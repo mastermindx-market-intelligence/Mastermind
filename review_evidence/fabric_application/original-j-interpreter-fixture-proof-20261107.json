@@ -1,0 +1,153 @@
+{
+  "schema": "mastermind.original-j-interpreter-fixture-proof.v1",
+  "source_head": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+  "observed_hosted_failure": {
+    "run": 42368271369,
+    "job": 128391017999,
+    "reason": "original_helper_preflight_refused",
+    "boundary": "Before Python spawn; specific failed predicate was not exposed by old fixture."
+  },
+  "repair": "Fixture owns a copied real Python executable with strict mode/nlink and exact descriptor hash checks. Shared interpreter and production pinnedFile checks remain unchanged.",
+  "first_run": {
+    "schema": "mastermind.original-delivery-private-python-fixture.v1",
+    "base_head": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+    "pending_merge": "84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c",
+    "source_sha256": {
+      "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "028f5d7bc80d7cd0501adc9564cbd7d4bd97633fc0a664576c9f7bba888e7167",
+      "integrations/studio_direct_mcp/control_bundle_closure_test.py": "06325dc2cfa68a5fb47dce2eeecc72144e5365e7f969e7fe34491ba1e6ec38f6",
+      "integrations/studio_direct_mcp/original-delivery.mjs": "37e7cee03652f79e7cd9751651683f048e222ede22792171af465d33a87b3f75",
+      "integrations/studio_direct_mcp/private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26"
+    },
+    "runs": [
+      {
+        "label": "original_delivery",
+        "command": [
+          "/opt/homebrew/bin/python3.12",
+          "-B",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          ".",
+          "-p",
+          "private_service_original_delivery_test.py",
+          "-v"
+        ],
+        "exit_code": 1,
+        "seconds": 10.159,
+        "log": "/tmp/mmx-studio-private-python-original_delivery.log",
+        "log_sha256": "a4f4e66c870a4f78b159862b8b1f8c53591ec0ad4e32bbc58eeca940954027cd",
+        "summary": [
+          "Ran 39 tests in 9.942s",
+          "FAILED (errors=1)"
+        ]
+      },
+      {
+        "label": "control_closure",
+        "command": [
+          "/opt/homebrew/bin/python3.12",
+          "-B",
+          "-m",
+          "unittest",
+          "control_bundle_closure_test",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 9.743,
+        "log": "/tmp/mmx-studio-private-python-control_closure.log",
+        "log_sha256": "e1cfefc6ac7bd5c3569e38640bfb31b8ec804d28a44ebc48f872dee79b0edd7e",
+        "summary": [
+          "Ran 35 tests in 9.637s",
+          "OK"
+        ]
+      },
+      {
+        "label": "node_original",
+        "command": [
+          "/opt/homebrew/bin/node",
+          "--test",
+          "original-delivery.test.mjs"
+        ],
+        "exit_code": 1,
+        "seconds": 0.143,
+        "log": "/tmp/mmx-studio-private-python-node_original.log",
+        "log_sha256": "485330d3e31d9de6d4146cc90bb380eb6fe0c8ebaf523632d3c6a759c7346452",
+        "summary": []
+      }
+    ],
+    "state": "FAILED",
+    "scope": "Fixture-only interpreter and diagnostics; unchanged production pinned-file checks. Hosted Linux proof still owed.",
+    "source_unchanged": true
+  },
+  "followup": {
+    "schema": "mastermind.original-delivery-private-python-fixture-followup.v1",
+    "runs": [
+      {
+        "label": "npm_ci",
+        "command": [
+          "/opt/homebrew/bin/npm",
+          "ci",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund"
+        ],
+        "exit_code": 0,
+        "seconds": 1.811,
+        "log": "/tmp/mmx-studio-private-python-npm_ci-02.log",
+        "log_sha256": "2a06483e20ac51e90e137590ff5d36779d45ff3ea770dae43b9bfff04badf3f7",
+        "summary": []
+      },
+      {
+        "label": "original_delivery",
+        "command": [
+          "/opt/homebrew/bin/python3.12",
+          "-B",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          ".",
+          "-p",
+          "private_service_original_delivery_test.py",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 8.288,
+        "log": "/tmp/mmx-studio-private-python-original_delivery-02.log",
+        "log_sha256": "a41b98ce97d0824569dd3b4f98a176bd282a67432d491031a07f660334f6de2f",
+        "summary": [
+          "Ran 39 tests in 8.044s",
+          "OK"
+        ]
+      },
+      {
+        "label": "node_original",
+        "command": [
+          "/opt/homebrew/bin/node",
+          "--test",
+          "original-delivery.test.mjs"
+        ],
+        "exit_code": 0,
+        "seconds": 2.231,
+        "log": "/tmp/mmx-studio-private-python-node_original-02.log",
+        "log_sha256": "aec6e9963f8c2eea3fcebf5d33d2a674815097dbb806bde3f66ba7ffa2b2b765",
+        "summary": [
+          "\u2139 tests 22",
+          "\u2139 pass 22",
+          "\u2139 fail 0",
+          "\u2139 skipped 0"
+        ]
+      }
+    ],
+    "production_pinned_file_unchanged": true,
+    "live_effects": "NONE; disposable fixtures and workspace test dependencies only",
+    "state": "PASSED"
+  },
+  "source_sha256": {
+    "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "5e9224125515592e7935583f3f63dd00935b0eb1946167399e9c356ec9ea04b7",
+    "integrations/studio_direct_mcp/control_bundle_closure_test.py": "06325dc2cfa68a5fb47dce2eeecc72144e5365e7f969e7fe34491ba1e6ec38f6",
+    "integrations/studio_direct_mcp/original-delivery.mjs": "37e7cee03652f79e7cd9751651683f048e222ede22792171af465d33a87b3f75"
+  },
+  "qualification": "39original-delivery,35control-closure and22Nodecases passed across retained runs. Hosted Linux proof is still owed.",
+  "live_effects": "NONE; disposable paths only"
+}

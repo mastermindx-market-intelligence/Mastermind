@@ -311,6 +311,9 @@ class Candidate:
     # bound into the plan identity and retained in the transaction marker so
     # a recovery reproduces THIS after-image and never a re-derived one.
     capability_profile_digests: dict[str, str] | None = None
+    # Exact Chris-only grant captured by the ORIGINAL MCP config transaction.
+    # Absent leaves old installation/marker semantics untouched.
+    canary_enrollment: dict[str, Any] | None = None
 
     @property
     def config_before_sha256(self) -> str:
@@ -363,17 +366,62 @@ def build_probes(document: dict) -> tuple[Probe, ...]:
 def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: str,
                       set_public_mcp_resource: bool,
                       selected_child_target: dict[str, Any] | None = None,
-                      capability_profile_digests: dict[str, str] | None = None) -> Candidate:
+                      capability_profile_digests: dict[str, str] | None = None,
+                      canary_enrollment: dict[str, Any] | None = None) -> Candidate:
     """Compile the only permitted change set, or raise UpdateRefused."""
     try:
         return _compile_candidate(prior_config, prior_plist, release_sha, set_public_mcp_resource,
-                                  selected_child_target, capability_profile_digests)
+                                  selected_child_target, capability_profile_digests,
+                                  canary_enrollment)
     except UpdateRefused:
         raise
     except AuthError as error:
         raise UpdateRefused("CANDIDATE_REFUSED: auth policy " + str(error.code.value)[:80]) from None
     except (ValueError, KeyError, TypeError) as error:
         raise UpdateRefused("CANDIDATE_REFUSED: " + str(error)[:160]) from None
+
+
+def _qualified_chris_canary(value: dict[str, Any]) -> dict[str, Any]:
+    """Reuse accepted canary validation, then enforce the one enrolled Slack lane.
+
+    This is a specific Chris-Dot pilot, not a generic grant issuer or
+    arbitrary account/channel selector. All other existing OAuth grants are
+    left untouched; the subject digest must be furnished by the real account.
+    """
+    from integrations.session_bridge.dot_canary_policy_selection import (
+        validate_dot_canary_settings,
+    )
+    if type(value) is not dict:
+        raise ValueError("canary enrollment document must be an object")
+    cfg = validate_dot_canary_settings({
+        "executive_mcp_profile": "web_ceo_v3",
+        "reply_events_armed": True,
+        "dot_canary": value,
+    })
+    if cfg is None or cfg["armed"] is not True or any(
+        cfg[key] != actual for key, actual in (
+            ("workspace_id", "T0BRD2AQXQV"),
+            ("channel_id", "C0BSBM78V1N"),
+            ("relay_bot_user_id", "U0BT71H4FQE"),
+            ("owner_slack_user_id", "U0BRET6191C"),
+        )
+    ):
+        raise ValueError("canary enrollment is not the accepted Chris lane")
+    return copy.deepcopy(cfg)
+
+
+def _canary_enrollment_input(host: Host, selector: tuple[str, str] | None
+                             ) -> dict[str, Any] | None:
+    if selector is None:
+        return None
+    # Reuse the EXACT original no-follow root-owned 0600 input reader, digest
+    # binding and budget. There is no new key store, file reader, or trust rule.
+    raw = host.read_selected_child_input(selector[0], selector[1])
+    document = _strict_json(raw, "MCP_COMPONENT_CANARY_INPUT_MALFORMED")
+    try:
+        return _qualified_chris_canary(document)
+    except (ValueError, TypeError, KeyError):
+        raise UpdateRefused("CHRIS_DOT_ENROLLMENT_REFUSED") from None
 
 
 def _preserved_profile_ids(prior: dict[str, Any]) -> set[str]:
@@ -407,6 +455,31 @@ def _validate_capability_profile_map(
         if type(value) is not str or HEX64.fullmatch(value) is None:
             raise ValueError("capability profile digest value is invalid")
     return {key: digests[key] for key in sorted(digests)}
+
+
+def derive_sealed_capability_profile_digests(
+    release_sha: str, profile_ids: tuple[str, ...], budget: Any,
+) -> dict[str, str]:
+    """Reuse the sealed target registry proof for component and gateway owners."""
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    root = Path(installed._SERVICE_RELEASES) / release_sha
+    policy = root / "config" / "executive_claude_principal_capabilities.json"
+    try:
+        before = installed._observe_ancestors(str(policy), budget)
+        registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
+        after = installed._observe_ancestors(str(policy), budget)
+    except Exception as error:
+        raise UpdateRefused(
+            "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
+    if before != after:
+        raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
+    digests: dict[str, str] = {}
+    for profile_id in profile_ids:
+        profile = registry.profiles.get(profile_id)
+        if profile is None or not profile.enabled:
+            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
+        digests[profile_id] = profile.profile_digest
+    return digests
 
 
 def _apply_capability_profile_digests(
@@ -470,7 +543,8 @@ def _apply_capability_profile_digests(
 
 def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sha: str,
                        set_public: bool, selected_child_target: dict[str, Any] | None = None,
-                       capability_profile_digests: dict[str, str] | None = None) -> Candidate:
+                       capability_profile_digests: dict[str, str] | None = None,
+                       canary_enrollment: dict[str, Any] | None = None) -> Candidate:
     _sha(release_sha, HEX40, "target release sha shape")
     prior = _strict_json(prior_config, "MCP_COMPONENT_CONFIG_MALFORMED")
     prior_plist = _strict_plist(prior_plist_bytes)
@@ -482,6 +556,16 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
     require(release_sha != prior_release, "target release equals the installed release")
     proposed = copy.deepcopy(prior)
     proposed["release_sha"] = release_sha
+    if canary_enrollment is not None:
+        # This is an ADD-ONLY account grant, never a silent rekey or overwrite
+        # of a current subscription. The enrolled digest must originate from
+        # the actual ChatGPT OAuth principal, not a name or Slack account.
+        require("dot_canary" not in prior
+                and prior.get("reply_events_armed", False) is False,
+                "canary enrollment already selected")
+        qualified = _qualified_chris_canary(canary_enrollment)
+        proposed["reply_events_armed"] = True
+        proposed["dot_canary"] = qualified
     if set_public:
         require("public_mcp_resource" not in prior, "public_mcp_resource is already configured")
         proposed["public_mcp_resource"] = PUBLIC_MCP_RESOURCE
@@ -499,8 +583,10 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
                       else _validate_capability_profile_map(
                           capability_profile_digests, _preserved_profile_ids(prior)))
     changed = {key for key in set(prior) | set(proposed) if prior.get(key, _MISSING) != proposed.get(key, _MISSING)}
-    require(changed <= {"release_sha", "public_mcp_resource", "selected_child_target", "coo"},
-            "candidate changed an unrelated config field")
+    allowed = {"release_sha", "public_mcp_resource", "selected_child_target", "coo"}
+    if canary_enrollment is not None:
+        allowed |= {"reply_events_armed", "dot_canary"}
+    require(changed <= allowed, "candidate changed an unrelated config field")
     _, public_after = _semantic(proposed)
     config_after = canonical(proposed) + b"\n"
     require(_strict_json(config_after, "MCP_COMPONENT_CONFIG_MALFORMED") == proposed, "config round trip differs")
@@ -524,6 +610,8 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
         selected_child_target=copy.deepcopy(proposed.get("selected_child_target")),
         capability_profile_digests=(None if frozen_digests is None
                                     else dict(frozen_digests)),
+        canary_enrollment=(None if canary_enrollment is None
+                           else copy.deepcopy(proposed["dot_canary"])),
     )
 
 
@@ -561,6 +649,11 @@ def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256:
             "root_job_id": candidate.selected_child_target["root_job_id"],
             "material_digest": candidate.selected_child_target["material_digest"],
         }
+    if candidate.canary_enrollment is not None:
+        # The operator sees a digest, not the account-bound principal hash.
+        # The full closed enrollment is held only in the root-owned marker.
+        document["chris_dot_enrollment_sha256"] = digest(
+            canonical(candidate.canary_enrollment))
     # The frozen capability-profile transform is part of the plan identity:
     # the operator approves THIS exact map, and the after-image it produces
     # is the one a recovery reproduces.  An empty map is still recorded.
@@ -918,26 +1011,12 @@ class ProductionHost:
         or a hardcoded tool-schema digest is never accepted, and no new
         principal realm or permission is created here.
         """
-        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-        root = Path(installed._SERVICE_RELEASES) / release_sha
-        policy = root / "config" / "executive_claude_principal_capabilities.json"
         try:
             budget = self._budget()
-            before = installed._observe_ancestors(str(policy), budget)
-            registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
-            after = installed._observe_ancestors(str(policy), budget)
         except Exception as error:
             raise UpdateRefused(
                 "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
-        if before != after:
-            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
-        digests: dict[str, str] = {}
-        for profile_id in profile_ids:
-            profile = registry.profiles.get(profile_id)
-            if profile is None or not profile.enabled:
-                raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
-            digests[profile_id] = profile.profile_digest
-        return digests
+        return derive_sealed_capability_profile_digests(release_sha, profile_ids, budget)
 
     def verify_closure(self) -> str:
         try:
@@ -1223,7 +1302,9 @@ _MARKER_KEYS = frozenset({
 # no-rewrite compilation.  Every NEW transaction records the exact chosen
 # map, including ``{}`` where there is no mission to rewrite, so the
 # after-image of a recovery never depends on the CURRENT registry.
-_MARKER_OPTIONAL_KEYS = frozenset({"selected_child_target", "capability_profile_digests"})
+_MARKER_OPTIONAL_KEYS = frozenset({
+    "selected_child_target", "capability_profile_digests", "chris_dot_enrollment",
+})
 
 
 def _unknown(code: str) -> TransactionEffectUnknown:
@@ -1261,6 +1342,9 @@ def _validate_marker(marker: Any) -> None:
             publication = marker["selected_child_target"]
             if publication is not None:
                 validate_selected_child_target(publication)
+        if "chris_dot_enrollment" in marker:
+            qualified = _qualified_chris_canary(marker["chris_dot_enrollment"])
+            require(qualified == marker["chris_dot_enrollment"], "marker canary binding")
         if "capability_profile_digests" in marker:
             # The FROZEN map of the original transaction: one lowercase64hex
             # digest per preserved mission profile id.  A malformed entry, an
@@ -1618,6 +1702,9 @@ def _receipt(host: Host, marker: dict, candidate: Candidate, outcome: str, readb
         "before_images": [] if outcome == "ABORTED_UNCHANGED" else [_before_name(kind, _tag(marker)) for kind in KINDS],
         "recorded_at": host.now(),
     }
+    if candidate.canary_enrollment is not None:
+        receipt["chris_dot_enrollment_sha256"] = digest(
+            canonical(candidate.canary_enrollment))
     if candidate.selected_child_target is not None:
         # The published publication's identity for the parent's readback.
         receipt["selected_child_target"] = {
@@ -1694,14 +1781,17 @@ def _mission_capability_profile_digests(
 
 
 def build_plan(host: Host, release_sha: str, set_public: bool,
-               selector: tuple[str, str] | None = None) -> tuple[dict, Candidate]:
+               selector: tuple[str, str] | None = None,
+               canary_selector: tuple[str, str] | None = None) -> tuple[dict, Candidate]:
     publication = _selected_child_publication(host, selector)
+    canary = _canary_enrollment_input(host, canary_selector)
     prior = host.read_config()
     digests = _mission_capability_profile_digests(host, release_sha, prior)
     candidate = compile_candidate(prior, host.read_plist(), release_sha=release_sha,
                                   set_public_mcp_resource=set_public,
                                   selected_child_target=publication,
-                                  capability_profile_digests=digests)
+                                  capability_profile_digests=digests,
+                                  canary_enrollment=canary)
     manifest = host.verify_release(release_sha)
     closure = host.verify_closure()
     return plan_document(candidate, manifest_sha256=manifest, closure_sha256=closure), candidate
@@ -1709,26 +1799,32 @@ def build_plan(host: Host, release_sha: str, set_public: bool,
 
 def plan(host: Host, *, release_sha: str, set_public: bool,
          selected_child_input: str | None = None,
-         selected_child_sha256: str | None = None) -> dict:
+         selected_child_sha256: str | None = None,
+         canary_input: str | None = None,
+         canary_sha256: str | None = None) -> dict:
     host.require_root()
     host.receipts_ready()
     selector = selected_child_selector(selected_child_input, selected_child_sha256)
-    document, _ = build_plan(host, release_sha, set_public, selector)
+    canary_selector = selected_child_selector(canary_input, canary_sha256)
+    document, _ = build_plan(host, release_sha, set_public, selector, canary_selector)
     return {"ok": True, "outcome": "PLANNED", "plan": document, "plan_sha256": plan_digest(document),
             "warnings": list(WARNINGS)}
 
 
 def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
           selected_child_input: str | None = None,
-          selected_child_sha256: str | None = None) -> dict:
+          selected_child_sha256: str | None = None,
+          canary_input: str | None = None,
+          canary_sha256: str | None = None) -> dict:
     host.require_root()
     host.receipts_ready()
     selector = selected_child_selector(selected_child_input, selected_child_sha256)
+    canary_selector = selected_child_selector(canary_input, canary_sha256)
     host.acquire_lock()
     try:
         if host.marker_read() is not None:
             raise UpdateRefused("TRANSACTION_PRESENT")
-        document, candidate = build_plan(host, release_sha, set_public, selector)
+        document, candidate = build_plan(host, release_sha, set_public, selector, canary_selector)
         if plan_digest(document) != plan_sha256:
             raise UpdateRefused("PLAN_DIGEST_MISMATCH")
         tag = plan_sha256[:12]
@@ -1765,6 +1861,9 @@ def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
             # transaction, so a reconciliation recovers THIS candidate and
             # never reopens a replacement input.
             marker["selected_child_target"] = copy.deepcopy(candidate.selected_child_target)
+        if candidate.canary_enrollment is not None:
+            # Read once before the effect. Recovery reads only this marker.
+            marker["chris_dot_enrollment"] = copy.deepcopy(candidate.canary_enrollment)
         # EVERY new transaction records the exact chosen capability-profile
         # map, including the empty map.  The recovery then reproduces THIS
         # after-image from the frozen map and never from the CURRENT
@@ -1810,7 +1909,8 @@ def _candidate_from_marker(host: Host, marker: dict) -> Candidate:
         candidate = compile_candidate(config, plist, release_sha=marker["release_sha"],
                                       set_public_mcp_resource=marker["set_public_mcp_resource"],
                                       selected_child_target=marker.get("selected_child_target"),
-                                      capability_profile_digests=frozen)
+                                      capability_profile_digests=frozen,
+                                      canary_enrollment=marker.get("chris_dot_enrollment"))
         if (candidate.config_after_sha256 != marker["config_after_sha256"]
                 or candidate.plist_after_sha256 != marker["plist_after_sha256"]):
             raise _unknown("AFTER_IMAGE_DRIFTED")
@@ -2265,9 +2365,11 @@ def prepare_selected_child(host: Host, *, work_ref: str, root_job_id: str,
 
 _VERBS: dict[str, dict[str, bool]] = {
     "plan": {"--release-sha": True, "--set-public-mcp-resource": False,
-             "--selected-child-target-input": True, "--selected-child-target-sha256": True},
+             "--selected-child-target-input": True, "--selected-child-target-sha256": True,
+             "--chris-dot-canary-input": True, "--chris-dot-canary-sha256": True},
     "apply": {"--release-sha": True, "--set-public-mcp-resource": False, "--plan-sha256": True,
-              "--selected-child-target-input": True, "--selected-child-target-sha256": True},
+              "--selected-child-target-input": True, "--selected-child-target-sha256": True,
+              "--chris-dot-canary-input": True, "--chris-dot-canary-sha256": True},
     "reconcile": {"--release-sha": True},
 }
 
@@ -2352,6 +2454,20 @@ def parse_arguments(argv: list[str]) -> tuple[str, dict[str, Any]]:
             raise UsageError("selected child target input")
         if not isinstance(digest_value, str) or HEX64.fullmatch(digest_value) is None:
             raise UsageError("selected child target input")
+    # The Chris-only enrollment is a second, independently closed PAIR.
+    # Reconcile never takes a new selection; original frozen marker wins.
+    has_canary = "--chris-dot-canary-input" in values
+    has_canary_digest = "--chris-dot-canary-sha256" in values
+    if has_canary != has_canary_digest:
+        raise UsageError("incomplete Chris-Dot enrollment")
+    if has_canary:
+        path_value = values["--chris-dot-canary-input"]
+        sha_value = values["--chris-dot-canary-sha256"]
+        if (not isinstance(path_value, str) or not path_value.startswith("/")
+                or "\x00" in path_value or ".." in path_value.split("/")):
+            raise UsageError("invalid Chris-Dot enrollment path")
+        if not isinstance(sha_value, str) or HEX64.fullmatch(sha_value) is None:
+            raise UsageError("invalid Chris-Dot enrollment digest")
     return verb, values
 
 
@@ -2403,22 +2519,28 @@ def main(argv: list[str] | None = None, host: Host | None = None) -> int:
         sys.stderr.write("usage: mcp_component_update.py plan|apply|reconcile --release-sha <40hex> "
                          "[--set-public-mcp-resource] [--plan-sha256 <64hex>] "
                          "[--selected-child-target-input <absolute path> "
-                         "--selected-child-target-sha256 <64hex>]\n")
+                         "--selected-child-target-sha256 <64hex>] "
+                         "[--chris-dot-canary-input <sealed absolute path> "
+                         "--chris-dot-canary-sha256 <64hex>]\n")
         return 64
     host = host if host is not None else ProductionHost()
     release = values["--release-sha"]
     public = bool(values.get("--set-public-mcp-resource", False))
     child_input = values.get("--selected-child-target-input")
     child_digest = values.get("--selected-child-target-sha256")
+    canary_input = values.get("--chris-dot-canary-input")
+    canary_digest = values.get("--chris-dot-canary-sha256")
     try:
         if verb == "plan":
             result = plan(host, release_sha=release, set_public=public,
                           selected_child_input=child_input,
-                          selected_child_sha256=child_digest)
+                          selected_child_sha256=child_digest,
+                          canary_input=canary_input, canary_sha256=canary_digest)
         elif verb == "apply":
             result = apply(host, release_sha=release, set_public=public, plan_sha256=values["--plan-sha256"],
                            selected_child_input=child_input,
-                           selected_child_sha256=child_digest)
+                           selected_child_sha256=child_digest,
+                           canary_input=canary_input, canary_sha256=canary_digest)
         else:
             result = reconcile(host, release_sha=release)
     except UpdateRefused as error:

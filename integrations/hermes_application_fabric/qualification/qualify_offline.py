@@ -15,8 +15,8 @@ import tempfile
 import unittest
 
 
-OWNER_COMMIT = "2ef828e569b683b9dfaa94f81116da3ac55f6186"
-OWNER_SHA256 = "3250f2ea9b56b4762619a960c23dd5cc57ae05c273fe8e2b63c89a0f868d0ce0"
+OWNER_COMMIT = "25ba92bb52120fae550b54c29f82929c0b77d37b"
+OWNER_SHA256 = "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e"
 
 
 def main():
@@ -56,15 +56,15 @@ def main():
         suite = unittest.TestSuite()
         suite.addTests(unittest.TestLoader().discover(str(package / "tests"), pattern="test_*.py"))
         suite.addTests(unittest.TestLoader().discover(str(package / "qualification"), pattern="test_native_schema.py"))
-        expected = suite.countTestCases()
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         print(json.dumps({"mode": "offline-original-client-loopback-fixture",
             "owner": OWNER_COMMIT, "owner_client_sha256": OWNER_SHA256,
+            "owner_verification_scope": "client_bytes_only",
             "python": sys.version.split()[0], "jsonschema": validator,
-            "tests_discovered": expected, "tests_run": result.testsRun, "failures": len(result.failures),
+            "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),
             "blocked_external_connections": len(blocked), "live_provider_acceptance": False}, sort_keys=True))
-        return 0 if result.wasSuccessful() and expected > 0 and result.testsRun == expected and not result.skipped and not blocked else 1
+        return 0 if result.wasSuccessful() and result.testsRun == 68 and not result.skipped and not blocked else 1
 
 
 if __name__ == "__main__":

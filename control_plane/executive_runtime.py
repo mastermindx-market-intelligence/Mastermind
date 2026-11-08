@@ -19051,6 +19051,27 @@ class AttemptRegistry:
             _recheck_selected_child_admission(expected)
         return claimed
 
+    def validate_fresh_launch_claim(self, job_id: str, lease: AttemptLease) -> None:
+        """Recheck the original fresh claim immediately before adapter START.
+
+        This is a read of the existing lease owner, not permission to replay,
+        reacquire or resume a CLAIMED operation. Heartbeat extensions remain
+        valid; cancellation, expiry, replacement and a rotated fence do not.
+        """
+        if (type(lease) is not AttemptLease or lease.attempt.job_id != job_id
+                or lease.attempt.status is not AttemptStatus.CLAIMED):
+            raise StateConflict("fresh launch requires its original CLAIMED lease")
+        with self.store.read() as connection:
+            row = self._leased_row(
+                connection, attempt_id=lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token, timestamp=self.store.now_ms(),
+                statuses={AttemptStatus.CLAIMED},
+            )
+            if any(row[field] != getattr(lease.attempt, field) for field in (
+                    "job_id", "worker_id", "quota_class", "lease_owner")):
+                raise StateConflict("fresh launch lost its original claim identity")
+
     def _validate_exact_target_launch(
         self, target: ExactWorkerClaimTarget, lease: AttemptLease,
     ) -> None:

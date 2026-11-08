@@ -616,6 +616,10 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
             _publish_file(output / DIST / name, data)
         _publish_file(output / DIST / "asset-manifest.json", _canonical(actual))
         _publish_file(output / RECEIPT, receipt_bytes)
+    # The caller's restrictive umask (e.g. the installer-owned 077) can
+    # turn mkdir(mode=0755) into 0700. Publish a readable root-owned
+    # qualified artifact only after every captured byte has been sealed.
+    output.chmod(0o755)
     return _hash(receipt_bytes)
 
 

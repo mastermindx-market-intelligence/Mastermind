@@ -8,8 +8,11 @@ No directory scan decides what to transport; this fixed list is the inventory.
 import argparse
 import hashlib
 import json
+import re
 import io
 import zipfile
+import subprocess
+import tempfile
 from pathlib import Path
 
 BASE_FILES = frozenset("""
@@ -68,7 +71,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
-    'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
+    'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
@@ -196,6 +199,12 @@ GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f
 GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
 GO_BASE_ORIGINAL_COLLECTOR_SHA256 = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
 GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+# Exact committed successor of the closed original-collection collector: the J
+# repair that preserves completed/uncertain original results. It replaces
+# exactly one member of the complete current107 closure, so every parent
+# closure below is re-derived for that lineage while the prior lineage and the
+# historical collector stay accepted. No other source or entrypoint hash moves.
+GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256 = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
 
 
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
@@ -216,6 +225,500 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 # Closed refusal diagnostics compose on the exact remote-cwd source in raw107.
 # Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
+
+# The same two-member repair has two separately qualified 107-member parents:
+# the protected WORKER closure and the installed APPLICATION carrier closure.
+# Temporary inverse views never replace the actual emitted repaired bytes;
+# unrelated or mixed complete parents remain ineligible.
+ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+# The same APPLICATION carrier closure with the one committed
+# original-collection successor member. The protected WORKER closure above is
+# a frozen historical fixture and keeps its own exact parent.
+ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256 = "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
+# The composed f57b085 x d0c543 endpoint: the APPLICATION closure above with
+# the protected qualification-quiescence broker successor (merged
+# ext/lease_broker.py 0bbf1ca0...) carried in the same namespace. Both
+# historical parents above stay accepted; the carrier cohort is still
+# required, exactly as for the historical APPLICATION parents.
+ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256 = "06c6822a18e92c45519711a40be9cdac5baf4bfb6ddedcbe116922d9f6640741"
+ADMISSION_INTEGRITY_PREIMAGES = {
+    "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
+    "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
+}
+ADMISSION_INTEGRITY_DIGESTS = {
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/lane_runtime.py": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
+}
+
+
+# Reviewed current-quiescence read/guard changes only Broker in exact raw107.
+# Validate the whole parent; never normalize a mixed or unrelated source set.
+QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
+QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
+
+
+def before_qualification_quiescence(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("qualification quiescence manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        return previous
+    previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+        raise ValueError("qualification quiescence parent closure differs")
+    return previous
+
+
+def before_admission_integrity(manifest):
+    """Validate one exact forward cohort without mutating caller identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    manifest = before_qualification_quiescence(manifest)
+    if not any(manifest.get(name) == digest
+               for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native admission integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(ADMISSION_INTEGRITY_PREIMAGES)
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity == ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+        return previous
+    if (parent_identity in (ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256,
+                            ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256)
+            and all(previous.get("ext/" + name) == digest
+                    for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
+        return previous
+    # The composed f57b085 x d0c543 endpoint arrives with the raw current view:
+    # the exact sparse-preflight executor successor plus the application-pool
+    # cohort with the quiescence broker successor, each already qualified by
+    # its own inverse. Their exact presence proves the same complete namespace
+    # the carrier cohort proves for the historical APPLICATION parents.
+    if (parent_identity == ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256
+            and previous.get("ext/remote_sub_exec.py") == SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
+            and _application_pool_cohort_exact_or_composed(previous)):
+        return previous
+    # Validation view only: before_host_pull_integrity may hand this gate the
+    # historical projection of the composed view (composed broker preimage
+    # restored). Map that single member back to its composed successor and
+    # accept only when the forward view reproduces the composed endpoint
+    # byte-for-byte; the composed view is returned so emitted manifests keep
+    # composed identities. No prior endpoint is replaced.
+    if (previous.get("ext/lease_broker.py") == COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
+            and _application_pool_cohort_exact_or_composed(previous)):
+        forward = dict(previous)
+        forward["ext/lease_broker.py"] = COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256
+        forward_identity = sha((json.dumps(forward, sort_keys=True, indent=2) + "\n").encode())
+        if forward_identity == ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256:
+            return forward
+    raise ValueError("native admission integrity parent closure differs")
+
+
+# The complete host-pull repair composes only on the current protected107
+# admission-integrity closure. This inverse is a validation view; emitted
+# manifests and staged payloads keep the repaired source identities.
+HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_PREIMAGES = {
+    "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+    "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+}
+HOST_PULL_INTEGRITY_DIGESTS = {
+    "ext/host_pull.sh": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
+    "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
+    "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
+}
+# Composed f57b085 x d0c543 endpoints. Two distinct composed parents arise
+# from the same join depending on how far the APPLICATION composition runs:
+# the go-application + application-http variant (107 members) yields
+# b5ceff41...; the provider-plan-application + quota-reset-recovery variant
+# (116 members: native-manifest.json base + provider_application composition
+# replacements/additions + PROVIDER_ROUTING_DIGESTS + the four quota-reset ext
+# members) yields b590442c... with the three host-pull members at their
+# PREIMAGE identities (b58b4cf4.../d00ff264.../826aed96...), i.e. the parent
+# as it stands immediately before the host-pull successor patch is applied.
+# Both historical owners stay accepted; no prior endpoint is replaced.
+HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256 = "b5ceff4116f5407810bfe755151de69ca0ce4fe3276b3e76a10a93e13909a68c"
+HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256 = "b590442c3e4099a708bf0f34e1a5623669e984bccb90a60f805a68873c5f4c75"
+# The composed f57b085 x d0c543 join advances the quiescence broker manifest
+# member to its composed successor preimage; every other member is unchanged.
+# Historical parents captured the frozen preimage, so the host-pull inverse
+# below projects only that exact successor back to the frozen preimage when
+# the projected view is itself an accepted historical parent. Both endpoints
+# stay accepted and no prior endpoint is replaced; the projection is a
+# validation view only -- emitted manifests keep the composed identities.
+COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256 = "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807"
+COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE = "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360"
+
+
+def _source_integrity_parent(manifest):
+    """Prove the same complete parent for either or both exact source deltas.
+
+    This private proof view never replaces emitted or captured current bytes.
+    Each public inverse still returns only its own declared inverse.
+    """
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") == QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if any(previous.get(name) == digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        if any(previous.get(name) != digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+            raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+        previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    return previous
+
+
+def before_host_pull_integrity(manifest):
+    """Validate the complete host-pull successor without changing its identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native host-pull integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    # Composed-join projection: the broker successor maps back to the frozen
+    # preimage for validation only. Accepted only when the projected whole
+    # parent is itself an accepted historical endpoint; the raw closure is
+    # checked next and keeps its own acceptance. No prior endpoint is replaced.
+    projected = dict(previous)
+    if projected.get("ext/lease_broker.py") == COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256:
+        projected["ext/lease_broker.py"] = COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
+        projected_identity = sha((json.dumps(projected, sort_keys=True, indent=2) + "\n").encode())
+        if projected_identity in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+                                  HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256,
+                                  HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256,
+                                  'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+            return projected
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+                           HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256,
+                           HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256,
+                           'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+        return previous
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256:
+        raise ValueError("native host-pull integrity parent closure differs")
+    return previous
+
+
+# An explicit forward composition of the selected provider plan and the exact
+# current APPLICATION107 source. The historical provider composer stays frozen.
+PROVIDER_APPLICATION_RECORD_SHA256 = "7bbe9fbffd0087d7ae5c191a50e8c6f6ce28fae43554a97e4efc0c23bba26584"
+PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
+    "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
+    "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
+    "experiential_transport.py", "fs_security.py", "native_plan_worker.py"))
+PROVIDER_ROUTING_DIGESTS = {
+    "ext/pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+    "ext/remote_sub.sh": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+    "ext/slot.py": "32809dd831e20711d30e07b956aa843de85edde5dc3965c002e522b4824d6ea7",
+    "ext/sub.sh": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
+}
+
+
+def _manifest_digest(manifest):
+    return sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
+
+
+def _provider_source(path, expected):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("provider APPLICATION source must be a regular file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("provider APPLICATION source commitment differs")
+    return raw
+
+
+def provider_application_record(root=None):
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    raw = _provider_source(root / "rollout/provider_application/composition.json",
+                           PROVIDER_APPLICATION_RECORD_SHA256)
+    record = json.loads(raw)
+    profile = json.loads(_provider_source(root / record["provider_profile_source"],
+                                         record["provider_profile_sha256"]))
+    if (record["schema"] != "native-provider-application-composition.v1"
+            or set(record["additions"]) != PROVIDER_APPLICATION_MEMBERS
+            or _manifest_digest(profile["files"]) != record["provider_manifest_sha256"]
+            or any(profile["files"].get(key) != digest
+                   for key, digest in PROVIDER_ROUTING_DIGESTS.items())):
+        raise ValueError("provider APPLICATION source cohort differs")
+    return record, profile["files"]
+
+
+PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256 = "4b6996bf22917a65cc7d3f4b050e853e6dd4affe5ae08f34c633421b0f7784b8"
+PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256 = "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019"
+
+
+def provider_remote_placement_record(root=None):
+    """Authenticate the exact protected sequence-39 provider/APPLICATION join."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    legacy, providers = provider_application_record(root)
+    record = json.loads(_provider_source(
+        root / "rollout/provider_application/remote-placement.json",
+        PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256,
+    ))
+    if record.get("schema") != "native-provider-application-remote-placement.v1":
+        raise ValueError("provider remote placement composition schema differs")
+    profile = json.loads(_provider_source(
+        root / record["provider_profile_source"], record["provider_profile_sha256"],
+    ))
+    row = record["picker"]
+    if (
+        profile.get("schema") != "mastermind.provider_plan_native_profile/v1"
+        or profile.get("base_files") != providers
+        or set(profile.get("patches", {})) != {"ext/pick.py"}
+        or set(profile.get("files", {})) != set(providers)
+        or len(providers) != 116
+        or _manifest_digest(providers) != record["provider_before_manifest_sha256"]
+        or _manifest_digest(profile["files"]) != record["provider_after_manifest_sha256"]
+        or legacy["manifest_sha256"] != record["application_before_manifest_sha256"]
+        or row["path"] != "ext/pick.py"
+        or row["sha256"] != PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+        or providers[row["path"]] != row["preimage_sha256"]
+        or profile["files"][row["path"]] != row["sha256"]
+        or any(profile["files"][key] != digest for key, digest in providers.items()
+               if key != row["path"])
+    ):
+        raise ValueError("provider remote placement whole source closure differs")
+    expected_patch = {
+        "before": row["preimage_sha256"], "after": row["sha256"],
+        "patch": row["patch_source"].removeprefix("../provider_plans/"),
+        "patch_sha256": row["patch_sha256"],
+    }
+    if profile["patches"][row["path"]] != expected_patch:
+        raise ValueError("provider remote placement protected patch binding differs")
+    patch = _provider_source(root / row["patch_source"], row["patch_sha256"])
+    return record, dict(profile["files"]), patch
+
+
+
+def _has_provider_members(manifest):
+    return bool(PROVIDER_APPLICATION_MEMBERS & set(manifest)) or any(
+        manifest.get(key) == digest for key, digest in PROVIDER_ROUTING_DIGESTS.items())
+
+
+def _before_provider_application_without_remote_placement(manifest):
+    """Invert only the complete116 source; never mutate the actual manifest."""
+    if type(manifest) is not dict:
+        raise ValueError("provider APPLICATION manifest differs")
+    if not _has_provider_members(manifest):
+        return manifest
+    record, _ = provider_application_record()
+    if len(manifest) != 116 or _manifest_digest(manifest) != record["manifest_sha256"]:
+        raise ValueError("provider APPLICATION source cohort differs")
+    previous = dict(manifest)
+    for key in record["additions"]:
+        del previous[key]
+    for key, row in record["replacements"].items():
+        previous[key] = row["preimage_sha256"]
+    if len(previous) != 107 or _manifest_digest(previous) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION parent closure differs")
+    return previous
+
+
+def before_provider_application(manifest):
+    if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
+        record, _, _ = provider_remote_placement_record()
+        if len(manifest) != 116 or _manifest_digest(manifest) != record["application_after_manifest_sha256"]:
+            raise ValueError("provider remote placement APPLICATION closure differs")
+        normalized = dict(manifest)
+        normalized["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        return _before_provider_application_without_remote_placement(normalized)
+    return _before_provider_application_without_remote_placement(manifest)
+
+
+
+def _application_base(manifest):
+    return {key: value for key, value in manifest.items()
+            if key not in {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+            | HTTP_GENERATION_MEMBERS}
+
+
+def go_staged_dependency_hashes(manifest, candidate_hashes):
+    """Keep original candidate provenance while binding actual combined bytes."""
+    result = dict(candidate_hashes)
+    base = _application_base(manifest)
+    parent = before_quota_reset_recovery(base)
+    if _has_provider_members(parent):
+        before_provider_application(parent)
+        record, _ = provider_application_record()
+        broker = record["replacements"]["ext/lease_broker.py"]
+        if parent != base:
+            # H2's reviewed dependency record carries both exact patch steps.
+            if candidate_hashes.get("lease_broker.py") != PROVIDER_QUOTA_RESET_DIGESTS["lease_broker.py"]:
+                raise ValueError("provider quota reset captured dependency differs")
+        else:
+            if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
+                raise ValueError("provider APPLICATION broker preimage differs")
+            result["lease_broker.py"] = broker["sha256"]
+    return result
+
+
+def _validate_go_source_transition_without_remote_placement(before, after):
+    """Check the frozen verified pair; CURRENT/CAS remains with the installer."""
+    if not (_has_provider_members(before) or _has_provider_members(after)):
+        return
+    record, provider = provider_application_record()
+    go_members = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+    http_members = HTTP_GENERATION_MEMBERS & set(after)
+    base = _application_base(after)
+    try:
+        parent = before_quota_reset_recovery(base)
+        before_provider_application(parent)
+    except ValueError:
+        raise ValueError("provider APPLICATION source transition differs") from None
+    if (before != provider or not go_members <= set(after)
+            or http_members and http_members != HTTP_GENERATION_MEMBERS
+            or len(base) != 116 or _manifest_digest(parent) != record["manifest_sha256"]):
+        raise ValueError("provider APPLICATION source transition differs")
+
+
+def validate_go_source_transition(before, after):
+    if type(before) is dict and type(after) is dict and (
+        before.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+        or after.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+    ):
+        record, providers, _ = provider_remote_placement_record()
+        if before != providers or after.get("ext/pick.py") != record["picker"]["sha256"]:
+            raise ValueError("provider remote placement source transition differs")
+        normalized_before, normalized_after = dict(before), dict(after)
+        normalized_before["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        normalized_after["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        return _validate_go_source_transition_without_remote_placement(
+            normalized_before, normalized_after,
+        )
+    return _validate_go_source_transition_without_remote_placement(before, after)
+
+
+
+def compose_provider_application_stage(root, output, manifest, files):
+    """Build reviewed source in isolation; never publish or select a release."""
+    root, output = Path(root), Path(output)
+    record, _ = provider_application_record(root)
+    if len(manifest) != 107 or _manifest_digest(manifest) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION requires the exact107 source")
+    stage = output / "native-code-stage"
+    for key, expected in manifest.items():
+        _provider_source(stage / key, expected)
+    updates = {}
+    # Apply only reviewed patch bytes to copied preimages outside any Git index.
+    with tempfile.TemporaryDirectory(prefix="native-provider-application-") as temporary:
+        scratch = Path(temporary)
+        for key, row in record["replacements"].items():
+            original = _provider_source(stage / key, row["preimage_sha256"])
+            target = scratch / key
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(original)
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                            "apply", "--whitespace=nowarn", "-"], input=patch, cwd=scratch,
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            raw = _provider_source(target, row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION postimage size differs")
+            updates[key] = raw
+        for key, row in record["additions"].items():
+            if key in manifest or (stage / key).exists() or (stage / key).is_symlink():
+                raise ValueError("provider APPLICATION addition already exists")
+            raw = _provider_source(root / row["source"], row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION addition size differs")
+            updates[key] = raw
+    composed = dict(manifest, **{key: sha(raw) for key, raw in updates.items()})
+    before_provider_application(composed)
+    for key, raw in updates.items():
+        (stage / key).write_bytes(raw)
+        if key in record["replacements"]:
+            row = record["replacements"][key]
+            files[key] = dict(files[key], source=row["source"], source_kind="verified_patch",
+                composition_preimage_source=files[key]["source"],
+                composition_preimage_sha256=row["preimage_sha256"], patch_sha256=row["patch_sha256"],
+                sha256=sha(raw), bytes=len(raw))
+        else:
+            row = record["additions"][key]
+            files[key] = dict(row, installed_preimage_sha256=None)
+    manifest.update(composed)
+
+
+def compose_provider_remote_placement_stage(root, output, manifest, files):
+    """Preserve the protected picker through one fixed APPLICATION source join."""
+    import subprocess
+    from tempfile import TemporaryDirectory
+
+    record, _, patch = provider_remote_placement_record(root)
+    row = record["picker"]
+    if type(manifest) is not dict or len(manifest) != 116 or _manifest_digest(manifest) != record["application_before_manifest_sha256"]:
+        raise ValueError("provider remote placement APPLICATION predecessor differs")
+    target = output / "native-code-stage" / row["path"]
+    original = _provider_source(target, row["preimage_sha256"])
+    prior = dict(files[row["path"]])
+    if prior["sha256"] != row["preimage_sha256"] or prior["bytes"] != len(original):
+        raise ValueError("provider remote placement inventory predecessor differs")
+    with TemporaryDirectory(prefix="native-provider-remote-placement-") as temporary:
+        work = Path(temporary)
+        member = work / row["path"]
+        member.parent.mkdir(parents=True)
+        member.write_bytes(original)
+        applied = subprocess.run(
+            ["git", "apply", "--whitespace=nowarn", "-"], input=patch, cwd=work,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if applied.returncode:
+            raise ValueError("provider remote placement exact patch failed")
+        successor = member.read_bytes()
+    if sha(successor) != row["sha256"] or len(successor) != row["bytes"]:
+        raise ValueError("provider remote placement picker successor differs")
+    normalized = dict(manifest)
+    normalized[row["path"]] = row["sha256"]
+    if _manifest_digest(normalized) != record["application_after_manifest_sha256"]:
+        raise ValueError("provider remote placement final whole closure differs")
+    target.write_bytes(successor)
+    _provider_source(target, row["sha256"])
+    manifest[row["path"]] = row["sha256"]
+    files[row["path"]] = {
+        "source": "candidate/pick.py", "sha256": row["sha256"], "bytes": len(successor),
+        "installed_preimage_sha256": prior["installed_preimage_sha256"],
+        "composition": {
+            "schema": "native-exact-forward-patch.v1",
+            "preimage_sha256": row["preimage_sha256"],
+            "patch_source": row["patch_source"], "patch_sha256": row["patch_sha256"],
+            "successor_composition_sha256": PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256,
+            "provider_preimage": {
+                "composition_sha256": PROVIDER_APPLICATION_RECORD_SHA256,
+                "preimage_sha256": prior["composition_preimage_sha256"],
+                "sha256": prior["sha256"], "source": prior["source"],
+                "patch_sha256": prior["patch_sha256"],
+            },
+        },
+    }
+
+
+
+# One exact command-scoped advice setting extends the complete accepted72
+# closure. This inverse is used only for historical validation, never capture.
+SPARSE_INDEX_ADVICE_PARENT_SHA256 = "45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18"
+SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+SPARSE_INDEX_ADVICE_EXECUTOR_SHA256 = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
+
+
+def before_sparse_index_advice(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse-index advice manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/remote_sub_exec.py") != SPARSE_INDEX_ADVICE_EXECUTOR_SHA256:
+        return previous
+    previous["ext/remote_sub_exec.py"] = SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != SPARSE_INDEX_ADVICE_PARENT_SHA256:
+        raise ValueError("native sparse-index advice parent closure differs")
+    return previous
 
 
 def validate_go_base_manifest(manifest, dependency_hashes):
@@ -238,7 +741,18 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
+    The committed successor of that collector is accepted the same way, so the
+    prior published generation keeps validating and no historical namespace can
+    be relabeled with either forward collector.
     """
+    # Bind actual captured bytes independently of the historical parent proof.
+    # Both views start from this same exact-dict snapshot; normalization never
+    # substitutes predecessor bytes for the source captured by the Go component.
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    actual_manifest = dict(manifest)
+    manifest = normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(actual_manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -308,15 +822,17 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
             GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
+    # The new advice epoch was already qualified against its full107 parent.
+    # Historical validation still recognizes exactly its original710 endpoint.
     if manifest["ext/remote_sub_exec.py"] not in {
-            GO_BASE_EXECUTOR_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]}:
+            GO_BASE_EXECUTOR_SHA256, SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE}:
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
@@ -329,8 +845,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
     collector = manifest["ext/original_delivery_collector.py"]
     if (collector not in {GO_BASE_ORIGINAL_COLLECTOR_SHA256,
-                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256}
-            or (collector == GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256
+                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                          GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
+            or (collector in {GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                              GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
                 and set(manifest) != expected)):
         raise ValueError("native Go original collector is not the exact current source")
     historical["ext/original_delivery_collector.py"] = GO_BASE_ORIGINAL_COLLECTOR_SHA256
@@ -403,6 +921,297 @@ def compose_application_http_stage(root, output, manifest, files):
             "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
+
+# Optional H2 successor: one closed four-member cohort over the complete
+# APPLICATION parent. Historical/default generations retain their exact bytes.
+QUOTA_RESET_PARENT_SHA256 = '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'
+# The former whole parent remains a historical inverse, never a new build base.
+QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset({'c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459', QUOTA_RESET_PARENT_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e', '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'})
+# Composed f57b085 x d0c543 join parent: identical to the historical
+# APPLICATION parent above except the quiescence broker sits at its composed
+# successor preimage. Accepted as a reviewed inverse so the composed join can
+# stage the H2 successor over it; the historical endpoints above stay
+# authoritative and no prior endpoint is replaced.
+QUOTA_RESET_COMPOSED_PARENT_SHA256 = '22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada'
+QUOTA_RESET_COMPOSED_PREIMAGES = {
+    "lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+}
+QUOTA_RESET_PREIMAGES = {
+    "quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
+    "quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+    "pick.py": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+}
+QUOTA_RESET_DIGESTS = {
+    "quota_remote.py": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+    "quota_circuit.py": "93d85e50c3a0641c3b8709c6ee330848d616a812e594cf735c716c634560c563",
+    "lease_broker.py": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+    "pick.py": "38b843380913be38839fc7f604d5f490c8914dc773f7a4556368db80bb1d6f8a",
+}
+QUOTA_RESET_PATCHES = {
+    "lease_broker.py": "b4ef4980f85ef0cce64c6843c9c5d0d16abf0459fda8a438b474789d86c6f421",
+    "pick.py": "dc8f3a48b32972a82067ee20b646a195ae6fa143a715adfed07bac7c6114c590",
+}
+
+
+# Exact H2 successor of the provider-preserving116 source. This is distinct
+# from the historical H2-only107 family; neither can impersonate the other.
+PROVIDER_QUOTA_RESET_PARENT_SHA256 = "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d"
+PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "b4618809aeedaa80081446e78d1760f08896d7d40f5246b9a81ac73d342df733"
+PROVIDER_QUOTA_RESET_PREIMAGES = dict(QUOTA_RESET_PREIMAGES, **{
+    "lease_broker.py": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+    "pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+})
+PROVIDER_QUOTA_RESET_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
+    "lease_broker.py": "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173",
+    "pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
+})
+# Composed provider-preserving candidate: the broker swap moves the candidate
+# preimage for the provider-preserving quota reset path only. The historical
+# H2-only107 preimage above stays authoritative when provider members are absent.
+PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES = {
+    "lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+}
+# Only the broker member of the composed-join cohort advances to the pinned
+# H2 successor computed over the composed broker preimage; remote/circuit/pick
+# keep the reviewed H2 successors pinned above. The same pinned H2 broker
+# patch applies to the composed broker preimage.
+QUOTA_RESET_COMPOSED_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
+    "lease_broker.py": "79103739c4c46cae3988187aea591aa06209ac1bd38046f49b8699fd93c205d0",
+})
+# The composed-join parent joins the reviewed inverse set above: the broker
+# projection back to the frozen preimage is accepted as a whole historical
+# parent, so the composed parent itself is equally reviewable. Historical
+# endpoints stay accepted; no prior endpoint is replaced.
+QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset(
+    set(QUOTA_RESET_REVIEWED_PARENT_SHA256S) | {QUOTA_RESET_COMPOSED_PARENT_SHA256})
+
+
+def _quota_reset_file(path, expected):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("quota reset source must be a regular file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("quota reset source digest differs")
+    return raw
+
+
+def _quota_reset_patch(original, patch, name):
+    """Apply the pinned patch to its pinned whole preimage, without fuzz.
+
+    Upstream hunk line numbers precede APPLICATION additions. Every complete
+    old context must occur exactly once in order; no omitted context, guessed
+    offset, subprocess, mutable Git checkout or replacement input is accepted.
+    The caller also authenticates the exact resulting whole-file postimage.
+    """
+    lines = patch.splitlines(keepends=True)
+    if lines[:2] != [("--- a/ext/" + name + "\n").encode(),
+                     ("+++ b/ext/" + name + "\n").encode()]:
+        raise ValueError("quota reset patch paths differ")
+    hunks, current = [], None
+    for line in lines[2:]:
+        if line.startswith(b"@@ "):
+            header = re.fullmatch(
+                rb"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\n]*\n?", line)
+            if header is None:
+                raise ValueError("quota reset patch header invalid")
+            current = (int(header[2] or b"1"), int(header[4] or b"1"), [])
+            hunks.append(current)
+        elif current is None or line[:1] not in (b" ", b"+", b"-"):
+            raise ValueError("quota reset patch body invalid")
+        else:
+            current[2].append(line)
+    if not hunks:
+        raise ValueError("quota reset patch is empty")
+    cursor, output = 0, []
+    for old_count, new_count, rows in hunks:
+        old_rows = [line[1:] for line in rows if line[:1] in (b" ", b"-")]
+        new_rows = [line[1:] for line in rows if line[:1] in (b" ", b"+")]
+        if not old_rows or len(old_rows) != old_count or len(new_rows) != new_count:
+            raise ValueError("quota reset patch hunk counts differ")
+        before, after = b"".join(old_rows), b"".join(new_rows)
+        position = original.find(before, cursor)
+        if position < 0 or original.find(before, position + 1) >= 0:
+            raise ValueError("quota reset patch exact context absent or ambiguous")
+        output.extend((original[cursor:position], after))
+        cursor = position + len(before)
+    output.append(original[cursor:])
+    return b"".join(output)
+
+
+def quota_reset_sources(root, *, preserve_provider=False, composed_parent=False):
+    """Capture all four reviewed successors and their exact source provenance."""
+    root = Path(root)
+    overlay = root.parent / "grok47/quota_billing"
+    captured = {}
+    provider_record = provider_application_record(root)[0] if preserve_provider else None
+    expected = PROVIDER_QUOTA_RESET_DIGESTS if preserve_provider else QUOTA_RESET_DIGESTS
+    if composed_parent and not preserve_provider:
+        # Composed-join cohort: only the broker member validates against its
+        # composed successor preimage; the pinned H2 patch applies unchanged.
+        expected = dict(expected, **QUOTA_RESET_COMPOSED_DIGESTS)
+    for name, preimage in QUOTA_RESET_PREIMAGES.items():
+        if preserve_provider and name in PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES:
+            preimage = PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES[name]
+        elif composed_parent and not preserve_provider and name in QUOTA_RESET_COMPOSED_PREIMAGES:
+            preimage = QUOTA_RESET_COMPOSED_PREIMAGES[name]
+        original = _quota_reset_file(root / "candidate" / name, preimage)
+        provider_preimage = None
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            row = provider_record["replacements"]["ext/" + name]
+            if row["preimage_sha256"] != preimage:
+                raise ValueError("provider quota reset candidate preimage differs")
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            original = _quota_reset_patch(original, patch, name)
+            if sha(original) != PROVIDER_QUOTA_RESET_PREIMAGES[name] or sha(original) != row["sha256"]:
+                raise ValueError("provider quota reset preimage differs")
+            provider_preimage = {"composition_sha256": PROVIDER_APPLICATION_RECORD_SHA256,
+                "source": row["source"], "patch_sha256": row["patch_sha256"],
+                "preimage_sha256": preimage, "sha256": sha(original)}
+            preimage = sha(original)
+        if name in QUOTA_RESET_PATCHES:
+            patch_source = "../grok47/quota_billing/" + name + ".patch"
+            patch = _quota_reset_file(overlay / (name + ".patch"), QUOTA_RESET_PATCHES[name])
+            raw = _quota_reset_patch(original, patch, name)
+            provenance = {
+                "schema": "native-exact-forward-patch.v1",
+                "preimage_sha256": preimage,
+                "patch_source": patch_source,
+                "patch_sha256": QUOTA_RESET_PATCHES[name],
+            }
+            if provider_preimage is not None:
+                provenance["provider_preimage"] = provider_preimage
+            source = "candidate/" + name
+        else:
+            source = "../grok47/quota_billing/" + name
+            raw = _quota_reset_file(overlay / name, QUOTA_RESET_DIGESTS[name])
+            provenance = {"schema": "native-exact-replacement.v1",
+                          "preimage_sha256": preimage}
+        if sha(raw) != expected[name]:
+            raise ValueError("quota reset postimage differs")
+        captured[name] = (raw, source, provenance)
+    return captured
+
+
+def before_quota_reset_recovery(manifest):
+    """Reverse only the complete H2 successor of the exact APPLICATION parent."""
+    if type(manifest) is not dict:
+        return manifest
+    if _has_provider_members(manifest) and any(
+            manifest.get("ext/" + name) == digest
+            for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items()):
+        if (len(manifest) != 116 or _manifest_digest(manifest) != PROVIDER_QUOTA_RESET_MANIFEST_SHA256
+                or any(manifest.get("ext/" + name) != digest
+                       for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items())):
+            raise ValueError("provider quota reset cohort incomplete or foreign")
+        previous = dict(manifest)
+        previous.update({"ext/" + name: digest for name, digest in PROVIDER_QUOTA_RESET_PREIMAGES.items()})
+        if _manifest_digest(previous) != PROVIDER_QUOTA_RESET_PARENT_SHA256:
+            raise ValueError("provider quota reset parent closure differs")
+        before_provider_application(previous)
+        return previous
+    if not any(manifest.get("ext/" + name) == digest
+               for name, digest in QUOTA_RESET_DIGESTS.items()):
+        return dict(manifest)
+    # Composed-join cohort: the broker member carries its composed successor
+    # digest while remote/circuit/pick keep the reviewed H2 successors; the
+    # inverse projects the broker back to the composed join parent, which is
+    # itself a reviewed whole parent. Historical cohort stays authoritative.
+    composed = (manifest.get("ext/lease_broker.py")
+                == QUOTA_RESET_COMPOSED_DIGESTS["lease_broker.py"])
+    digests = QUOTA_RESET_COMPOSED_DIGESTS if composed else QUOTA_RESET_DIGESTS
+    preimages = (dict(QUOTA_RESET_PREIMAGES, **QUOTA_RESET_COMPOSED_PREIMAGES)
+                 if composed else QUOTA_RESET_PREIMAGES)
+    if any(manifest.get("ext/" + name) != digest
+           for name, digest in digests.items()):
+        raise ValueError("quota reset cohort incomplete or foreign")
+    previous = dict(manifest)
+    previous.update({"ext/" + name: digest for name, digest in preimages.items()})
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) not in QUOTA_RESET_REVIEWED_PARENT_SHA256S:
+        raise ValueError("quota reset parent closure differs")
+    return previous
+
+
+def go_application_dependencies(root, *, staged_manifest=None):
+    """The builder and installer authenticate the same actual dependency bytes."""
+    root = Path(root)
+    quota = None
+    if staged_manifest is not None:
+        base = dict(staged_manifest)
+        pair = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+        present_pair, present_http = pair & set(base), HTTP_GENERATION_MEMBERS & set(base)
+        if ((present_pair and present_pair != pair)
+                or (present_http and (present_http != HTTP_GENERATION_MEMBERS or present_pair != pair))):
+            raise ValueError("quota reset Go or HTTP closure incomplete")
+        for name in present_pair | present_http:
+            del base[name]
+        parent = before_quota_reset_recovery(base)
+        if parent != base:
+            quota = quota_reset_sources(
+                root, preserve_provider=_has_provider_members(parent),
+                composed_parent=(not _has_provider_members(parent)
+                                 and parent.get("ext/lease_broker.py")
+                                 == QUOTA_RESET_COMPOSED_PREIMAGES["lease_broker.py"]))
+    dependencies = {}
+    for name in GO_APPLICATION_DEPENDENCIES:
+        if quota is not None and name in quota:
+            raw, source, provenance = quota[name]
+            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw),
+                                  "source": source, "composition": provenance}
+        else:
+            path = root / "candidate" / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("external Go application dependency unavailable")
+            raw = path.read_bytes()
+            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw), "source": "candidate/" + name}
+    return dependencies
+
+
+def compose_quota_reset_stage(root, output, manifest, files):
+    """Replace four existing members only after authenticating their whole parent."""
+    identity = _manifest_digest(manifest)
+    preserve_provider = identity == PROVIDER_QUOTA_RESET_PARENT_SHA256
+    composed_parent = False
+    if identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256):
+        # Composed f57b085 x d0c543 join parent: identical to the historical
+        # APPLICATION parent except the quiescence broker sits at its composed
+        # successor preimage. Accepted only when the broker projection back to
+        # the frozen preimage reproduces the historical whole parent
+        # byte-for-byte; no prior endpoint is replaced.
+        mapped = dict(manifest)
+        if mapped.get("ext/lease_broker.py") == QUOTA_RESET_COMPOSED_PREIMAGES["lease_broker.py"]:
+            mapped["ext/lease_broker.py"] = QUOTA_RESET_PREIMAGES["lease_broker.py"]
+            composed_parent = _manifest_digest(mapped) == QUOTA_RESET_PARENT_SHA256
+    if (identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256)
+            and not composed_parent):
+        raise ValueError("quota reset requires exact complete APPLICATION parent")
+    captured = quota_reset_sources(root, preserve_provider=preserve_provider,
+                                   composed_parent=composed_parent)
+    preimages = PROVIDER_QUOTA_RESET_PREIMAGES if preserve_provider else QUOTA_RESET_PREIMAGES
+    if composed_parent and not preserve_provider:
+        preimages = dict(preimages, **QUOTA_RESET_COMPOSED_PREIMAGES)
+    targets = {}
+    for name, preimage in preimages.items():
+        relative = "ext/" + name
+        target = Path(output) / "native-code-stage" / relative
+        if manifest.get(relative) != preimage:
+            raise ValueError("quota reset staged preimage differs")
+        _quota_reset_file(target, preimage)
+        targets[name] = target
+    for name, (raw, source, provenance) in captured.items():
+        relative = "ext/" + name
+        targets[name].write_bytes(raw)
+        manifest[relative] = sha(raw)
+        files[relative] = {**files[relative], "source": source, "sha256": sha(raw),
+                           "bytes": len(raw), "composition": provenance}
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            # The nested provenance now records both exact patch steps.
+            for key in ("source_kind", "composition_preimage_source",
+                        "composition_preimage_sha256", "patch_sha256"):
+                files[relative].pop(key, None)
+    before_quota_reset_recovery(manifest)
+
+
 def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
     """One closed external-owner bundle; never installs or changes a generation.
 
@@ -423,21 +1232,16 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
         raw[name] = path.read_bytes()
     if sha(raw["source-go_shim.py"]) != GO_INSTALLED_PREIMAGE:
         raise ValueError("external Go installed preimage mismatch")
-    dependencies = {}
-    for name in GO_APPLICATION_DEPENDENCIES:
-        path = root / "candidate" / name
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("external Go application dependency unavailable")
-        data = path.read_bytes()
-        dependencies[name] = {"sha256": sha(data), "bytes": len(data), "source": "candidate/" + name}
+    dependencies = go_application_dependencies(root, staged_manifest=staged_manifest)
     staged_dependencies = None
     if staged_manifest is not None:
-        staged_dependencies = {}
+        staged_dependencies = go_staged_dependency_hashes(staged_manifest,
+            {name: row["sha256"] for name, row in dependencies.items()})
         for name, dependency in dependencies.items():
             relative = "ext/" + name
             staged = output / "native-code-stage" / relative
             expected = staged_manifest.get(relative)
-            if (not isinstance(expected, str) or expected != dependency["sha256"]
+            if (not isinstance(expected, str) or expected != staged_dependencies[name]
                     or staged.is_symlink() or not staged.is_file()
                     or sha(staged.read_bytes()) != expected):
                 raise ValueError("external Go dependency differs from captured native stage")
@@ -467,9 +1271,10 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
 def compose_go_stage(root, output, manifest, files, component):
     """Join only the captured external B handler and the fixed native entry."""
     root, output = Path(root), Path(output)
-    validate_go_base_manifest(manifest,
+    staged_dependencies = go_staged_dependency_hashes(manifest,
         {name: row["sha256"] for name, row in component["dependencies"].items()})
-    expected = {"ext/" + name: row["sha256"] for name, row in component["dependencies"].items()}
+    validate_go_base_manifest(manifest, staged_dependencies)
+    expected = {"ext/" + name: digest for name, digest in staged_dependencies.items()}
     if (component.get("schema") != "native-external-go-component.v1"
             or component.get("component") != "go_application_handler"
             or component.get("destination_relative_to_stable_ext") != "go_shim/go_shim.py"
@@ -502,6 +1307,238 @@ def compose_go_stage(root, output, manifest, files, component):
             "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
+
+# One complete APPLICATION carrier successor of the exact qualified 107-file
+# base. Historical Grok and native cohort guards remain unchanged below.
+APPLICATION_CARRIER_DIGESTS = {
+    "native_remote.py": "f94689bbbf5f567b6d27e64965379ad4992a188b452d5bc593f41e925ebc411a",
+    "remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+    "remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822"
+}
+APPLICATION_CARRIER_PREIMAGES = {
+    "native_remote.py": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
+    "remote_sub_exec.py": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
+    "remote_sub_helpers.py": "f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93",
+    "support_bundle.py": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b"
+}
+APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+# The same APPLICATION carrier base with the one committed original-collection
+# successor member; the prior lineage stays accepted for the published
+# generation and its frozen fixtures.
+APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256 = "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
+
+
+# One complete successor of #2194's exact two-repair APPLICATION closure.
+# It composes #2182's publisher into APPLICATION's support owner and preserves
+# #2175/d5df6b2's scoped-model dependencies. The publisher-only WORKER closure
+# is not this precursor. Each accepted parent binds all other 104 members. The second complete
+# parent is the already qualified sparse-executor successor; older pins stay fixed.
+APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+# The original-collection successor has exact parents with and without the
+# qualified sparse executor. Historical parent identities remain unchanged.
+APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256 = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256 = "2ebfb9435053b90e4ce3bf9dfc6780460f6b2669f070c40c16f5772e928c9608"
+APPLICATION_POOL_COMPOSITION_PREIMAGES = {
+    "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+APPLICATION_POOL_COMPOSITION_DIGESTS = {
+    "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+# Composed f57b085 x d0c543 qualification-quiescence broker successor: the
+# exact pool successor cohort with ext/lease_broker.py advanced from
+# a84752dc... to 0bbf1ca0... only. The parent view below still maps the
+# broker to the same frozen preimage, so every historical parent identity
+# above stays unchanged.
+APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256 = "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807"
+# The same composed broker-successor parent as seen through the admission
+# integrity inverse inside validate_go_base_manifest: that inverse returns
+# its private backdated view (ext/fabric_task.py and ext/lane_runtime.py at
+# the frozen refusal/census preimages) before this pool inverse runs. The
+# identity below is exactly that view with the same pool preimage mapping;
+# every historical parent identity above is unchanged.
+APPLICATION_POOL_COMPOSITION_COMPOSED_ADMISSION_PARENT_SHA256 = "5d96edc64c8e5fc35b04a556a4dabceb7b9f1ec15b340d794f23193e02b37f0f"
+
+
+def _application_pool_cohort_exact_or_composed(manifest):
+    for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items():
+        actual = manifest.get(name)
+        if actual == digest:
+            continue
+        if (name == "ext/lease_broker.py"
+                and actual == APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256):
+            continue
+        return False
+    return True
+
+
+def before_application_pool_composition(manifest):
+    """Validate the exact complete successor; return its private parent view."""
+    if type(manifest) is not dict:
+        return manifest
+    if not any(manifest.get(name) == digest
+               for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        return dict(manifest)
+    if not _application_pool_cohort_exact_or_composed(manifest):
+        raise ValueError("application pool composition cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (APPLICATION_POOL_COMPOSITION_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256):
+        # Composed f57b085 x d0c543 endpoint as backdated by the admission
+        # integrity inverse (frozen refusal/census preimages on the two
+        # admission members); only that exact pair may precede the composed
+        # broker successor here.
+        if (identity == APPLICATION_POOL_COMPOSITION_COMPOSED_ADMISSION_PARENT_SHA256
+                and previous.get("ext/fabric_task.py") == GO_REQUEST_REFUSAL_TASK_DIGEST
+                and previous.get("ext/lane_runtime.py") == GO_CENSUS_EXIT_RUNTIME_DIGEST):
+            return previous
+        raise ValueError("application pool composition parent closure differs")
+    return previous
+
+
+# Exact adoption of #2007's two-hunk sparse preflight repair on the already
+# qualified APPLICATION admission-repair parent. Historical carrier hashes stay
+# frozen; this inverse is only a validation view of the new actual executor.
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
+SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
+
+
+# Exact published scoped-model successor from APPLICATION d5df6b2. Only the
+# two current dependency members change in this base107 transition. Historical
+# parents stay frozen; normalization never rewrites captured dependency bytes.
+EXACT_SCOPED_MODEL_PREIMAGES = {
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+EXACT_SCOPED_MODEL_DIGESTS = {
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
+
+
+def before_exact_scoped_models(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native scoped-model manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        raise ValueError("native scoped-model cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(EXACT_SCOPED_MODEL_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256,
+                        EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        raise ValueError("native scoped-model parent closure differs")
+    return previous
+
+
+def before_sparse_commit_preflight(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse commit preflight manifest invalid")
+    if manifest.get("ext/remote_sub_exec.py") != SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
+        return dict(manifest)
+    previous = dict(manifest)
+    previous["ext/remote_sub_exec.py"] = SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256,
+                        SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        # Composed f57b085 admission wrap feeding d0c543's normalize chain:
+        # the admission integrity inverse returns its private backdated view
+        # (frozen refusal/census preimages) before this preflight runs. That
+        # exact view's parent identity is the historical admission successor
+        # parent; only the two admission preimage markers may carry it here.
+        if (identity == ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256
+                and manifest.get("ext/fabric_task.py") == GO_REQUEST_REFUSAL_TASK_DIGEST
+                and manifest.get("ext/lane_runtime.py") == GO_CENSUS_EXIT_RUNTIME_DIGEST):
+            return previous
+        raise ValueError("native sparse commit preflight parent closure differs")
+    return previous
+
+
+def application_carrier_candidate_digests(root):
+    sparse = {**APPLICATION_CARRIER_DIGESTS,
+              "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    publisher = {**APPLICATION_CARRIER_DIGESTS,
+                 "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
+    combined = {**publisher,
+                "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    # Observe regular candidate files before selecting a complete reviewed
+    # cohort. A missing, symlinked or foreign forward member must fail its
+    # named guard, never silently reselect an historical base.
+    observed = {}
+    for name in APPLICATION_CARRIER_DIGESTS:
+        source = root / "candidate" / name
+        observed[name] = (None if source.is_symlink() or not source.is_file()
+                          else sha(source.read_bytes()))
+        if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+            accepted = {cohort[name] for cohort in cohorts}
+            accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            if observed[name] not in accepted:
+                raise ValueError("accepted Grok forward composition mismatch: " + name)
+    if any(observed == cohort for cohort in cohorts):
+        return observed
+    if any(observed[name] in {cohort[name] for cohort in cohorts}
+           for name in APPLICATION_CARRIER_DIGESTS):
+        raise ValueError("application carrier candidate cohort is incomplete")
+    return {}
+
+
+def application_carrier_candidate_cohort(root):
+    return bool(application_carrier_candidate_digests(root))
+
+
+def normalize_application_carrier_base_manifest(manifest):
+    """Validate the complete new base; return a temporary historical view.
+
+    The caller's manifest and published generation keep their actual hashes.
+    A historical namespace cannot be relabeled as an APPLICATION generation.
+    """
+    if type(manifest) is not dict:
+        return manifest
+    # Qualify the exact repaired parent before the existing APPLICATION inverse.
+    # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_host_pull_integrity(before_sparse_index_advice(before_quota_reset_recovery(manifest)))
+    if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
+        manifest = before_application_pool_composition(manifest)
+    else:
+        manifest = before_exact_scoped_models(manifest)
+    manifest = before_sparse_commit_preflight(manifest)
+    manifest = before_admission_integrity(manifest)
+    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
+               if manifest.get("ext/" + name) == expected}
+    if not present:
+        return manifest
+    if any(manifest.get("ext/" + name) != expected
+           for name, expected in APPLICATION_CARRIER_DIGESTS.items()):
+        raise ValueError("application carrier manifest cohort is incomplete")
+    historical = dict(manifest)
+    historical.update({"ext/" + name: expected
+                       for name, expected in APPLICATION_CARRIER_PREIMAGES.items()})
+    identity = sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (APPLICATION_CARRIER_BASE_SHA256,
+                        APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256):
+        raise ValueError("application carrier cannot relabel a prior or mixed native base")
+    return historical
+
+
 def main():
     draft = Path(__file__).resolve().parent
     root = draft.parent
@@ -512,7 +1549,16 @@ def main():
                         help='include the fixed Go entry/handler source pair; does not enroll or start services')
     parser.add_argument('--include-application-http', action='store_true',
                         help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
+    parser.add_argument('--include-provider-plan-application', action='store_true',
+                        help='preserve the exact selected provider plan in the reviewed APPLICATION source')
+    parser.add_argument('--include-quota-reset-recovery', action='store_true',
+                        help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
+    parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
     args = parser.parse_args()
+    if args.include_provider_plan_remote_placement and not args.include_provider_plan_application:
+        parser.error("--include-provider-plan-remote-placement requires --include-provider-plan-application")
+    if args.include_provider_plan_remote_placement and args.include_quota_reset_recovery:
+        parser.error("remote placement plus quota reset requires its separately qualified exact composition")
     if args.include_application_http and not args.include_go_application:
         parser.error('--include-application-http requires --include-go-application')
     output = args.output
@@ -525,8 +1571,23 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
+    application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if name in GROK47_MERGED_SOURCE_DIGESTS:
+        if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+            # Carrier successors still authenticate their immutable accepted
+            # overlay. Hash the exact regular candidate bytes being staged.
+            if name in GROK47_MERGED_SOURCE_DIGESTS:
+                historical = root.parent / "grok47" / "overlay" / name
+                if (historical.is_symlink() or not historical.is_file()
+                        or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+            source = root / "candidate" / name
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("application carrier source is not a regular file: " + name)
+            raw = source.read_bytes()
+            if sha(raw) != application_carrier[name]:
+                raise ValueError("application carrier source changed during build")
+        elif name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
@@ -559,7 +1620,7 @@ def main():
         relative = "ext/" + name
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
-        source_ref = ("../grok47/overlay/" + name if name in GROK47_MERGED_SOURCE_DIGESTS
+        source_ref = ("../grok47/overlay/" + name if not (application_carrier and name in APPLICATION_CARRIER_DIGESTS) and name in GROK47_MERGED_SOURCE_DIGESTS
                       and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
                       else str(source.relative_to(root)))
         files[relative] = {"source": source_ref, "sha256": sha(raw),
@@ -591,10 +1652,28 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
+    if args.include_provider_plan_application:
+        compose_provider_application_stage(root, output, manifest, files)
+    if args.include_provider_plan_remote_placement:
+        compose_provider_remote_placement_stage(root, output, manifest, files)
+    if args.include_quota_reset_recovery:
+        compose_quota_reset_stage(root, output, manifest, files)
+    normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(manifest)))
+    # Qualify the complete repair cohort even when no APPLICATION pair is added.
+    # Provider-plan and quota-reset variants arrive here as the composed
+    # 116-member endpoint; the same historical inversions the adjacent
+    # normalize call applies expose the 107-member admission view (exact
+    # fabric_task/lane_runtime digests, sparse-preflight executor successor,
+    # quiescence broker successor) that the composed parent closure accepts.
+    before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(
+        before_provider_application(before_quota_reset_recovery(manifest)))))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
     extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if args.include_provider_plan_application:
+        extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
     if args.include_application_http:
         compose_application_http_stage(root, output, manifest, files)
         extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}

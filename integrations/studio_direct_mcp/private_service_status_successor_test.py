@@ -907,11 +907,16 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         manifest["configHash"] = owner.digest(owner.encode(config))
         roots["manifest"].write_bytes(owner.encode(manifest))
         patch(svc, "C2_PAPER_FILES_SHA256", original_modules)
+        native_store = home / "native-code-releases"
+        native_store.mkdir(mode=0o700)
         binding = {
-            "successor_digest": "1" * 64, "target_generation": "2" * 64,
+            "successor_digest": getattr(self, "native_successor_digest", "1" * 64),
+            "target_generation": getattr(self, "native_target_generation", "2" * 64),
             "expected_selection": {"generation": "3" * 64, "sequence": 23},
             "pool_target": str(pool), "pool_previous": owner.digest(pool.read_bytes()),
             "pool_bridge": owner.digest(future_pool), "phase": "PREVIOUS",
+            "store": str(native_store),
+            "selection": {"generation": "3" * 64, "sequence": 23},
         }
         after_config = copy.deepcopy(config)
         after_config["fleetStatus"]["fabricLauncherSha256"] = binding["pool_bridge"]
@@ -933,7 +938,8 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         pin_args = SimpleNamespace(
             account=account,
             expected_manifest_sha256=owner.digest(owner.encode(manifest)),
-            successor_bundle=str(home / "successor"), successor_plan_sha256="1" * 64,
+            successor_bundle=str(home / "successor"),
+            successor_plan_sha256=binding["successor_digest"],
             operation="preview", expected_plan_sha256=None)
         preview = svc._pin_owner_module().run(svc, pin_args)
         pin_args.expected_plan_sha256 = preview["planSha256"]
@@ -941,6 +947,10 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         svc._pin_owner_module().run(svc, pin_args)
         pool.write_bytes(future_pool)
         binding["phase"] = "SELECTED"
+        binding["selection"] = {"schema": "native-code-selection.v1",
+                                "generation": binding["target_generation"],
+                                "previous": binding["expected_selection"]["generation"],
+                                "sequence": 24}
         original_receipt = {p.name: p.read_bytes()
                             for p in (roots["state"] / "native-pool-pin").iterdir()}
         fixture = {
@@ -1138,6 +1148,759 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         self.assertNotEqual(fixture["roots"]["manifest"].read_bytes(), raw_manifest)
         self.assertEqual(s._original_pin(svc, "chatgpt4", fixture["roots"]),
                          fixture["pin_sha"])
+
+
+
+
+class C4PublisherSuccessorTests(unittest.TestCase):
+    """Real prior transactions and exclusive filesystem publication, inert runtime."""
+    build = EnrolledRetainedReceiptTests.build
+    manifest_shape = EnrolledRetainedReceiptTests.manifest_shape
+    PORTS = EnrolledRetainedReceiptTests.PORTS
+    SOURCE = EnrolledRetainedReceiptTests.SOURCE
+
+    def setUp(self):
+        self.fixture = self.build("chatgpt4")
+        self.roots = self.fixture["roots"]
+        self.account = "chatgpt4"
+        self.patch = lambda obj, key, value: self._patch(obj, key, value)
+        status_args = SimpleNamespace(**{
+            **vars(self.fixture["args"]), "operation": "apply",
+            "expected_plan_sha256": self.fixture["successor_plan_sha"]})
+        self.assertEqual(s.run(svc, status_args)["effect"], "APPLIED")
+        self.status_path = self.fixture["successor_tx"]
+        self.status_plan = json.loads((self.status_path / "plan.json").read_bytes())
+        self.status_raw = {n: (self.status_path / n).read_bytes() for n in (
+            "manifest.before", "manifest.after", "module.before", "module.after")}
+        before = self.roots["manifest"].read_bytes()
+        config = self.roots["config"].read_bytes()
+        self.before_publisher = (self.roots["base"] / "git-publish.mjs").read_bytes()
+        self.after_publisher = b"// qualified inert C4 recovery publisher"
+        self.before_adapter = (self.roots["base"] / "workspace-access.mjs").read_bytes()
+        self.after_adapter = b"// qualified inert C4 recovery adapter"
+        # Exercise the real Paper-origin verification path using an inert exact
+        # selected cohort; no production credential/configuration is copied.
+        for mapping, value in (
+                (s.PREDECESSOR_MANIFEST_SHA256, "f" * 64),
+                (s.PAPER_V20_PREDECESSOR_MANIFEST_SHA256, s.digest(self.status_raw["manifest.before"])),
+                (s.PAPER_V20_PREDECESSOR_CONFIG_SHA256, s.digest(config)),
+                (s.PAPER_V20_POST_MANIFEST_RAW_SHA256, s.digest(before)),
+                (s.PAPER_V20_POST_MANIFEST_CANONICAL_SHA256,
+                 s.digest(json.dumps(json.loads(before), sort_keys=True,
+                                     separators=(",", ":")).encode()))):
+            patcher = mock.patch.dict(mapping, {self.account: value})
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.paper_calls = []
+        def paper_selection(*args, **kwargs):
+            self.paper_calls.append((args, kwargs))
+            return {"manifestBytes": self.status_raw["manifest.before"],
+                    "configBytes": config}
+        self.patch(svc, "_frozen_paper_fleet_module",
+                   lambda: SimpleNamespace(plan_selection=paper_selection))
+        for key, value in (
+                ("C4_PUBLISHER_BEFORE_MANIFEST", s.digest(before)),
+                ("C4_PUBLISHER_BEFORE_CONFIG", s.digest(config)),
+                ("C4_PUBLISHER_BEFORE", s.digest(self.before_publisher)),
+                ("C4_PUBLISHER_AFTER", s.digest(self.after_publisher)),
+                ("C4_ADAPTER_BEFORE", s.digest(self.before_adapter)),
+                ("C4_ADAPTER_AFTER", s.digest(self.after_adapter))):
+            self.patch(owner, key, value)
+        self.source = svc._user_root() / "publisher-source"
+        self.source.mkdir(mode=0o700)
+        self.write(self.source / "git-publish.mjs", self.after_publisher)
+        self.write(self.source / "workspace-access.mjs", self.after_adapter)
+        self.target = self.roots["state"] / owner.C4_PUBLISHER_TRANSACTION
+        self.args = SimpleNamespace(account=self.account, operation="preview",
+                                    source=str(self.source),
+                                    expected_manifest_sha256=s.digest(before),
+                                    expected_plan_sha256=None)
+        self.originals = {
+            n: {p.name: p.read_bytes() for p in (self.roots["state"] / n).iterdir()}
+            for n in ("native-pool-pin", owner.TRANSACTION, s.TRANSACTION)
+        }
+        self.before = self.snapshot()
+
+    def _patch(self, obj, name, value):
+        patcher = mock.patch.object(obj, name, value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write(self, path, data):
+        path.write_bytes(data)
+        path.chmod(0o600)
+
+    def snapshot(self):
+        return {str(p.relative_to(self.roots["base"])): (p.read_bytes(), p.stat().st_mode)
+                for p in self.roots["base"].rglob("*") if p.is_file()}
+
+    def call(self, op, plan=None):
+        return owner.run(svc, SimpleNamespace(**{
+            **vars(self.args), "operation": op, "expected_plan_sha256": plan}))
+
+    def apply(self):
+        pd = self.call("preview")["planSha256"]
+        result = self.call("apply", pd)
+        return pd, result
+
+    def assert_parents_unchanged(self):
+        for name, blobs in self.originals.items():
+            self.assertEqual({p.name: p.read_bytes()
+                              for p in (self.roots["state"] / name).iterdir()}, blobs)
+
+    def test_preview_is_readonly_and_requires_real_parent_chain(self):
+        record = self.call("preview")
+        self.assertEqual((record["effect"], record["phase"]), ("NOT_APPLIED", "PREVIEW"))
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse(self.target.exists())
+        self.assertTrue(self.paper_calls)
+
+    def test_apply_changes_publisher_then_adapter_then_manifest_and_commits_result_last(self):
+        writes = []
+        actual = svc._atomic_write_bytes
+        def checked(path, data, mode=0o600):
+            writes.append(path.name)
+            return actual(path, data, mode=mode)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=checked):
+            pd, record = self.apply()
+        self.assertEqual(writes, ["git-publish.mjs", "workspace-access.mjs", "manifest.json"])
+        self.assertEqual(record["effect"], "APPLIED")
+        self.assertTrue(record["durabilityConfirmed"])
+        self.assertEqual((self.roots["base"] / "git-publish.mjs").read_bytes(), self.after_publisher)
+        self.assertEqual((self.roots["base"] / "workspace-access.mjs").read_bytes(), self.after_adapter)
+        self.assertEqual(record["adapterSha256"], s.digest(self.after_adapter))
+        self.assert_parents_unchanged()
+        self.assertTrue(s.require_start(svc, self.account, self.roots))
+        self.assertEqual(s._static_state(svc, self.account, self.roots,
+                                       self.status_plan, self.status_raw), "COMMITTED")
+        self.assertEqual(self.call("status", pd)["effect"], "APPLIED")
+        self.assertFalse(self.call("status", pd)["durabilityConfirmed"])
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed write")):
+            self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+
+    def test_running_or_ambiguous_gateway_refuses_before_intent(self):
+        pd = self.call("preview")["planSha256"]
+        with mock.patch.object(svc, "_lifecycle_inspect", return_value={"pid": 1}):
+            with self.assertRaises(SystemExit):
+                self.call("apply", pd)
+        with mock.patch.object(svc, "_lifecycle_inspect", side_effect=SystemExit("ambiguous")):
+            with self.assertRaises(SystemExit):
+                self.call("apply", pd)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_wrong_account_preimage_source_plan_and_unaccepted_global_target_refuse(self):
+        pd = self.call("preview")["planSha256"]
+        with self.assertRaises(SystemExit):
+            self.call("apply", "f" * 64)
+        self.args.expected_manifest_sha256 = "0" * 64
+        with self.assertRaises(SystemExit):
+            self.call("preview")
+        self.args.expected_manifest_sha256 = owner.C4_PUBLISHER_BEFORE_MANIFEST
+        self.args.account = "chatgpt2-personal"
+        with self.assertRaises(SystemExit):
+            self.call("preview")
+        self.args.account = self.account
+        self.write(self.source / "git-publish.mjs", b"future generic target")
+        with self.assertRaises(SystemExit):
+            self.call("apply", pd)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_source_symlink_and_foreign_directory_refuse(self):
+        real = self.source / "git-publish.mjs"
+        real.unlink()
+        real.symlink_to(self.roots["base"] / "git-publish.mjs")
+        with self.assertRaises(SystemExit):
+            self.call("preview")
+        self.assertFalse(self.target.exists())
+
+    def test_each_missing_parent_completion_refuses_preview_and_start(self):
+        pd, _ = self.apply()
+        for name in self.originals:
+            path = self.roots["state"] / name / "result.json"
+            saved = path.read_bytes()
+            path.unlink()
+            with self.subTest(parent=name):
+                with self.assertRaises((SystemExit, OSError)):
+                    self.call("status", pd)
+                with self.assertRaises((SystemExit, OSError)):
+                    s.require_start(svc, self.account, self.roots)
+            self.write(path, saved)
+
+    def test_paper_selection_change_refuses_even_with_exact_installed_hashes(self):
+        self.patch(svc, "_frozen_paper_fleet_module", lambda: SimpleNamespace(
+            plan_selection=lambda *a, **k: {"manifestBytes": b"forged", "configBytes": b"forged"}))
+        with self.assertRaises(SystemExit):
+            self.call("preview")
+        self.assertFalse(self.target.exists())
+
+    def test_interrupted_private_preparation_never_publishes_partial_journal(self):
+        pd = self.call("preview")["planSha256"]
+        actual = svc._fabric_release_new
+        def torn(path, data):
+            if path.name == "publisher.after":
+                actual(path, data[:1])
+                raise OSError("interrupted preparation")
+            return actual(path, data)
+        with mock.patch.object(svc, "_fabric_release_new", side_effect=torn):
+            with self.assertRaises(OSError):
+                self.call("apply", pd)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_lost_intent_rename_requires_original_plan_reconcile_and_blocks_start(self):
+        pd = self.call("preview")["planSha256"]
+        actual = s._rename_new
+        def lost(svc_arg, source, destination):
+            actual(svc_arg, source, destination)
+            if destination == self.target:
+                raise OSError("lost callback after exclusive rename")
+        with mock.patch.object(s, "_rename_new", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        self.assertEqual(self.call("status", pd)["phase"], "OLD")
+        with self.assertRaises((SystemExit, OSError)):
+            s.require_start(svc, self.account, self.roots)
+        with self.assertRaises(SystemExit):
+            self.call("apply", pd)
+        self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+
+    def test_publisher_only_and_manifest_without_result_block_start(self):
+        pd = self.call("preview")["planSha256"]
+        actual = svc._atomic_write_bytes
+        def lost(path, data, mode=0o600):
+            actual(path, data, mode=mode)
+            if path.name == "git-publish.mjs":
+                raise OSError("lost publisher write")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        self.assertEqual(self.call("status", pd)["phase"], "PUBLISHER_ONLY")
+        with self.assertRaises((SystemExit, OSError)):
+            s.require_start(svc, self.account, self.roots)
+        with mock.patch.object(s, "_publish_result", side_effect=OSError("missing receipt")):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("reconcile", pd)
+        self.assertEqual(self.call("status", pd)["effect"], "EFFECT_UNKNOWN")
+        with self.assertRaises((SystemExit, OSError)):
+            s.require_start(svc, self.account, self.roots)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed")):
+            self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+
+    def test_nonprefix_foreign_module_and_mode_are_not_reconciled(self):
+        pd, _ = self.apply()
+        manifest = self.roots["manifest"]
+        final = manifest.read_bytes()
+        self.write(manifest, self.status_raw["manifest.after"])
+        self.write(self.roots["base"] / "git-publish.mjs", b"foreign")
+        with self.assertRaises(SystemExit):
+            self.call("reconcile", pd)
+        self.write(manifest, final)
+        self.write(self.roots["base"] / "git-publish.mjs", self.after_publisher)
+        other = self.roots["base"] / "workspace-access.mjs"
+        old_mode = other.stat().st_mode & 0o777
+        other.chmod(0o400 if old_mode == 0o600 else 0o600)
+        with self.assertRaises(SystemExit):
+            self.call("status", pd)
+
+    def test_manifest_first_mixture_refuses_without_repair(self):
+        pd, _ = self.apply()
+        self.write(self.roots["base"] / "git-publish.mjs", self.before_publisher)
+        with self.assertRaises(SystemExit):
+            self.call("reconcile", pd)
+
+    def test_result_forgery_and_extra_transaction_file_refuse(self):
+        pd, _ = self.apply()
+        result = self.target / "result.json"
+        saved = result.read_bytes()
+        self.write(result, b'{"effect":"APPLIED"}')
+        with self.assertRaises(SystemExit):
+            self.call("status", pd)
+        self.write(result, saved)
+        self.write(self.target / "foreign", b"unrelated")
+        with self.assertRaises(SystemExit):
+            s.require_start(svc, self.account, self.roots)
+
+    def test_second_apply_and_foreign_racing_transaction_never_replace_evidence(self):
+        pd, _ = self.apply()
+        after = self.snapshot()
+        with self.assertRaises(SystemExit):
+            self.call("apply", pd)
+        self.assertEqual(self.snapshot(), after)
+        with self.assertRaises(SystemExit):
+            self.call("status", "f" * 64)
+
+    def test_existing_transaction_collision_is_exclusive(self):
+        pd = self.call("preview")["planSha256"]
+        actual = s._rename_new
+        def collision(svc_arg, source, destination):
+            if destination == self.target:
+                destination.mkdir(mode=0o700)
+                self.write(destination / "foreign", b"owned elsewhere")
+            return actual(svc_arg, source, destination)
+        with mock.patch.object(s, "_rename_new", side_effect=collision):
+            with self.assertRaises((SystemExit, OSError)):
+                self.call("apply", pd)
+        self.assertEqual((self.target / "foreign").read_bytes(), b"owned elsewhere")
+        self.assertEqual((self.roots["base"] / "git-publish.mjs").read_bytes(), self.before_publisher)
+
+    def test_changed_native_or_status_receipt_cannot_be_resigned_as_new_plan(self):
+        pd, _ = self.apply()
+        for parent in ("native-pool-pin", owner.TRANSACTION, s.TRANSACTION):
+            path = self.roots["state"] / parent / "plan.json"
+            saved = path.read_bytes()
+            value = json.loads(saved)
+            value["uid"] = os.getuid() + 1
+            self.write(path, owner.encode(value))
+            with self.subTest(parent=parent):
+                with self.assertRaises((SystemExit, OSError)):
+                    self.call("status", pd)
+            self.write(path, saved)
+
+    def test_durability_failure_blocks_start_and_reconcile_does_not_replay(self):
+        pd, _ = self.apply()
+        with mock.patch.object(s, "_sync_directory", side_effect=OSError("fsync failed")):
+            with self.assertRaises(SystemExit):
+                s.require_start(svc, self.account, self.roots)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed")):
+            self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+
+    def test_source_not_needed_after_commit_and_c2_cannot_claim_c4_receipt(self):
+        pd, _ = self.apply()
+        (self.source / "git-publish.mjs").unlink()
+        (self.source / "workspace-access.mjs").unlink()
+        self.assertEqual(self.call("status", pd)["effect"], "APPLIED")
+        self.assertFalse(owner.c4_publisher_postimage(svc, "chatgpt2-personal", self.roots))
+        forged = dict(self.status_plan, account="chatgpt2-personal")
+        with self.assertRaises(SystemExit):
+            owner.c4_publisher_postimage(svc, self.account, self.roots, forged, self.status_raw)
+
+    def test_only_four_ordered_byte_states_are_admitted_and_none_start_without_result(self):
+        import itertools
+        pd = self.call("preview")["planSha256"]
+        actual = s._rename_new
+        def lost(svc_arg, source, destination):
+            actual(svc_arg, source, destination)
+            if destination == self.target:
+                raise OSError("intent published")
+        with mock.patch.object(s, "_rename_new", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        manifest_after = (self.target / "manifest.after").read_bytes()
+        states = {(0, 0, 0): "OLD", (1, 0, 0): "PUBLISHER_ONLY",
+                  (1, 1, 0): "MODULES", (1, 1, 1): "COMMITTED"}
+        for state in itertools.product((0, 1), repeat=3):
+            self.write(self.roots["base"] / "git-publish.mjs",
+                       (self.before_publisher, self.after_publisher)[state[0]])
+            self.write(self.roots["base"] / "workspace-access.mjs",
+                       (self.before_adapter, self.after_adapter)[state[1]])
+            self.write(self.roots["manifest"],
+                       (self.status_raw["manifest.after"], manifest_after)[state[2]])
+            snapshot = self.snapshot()
+            with self.subTest(state=state):
+                if state in states:
+                    self.assertEqual(self.call("status", pd)["phase"], states[state])
+                else:
+                    with self.assertRaises(SystemExit):
+                        self.call("status", pd)
+                    with self.assertRaises(SystemExit):
+                        self.call("reconcile", pd)
+                with self.assertRaises((SystemExit, OSError)):
+                    s.require_start(svc, self.account, self.roots)
+                self.assertEqual(self.snapshot(), snapshot)
+
+    def test_adapter_missing_wrong_or_symlink_source_cannot_prepare_intent(self):
+        pd = self.call("preview")["planSha256"]
+        path = self.source / "workspace-access.mjs"
+        for kind in ("missing", "wrong", "symlink"):
+            path.unlink()
+            if kind == "wrong":
+                self.write(path, b"foreign adapter")
+            elif kind == "symlink":
+                path.symlink_to(self.roots["base"] / "workspace-access.mjs")
+            with self.subTest(kind=kind):
+                with self.assertRaises((SystemExit, OSError)):
+                    self.call("apply", pd)
+                self.assertFalse(self.target.exists())
+                self.assertEqual(self.snapshot(), self.before)
+            if path.is_symlink() or path.exists():
+                path.unlink()
+            self.write(path, self.after_adapter)
+
+    def test_lost_adapter_write_reconciles_only_manifest_and_blocks_start(self):
+        pd = self.call("preview")["planSha256"]
+        actual = svc._atomic_write_bytes
+        def lost(path, data, mode=0o600):
+            actual(path, data, mode=mode)
+            if path.name == "workspace-access.mjs":
+                raise OSError("lost adapter write")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        self.assertEqual(self.call("status", pd)["phase"], "MODULES")
+        with self.assertRaises((SystemExit, OSError)):
+            s.require_start(svc, self.account, self.roots)
+        writes = []
+        def checked(path, data, mode=0o600):
+            writes.append(path.name)
+            return actual(path, data, mode=mode)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=checked):
+            self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+        self.assertEqual(writes, ["manifest.json"])
+        self.assertTrue(s.require_start(svc, self.account, self.roots))
+        self.assert_parents_unchanged()
+
+    def test_adapter_only_prefix_and_foreign_adapter_refuse_without_repair(self):
+        pd = self.call("preview")["planSha256"]
+        actual = s._rename_new
+        def lost(svc_arg, source, destination):
+            actual(svc_arg, source, destination)
+            if destination == self.target:
+                raise OSError("intent published")
+        with mock.patch.object(s, "_rename_new", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        adapter = self.roots["base"] / "workspace-access.mjs"
+        for data in (self.after_adapter, b"foreign"):
+            self.write(adapter, data)
+            snapshot = self.snapshot()
+            with self.subTest(data=data):
+                with self.assertRaises(SystemExit):
+                    self.call("reconcile", pd)
+                with self.assertRaises((SystemExit, OSError)):
+                    s.require_start(svc, self.account, self.roots)
+                self.assertEqual(self.snapshot(), snapshot)
+
+    def test_retained_adapter_payload_cannot_be_resigned_or_replaced(self):
+        pd, _ = self.apply()
+        for name in ("adapter.before", "adapter.after"):
+            path = self.target / name
+            saved = path.read_bytes()
+            self.write(path, b"foreign retained adapter")
+            with self.subTest(name=name):
+                with self.assertRaises(SystemExit):
+                    self.call("status", pd)
+                with self.assertRaises((SystemExit, OSError)):
+                    s.require_start(svc, self.account, self.roots)
+            self.write(path, saved)
+
+    def test_status_does_not_sync_or_mutate_any_retained_evidence(self):
+        pd, _ = self.apply()
+        snapshot = self.snapshot()
+        with mock.patch.object(s, "_sync_directory", side_effect=AssertionError("status wrote")):
+            self.assertEqual(self.call("status", pd)["effect"], "APPLIED")
+        self.assertEqual(self.snapshot(), snapshot)
+
+
+
+class HistoricalStatusPairTests(unittest.TestCase):
+    """Qualify frozen forward input without reinterpreting a changed live pair."""
+
+    patch = OwnerTransactionTests.patch
+    patch_object = OwnerTransactionTests.patch_object
+    write = OwnerTransactionTests.write
+    preview = OwnerTransactionTests.preview
+    apply = OwnerTransactionTests.apply
+
+    def setUp(self):
+        import private_service_pin as pin
+        OwnerTransactionTests.setUp(self)
+        self.original_plan = {
+            "account": self.account, "fixture": "authenticated-original",
+            "config_mode": 0o600, "manifest_mode": 0o600,
+        }
+        self.original_raw = {
+            "config.before.json": self.config,
+            "config.after.json": self.config,
+            "manifest.before.json": self.before,
+            "manifest.after.json": self.before,
+        }
+        self.pin = pin.plan_sha(self.svc, self.original_plan)
+        self.original_path = self.roots["state"] / "native-pool-pin"
+        self.original_path.mkdir(mode=0o700)
+        for name, blob in self.original_raw.items():
+            self.write(self.original_path / name, blob)
+        self.write(self.original_path / "plan.json",
+                   self.svc._fabric_release_json(self.original_plan))
+        self.write(self.original_path / "intent.json",
+                   self.svc._fabric_release_json({
+                       "schema": pin.SCHEMA, "planSha256": self.pin}))
+        self.write(self.original_path / "result.json",
+                   self.svc._fabric_release_json({
+                       "schema": pin.SCHEMA, "planSha256": self.pin,
+                       "effect": "APPLIED"}))
+        self.apply(self.preview())
+
+    def qualify(self, **changes):
+        args = dict(
+            original_plan=self.original_plan, original_raw=self.original_raw,
+            config_bytes=self.config, manifest_bytes=self.after,
+        )
+        args.update(changes)
+        return s.historical_pair(self.svc, self.account, self.roots, **args)
+
+    def test_complete_retained_status_chain_qualifies(self):
+        self.assertTrue(self.qualify())
+
+    def test_frozen_pair_survives_forward_after_pair_installation(self):
+        self.write(self.roots["config"], b'{"forward":"new configured native pool"}')
+        self.write(self.roots["manifest"], b'{"forward":"new manifest"}')
+        with mock.patch.object(s, "_original_pin",
+                               side_effect=AssertionError("native context reacquired")), \
+             mock.patch.object(s, "_confirm_retained_durability",
+                               side_effect=AssertionError("historical read acknowledged")):
+            self.assertTrue(self.qualify())
+
+    def test_missing_status_transaction_does_not_authorize_a_chain(self):
+        shutil.rmtree(self.roots["state"] / s.TRANSACTION)
+        self.assertFalse(self.qualify())
+
+    def test_changed_original_applied_receipt_refuses(self):
+        self.write(self.original_path / "result.json", b'{"effect":"APPLIED"}')
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify()
+
+    def test_original_fingerprint_change_between_reads_refuses(self):
+        actual = self.svc._fabric_release_bytes
+        changed = False
+        target = self.original_path / "config.before.json"
+        def raced(path, *args, **kwargs):
+            nonlocal changed
+            result = actual(path, *args, **kwargs)
+            if Path(path) == target and not changed:
+                changed = True
+                self.write(target, b"changed after fingerprint read")
+            return result
+        with mock.patch.object(self.svc, "_fabric_release_bytes", side_effect=raced):
+            with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+                self.qualify()
+        self.assertTrue(changed)
+
+    def test_caller_original_snapshots_must_match_retained_bytes(self):
+        raw = dict(self.original_raw)
+        raw["config.after.json"] = b"substituted original"
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify(original_raw=raw)
+
+    def test_changed_status_applied_receipt_refuses(self):
+        self.write(self.roots["state"] / s.TRANSACTION / "result.json",
+                   b'{"effect":"APPLIED","planSha256":"wrong"}')
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify()
+
+    def test_status_must_be_successor_of_exact_authenticated_original(self):
+        raw = dict(self.original_raw)
+        raw["manifest.after.json"] = b'{"foreign":"intermediate manifest"}'
+        self.write(self.original_path / "manifest.after.json",
+                   raw["manifest.after.json"])
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_SUCCESSOR_EDGE_CHANGED"):
+            self.qualify(original_raw=raw)
+
+    def test_frozen_endpoint_must_equal_retained_status_postimage(self):
+        with self.assertRaisesRegex(SystemExit, "RETAINED_ENDPOINT_CHANGED"):
+            self.qualify(manifest_bytes=self.before)
+
+    def test_installed_status_module_tamper_refuses(self):
+        self.write(self.roots["base"] / s.MODULE, b"unqualified status")
+        with self.assertRaisesRegex(SystemExit, "RETAINED_ENDPOINT_CHANGED"):
+            self.qualify()
+
+    def test_other_installed_module_tamper_refuses(self):
+        self.write(self.roots["base"] / "gateway.mjs", b"changed gateway")
+        with self.assertRaisesRegex(SystemExit, "OTHER_MODULE_CHANGED"):
+            self.qualify()
+
+    def test_unqualified_enrollment_is_not_accepted_as_an_alternate_path(self):
+        (self.roots["state"] / owner.TRANSACTION).mkdir(mode=0o700)
+        with self.assertRaisesRegex(SystemExit, "ENROLLMENT_ACCOUNT_UNQUALIFIED"):
+            self.qualify()
+
+class C4InventorySourceIdentityTests(unittest.TestCase):
+    def test_installed_successor_target_is_the_exact_shipped_publisher(self):
+        publisher = Path(__file__).with_name("git-publish.mjs")
+        self.assertEqual(owner.digest(publisher.read_bytes()), owner.C4_INVENTORY_AFTER)
+
+
+class C4InventorySuccessorTests(unittest.TestCase):
+    """The corrected publisher is a child of a real, retained v4 transaction."""
+    build = C4PublisherSuccessorTests.build
+    manifest_shape = C4PublisherSuccessorTests.manifest_shape
+    PORTS = C4PublisherSuccessorTests.PORTS
+    SOURCE = C4PublisherSuccessorTests.SOURCE
+    _patch = C4PublisherSuccessorTests._patch
+    write = C4PublisherSuccessorTests.write
+    snapshot = C4PublisherSuccessorTests.snapshot
+    call = C4PublisherSuccessorTests.call
+    apply = C4PublisherSuccessorTests.apply
+    assert_parents_unchanged = C4PublisherSuccessorTests.assert_parents_unchanged
+
+    def setUp(self):
+        C4PublisherSuccessorTests.setUp(self)
+        pd, applied = self.apply()
+        self.assertEqual(applied["effect"], "APPLIED")
+        self.v4_target = self.target
+        self.v4_manifest = self.roots["manifest"].read_bytes()
+        self.originals[owner.C4_PUBLISHER_TRANSACTION] = {
+            p.name: p.read_bytes() for p in self.v4_target.iterdir()}
+        self.before_publisher = self.after_publisher
+        self.after_publisher = b"// bounded streaming inventory publisher"
+        for key, value in (
+                ("C4_INVENTORY_PARENT_PLAN", pd),
+                ("C4_INVENTORY_BEFORE_MANIFEST", owner.digest(self.v4_manifest)),
+                ("C4_INVENTORY_AFTER", owner.digest(self.after_publisher))):
+            self.patch(owner, key, value)
+        self.write(self.source / "git-publish.mjs", self.after_publisher)
+        self.args.expected_manifest_sha256 = owner.digest(self.v4_manifest)
+        self.target = self.roots["state"] / owner.C4_INVENTORY_TRANSACTION
+        self.before = self.snapshot()
+
+    test_preview_is_readonly_and_requires_real_parent_chain = C4PublisherSuccessorTests.test_preview_is_readonly_and_requires_real_parent_chain
+    test_running_or_ambiguous_gateway_refuses_before_intent = C4PublisherSuccessorTests.test_running_or_ambiguous_gateway_refuses_before_intent
+    test_source_symlink_and_foreign_directory_refuse = C4PublisherSuccessorTests.test_source_symlink_and_foreign_directory_refuse
+    test_each_missing_parent_completion_refuses_preview_and_start = C4PublisherSuccessorTests.test_each_missing_parent_completion_refuses_preview_and_start
+    test_interrupted_private_preparation_never_publishes_partial_journal = C4PublisherSuccessorTests.test_interrupted_private_preparation_never_publishes_partial_journal
+    test_lost_intent_rename_requires_original_plan_reconcile_and_blocks_start = C4PublisherSuccessorTests.test_lost_intent_rename_requires_original_plan_reconcile_and_blocks_start
+    test_publisher_only_and_manifest_without_result_block_start = C4PublisherSuccessorTests.test_publisher_only_and_manifest_without_result_block_start
+    test_result_forgery_and_extra_transaction_file_refuse = C4PublisherSuccessorTests.test_result_forgery_and_extra_transaction_file_refuse
+    test_second_apply_and_foreign_racing_transaction_never_replace_evidence = C4PublisherSuccessorTests.test_second_apply_and_foreign_racing_transaction_never_replace_evidence
+    test_existing_transaction_collision_is_exclusive = C4PublisherSuccessorTests.test_existing_transaction_collision_is_exclusive
+    test_changed_native_or_status_receipt_cannot_be_resigned_as_new_plan = C4PublisherSuccessorTests.test_changed_native_or_status_receipt_cannot_be_resigned_as_new_plan
+    test_durability_failure_blocks_start_and_reconcile_does_not_replay = C4PublisherSuccessorTests.test_durability_failure_blocks_start_and_reconcile_does_not_replay
+    test_status_does_not_sync_or_mutate_any_retained_evidence = C4PublisherSuccessorTests.test_status_does_not_sync_or_mutate_any_retained_evidence
+
+    def test_roundtrip_writes_only_publisher_then_manifest_and_preserves_all_v4_bytes(self):
+        writes = []
+        actual = svc._atomic_write_bytes
+        def checked(path, data, mode=0o600):
+            writes.append(path.name)
+            return actual(path, data, mode=mode)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=checked):
+            pd, record = self.apply()
+        self.assertEqual(writes, ["git-publish.mjs", "manifest.json"])
+        self.assertEqual(record["generation"], owner.C4_INVENTORY_GENERATION)
+        self.assertEqual(record["publisherSha256"], owner.digest(self.after_publisher))
+        self.assertTrue(record["durabilityConfirmed"])
+        self.assertEqual(record["effect"], "APPLIED")
+        before = json.loads(self.v4_manifest)
+        after = json.loads(self.roots["manifest"].read_bytes())
+        before["files"]["git-publish.mjs"] = owner.digest(self.after_publisher)
+        self.assertEqual(after, before)
+        self.assert_parents_unchanged()
+        self.assertTrue(s.require_start(svc, self.account, self.roots))
+        self.assertEqual(s._static_state(svc, self.account, self.roots,
+                                       self.status_plan, self.status_raw), "COMMITTED")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed write")):
+            result = self.call("reconcile", pd)
+        self.assertTrue(result["durabilityConfirmed"])
+        self.assertFalse(self.call("status", pd)["durabilityConfirmed"])
+
+    def test_wrong_account_parent_plan_source_and_preimage_refuse_before_intent(self):
+        pd = self.call("preview")["planSha256"]
+        with self.assertRaises(SystemExit):
+            self.call("apply", "f" * 64)
+        with mock.patch.object(owner, "C4_INVENTORY_PARENT_PLAN", "f" * 64):
+            with self.assertRaises(SystemExit):
+                self.call("preview")
+        for field, value in (("account", "chatgpt2-personal"),
+                             ("expected_manifest_sha256", "f" * 64)):
+            with mock.patch.object(self.args, field, value):
+                with self.assertRaises(SystemExit):
+                    self.call("preview")
+        self.write(self.source / "git-publish.mjs", b"unqualified future publisher")
+        with self.assertRaises(SystemExit):
+            self.call("apply", pd)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_v4_retained_payloads_receipt_and_fingerprint_remain_required(self):
+        pd, _ = self.apply()
+        for name in owner.C4_PUBLISHER_FILES:
+            path = self.v4_target / name
+            saved = path.read_bytes()
+            self.write(path, b"changed v4 retained parent")
+            with self.subTest(name=name):
+                with self.assertRaises((SystemExit, OSError, ValueError)):
+                    self.call("status", pd)
+                with self.assertRaises((SystemExit, OSError, ValueError)):
+                    s.require_start(svc, self.account, self.roots)
+            self.write(path, saved)
+        self.assert_parents_unchanged()
+
+    def test_three_prefix_states_only_and_incomplete_child_never_falls_back_to_v4(self):
+        import itertools
+        pd = self.call("preview")["planSha256"]
+        actual = s._rename_new
+        def lost(svc_arg, source, destination):
+            actual(svc_arg, source, destination)
+            if destination == self.target:
+                raise OSError("intent published")
+        with mock.patch.object(s, "_rename_new", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        final_manifest = (self.target / "manifest.after").read_bytes()
+        states = {(0, 0): "OLD", (1, 0): "PUBLISHER_ONLY", (1, 1): "COMMITTED"}
+        for state in itertools.product((0, 1), repeat=2):
+            self.write(self.roots["base"] / "git-publish.mjs",
+                       (self.before_publisher, self.after_publisher)[state[0]])
+            self.write(self.roots["manifest"], (self.v4_manifest, final_manifest)[state[1]])
+            snapshot = self.snapshot()
+            with self.subTest(state=state):
+                if state in states:
+                    observed = self.call("status", pd)
+                    self.assertEqual(observed["phase"], states[state])
+                    if state == (1, 1):
+                        self.assertEqual(observed["effect"], "EFFECT_UNKNOWN")
+                else:
+                    with self.assertRaises(SystemExit):
+                        self.call("reconcile", pd)
+                with self.assertRaises((SystemExit, OSError)):
+                    s.require_start(svc, self.account, self.roots)
+                self.assertEqual(self.snapshot(), snapshot)
+        self.assert_parents_unchanged()
+
+    def test_adapter_config_modes_and_manifest_projection_are_preserved(self):
+        pd, _ = self.apply()
+        for path in (self.roots["base"] / "workspace-access.mjs", self.roots["config"],
+                     self.roots["manifest"], self.roots["base"] / "git-publish.mjs"):
+            saved, file_mode = path.read_bytes(), path.stat().st_mode & 0o777
+            for fault in ("bytes", "mode"):
+                if fault == "bytes":
+                    self.write(path, b"foreign installed state")
+                else:
+                    path.chmod(0o400 if file_mode == 0o600 else 0o600)
+                with self.subTest(path=path.name, fault=fault):
+                    with self.assertRaises((SystemExit, OSError)):
+                        self.call("reconcile", pd)
+                    with self.assertRaises((SystemExit, OSError)):
+                        s.require_start(svc, self.account, self.roots)
+                path.chmod(file_mode)
+                self.write(path, saved)
+                path.chmod(file_mode)
+        self.assert_parents_unchanged()
+
+    def test_lost_manifest_or_result_callback_reconciles_without_replacing_modules(self):
+        pd = self.call("preview")["planSha256"]
+        actual = svc._atomic_write_bytes
+        def lost(path, data, mode=0o600):
+            actual(path, data, mode=mode)
+            if path == self.roots["manifest"]:
+                raise OSError("lost manifest callback")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=lost):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("apply", pd)
+        self.assertEqual(self.call("status", pd)["effect"], "EFFECT_UNKNOWN")
+        actual_result = s._publish_result
+        def lost_result(*args):
+            actual_result(*args)
+            raise OSError("lost result callback")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed write")), \
+                mock.patch.object(s, "_publish_result", side_effect=lost_result):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.call("reconcile", pd)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("replayed write")):
+            self.assertEqual(self.call("reconcile", pd)["effect"], "APPLIED")
+        self.assert_parents_unchanged()
 
 
 if __name__ == "__main__":

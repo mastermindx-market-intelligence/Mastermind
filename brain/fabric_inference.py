@@ -29,6 +29,7 @@ def _owner():
 def _selection(owner, root):
     return owner.configured_application_fabric(
         lane=_LANE, workload_profile=_WORKLOAD, root=root,
+        service_mode_id="mastermind_text_fabric",
     )
 
 
@@ -50,9 +51,14 @@ def _record_turn(provider, usage, *, user, text, reason, role, seat, record_book
     from brain import thinking_log
     from brain.cli_bridge import _ROLE_BOOK
 
+    _, shared, _ = _owner()
+    observation = shared.fabric_observation(provider)
+    document = observation.document if observation is not None else None
+    model = document["serving_model"] if document is not None else provider["model"]
+    serving_pool = document["routing"]["pool"] if document is not None else provider["provider"]
     thinking_log.log_turn_async(
-        question=user, answer=text or "", model=provider["model"],
-        provider=provider["provider"], mode="shared_fabric", backend="fabric",
+        question=user, answer=text or "", model=model,
+        provider=serving_pool, mode="shared_fabric", backend="fabric",
         seat=seat or role, book=record_book or _ROLE_BOOK.get(str(role).lower(), "flagship"),
         role=role, armed=False, run_id=request_id, key_id=provider["cap_id"],
         latency_ms=latency_ms, input_tokens=usage["input_tokens"],

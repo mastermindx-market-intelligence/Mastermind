@@ -82,7 +82,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     }
   })();
 
-  function call(command: "executive_context" | "executive_submit" | "executive_status" |
+  function call(command: "read_company_priorities" | "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
     "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
@@ -124,6 +124,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     diagnostics,
     context: (signal) => call("executive_context", signal),
+    companyPriorities: (signal) => call("read_company_priorities", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
     projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,

@@ -41,6 +41,7 @@ from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
 SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
+SERVICE_SCHEMA_V3 = "mastermind.workbench_action_service.v3"
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
 MAX_BROWSER_CATALOG_BYTES = 2 * 1024 * 1024
@@ -69,6 +70,7 @@ _CONFIG_KEYS = frozenset(
     }
 )
 _CONFIG_KEYS_V2 = _CONFIG_KEYS | {"browser"}
+_CONFIG_KEYS_V3 = _CONFIG_KEYS_V2 | {"credential_grant", "credential_runtime"}
 _BROWSER_KEYS = frozenset(
     {
         "source_root",
@@ -142,6 +144,7 @@ class BrowserServiceConfig:
     tool_catalog_file: str
     startup_timeout_seconds: float
     mount_path: str = "/browser"
+    credential_runtime: object | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,6 +165,7 @@ class ServiceConfig:
     action_ttl_ms: int
     lease: StableWorkbenchActionLease
     browser: BrowserServiceConfig | None = None
+    credential_grant: object | None = None
 
     @property
     def allowed_hosts(self) -> tuple[str, ...]:
@@ -322,6 +326,7 @@ def parse_service_config(value: object) -> ServiceConfig:
     if not isinstance(value, dict):
         _refuse()
     schema = value.get("schema")
+    credential_grant = None
     if schema == SERVICE_SCHEMA:
         if set(value) != _CONFIG_KEYS:
             _refuse()
@@ -330,6 +335,18 @@ def parse_service_config(value: object) -> ServiceConfig:
         if set(value) != _CONFIG_KEYS_V2:
             _refuse()
         browser = parse_browser_service_config(value.get("browser"))
+    elif schema == SERVICE_SCHEMA_V3:
+        if set(value) != _CONFIG_KEYS_V3:
+            _refuse()
+        from integrations.workbench_browser_mcp.credential_use import (
+            parse_credential_grant, parse_credential_runtime, CredentialUseRefused,
+        )
+        try:
+            credential_grant = parse_credential_grant(value["credential_grant"])
+            browser = dataclasses.replace(parse_browser_service_config(value["browser"]),
+                credential_runtime=parse_credential_runtime(value["credential_runtime"]))
+        except CredentialUseRefused:
+            _refuse()
     else:
         _refuse()
     if value.get("bind_host") != "127.0.0.1":
@@ -354,6 +371,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         action_ttl_ms=ttl,
         lease=_lease(value.get("lease")),
         browser=browser,
+        credential_grant=credential_grant,
     )
 
 
@@ -733,6 +751,10 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
         )
         if runtime.services.allowed_hosts != config.allowed_hosts:
             _refuse()
+        if config.credential_grant is not None:
+            if config.schema != SERVICE_SCHEMA_V3 or config.browser is None or config.browser.credential_runtime is None:
+                _refuse()
+            runtime._adopt_browser_credential_grant(config.credential_grant)
     except BaseException as error:
         primary_error = error
     finally:
@@ -786,6 +808,13 @@ def create_browser_sibling(
     if selected is None:
         return None
     try:
+        if selected.credential_runtime is not None:
+            # The installed service already owns its private configuration and
+            # source release. Refuse an accidentally mixed relay release or
+            # interpreter; Node attestation is a separate, narrower proof.
+            if (Path(selected.source_root).resolve(strict=True) != Path(__file__).resolve().parents[2]
+                    or not os.path.samefile(selected.python_executable, sys.executable)):
+                _refuse()
         from integrations.workbench_browser_mcp.deployment import create_browser_deployment
         from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig
 
@@ -804,6 +833,7 @@ def create_browser_sibling(
             home_dir=selected.home_dir,
             tmp_dir=selected.tmp_dir,
             startup_timeout_seconds=selected.startup_timeout_seconds,
+            credential_runtime=selected.credential_runtime,
         )
         return create_browser_deployment(
             services=runtime.services,

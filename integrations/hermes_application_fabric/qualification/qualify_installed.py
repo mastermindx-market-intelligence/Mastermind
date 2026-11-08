@@ -24,9 +24,12 @@ def main():
     parser.add_argument("--hermes-root", required=True)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--manifest", required=True)
+    parser.add_argument("--hermes-sha", choices=("2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+        "1c0cd667746d3395fe9e1b6c74f8f85952486f18"),
+        default="2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19")
     args = parser.parse_args()
     root, owner, hermes = (Path(p).resolve() for p in (args.adapter_root, args.owner_root, args.hermes_root))
-    expected_hermes = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+    expected_hermes = args.hermes_sha
     actual = subprocess.run(["git", "-C", str(hermes), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if actual != expected_hermes:
@@ -41,7 +44,7 @@ def main():
         if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("Candidate source checksum mismatch")
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
-    if hashlib.sha256(owner_bytes).hexdigest() != "3250f2ea9b56b4762619a960c23dd5cc57ae05c273fe8e2b63c89a0f868d0ce0":
+    if hashlib.sha256(owner_bytes).hexdigest() != "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
     package = root / "integrations/hermes_application_fabric"
     sys.path[:0] = [str(root), str(owner), str(package / "tests"), str(package / "qualification")]
@@ -73,18 +76,23 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "2ef828e569b683b9dfaa94f81116da3ac55f6186", "owner_source_verified": True,
+        "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b", "owner_source_verified": True,
+        "owner_verification_scope": "client_bytes_only",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
-    for directory in (package / "tests", package / "qualification"):
-        suite.addTests(unittest.TestLoader().discover(str(directory), pattern="test_*.py"))
+    suite.addTests(unittest.TestLoader().discover(str(package / "tests"), pattern="test_*.py"))
+    # The original unpatched ABI and the attended patched ABI have separate
+    # exact-source jobs. Keep every unpatched case, including attended agent
+    # construction; the gateway extension is exercised by qualify_gateway.py.
+    for pattern in ("test_installed_native.py", "test_native_schema.py", "test_attended_native.py"):
+        suite.addTests(unittest.TestLoader().discover(str(package / "qualification"), pattern=pattern))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"tests_run": result.testsRun, "failures": len(result.failures),
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 87 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":

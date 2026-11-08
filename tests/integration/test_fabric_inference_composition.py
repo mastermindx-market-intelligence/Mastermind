@@ -26,7 +26,8 @@ from brain import client, cli_bridge, fabric_inference, thinking_log
 
 MODEL = "composition-text-model"
 PROXY_TOKEN = "synthetic-composition-proxy-token"
-GATEWAY_BLOB = "9404753b3571e6eb6887c414cab0648c00197023"
+# Exact candidate gateway; the paired test executes its legacy-compatible path.
+GATEWAY_BLOB = "a898910e838ec9c3f9389abaa91cad8d350095a7"
 
 
 class DispatcherTests(unittest.TestCase):
@@ -58,7 +59,8 @@ class DispatcherTests(unittest.TestCase):
                     return [event async for event in cli_bridge.chat_stream("u", resume="old-session")]
 
                 self.assertEqual(asyncio.run(events()),
-                                 [{"type": "error", "error": "backend_chat_unsupported"}])
+                                 [{"type": "error", "error": ("fabric_tools_unavailable"
+                                     if backend == "fabric" else "backend_chat_unsupported")}])
         with patch.dict(os.environ, {"BOT_LLM_BACKEND": "waterfall"}):
             self.assertEqual(cli_bridge._selected_backend(""), "")
 
@@ -194,13 +196,14 @@ class FabricCompositionTests(unittest.TestCase):
             url, "TEST_FABRIC_PROXY_TOKEN", "actual-fixture-provider", MODEL, "unknown",
             "fabric:text-fixture", "text_fixture", qualified=True, application_allowed=True,
         )
-        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {"text_fixture_v1": transport}))
+        self.transport_id = self.owner._SERVICE_FABRIC_RELATIONS["mastermind_text_fabric"].transport_id
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {self.transport_id: transport}))
         self.document = json.loads(self.originals[self.config_paths[0]])
         self.mode = {key: getattr(transport, key) for key in self.owner._APPLICATION_IDENTITY_FIELDS}
-        self.mode.update(transport_id="text_fixture_v1", enabled=True, application_allowed=True,
+        self.mode.update(transport_id=self.transport_id, enabled=True, application_allowed=True,
                          qualification=self.owner.PROFILE_QUALIFIED_CANARY,
                          qualification_ref="fixture:source-only", qualified_until=time.time()+3600)
-        self.document["application_fabric_modes"] = {"shared_fabric": self.mode}
+        self.document["application_fabric_modes"] = {"mastermind_text_fabric": self.mode}
         self.manifest = {"capabilities": [{"capability_id": "text_fixture", "secret_ref": "TEST_FABRIC_PROXY_TOKEN",
                                           "kill_state": "active", "allowed_lanes": ["mastermind-text"]}]}
         self.save()

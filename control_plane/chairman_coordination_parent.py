@@ -1,16 +1,19 @@
 """Full proposal delivery into the existing aggregation parent's ordinary task.
 
-Only prompt composition is specialized. Canonical handoff validation, review
+Only input composition/currentness is specialized. Canonical handoff validation, review
 independence, admission, result sealing and completion stay with their original
 owners. No parent acknowledgment store, acceptance policy or dispatcher is added.
 """
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import hashlib
 import json
+import re
 from typing import Any
 
-from control_plane.chairman_coordination import render_coordination_brief
+from control_plane.chairman_coordination import REVIEW_SCHEMA, render_coordination_brief
+from control_plane.fabric_result_projection import FABRIC_ROLE_RESULT_VIEW_SCHEMA
 from control_plane.chairman_coordination_host import (
     CoordinationWorkSources, _freeze_sources, _revalidate_sources,
 )
@@ -44,10 +47,60 @@ missing evidence without fabricating progress. Keep next_actions as proposals
 under the original result contract; no automatic dispatch, repair or acceptance is
 requested. Do not self-attest validations or invent additional result fields.
 """
+_PARENT_EVIDENCE_BOUNDARY = "\n\n" + _PARENT_INSTRUCTION + "\n\nParent coordination evidence:\n"
+
+
+def _comparison_input(prompt: str) -> tuple[str, bytes]:
+    """Compare two validated reads; never alter the original delivered input."""
+    if type(prompt) is not str or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
+        raise ValueError("invalid parent prompt")
+    prefix, boundary, raw = prompt.rpartition(_PARENT_EVIDENCE_BOUNDARY)
+    if not boundary:
+        raise ValueError("missing owned parent evidence boundary")
+    task = json.loads(raw)
+    # The producer's exact round-trip refuses duplicate keys and ambiguous text.
+    if (type(task) is not dict
+            or set(task) != {"aggregation_handoff", "coordination_return", "coordination_brief"}
+            or raw != json.dumps(task, sort_keys=True, ensure_ascii=True, allow_nan=False)):
+        raise ValueError("invalid parent evidence serialization")
+    returned = task["coordination_return"]
+    structural = returned["structural_review"]
+    semantic = returned["semantic_review"]
+    generation = semantic["generation"]
+    evidence = structural["runtime_result_evidence"]
+    if (returned["schema"] != "mastermind.chairman_coordination_review_return.v1"
+            or structural["schema"] != REVIEW_SCHEMA
+            or semantic["schema"] != FABRIC_ROLE_RESULT_VIEW_SCHEMA
+            or type(generation) is not dict
+            or set(generation) != {"schema", "state", "source_identity", "before", "after"}
+            or generation["schema"] != "mastermind.runtime_read_observation.v1"
+            or generation["state"] != "SAME" or evidence["source_state"] != "SAME"
+            or type(generation["before"]) is not int or generation["before"] < 0
+            or type(generation["after"]) is not int
+            or generation["before"] != generation["after"]):
+        raise ValueError("unsupported parent evidence shape")
+    # Verify both ORIGINAL packets, including the nested digest in the outer
+    # packet, before removing anything from these disposable comparison copies.
+    for packet in (returned, structural):
+        expected = hashlib.sha256(canonical_json_bytes({
+            key: value for key, value in packet.items() if key != "packet_digest"
+        })).hexdigest()
+        if packet["packet_digest"] != expected:
+            raise ValueError("invalid parent evidence digest")
+    for observation in (generation, evidence):
+        identity = observation["source_identity"]
+        if type(identity) is not str or re.fullmatch(r"[0-9a-f]{32}", identity) is None:
+            raise ValueError("invalid parent observation identity")
+        del observation["source_identity"]
+    del structural["packet_digest"]
+    del returned["packet_digest"]
+    # All other fields, including partial/omitted facts and before/after samples,
+    # remain exact. Canonical bytes preserve JSON distinctions such as 1 vs true.
+    return prefix, canonical_json_bytes(task)
 
 
 class CoordinationParentSupervisor(ExecutiveSupervisor):
-    """Specialize only the original prompt hook for one admitted parent Job."""
+    """Specialize input composition/currentness for one admitted parent Job."""
 
     def __init__(self, *args: Any, coordination_root_job_id: str,
                  coordination_work_job_id: str,
@@ -87,6 +140,14 @@ class CoordinationParentSupervisor(ExecutiveSupervisor):
                 or provenance[current.job_id].get("workstream") != sources.context.get("project_ref")):
             raise SupervisorError("parent is not the current admitted project assignment")
         return by_id
+
+    def _current_prompt_matches(self, job: Job, original: str, current: str) -> bool:
+        if job.job_id != self._coordination_root_job_id:
+            return super()._current_prompt_matches(job, original, current)
+        try:
+            return _comparison_input(original) == _comparison_input(current)
+        except (KeyError, TypeError, ValueError, RecursionError):
+            return False
 
     def _prompt(
         self, job: Job, attempt: Attempt,
@@ -148,7 +209,7 @@ class CoordinationParentSupervisor(ExecutiveSupervisor):
                 raise SupervisorError("canonical parent handoff changed during composition")
             _revalidate_sources(sources)
             self._current_parent(job, attempt, sources)
-            prompt = original + "\n\n" + _PARENT_INSTRUCTION + "\n\nParent coordination evidence:\n" + json.dumps(
+            prompt = original + _PARENT_EVIDENCE_BOUNDARY + json.dumps(
                 task, sort_keys=True, ensure_ascii=True, allow_nan=False)
             if len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
                 raise SupervisorError("complete parent input exceeds its bound")

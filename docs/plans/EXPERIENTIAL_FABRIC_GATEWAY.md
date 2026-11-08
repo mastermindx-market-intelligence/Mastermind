@@ -130,3 +130,62 @@ Writing that adapter now would add unexercised provider surface to a head whose 
 **Shared-quota accounting honesty.** This gateway's per-key and `SAFE_RPM_SHARED` counters cover only requests that actually traverse this proxy. Jev's native `/v1/systemone` direct calls are not counted by this limiter, so local counters must never be presented as organization-wide accounting, and the shared organization quota must be reconciled with PR #1851 before both are activated.
 
 **Production gates that remain closed (source-recorded, not live claims).** One `$20 Pro` organization, one API key for now, shared with Jev System One. The per-key `SAFE_RPM_PER_KEY=1000` ceiling stays conservative; do not raise it to the 1,500 RPM organization figure without an owner-verified organization readback, and keep `SAFE_RPM_SHARED` unset until that organization scope is confirmed rather than inferred from provider screenshots. The shipped per-key in-flight default of 128 is a **source** default, not an approved host value: with one key on the M2 host it must be set to 32 or lower after an actual host limit preflight, because four credentials at 128 in-flight each would demand outbound sockets beyond the observed 256 soft file limit and that configuration is unsafe. Upstream errors, a 429, or credit exhaustion must not trigger key rotation, a POST retry, or any hidden billed continuation. The proxy's local limiter does not see Jev's direct `/v1/systemone` calls, so the two routes must not be activated on one organization key until a joint safe reservation exists. Production stays inert until the organization limits, the key and the M2 host custody are owner-verified.
+
+
+## P5 — Chairman plan integration, November 7, 2026
+
+Current operation: `provider-plans-byteplus-experiential-20261107-c2`.
+Source/procedure base: `779fc3be9d07c366bf5b47c650b64e59fc6f3903`.
+Parent: [Fabric convergence #983](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983).
+This is the current Chairman-assigned continuation of provider enrollment and plan-aware admission. The original gateway #1849 and commercial ModelArk #1824 are merged; those source releases do not prove live enrollment. Preserve the active #2175 application composition and original effects, #1941/#1851 Jev, original Experiential account holds, and every native publication owner.
+
+### User outcome and account policy
+
+An eligible Capacity/Subagent Fabric task can consume the actual subscribed plan through existing model, account, quota, broker and result owners. The user supplies a BytePlus $50 plan and an Experiential Labs plan with 7,000 free-model credits per day and a $200 monthly paid allowance. These are owner-declared plan limits, not measured remaining quota. No credential or subscriber identifier belongs in this file, GitHub, worker packets or logs.
+
+- BytePlus: retain the distinct Personal Coding Plan endpoint and its three simultaneous five-hour, weekly and subscription-month constraints. Prefer the verified DeepSeek V4.1 Flash / GLM 5.3 Flash model choices within supported usage. Never substitute the commercial PAYG endpoint or count duplicate keys as independent subscriptions. Additional independently enrolled subscriptions may increase capacity only with their own account-bound quota observations and configured concurrency caps.
+- Experiential free traffic: allow the exact provider-catalog free variants corresponding to DeepSeek V4.1 Flash, GPT-6 Luna, Clef, DeepSeek V4.1 Flash 1017, Jev, Clef Flash and GPT-6 Luna Decisions. Display names alone are not model IDs or proof of free billing. Admission requires current provider evidence and preserves the daily-credit boundary.
+- Experiential paid traffic: reserve included paid allowance for the explicitly chosen uncensored lane, preferring DeepSeek V4.1 Flash 1017 Uncensored and then GLM 5.3 Flash Uncensored. No automatic promotion from exhausted free credits into paid traffic, no unrelated paid models or subscription overage. Provider refusals and ambiguous submissions are not model/account failover permission.
+
+### Existing task tree extension
+
+| ID | Depends | Action and completion evidence | Editorial state |
+| --- | --- | --- | --- |
+| P5.T1 | P2.T4 | Reconcile existing owners and official provider contracts; authenticated Experiential organization/wallet/catalog observed, BytePlus management telemetry remains UNKNOWN | complete |
+| P5.T2 | P5.T1 | Implement native request/lease/result integration, free/paid policy, shared subscription scope and no PAYG fallback; focused source tests pass, hosted CI repair is in progress | implemented; qualifying |
+| P5.T3 | P5.T2 | Both supplied credentials privately enrolled; candidate gateway metadata verified; native account/host enrollment and supported provider execution remain | in_progress |
+| P5.T4 | P5.T3 | Normal auto-merge armed; consume exact accepted source, CAS-select native generation, execute admitted workers and consume their results/accounting | in_progress |
+
+DONE_WHEN is actual supported-plan execution and result consumption with truthful remaining quota, paid-model reservation and no secret leakage. A plan, source alias, gateway health response, test pass or successful merge alone is insufficient. If a real provider/permission/credential/native-release hold applies, preserve its exact identity and complete independent source work; do not remove guards to manufacture enrollment.
+
+Direct principal work is retained initially for PRINCIPAL_JUDGMENT and UNIQUE_APPROVED_ACCESS: reconcile personal-versus-commercial entitlement, old account holds, current supplied credentials, and active application/native writers. Bounded independent labor is eligible for the existing paid Fabric after that envelope is frozen; no new router, quota ledger, worker queue or credential cache is introduced.
+
+
+### P5 implementation checkpoint — November 7
+
+[P5 source and account evidence](../reports/provider-plan-integration-20261107.md)
+records the complete native integration in [PR #2220](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2220).
+P5.T1 is complete. P5.T2 implements original request custody, physical/provider
+leases, account-bound launch, single-send reservation, quota observation and
+result delivery, together with strict free/paid selection. Hosted qualification
+found a sealed GLM helper dependency; preserve those accepted bytes and validate
+new-pool leases through the read-only plan adapter.
+
+P5.T3 has enrolled both supplied credentials through private owners. The existing
+loopback gateway is running as an unselected candidate and authenticated account,
+wallet and catalog observations are recorded. The production catalog publishes
+base IDs; the documented `:free` request qualifier is validated against those IDs.
+A provisioning credential is not required to consume the supplied inference plan.
+BytePlus management SSO is separate from the supplied coding-plan inference key:
+unknown management quota remains UNKNOWN, with provider hard stops and the
+original broker/operator cap. Missing management telemetry alone does not create
+a new credential or human gate.
+
+P5.T4 is in progress: normal protected auto-merge is armed; required hosted CI,
+accepted-master publication, exact-current native selection, original-owner
+account/host enrollment and real native result consumption remain to be proven.
+The current Web review waiver governs this continuation; historical prose above
+about mandatory named independent reviewers is not a present gate unless the
+repository actually requires that approval. No review, merge, native activation
+or provider inference is inferred from this checkpoint. Continue through actual
+provider completion and lease/accounting settlement before acceptance.

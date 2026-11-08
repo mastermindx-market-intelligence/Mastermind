@@ -26,11 +26,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import httpx
 
+from control_plane.experiential_plan_policy import PLAN_MODES, PlanRequestRefused, plan_policy_digest, validate_plan_request
+
 UPSTREAM = "https://api.experientiallabs.ai/v1"
 ALLOWED = {
     ("POST", "chat/completions"),
     ("POST", "responses"),
     ("POST", "systemone"),
+    ("POST", "decisions"),
     ("POST", "embeddings"),
     ("GET", "models"),
     # Read-only account observations, opt-in and one-key-only. Never admin writes.
@@ -56,8 +59,11 @@ class Settings:
     max_queue_wait_s: float = 600.0
     max_body_bytes: int = 8 * 1024 * 1024
     enable_account_metadata: bool = False  # off by default; only one provider key can be introspected
+    plan_policy: str = "legacy"  # opt-in; exact wire model, no automatic paid spill
 
     def __post_init__(self) -> None:
+        if type(self.plan_policy) is not str or self.plan_policy not in PLAN_MODES:
+            raise ValueError("EXPLABS_PLAN_POLICY must be legacy, free_only or free_and_uncensored")
         if not 1 <= len(self.api_keys) <= 4 or not all(self.api_keys):
             raise ValueError("configure 1-4 nonempty EXPLABS_KEY_N values")
         if type(self.enable_account_metadata) is not bool:
@@ -84,6 +90,7 @@ class Settings:
         if metadata_flag not in {"0", "1"}:
             raise ValueError("EXPLABS_ACCOUNT_METADATA_ENABLED must be 0 or 1")
         return cls(
+            plan_policy=os.environ.get("EXPLABS_PLAN_POLICY", "legacy").strip(),
             enable_account_metadata=metadata_flag == "1",
             api_keys=keys,
             proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", "").strip(),
@@ -397,7 +404,13 @@ def create_app(
         scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not hmac.compare_digest(candidate, cfg.proxy_token):
             return JSONResponse({"error": {"message": "unauthorized", "type": "authentication_error"}}, status_code=401)
-        return JSONResponse(await request.app.state.admissions.snapshot())
+        snapshot = await request.app.state.admissions.snapshot()
+        snapshot.update(plan_policy=cfg.plan_policy,
+                        plan_policy_digest=plan_policy_digest(cfg.plan_policy),
+                        account_metadata_enabled=cfg.enable_account_metadata,
+                        included_funding_state="unverified",
+                        included_funding_reason="PLAN_INCLUDED_FUNDING_UNVERIFIED")
+        return JSONResponse(snapshot)
 
     @app.api_route("/v1/{endpoint:path}", methods=["POST", "GET"])
     async def proxy(endpoint: str, request: Request) -> Response:
@@ -421,6 +434,31 @@ def create_app(
             if len(body) + len(chunk) > cfg.max_body_bytes:
                 return JSONResponse({"error": {"message": "request body too large"}}, status_code=413)
             body.extend(chunk)
+
+        if request.method == "POST":
+            expected_policy = request.headers.get("x-fabric-plan-policy")
+            if (cfg.plan_policy != "legacy" or expected_policy is not None) and (
+                expected_policy != plan_policy_digest(cfg.plan_policy)
+            ):
+                return JSONResponse(
+                    {"error": {"message": "gateway plan policy changed",
+                               "type": "plan_policy_error", "code": "PLAN_POLICY_MISMATCH"}},
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            try:
+                lane = validate_plan_request(cfg.plan_policy, endpoint, bytes(body))
+                if lane == "free":
+                    # The public API supplies no account-specific Max entitlement
+                    # or effective continuation readback. A local flag, catalog,
+                    # wallet, or caller assertion cannot authorize wallet-free
+                    # plain-ID inference. Refuse before RPM/slot/upstream send.
+                    raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
+            except PlanRequestRefused as exc:
+                return JSONResponse(
+                    {"error": {"message": "provider plan request refused",
+                               "type": "plan_policy_error", "code": exc.reason}},
+                    status_code=HTTPStatus.FORBIDDEN,
+                )
 
         admissions: SlidingWindowAdmissions = request.app.state.admissions
         disconnected = asyncio.Event()
@@ -581,10 +619,20 @@ def create_app(
                         if endpoint == "api/v1/key" else ("total_credits", "total_usage")
                     )
                     safe_data = {}
+                    # The official key API uses paired nulls for an uncapped
+                    # daily USD key limit. Preserve that fact; never turn it
+                    # into zero, a subscription allowance, or usable capacity.
+                    uncapped_key = (
+                        endpoint == "api/v1/key"
+                        and all(name in data and data[name] is None for name in names)
+                    )
                     for name in names:
                         if name not in data:
                             raise ValueError("missing account metadata field")
                         value = data[name]
+                        if uncapped_key:
+                            safe_data[name] = None
+                            continue
                         # Closed numeric observation contract, without coercion.
                         # Integers stay exact; bool is not a monetary scalar.
                         if type(value) not in (int, float) or (

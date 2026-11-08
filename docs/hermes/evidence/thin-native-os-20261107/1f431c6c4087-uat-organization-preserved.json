@@ -1,0 +1,48 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "observation": {
+    "at": "2026-11-07T09:13:11.250Z",
+    "pid": 75264,
+    "organization": {
+      "names": [
+        "Organization and goal lineage",
+        "Organization"
+      ],
+      "groups": [
+        {
+          "index": 1,
+          "names": [
+            null,
+            null
+          ],
+          "groups": [
+            {
+              "index": 0,
+              "names": [
+                "Organization",
+                "Read-only reporting view"
+              ],
+              "groups": [
+                {
+                  "index": 0,
+                  "names": [
+                    "Organization"
+                  ],
+                  "groups": []
+                }
+              ]
+            },
+            {
+              "index": 1,
+              "names": [
+                "The organization source has not been qualified for this selected mission. This is not evidence of no team or no work."
+              ],
+              "groups": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "claim": "Existing organization consumer remains mounted; no new data or authority inferred"
+}

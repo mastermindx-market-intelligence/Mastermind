@@ -161,6 +161,20 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     assert shards["strategy"] == {"fail-fast": False, "max-parallel": 6,
                                    "matrix": {"index": list(range(6))}}
     assert shards["runs-on"] == "ubuntu-latest"
+    macro_checkout = next(step["with"] for step in shards["steps"]
+                          if step.get("with", {}).get("repository") ==
+                          "mastermindx-market-intelligence/macro")
+    ordinary = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(),
+                         Loader=ci_pytest._WorkflowYAMLLoader)
+    ordinary_checkout = next(
+        step["with"] for step in ordinary["jobs"]["pytest_shards"]["steps"]
+        if step.get("with", {}).get("repository") ==
+        "mastermindx-market-intelligence/macro"
+    )
+    assert macro_checkout["sparse-checkout"] == ordinary_checkout["sparse-checkout"]
+    assert macro_checkout["sparse-checkout"].splitlines() == ["engine", "lib", "config"]
+    assert macro_checkout["persist-credentials"] is False
+    assert macro_checkout["token"] == ordinary_checkout["token"]
     assert shards["timeout-minutes"] == 45
     minting = [(name, step) for name, job in jobs.items() for step in job["steps"]
                if "pip-compile " in step.get("run", "")]

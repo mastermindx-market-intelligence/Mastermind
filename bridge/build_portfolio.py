@@ -42,23 +42,22 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
             pass
 
 
-def write(payload: dict, portfolio_id: str | None = None) -> dict:
-    """Write both contracts; always succeed (return paths).
-
-    portfolio_id None/'flagship' → the legacy data/portfolio/ dir; any other id →
-    data/portfolios/<id>/ (so every book has its own published contract). The id is
-    stamped into the payload so the dashboard knows which book it is reading.
-    """
+def prepare(payload: dict, portfolio_id: str | None = None) -> tuple[dict, bytes]:
+    """Return the incumbent contract's exact paths/bytes without filesystem effects."""
     from portfolio import registry
     pid = portfolio_id or registry.DEFAULT_ID
     payload = {"schema": "portfolio.v1", "is_paper": True, "portfolio_id": pid, **payload,
                "disclaimer": "Paper-only / display-only. Accountability, not alpha. Not investment advice.",
                "zh": {"disclaimer": "仅纸面/仅展示；从不自动执行。"}}
     base = registry.data_dir(portfolio_id)
-    hub = base / "latest.json"
-    site = base / "portfolio.json"   # site/ in prod; local mirror here
-    base.mkdir(parents=True, exist_ok=True)
+    paths = {"hub": str(base / "latest.json"), "site": str(base / "portfolio.json")}
     encoded = json.dumps(payload, indent=2, default=str, ensure_ascii=False).encode("utf-8")
-    for p in (hub, site):
-        _atomic_write_bytes(p, encoded)
-    return {"hub": str(hub), "site": str(site)}
+    return paths, encoded
+
+
+def write(payload: dict, portfolio_id: str | None = None) -> dict:
+    """Write both existing portfolio contracts and return their paths."""
+    paths, encoded = prepare(payload, portfolio_id)
+    for path in paths.values():
+        _atomic_write_bytes(Path(path), encoded)
+    return paths

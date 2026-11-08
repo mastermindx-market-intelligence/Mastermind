@@ -23,6 +23,9 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.calls, self.mode, self.closed, self.allow = [], "text", 0, True
         self.structured_value = {"answer": 42}
         self.tool_name, self.tool_arguments = "read", {"path": "/tmp/x"}
+        self.auto_inspection = None
+        self.route_overrides = {}
+        self.serving_model = "model-1"
         self.response_release, self.response_finished = threading.Event(), threading.Event()
         parent = self
 
@@ -70,21 +73,44 @@ class OwnerLoopbackTests(unittest.TestCase):
                         msg["tool_calls"].append({"id": "structured-second", "type": "function", "function": {
                             "name": "mmx_hermes_structured_result", "arguments": json.dumps(parent.structured_value)}})
                     finish = "tool_calls"
-                self.reply(200, {"id": "provider-result", "model": "model-1",
+                self.reply(200, {"id": "provider-result", "model": parent.serving_model,
                     "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
                     "usage": {"prompt_tokens": 11, "completion_tokens": 7}}, "terminal", turn, req)
                 parent.response_finished.set()
 
             def reply(self, status, payload, state, turn, req):
+                if parent.auto_inspection is not None and req is not None and status == 200:
+                    from engine.fabric_inference_client import _auto_request_digest, AUTO_SCHEMA
+                    original = parent.calls[-1]["payload"]
+                    scope = parent.auto_inspection
+                    exact = scope["schema"] == "mastermind.fabric_application_inspection.v3"
+                    routing = dict(schema="mastermind.fabric_application_route.v2" if exact else "mastermind.fabric_application_route.v1",
+                        requested_model=scope["requested_model"],
+                        route_scope=scope["route_scope"], route_scope_digest=scope["route_scope_digest"],
+                        selection_digest="a" * 64, request_digest=_auto_request_digest(original),
+                        routed_request_digest=None if exact else _auto_request_digest(dict(original, model=parent.serving_model)),
+                        pool="go", selected_model=scope["requested_model"] if exact else parent.serving_model,
+                        mode="fixture-mode", protocol="chat",
+                        driver="fixture-driver", profile="fixture-profile", source="fixture-source", recipe_digest=None,
+                        output_contract={"mode": "hard_maximum", "max_tokens": original["max_tokens"]})
+                    routing.update(parent.route_overrides)
+                    payload["application"] = dict(schema=AUTO_SCHEMA, disposition=state, turn_id=turn,
+                        request_id=req, dispatch_permitted=False, effect_unknown=False, routing=routing,
+                        serving_model=parent.serving_model, usage={"input_tokens": 11, "output_tokens": 7})
+                def _header(value):
+                    # Defense in depth: fixture-derived header values must
+                    # never carry CR/LF into a response header.
+                    return str(value).replace("\r", "").replace("\n", "")
+
                 body = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-MM-Application-Disposition", state)
+                self.send_header("X-MM-Application-Disposition", _header(state))
                 if turn is not None:
-                    self.send_header("X-MM-Application-Turn-ID", turn)
+                    self.send_header("X-MM-Application-Turn-ID", _header(turn))
                 if req is not None:
-                    self.send_header("X-MM-Application-Request-ID", req)
+                    self.send_header("X-MM-Application-Request-ID", _header(req))
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -100,6 +126,8 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.binding.operation_id, self.binding.session_id, self.binding.turn_id = "owner-turn-1", "session-1", "turn-1"
         self.binding.model, self.binding.requested_model = "model-1", "host-selection"
         self.binding._authorized = lambda _: self.allow
+        self.binding._max_output_tokens = 4096
+        self.binding.automatic = False
         self.call = NativeCall("session-1", "task-1", "turn-1", "api-1")
 
     def tearDown(self):
@@ -120,6 +148,15 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.assertTrue(self.calls[0]["authenticated"])
         self.assertEqual(self.calls[0]["turn_id"], "owner-turn-1")
         self.assertEqual(self.calls[0]["request_id"], self.binding.request_id(self.call))
+
+    def test_final_native_request_cannot_expand_host_output_ceiling(self):
+        self.binding._max_output_tokens = 128
+        for extra in ({"max_tokens": 129}, {"max_completion_tokens": 129}, {}):
+            with self.subTest(extra=extra), self.assertRaises(HermesFabricError):
+                self.invoke(**extra)
+        self.assertEqual(self.calls, [])
+        self.invoke(max_completion_tokens=128)
+        self.assertEqual(self.calls[0]["payload"]["max_tokens"], 128)
 
     def test_rebuilt_facade_cannot_replay_completed_request(self):
         self.invoke()

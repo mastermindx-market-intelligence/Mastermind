@@ -732,7 +732,14 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         metadata_error = exc
     if missing_log:
         retained = here / "state" / "remote_sub" / f"{rid}.request.json"
-        if retained.exists() or retained.is_symlink():
+        retained_present, artifact_unverified = True, False
+        try:
+            retained.lstat()
+        except FileNotFoundError:
+            retained_present = False
+        except OSError:
+            retained_present, artifact_unverified = False, True
+        if retained_present:
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
@@ -768,11 +775,26 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
                     **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+        # The packet is fsynced before its descriptor. A crash in that window
+        # still occupies the original run, as does an orphan result. Check only
+        # the fixed artifacts guarded by request(); their presence or unreadable
+        # metadata proves neither execution absence nor root identity. Never read
+        # their contents or turn a missing log into permission to redispatch.
+        if not artifact_unverified:
+            for artifact in (retained.with_name(f"{rid}.request.packet"), result_path):
+                try:
+                    artifact.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    pass
+                artifact_unverified = True
+                break
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
-            "state": "NOT_FOUND",
-            **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
+            "state": "STATUS_UNREADABLE" if artifact_unverified else "NOT_FOUND",
+            **_acceptance_unknown("ARTIFACT_UNVERIFIED" if artifact_unverified else "EXECUTION_NOT_ELIGIBLE"),
             "rc": None,
             "signal": None,
             "result_available": False,

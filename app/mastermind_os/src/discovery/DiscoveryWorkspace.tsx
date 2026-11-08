@@ -39,6 +39,8 @@ export interface DiscoveryWorkspaceProps {
   onOpenKnowledge?: () => void;
   onOpenPreferences?: () => void;
   onRefreshSources?: () => void;
+  /** Explicit Sources return; navigation only, no read or permission grant. */
+  onReturnToSearch?: () => void;
 }
 
 /** Exact requested-result tuple the concurrent Knowledge seam validates before
@@ -113,6 +115,9 @@ const ZH = {
     "此界面未提供原始内容；未提供来源路由。",
   "Open source": "打开来源",
   "Back to search": "返回搜索",
+  "Close source details": "关闭来源详情",
+  "Source details": "来源详情",
+  "Source references": "来源引用",
   "This item is no longer in the supplied window.": "该项目已不在已提供窗口中。",
   "Unavailable": "不可用",
   "The supplied view does not match the current projection, so this surface keeps no saved query, selection or source content.":
@@ -790,6 +795,7 @@ function SourcesView({
   onSelect,
   onRefreshSources,
   onOpenPreferences,
+  onBackToSearch,
 }: {
   view: DiscoveryView;
   locale: "en" | "zh-CN";
@@ -798,13 +804,34 @@ function SourcesView({
   onSelect: (key: string | null) => void;
   onRefreshSources?: () => void;
   onOpenPreferences?: () => void;
+  onBackToSearch?: () => void;
 }) {
   const t = makeT(locale);
   const selected = selectedId
     ? view.sources.find((source) => sourceKey(source.id) === selectedId) ?? null
     : null;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const listHeading = useRef<HTMLHeadingElement>(null);
+  const sourceButtons = useRef(new Map<string, HTMLButtonElement>());
+  const [gesture, setGesture] = useState<{kind: "inspect" | "close"; key: string} | null>(null);
+  const closeDetails = () => {
+    if (!selectedId) return;
+    onSelect(null);
+    setGesture({kind: "close", key: selectedId});
+  };
+  useLayoutEffect(() => {
+    if (!gesture) return;
+    const target = gesture.kind === "inspect" ? heading.current
+      : sourceButtons.current.get(gesture.key) ?? listHeading.current;
+    target?.focus();
+    target?.scrollIntoView?.({block: gesture.kind === "inspect" ? "start" : "nearest"});
+  }, [gesture]);
   return (
-    <section className="discovery-view">
+    <section className="discovery-view discovery-sources-view" onKeyDown={event => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || !selected) return;
+      if ((event.target as HTMLElement).closest('input,textarea,[contenteditable="true"]')) return;
+      event.preventDefault(); event.stopPropagation(); closeDetails();
+    }}>
       <header className="discovery-heading">
         <p className="discovery-eyebrow">{t("SEARCH AVAILABLE SOURCES")}</p>
         <h1>{t("Sources")}</h1>
@@ -840,7 +867,7 @@ function SourcesView({
         </div>
       </div>
       <div className="discovery-layout">
-        <section className="discovery-panel discovery-results" aria-label={t("Supplied sources")}>
+        <section className="discovery-panel discovery-results" aria-label={t("Supplied sources")}><h2 ref={listHeading} tabIndex={-1} className="discovery-section-title">{t("Supplied sources")}</h2>
           {view.sources.length > 0 ? (
             <ul className="discovery-list">
               {view.sources.map((source) => (
@@ -850,7 +877,12 @@ function SourcesView({
                     className={selectedId === sourceKey(source.id) ? "discovery-item discovery-item-selected" : "discovery-item"}
                     data-disc-item={sourceKey(source.id)}
                     aria-pressed={selectedId === sourceKey(source.id)}
-                    onClick={() => onSelect(selectedId === sourceKey(source.id) ? null : sourceKey(source.id))}
+                    ref={node => { if (node) sourceButtons.current.set(sourceKey(source.id), node); else sourceButtons.current.delete(sourceKey(source.id)); }}
+                    onClick={() => {
+                      const key = sourceKey(source.id);
+                      if (selectedId === key) closeDetails();
+                      else { onSelect(key); setGesture({kind: "inspect", key}); }
+                    }}
                   >
                     <span className="discovery-item-kind">{source.owner}</span>
                     <span className="discovery-item-title">{source.title}</span>
@@ -866,15 +898,14 @@ function SourcesView({
             <p className="discovery-muted">{t("No sources were supplied.")}</p>
           )}
         </section>
-        <aside className="discovery-panel discovery-preview" aria-label={t("Supplied sources")}>
+        <aside className="discovery-panel discovery-preview" aria-label={t("Source details")}>
           {selected ? (
             <>
               <div className="discovery-preview-head">
                 <span className="discovery-item-kind">{selected.owner}</span>
-                <h2>{selected.title}</h2>
+                <h2 ref={heading} tabIndex={-1}>{selected.title}</h2>
               </div>
-              <MetaRow label={t("Reference")} value={clockLabel(locale, selected.reference)} />
-              <MetaRow label={t("Revision")} value={clockLabel(locale, selected.revision)} />
+              <button type="button" className="discovery-action" onClick={closeDetails}>{t("Close source details")}</button>
               <MetaRow label={t("State")} value={selected.state} />
               <MetaRow label={t("Coverage")} value={selected.coverage} />
               <MetaRow label={t("Observed at")} value={clockLabel(locale, selected.observedAt)} />
@@ -885,6 +916,10 @@ function SourcesView({
                 />
               ) : null}
               <MetaRow label={t("Source time")} value={clockLabel(locale, selected.sourceTime)} />
+              <details className="discovery-preview-section"><summary>{t("Source references")}</summary>
+              <MetaRow label={t("Reference")} value={clockLabel(locale, selected.reference)} />
+              <MetaRow label={t("Revision")} value={clockLabel(locale, selected.revision)} />
+              </details>
               {selected.content === "OBSERVED" ? (
                 <p className="discovery-fineprint">{t("Observed copy supplied — a decoded projection, not the full canonical original.")}</p>
               ) : selected.content === "REFERENCE_ONLY" ? (
@@ -902,6 +937,7 @@ function SourcesView({
           )}
         </aside>
       </div>
+      {onBackToSearch ? <button type="button" className="discovery-action discovery-sources-return" onClick={onBackToSearch}>{t("Back to search")}</button> : null}
       <div className="discovery-lower">
         <section className="discovery-panel discovery-systems" aria-label={t("System observations")}>
           <h2 className="discovery-section-title">{t("System observations")}</h2>
@@ -1127,17 +1163,25 @@ function DiscoveryBody(props: DiscoveryWorkspaceProps) {
     onOpenKnowledge,
     onOpenPreferences,
     onRefreshSources,
+    onReturnToSearch,
   } = props;
   const locale: "en" | "zh-CN" = localeProp === "zh-CN" ? "zh-CN" : "en";
   const [selectedCapability,setSelectedCapability]=useState<DiscoveryCapability["id"]|null>(null);
   const [toolsReturn,setToolsReturn]=useState<DiscoveryCapability["id"]|null>(null);
   const [toolsReturnRequest,setToolsReturnRequest]=useState(0);
+  const [searchReturnRequest, setSearchReturnRequest] = useState(0);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterState>({ kind: "all", expanded: false });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<SelectedResultState | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const focusReturnRef = useRef<string | null>(null);
+  const consumedSearchReturn = useRef(0);
+  useLayoutEffect(() => {
+    if (mode !== "Search" || searchReturnRequest <= consumedSearchReturn.current) return;
+    consumedSearchReturn.current = searchReturnRequest;
+    rootRef.current?.querySelector<HTMLInputElement>(".discovery-search-input")?.focus();
+  }, [mode, searchReturnRequest]);
 
   // Selection is derived from the current view on every render and withheld
   // when its record is no longer supplied.
@@ -1220,6 +1264,11 @@ function DiscoveryBody(props: DiscoveryWorkspaceProps) {
         onSelect={setSelectedId}
         onRefreshSources={onRefreshSources}
         onOpenPreferences={onOpenPreferences}
+        onBackToSearch={onReturnToSearch || onModeChange ? () => {
+          setSelectedId(null);
+          setSearchReturnRequest(value => value + 1);
+          if (onReturnToSearch) onReturnToSearch(); else onModeChange?.("Search");
+        } : undefined}
       />
     ) : (
       <ToolsView

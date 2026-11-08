@@ -27,7 +27,7 @@ function mount(next, options = {}) {
   for (const id of ids) assert.ok(html.includes(`id="${id}"`), `actual HTML missing ${id}`);
   const tabs = options.tabs || Object.freeze({});
   const instanceId = options.instanceId || INSTANCE;
-  const configVersion = options.configVersion || options.version || '0.2.0';
+  const configVersion = options.configVersion || options.version || '0.3.0';
   const config = options.configured === false ? undefined : Object.freeze({
     schema: options.configSchema || 'mastermind.web_sol_instance_config.v1',
     instanceId,
@@ -44,7 +44,7 @@ function mount(next, options = {}) {
     document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
     createElement: tag => new Element(tag)}, chrome: {runtime: {
       id: options.runtimeId || 'kmpbpccecbofdnhpcmjogofgmdodpnko',
-      getManifest() { return {version: options.version || '0.2.0'}; },
+      getManifest() { return {version: options.version || '0.3.0'}; },
       sendMessage(message) {
         assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
         calls++; received.push([tabs, config?.instanceId]); return next(tabs, config?.instanceId);
@@ -91,7 +91,7 @@ test('healthy discarded duplicate rows retain measured counts and unknown model'
   assert.match(ui.nodes.rows.textContent, /Served model: unknown/);
   assert.match(ui.nodes.rows.textContent, /Model\/effort telemetry is not implemented in census v1/);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
-  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.2\.0 · Captured /);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.3\.0 · Captured /);
 });
 test('successful empty inventory remains distinguishable as measured zero', async () => {
   const ui = await settled(mount(() => snapshot([])));
@@ -219,7 +219,7 @@ for (const [label, input, options] of [
   assert.deepEqual(metrics(ui), ['—', '—', '—', '—']);
   assert.doesNotMatch(ui.nodes.scope.textContent, /0\/0 document probes sampled|0 distinct/);
   assert.match(ui.nodes.rows.textContent, /not evidence that no sessions exist/);
-  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.2\.0 · Attempted /);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.3\.0 · Attempted /);
 });
 test('refresh clears the previous scope while a new result is pending', async () => {
   const prior = await snapshot([tab(1), tab(2)]); let resolve; let call = 0;

@@ -1,0 +1,376 @@
+{
+  "schema": "mastermind.cognition-current-integration-proof.v1",
+  "head": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+  "merge_parent": "84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c",
+  "governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "governing_compatible_through": "788cafa84feb8526cb8ad0c27cd460e793a0cdb6",
+  "state": "SOURCE_QUALIFIED_NOT_DEPLOYED",
+  "qualified_runs": [
+    {
+      "label": "inference",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_*inference_composition.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 4.011,
+      "log": "/tmp/mmx-current-cognition-inference.log",
+      "log_sha256": "dcd0a38ec17237c79836fa27113d92f1f5d7d7ce46b8a58b12d0ac98162398ab",
+      "summary": [
+        "Ran 52 tests in 3.040s",
+        "OK"
+      ]
+    },
+    {
+      "label": "translation",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_fabric_translation_composition.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 4.753,
+      "log": "/tmp/mmx-current-cognition-translation.log",
+      "log_sha256": "8d4ccc760a5d8d7e33a1e7b5329c5d098fd2251179251d6084dc804ff6125203",
+      "summary": [
+        "Ran 23 tests in 4.487s",
+        "OK"
+      ]
+    },
+    {
+      "label": "chat_auto",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_fabric_chat_cross_pool_auto.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 5.719,
+      "log": "/tmp/mmx-current-cognition-chat_auto-02.log",
+      "log_sha256": "6ecc50b0b0950d54798a8918f79845a41a64005040f07a545aec9dfa11b4e0da",
+      "summary": [
+        "Ran 16 tests in 4.657s",
+        "OK"
+      ]
+    },
+    {
+      "label": "text_auto",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_fabric_text_cross_pool_auto.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 3.509,
+      "log": "/tmp/mmx-current-cognition-text_auto-02.log",
+      "log_sha256": "2c30d0ee346b4932046aa66ac7f62a43592aba5795855c890f5fe0650d0ec51a",
+      "summary": [
+        "Ran 14 tests in 2.799s",
+        "OK"
+      ]
+    },
+    {
+      "label": "cognition",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--noconftest",
+        "-c",
+        "/dev/null",
+        "--basetemp=/tmp/mmx-cognition-current-composed-2padb9jf/pytest-temp-02",
+        "tests/test_advisor_cognition_plane.py"
+      ],
+      "exit_code": 0,
+      "seconds": 6.456,
+      "log": "/tmp/mmx-current-cognition-cognition-02.log",
+      "log_sha256": "042aa352b3b0fad580eb47de9074d076a5963755eee907357cba5a899d9717ea",
+      "summary": [
+        "12 passed in 5.94s"
+      ]
+    }
+  ],
+  "initial_export_and_failures": {
+    "schema": "mastermind.current-cognition-composed-proof.v1",
+    "state": "FAILED",
+    "fixture": "/tmp/mmx-cognition-current-composed-2padb9jf",
+    "source_head": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+    "pending_merge": "84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c",
+    "archives": [
+      {
+        "head": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+        "paths": [
+          "brain",
+          "bot",
+          "bridge",
+          "common",
+          "app",
+          "control_plane",
+          "data_layer",
+          "portfolio",
+          "scripts/translate_all.py",
+          "tests/integration/test_production_inference_composition.py",
+          "tests/integration/test_fabric_inference_composition.py",
+          "tests/integration/test_fabric_chat_inference_composition.py",
+          "tests/integration/test_fabric_chat_cross_pool_auto.py",
+          "tests/integration/test_fabric_text_cross_pool_auto.py",
+          "tests/integration/test_fabric_translation_composition.py",
+          "tests/test_advisor_cognition_plane.py",
+          "ops/native_fabric/quota_continuity",
+          "ops/native_fabric/experiential_proxy/gateway.py"
+        ],
+        "archive_sha256": "0059bd7c664075c9e1fe49addd84b1277efd74ec1e8c558fac399522d0357032",
+        "overlay_sha256": {
+          "brain/bot_mcp.py": "eae9f82b4b1899973dba7c8e1f65f8f1bf8b5077863ceed51582583b675c66bc",
+          "tests/integration/test_fabric_chat_cross_pool_auto.py": "7ddc63fa4551c9389e4c517bf89f15b291046575fc941ad8c9c84d45258a0902",
+          "tests/integration/test_fabric_chat_inference_composition.py": "da6d992eccc2ab9d84b8dac5996436be177ec39de0d678dae037de4d8dc796b3",
+          "tests/test_advisor_cognition_plane.py": "3ccbbee066a91afd649f0ae4c578a6918be06f1e9fe3bb06d65f1ffef052c054"
+        }
+      },
+      {
+        "head": "1636134041b05feb278f3fbb7f44f1847bafac22",
+        "paths": [
+          "engine",
+          "lib",
+          "config"
+        ],
+        "archive_sha256": "7bede6838b9211936702d10f04e20b61a0d1d9f40d7828df26b28b60ee8b26f3",
+        "overlay_sha256": {
+          "engine/metabolism/audit.py": "7c97e41d59af12f967c3c0a6a52a35b1c6bf612975c89dbaef31c342bb0b8347",
+          "engine/neuralweb/governance.py": "e82a53c4769658137be391da1039d039d577771598bbe485f0cdb99f583bfdf7"
+        }
+      }
+    ],
+    "runs": [
+      {
+        "label": "inference",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_*inference_composition.py",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 4.011,
+        "log": "/tmp/mmx-current-cognition-inference.log",
+        "log_sha256": "dcd0a38ec17237c79836fa27113d92f1f5d7d7ce46b8a58b12d0ac98162398ab",
+        "summary": [
+          "Ran 52 tests in 3.040s",
+          "OK"
+        ]
+      },
+      {
+        "label": "chat_auto",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_fabric_chat_cross_pool_auto.py",
+          "-v"
+        ],
+        "exit_code": 1,
+        "seconds": 0.707,
+        "log": "/tmp/mmx-current-cognition-chat_auto.log",
+        "log_sha256": "91eb8e5bbc4f3d07a09796a4fbf0dc31ede31d44e806e7dd6b50e92354575124",
+        "summary": [
+          "Ran 1 test in 0.000s",
+          "FAILED (errors=1)"
+        ]
+      },
+      {
+        "label": "text_auto",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_fabric_text_cross_pool_auto.py",
+          "-v"
+        ],
+        "exit_code": 1,
+        "seconds": 0.684,
+        "log": "/tmp/mmx-current-cognition-text_auto.log",
+        "log_sha256": "eb7cfa23a91d81dcdec19ac93ee91527985d107febd6dca57d36d942cf453d72",
+        "summary": [
+          "Ran 1 test in 0.000s",
+          "FAILED (errors=1)"
+        ]
+      },
+      {
+        "label": "translation",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_fabric_translation_composition.py",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 4.753,
+        "log": "/tmp/mmx-current-cognition-translation.log",
+        "log_sha256": "8d4ccc760a5d8d7e33a1e7b5329c5d098fd2251179251d6084dc804ff6125203",
+        "summary": [
+          "Ran 23 tests in 4.487s",
+          "OK"
+        ]
+      },
+      {
+        "label": "cognition",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "--noconftest",
+          "-c",
+          "/dev/null",
+          "--basetemp=/tmp/mmx-cognition-current-composed-2padb9jf/pytest-temp",
+          "tests/test_advisor_cognition_plane.py"
+        ],
+        "exit_code": 1,
+        "seconds": 5.699,
+        "log": "/tmp/mmx-current-cognition-cognition.log",
+        "log_sha256": "ce5a37f3b3c4baeba54620ca824696c432f1c6f2410a527555af22e6c7d1ecb5",
+        "summary": [
+          "            raise RuntimeError(f\"provider failed with {secret} at /private/runtime/path\")",
+          "FAILED ../../../dev::test_chat_stream_arms_bot_and_read_only_cognition_servers",
+          "FAILED ../../../dev::test_chat_stream_redacts_backend_exception_text - FileNo...",
+          "2 failed, 10 passed in 5.27s"
+        ]
+      }
+    ],
+    "live_effects": "NONE; inert source, disposable owner data and synthetic provider replies"
+  },
+  "corrected_export_and_followup": {
+    "schema": "mastermind.current-cognition-composition-followup.v1",
+    "fixture": "/tmp/mmx-cognition-current-composed-2padb9jf",
+    "added_fixture_closure": {
+      "source": "71b471af4705b2baf4637462cf8c3573d9ba001a",
+      "paths": [
+        "config",
+        "tests/integration/test_fabric_chat_buffered_delivery.py",
+        "tests/integration/test_fabric_text_native_application.py"
+      ],
+      "archive_sha256": "20f6bb110e1df3e8fdcec33e594b44178532f09e1f5ffd00588def1a4c39d2be"
+    },
+    "source_changes": "NONE; missing inert export dependencies restored",
+    "runs": [
+      {
+        "label": "chat_auto",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_fabric_chat_cross_pool_auto.py",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 5.719,
+        "log": "/tmp/mmx-current-cognition-chat_auto-02.log",
+        "log_sha256": "6ecc50b0b0950d54798a8918f79845a41a64005040f07a545aec9dfa11b4e0da",
+        "summary": [
+          "Ran 16 tests in 4.657s",
+          "OK"
+        ]
+      },
+      {
+        "label": "text_auto",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests/integration",
+          "-p",
+          "test_fabric_text_cross_pool_auto.py",
+          "-v"
+        ],
+        "exit_code": 0,
+        "seconds": 3.509,
+        "log": "/tmp/mmx-current-cognition-text_auto-02.log",
+        "log_sha256": "2c30d0ee346b4932046aa66ac7f62a43592aba5795855c890f5fe0650d0ec51a",
+        "summary": [
+          "Ran 14 tests in 2.799s",
+          "OK"
+        ]
+      },
+      {
+        "label": "cognition",
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "--noconftest",
+          "-c",
+          "/dev/null",
+          "--basetemp=/tmp/mmx-cognition-current-composed-2padb9jf/pytest-temp-02",
+          "tests/test_advisor_cognition_plane.py"
+        ],
+        "exit_code": 0,
+        "seconds": 6.456,
+        "log": "/tmp/mmx-current-cognition-cognition-02.log",
+        "log_sha256": "042aa352b3b0fad580eb47de9074d076a5963755eee907357cba5a899d9717ea",
+        "summary": [
+          "12 passed in 5.94s"
+        ]
+      }
+    ],
+    "state": "PASSED"
+  },
+  "behavior": "Real bot and read-only cognition handlers share the derived inference view, with original namespaces and existing dispatch/accounting owners.",
+  "scope": "No live application selection or provider call."
+}

@@ -97,7 +97,9 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
-def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, tuple[str, ...]] | None:
+def expected_disabled_mcp(
+    profile: RuntimeProfile, consumer=None, primary_application=None, *, evaluation_inputs=None,
+) -> dict[str, tuple[str, ...]] | None:
     """Require exact on-disk native config before trusting any CLI summary.
 
     A displayed MCP summary is not a connection or admission receipt.
@@ -106,9 +108,11 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, t
     reviewed Executive entry whose tool filter is empty. No unknown or
     enabled MCP/server plugin is allowed.
     """
+    if evaluation_inputs is not None and (primary_application is not None or profile.model_provider == "mastermind-fabric"):
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
     path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if not path.exists() and not path.is_symlink():
-        if (profile.state_dir / "install-manifest.json").exists():
+        if evaluation_inputs is not None or (profile.state_dir / "install-manifest.json").exists():
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
         # Uninstalled stub-runtime tests use a temporary profile without
         # a native config. Real installs must carry that config.
@@ -125,7 +129,8 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, t
         raw = path.read_bytes()
     except OSError:
         raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
-    if (profile.native_provider_id is None
+    if (primary_application is None and evaluation_inputs is None
+            and profile.model_provider != "mastermind-fabric" and profile.native_provider_id is None
             and raw == render_hermes_config(profile).encode("utf-8")):
         return None
     # The built-in WP1 package remains independent for non-integrated
@@ -140,11 +145,18 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, t
         expected_native_config,
         render_disarmed_native_byok,
     )
-    allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
-    # An explicit persisted selection cannot downgrade to a legacy or
-    # model-less config. Only selector-free historical profiles retain
+    if primary_application is not None:
+        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
+        allowed_native = {application_config(profile, primary_application, consumer).encode("utf-8")}
+    elif profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED")
+    else:
+        allowed_native = ({render_disarmed_native_byok(profile).encode("utf-8")}
+                          if evaluation_inputs is None else set())
+    # Explicit primary or evaluation context cannot downgrade to a legacy
+    # or model-less config. Only selector-free historical profiles retain
     # the earlier source-compatible config forms.
-    if profile.native_provider_id is None:
+    if primary_application is None and evaluation_inputs is None and profile.native_provider_id is None:
         allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
     expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
     if consumer is not None:
@@ -152,7 +164,9 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, t
             publication_from_document,
         )
         publication = publication_from_document(consumer)
-        allowed_native.add(expected_native_config(profile, consumer).encode("utf-8"))
+        if primary_application is None:
+            allowed_native.add(expected_native_config(
+                profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
         # The upstream census renders an empty include list as "(none)". The
         # Executive entry registers no model-facing tool at all, so the
         # summary must show exactly that.
@@ -195,6 +209,7 @@ class ServiceRuntime:
         self._native_home: Path | None = None
         self._extension_observed: dict | None = None
         self._extension_proved = False
+        self._context_observed: dict | None = None
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
@@ -258,6 +273,7 @@ class ServiceRuntime:
             child = self._child
             running = child is not None and child.poll() is None
             backend_ready = running and self._backend_ready
+            context = self._context_observed if backend_ready else None
             if self.failed:
                 status = "failed"
             elif backend_ready:
@@ -290,6 +306,13 @@ class ServiceRuntime:
                 # from the static no-credential built-in census and it never
                 # clears the extension hold by itself.
                 "native_extension_proved": self._extension_proved and backend_ready,
+                "native_context_factory_registered": bool(context and context["factory_registered"]),
+                "native_context_provider_installed": bool(context and context["provider_installed"]),
+                "native_context_ready": bool(context and context["readiness"]
+                                             and context["readiness"]["state"] == "READY"),
+                "native_context_delivery_observed": bool(context and context["last_delivery"]),
+                "native_context_prompt_observed": bool(context and context["last_delivery"]
+                                                       and context["last_delivery"]["prompt"]),
                 "loopback": True,
                 "gateway_host": self.profile.gateway_host,
                 "allowlist": sorted(self.profile.tool_allowlist),
@@ -353,12 +376,14 @@ class ServiceRuntime:
             return None
         try:
             from .native_session_control import NativeSecretaryClient, validate_enrollment_result
-            from integrations.hermes_harness.native_executive_consumer import publication_from_document
+            from integrations.hermes_harness.native_executive_consumer import (
+                ExecutiveContextConsumerPublication, publication_from_document)
             publication = publication_from_document(self._consumer_publication())
             implementation = launch.owner.root.name
             launch.observe_child(child_pid)
             client = NativeSecretaryClient(home, expected_pid=child_pid, role=self.profile.role)
-            result = client.consumer_extension()
+            contextual = type(publication) is ExecutiveContextConsumerPublication
+            result = client.consumer_capabilities() if contextual else client.consumer_extension()
             enrollment = validate_enrollment_result(
                 client.inspect_enrollment(implementation, publication.session.request_id),
                 implementation_sha=implementation, request_id=publication.session.request_id,
@@ -366,9 +391,9 @@ class ServiceRuntime:
             launch.observe_child(child_pid)
             if (not isinstance(result, dict) or result.get("status") != "OBSERVED"
                     or enrollment["status"] != "ENROLLED"
-                    or type(result.get("extension")) is not dict):
+                    or type(result.get("consumer" if contextual else "extension")) is not dict):
                 return None
-            return result["extension"], enrollment["target"]
+            return result["consumer" if contextual else "extension"], enrollment["target"]
         except Exception:
             return None
 
@@ -378,7 +403,9 @@ class ServiceRuntime:
         from .registry import assert_extension_proof_exact
         from .native_session_control import CONSUMER_EXTENSION_TOOL
         from integrations.hermes_harness.native_executive_consumer import (
-            publication_from_document, schema_digest)
+            ExecutiveContextConsumerPublication, _canonical,
+            publication_from_document, schema_digest, selected_child_publication,
+            validate_consumer_publication)
         from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
         with self._lock:
             original_child = self._child
@@ -386,36 +413,50 @@ class ServiceRuntime:
                 return
         observation = self._observe_consumer_extension(child_pid)
         extension = None
+        context = None
         proved = False
         try:
             if observation is not None:
                 extension, target = observation
-                publication = publication_from_document(self._consumer_publication())
-                expected = {
+                document = validate_consumer_publication(self._consumer_publication())
+                publication = publication_from_document(document)
+                common = {
                     "implementation_sha": self._native_launch.owner.root.name,
                     "profile_id": str(self._native_home),
                     "instance_id": target["instance_id"], "authority_epoch": target["authority_epoch"],
                     "enrollment_request_id": publication.session.request_id,
                     "principal_id": publication.session.principal_id, "session_id": target["session_id"],
-                    "command_id": publication.command, "job_id": publication.job_id,
-                    "target_digest": publication.target_digest,
+                }
+                if type(publication) is ExecutiveContextConsumerPublication:
+                    from .native_agentos_memory import validate_consumer_readback
+                    import hashlib
+                    checked = validate_consumer_readback(extension, publication=publication,
+                        expected_binding={**common, "publication_sha256": hashlib.sha256(_canonical(document)).hexdigest()})
+                    context, extension = checked["context"], checked["selected_child"]
+                child = selected_child_publication(publication)
+                expected = {**common,
+                    "command_id": None if child is None else child.command,
+                    "job_id": None if child is None else child.job_id,
+                    "target_digest": None if child is None else child.target_digest,
                     "principal_binding_digest": publication.principal_binding_digest,
                     "authority_generation_digest": publication.authority_generation_digest,
                     "capability_profile_digest": publication.capability_profile_digest,
                     "plugin_sha256": publication.plugin.digest,
                     "mcp_tools_schema_sha256": publication.tools_schema_digest,
                 }
-                verdict = assert_extension_proof_exact(
-                    extension, expected_tool=CONSUMER_EXTENSION_TOOL,
-                    expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA),
-                    expected_scope=str(self._native_home), expected_binding=expected)
-                proved = verdict["installed"] is True
+                if child is not None:
+                    verdict = assert_extension_proof_exact(
+                        extension, expected_tool=CONSUMER_EXTENSION_TOOL,
+                        expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA),
+                        expected_scope=str(self._native_home), expected_binding=expected)
+                    proved = verdict["installed"] is True
         except (RuntimeRefusal, ValueError, TypeError, KeyError, AttributeError):
             proved = False
         with self._lock:
             if self._child is original_child:
                 self._extension_observed = extension
                 self._extension_proved = proved and original_child.poll() is None
+                self._context_observed = context if original_child.poll() is None else None
 
 
     def _env(self) -> dict[str, str]:
@@ -472,10 +513,30 @@ class ServiceRuntime:
         if self.profile.gateway_backend == "native-session-authority":
             from .native_gateway_entry import native_git_environment
             env.update(native_git_environment(Path(self._native_launch.recipe["vendor_root"])))
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        if primary is not None:
+            from integrations.hermes_application_fabric.publication import (
+                expected_native_config as application_config, primary_child_env)
+            from .secrets import child_secret_env_names
+            from .constants import DEFAULT_CHILD_SECRET_ENV
+            expected = application_config(self.profile, primary, self._consumer_publication()).encode("utf-8")
+            if not native.is_file() or native.read_bytes() != expected:
+                raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
+            if self.secrets.dashboard_password == self.secrets.token:
+                raise RuntimeRefusal("NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
+            for name in child_secret_env_names() - DEFAULT_CHILD_SECRET_ENV:
+                env.pop(name, None)
+            env.update(primary_child_env(self.profile, primary, self.secrets))
+            if self._consumer_publication() is not None:
+                from .egress import native_egress_child_env
+                env.update(native_egress_child_env(self.profile.role, self.secrets.values))
+            assert_no_supervisor_notification_env(env)
+            return env
         expected_config = None
         if native.is_file():
             expected_config = expected_native_config(
-                self.profile, self._consumer_publication())
+                self.profile, self._consumer_publication(), evaluation_inputs=(
+                    self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None))
         if expected_config is not None and native.read_bytes() == expected_config.encode("utf-8"):
             # load_secrets historically defaults dashboard Basic-Auth password
             # to the gateway token. The model child receives that password;
@@ -523,7 +584,14 @@ class ServiceRuntime:
         return recipe.get("executive_consumer")
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
-        return expected_disabled_mcp(self.profile, self._consumer_publication())
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        evaluation_inputs = self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None
+        if primary is not None:
+            return expected_disabled_mcp(
+                self.profile, self._consumer_publication(), primary,
+                evaluation_inputs=evaluation_inputs)
+        return expected_disabled_mcp(
+            self.profile, self._consumer_publication(), evaluation_inputs=evaluation_inputs)
 
     def _check_registry(self) -> None:
         expected_disabled_mcp = self._expected_disabled_mcp()
@@ -639,6 +707,7 @@ class ServiceRuntime:
                 self._backend_ready = False
                 self._extension_observed = None
                 self._extension_proved = False
+                self._context_observed = None
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
             while not self._stop.is_set() and proc.poll() is None:
@@ -673,6 +742,7 @@ class ServiceRuntime:
                     self._backend_ready = False
                     self._extension_observed = None
                     self._extension_proved = False
+                    self._context_observed = None
                 return
             _reap(proc)
             with self._lock:
@@ -681,6 +751,7 @@ class ServiceRuntime:
                 self._backend_ready = False
                 self._extension_observed = None
                 self._extension_proved = False
+                self._context_observed = None
                 self.restart_count += 1
             if self.child_starts >= self.profile.start_limit_burst:
                 self.failed = True
@@ -704,3 +775,4 @@ def _reap(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is None:
         return
     proc.wait(timeout=1)
+

@@ -752,9 +752,22 @@ def test_module_imports_no_execution_plane():
     forbidden = {
         name for name in imported
         if name.startswith("control_plane.")
-        and name != "control_plane.strategic_state"
+        and name not in {"control_plane.strategic_state", "control_plane.company_orientation"}
     }
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
+    # The one new advisory value projector is itself execution-plane-free;
+    # this is not a blanket exemption for transitive control-plane imports.
+    from control_plane import company_orientation
+    import hashlib
+    helper_source = Path(company_orientation.__file__).read_bytes()
+    assert hashlib.sha256(helper_source).hexdigest() == "7dd83a23f420aff83adc2adb257c2902ca0c72004912cc6f97a0ae3cde924598"
+    helper_imports = set()
+    for node in ast.walk(ast.parse(helper_source.decode("utf-8"))):
+        if isinstance(node, ast.Import):
+            helper_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            helper_imports.add(node.module)
+    assert helper_imports == {"__future__", "datetime", "copy", "re"}
 
 
 def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):

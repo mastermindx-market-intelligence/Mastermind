@@ -322,7 +322,7 @@ describe("ProjectJournalReader explicit reads", () => {
     render(<ProjectJournalReader {...props()} read={read} />);
     expect(reads).toHaveLength(0);
     expect(screen.getByText(/has not been read/)).toBeTruthy();
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
   });
 
@@ -337,7 +337,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[0].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
     expect(screen.getByText("Restrict outbound TLS to the release allowlist")).toBeTruthy();
     expect(screen.getByText("Public R2 data-plane reads serve exact keys")).toBeTruthy();
     expect(screen.getByText("Hand off the journal consumer wiring")).toBeTruthy();
@@ -367,7 +367,7 @@ describe("ProjectJournalReader explicit reads", () => {
     });
     expect(screen.getByText("RECORD_NOT_FOUND")).toBeTruthy();
     expect(screen.getByText(/Unavailable does not mean/)).toBeTruthy();
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.queryByText(/project may have other history/)).toBeNull();
     // A completed UNAVAILABLE answer is still a read: refreshing to re-check is allowed.
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
@@ -386,7 +386,7 @@ describe("ProjectJournalReader explicit reads", () => {
     });
     expect(screen.getByText(/No records were supplied in this sample/)).toBeTruthy();
     expect(screen.getByText(/project may have other history/)).toBeTruthy();
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
     expect(screen.getByText(/Invalid/)).toBeTruthy();
   });
 
@@ -431,7 +431,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[1].resolve(body(OTHER_REF));
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
   });
 
   it("aborts pending reads and conceals on generation or auth generation change", async () => {
@@ -441,9 +441,9 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[0].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
     view.rerender(<ProjectJournalReader {...props({ generation: 2 })} read={read} />);
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.getByText(/has not been read/)).toBeTruthy();
     expect(reads).toHaveLength(1);
     clickRead();
@@ -453,7 +453,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[1].resolve(body());
     });
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.getByText(/has not been read/)).toBeTruthy();
   });
 
@@ -464,14 +464,14 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[0].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
     view.rerender(<ProjectJournalReader {...props()} read={read} canRead={() => false} />);
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.getByText(/was revoked after a read/)).toBeTruthy();
     view.rerender(<ProjectJournalReader {...props()} read={read} canRead={() => true} />);
     clickRead();
     expect(reads).toHaveLength(1);
-    expect(screen.queryByText(/Source records shown/)).toBeNull();
+    expect(screen.queryByText(/Records in this view/)).toBeNull();
     expect(screen.getByText(/does not redisplay/)).toBeTruthy();
     view.rerender(<ProjectJournalReader {...props({ generation: 2 })} read={read} canRead={() => true} />);
     clickRead();
@@ -479,7 +479,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[1].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
   });
 
   it("shows the strict-decode error state with retry guidance and supports an explicit retry", async () => {
@@ -497,7 +497,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[1].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
   });
 
   it("distinguishes transport failure from decode failure", async () => {
@@ -512,7 +512,7 @@ describe("ProjectJournalReader explicit reads", () => {
     await act(async () => {
       reads[1].resolve(body());
     });
-    expect(screen.getByText(/Source records shown/)).toBeTruthy();
+    expect(screen.getByText(/Records in this view/)).toBeTruthy();
   });
 
   it("blocks reads when no transport is provided or the selection is not a WS ref", () => {
@@ -532,14 +532,14 @@ describe("ProjectJournalReader explicit reads", () => {
     const view = render(<ProjectJournalReader {...props({ locale: "zh-CN" })} read={read} />);
     expect(screen.getByText("项目日志")).toBeTruthy();
     expect(screen.getByRole("button", { name: "读取项目日志" })).toBeTruthy();
-    expect(screen.getByText(/尚未读取项目日志/)).toBeTruthy();
+    expect(screen.getByText(/尚未读取日志/)).toBeTruthy();
     clickRead("读取项目日志");
     await act(async () => {
       reads[0].resolve(body());
     });
-    expect(screen.getByText(/显示的来源记录/)).toBeTruthy();
+    expect(screen.getByText(/此视图中的记录/)).toBeTruthy();
     expect(screen.getByText("已扫描")).toBeTruthy();
-    expect(screen.getByText(/来自本次有界记录样本/)).toBeTruthy();
+    expect(screen.getByText(/可能未包含其他历史记录/)).toBeTruthy();
     expect(screen.getByText(/记录的来源快照/)).toBeTruthy();
     view.rerender(<ProjectJournalReader {...props()} read={read} />);
     expect(screen.getByText("Project journal")).toBeTruthy();
@@ -567,14 +567,14 @@ it("denies absent authority and clears a same-callback revocation before stale c
   const canRead = () => allowed;
   const view = render(<ProjectJournalReader {...props()} read={reads.read} canRead={canRead} />);
   clickRead(); await act(async () => { reads.reads[0].resolve(body()); });
-  expect(screen.getByText(/Source records shown/)).toBeTruthy();
+  expect(screen.getByText(/Records in this view/)).toBeTruthy();
   allowed = false;
   view.rerender(<ProjectJournalReader {...props()} read={reads.read} canRead={canRead} />);
-  expect(screen.queryByText(/Source records shown/)).toBeNull();
+  expect(screen.queryByText(/Records in this view/)).toBeNull();
   allowed = true;
   view.rerender(<ProjectJournalReader {...props()} read={reads.read} canRead={canRead} />);
   clickRead(); expect(reads.reads).toHaveLength(1);
-  expect(screen.queryByText(/Source records shown/)).toBeNull();
+  expect(screen.queryByText(/Records in this view/)).toBeNull();
 });
 
 it("rechecks actual authority when a pending read resolves without a parent render", async () => {
@@ -582,7 +582,7 @@ it("rechecks actual authority when a pending read resolves without a parent rend
   render(<ProjectJournalReader {...props()} read={reads.read} canRead={canRead} />);
   clickRead(); allowed = false;
   await act(async () => { reads.reads[0].resolve(body()); });
-  expect(screen.queryByText(/Source records shown/)).toBeNull();
+  expect(screen.queryByText(/Records in this view/)).toBeNull();
   expect(screen.getByText(/was revoked after a read/)).toBeTruthy();
 });
 

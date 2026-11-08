@@ -23,6 +23,8 @@ export interface ProjectPlanPanelProps {
   sourceGeneration?: () => number;
   canRead?: () => boolean;
   locale?: "en" | "zh-CN";
+  /** DATA hint only; chooses an actually captured proposal. */
+  initialProposalId?: string|null;
   /** Compose a workspace from this same qualified read, without another cache or read. */
   renderWorkspace?: (view: {
     objective: string | null; panel: ReactNode; inspection: PlanAdoptionInspection | null;
@@ -245,7 +247,7 @@ function AvailablePlanBody({ plan, source, chinese, hasContinuity, continuity }:
 }
 
 export function ProjectPlanPanel({
-  selection, read, sourceGeneration, canRead, locale = "en", renderWorkspace,
+  selection, read, sourceGeneration, canRead, locale = "en", renderWorkspace, initialProposalId,
 }: ProjectPlanPanelProps) {
   const chinese = locale === "zh-CN";
   const [document, setDocument] = useState<ProjectPlanRead | null>(null);
@@ -261,7 +263,8 @@ export function ProjectPlanPanel({
     workRef: string } | null>(null);
   const autoWindow = useRef<{ ready: boolean; work: string | null } | null>(null);
   const selectedWork = selection?.work_ref ?? null;
-  const [proposalHint,setProposalHint]=useState<string|null>(null);
+  const [proposalHint,setProposalHint]=useState<string|null>(initialProposalId??null);
+  useLayoutEffect(()=>setProposalHint(initialProposalId??null),[selectedWork,initialProposalId]);
   const currentOwner=useRef({read,sourceGeneration,canRead,selectedWork});
   currentOwner.current={read,sourceGeneration,canRead,selectedWork};
   const currentProposal=useRef<string|null>(null);
@@ -388,7 +391,10 @@ export function ProjectPlanPanel({
     displayedPlan = document;
   }
 
-  const proposal=displayedPlan?.schema==='mastermind.workspace_project_plan.v2'&&displayedPlan.availability==='AVAILABLE'
+  const originalMissing=!!initialProposalId&&displayedPlan?.availability==='AVAILABLE'&&
+    (displayedPlan.schema!=='mastermind.workspace_project_plan.v2'||displayedPlan.continuity.proposals.state!=='AVAILABLE'||
+      !displayedPlan.continuity.proposals.items.some(item=>'proposal_id' in item&&item.proposal_id===initialProposalId));
+  const proposal=originalMissing?null:displayedPlan?.schema==='mastermind.workspace_project_plan.v2'&&displayedPlan.availability==='AVAILABLE'
     ?selectedRecordedPlanProposal(displayedPlan.continuity,proposalHint):null;
   currentProposal.current=proposal?.proposal_id??null;
   const capturedFence=fence.current;
@@ -448,7 +454,7 @@ export function ProjectPlanPanel({
         <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese}
           hasContinuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"}
           continuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"
-            ? <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale}
+            ? originalMissing ? <p role="status">{chinese?"此次当前计划读取未提供此原始提案；未选择替代提案。":"This original proposal is not supplied by the current Plan read; no replacement was selected."}</p> : <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale}
                 selectedProposalId={proposalHint} onSelectedProposal={setProposalHint}/> : undefined} />
       </div>}
   </section>;

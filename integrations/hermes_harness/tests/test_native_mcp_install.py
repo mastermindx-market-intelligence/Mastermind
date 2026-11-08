@@ -98,13 +98,18 @@ class NativeStewardConfigTests(unittest.TestCase):
             (upstream / "PINNED_FIXTURE_ONLY").write_text("fixture\n", encoding="utf-8")
             secrets = root / "secrets.env"
             write_secrets(secrets)
+            # Qualify our own executable fixture; tracked source is not executable
+            # and must not depend on another test changing its shared mode.
+            stub = root / "hermes-stub"
+            stub.write_bytes(STUB.read_bytes())
+            stub.chmod(0o700)
             payload = _install(
                 argparse.Namespace(
                     role="mmsecretary",
                     state=state,
                     systemd_user_dir=unit_dir,
                     secrets_file=secrets,
-                    hermes_bin=STUB,
+                    hermes_bin=stub,
                     upstream_source=upstream,
                     fetch=False,
                 )

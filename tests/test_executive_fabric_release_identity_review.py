@@ -49,7 +49,11 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
          '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
          '_mastermind_ops', '_mastermind_ops', '452', '457',
          '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
-         '432', '432'] if path == 'ops/executive_os/install.sh' else [])
+         '432', '432'] if path == 'ops/executive_os/install.sh' else
+        # Incumbent provider findings remain visible; only the ten new exact
+        # subscription principal sites are qualified by this source record.
+        ["_mastermind_worker","451","_mastermind_","_mastermind_worker","451","453","453","400","500","400","500","451","453","453"] if path ==
+        'ops/executive_os/provider_worker_slots.py' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
@@ -80,6 +84,8 @@ def test_changed_or_extended_file_cannot_reuse_review(path):
     'ops/executive_os/bootstrap-host.sh',
     'integrations/session_bridge/original_validator_compat/artifact_delivery.py.base',
     'research/fabric_glm_account_admission_20261014/BASELINE.xml',
+    'review_evidence/fabric_application/shared-relay-source-qualification-20261107.json',
+    'review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json',
 ])
 def test_non_python_review_still_requires_exact_diff_postimage(path):
     from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff

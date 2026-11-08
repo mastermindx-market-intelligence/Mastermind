@@ -930,6 +930,14 @@ def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:
         # (levels drawn from the declared `constraint_levels` vocabulary).
         "constraints": {name: str(level) for name, level in state["constraints"].items()},
     }
+    # Additive authored DATA, distinct from any evaluated or adopted direction.
+    from control_plane.company_orientation import from_state
+    try:
+        orientation = from_state(state)
+        if orientation is not None:
+            summary["authored_orientation"] = orientation
+    except (ValueError, TypeError):
+        return None, "authored company orientation is invalid"
     return summary, None
 
 
