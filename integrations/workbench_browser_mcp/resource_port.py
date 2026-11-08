@@ -98,6 +98,7 @@ class BrowserHostConfig:
     tmp_dir: str
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
     startup_timeout_seconds: float = 10.0
+    credential_runtime: object | None = None
 
 
 def _absolute(value: str, name: str) -> str:
@@ -151,6 +152,11 @@ def validate_host_config(value: object) -> BrowserHostConfig:
         or not 0 < value.startup_timeout_seconds <= 60
     ):
         raise BrowserResourceRefused("STARTUP_TIMEOUT_INVALID")
+    if value.credential_runtime is not None:
+        from .credential_use import CredentialRuntimeConfig, parse_credential_runtime
+        if type(value.credential_runtime) is not CredentialRuntimeConfig:
+            raise BrowserResourceRefused("CREDENTIAL_RUNTIME_INVALID")
+        parse_credential_runtime(dataclasses.asdict(value.credential_runtime))
     return value
 
 
@@ -163,6 +169,14 @@ def default_relay_command(
     output_dir: Path,
     profile_dir: Path | None,
 ) -> tuple[str, ...]:
+    credential = config.credential_runtime
+    if credential is not None:
+        if prepared.mode != BrowserMode.ISOLATED.value or profile_dir is not None:
+            raise BrowserResourceRefused("CREDENTIAL_REQUIRES_ISOLATED_BROWSER")
+        from control_plane.worker_browser_b1 import qualify_workbench_credential_entry
+        qualify_workbench_credential_entry(
+            runtime_root=Path(credential.runtime_root), expected_manifest_digest=credential.manifest_sha256,
+            node=Path(config.node_executable), mcp=Path(config.mcp_cli_path), browser=Path(config.chrome_executable))
     return (
         config.python_executable,
         "-I",
@@ -197,6 +211,8 @@ def default_relay_command(
         str(barrier_fd),
         "--expires-at-ms",
         str(prepared.resource_expires_at_ms),
+        *(("--credential-runtime-root", credential.runtime_root,
+           "--credential-manifest-sha256", credential.manifest_sha256) if credential is not None else ()),
     )
 
 

@@ -1,3 +1,4 @@
+import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
 import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
@@ -24,6 +25,7 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoWorkspace as MetaCeoOffice } from "./meta-ceo/MetaCeoWorkspace";
+import { captureOfficeReadFrame } from "./meta-ceo/office-read-frame";
 import {
   decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
   type DirectionPreview, type OfficeLaunchOutcome,
@@ -59,7 +61,8 @@ import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/Know
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
 import { useProjectKnowledgeWorkspace } from "./knowledge/useProjectKnowledgeWorkspace";
 import { ProjectKnowledgeEditor } from "./knowledge/library/ProjectKnowledgeEditor";
-import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./knowledge/library/knowledge-library-contract";
+import {ProjectDiscoveryCorrectionEditor,DiscoveryCorrectionReview} from './knowledge/library/ProjectDiscoveryCorrectionEditor';
+import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext, ProjectDiscoverySource } from "./knowledge/library/knowledge-library-contract";
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
@@ -157,6 +160,9 @@ import {
 import { ProjectJournalReader } from "./ProjectJournalReader";
 import { AutonomyPanel } from "./supervision/AutonomyPanel";
 import { ActivationReceipt } from "./activation/ActivationReceipt";
+import { ActivationFacts } from "./activation/ActivationFacts";
+import { activationFacts, type ReceiptRoute } from "./activation/activation-facts";
+import type { OriginalOperationObservation } from "./orchestration/operation-controller";
 import { WebSessionPreview } from "./activation/WebSessionPreview";
 import { readLaunchRequestPreview } from "./activation/LaunchRequestPreview";
 import { useControlRoomSurfaceControls } from "./useControlRoomSurfaceControls";
@@ -375,10 +381,10 @@ const isDoc = (v: MissionDocument | UnavailableMission): v is MissionDocument =>
 const isDocv3 = (
   v: Missionv3Document | UnavailableMission | null,
 ): v is Missionv3Document => !!v && !("kind" in v);
-function State({ value }: { value: unknown }) {
+function State({ value, text }: { value: unknown; text?: string }) {
   return (
     <span className={`state state-${String(value ?? "UNKNOWN").toLowerCase()}`}>
-      {label(value)}
+      {text ?? label(value)}
     </span>
   );
 }
@@ -1173,55 +1179,6 @@ function ProjectTabs({
   );
 }
 
-function ProjectPlan({ d }: { d: MissionDocument }) {
-  return (
-    <>
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Plan</h2>
-            <p className="muted">
-              Agent OS plan content is not projected through the current
-              approved app source.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          This project view does not reconstruct a plan from Mission, Work,
-          GitHub, or conversation data. The current Mission context below is
-          shown only to preserve continuity while the plan owner is absent.
-        </p>
-      </section>
-      <section className="card">
-        <div className="section-title">
-          <h2>Current project context</h2>
-          <State value={d.read_state.state} />
-        </div>
-        <dl>
-          <dt>Project</dt>
-          <dd>{d.program.title || d.program.work_ref}</dd>
-          <dt>Next source-qualified action</dt>
-          <dd>
-            {display(
-              d.program.next_action,
-              "No next action was projected by the Mission source.",
-            )}
-          </dd>
-          <dt>Accountable seat</dt>
-          <dd>{display(d.principal.accountable_seat)}</dd>
-          <dt>Owed turn</dt>
-          <dd>
-            {d.principal.owed_turn
-              ? `${display(d.principal.owed_turn.seat)} · ${display(d.principal.owed_turn.reason)}`
-              : "Not established"}
-          </dd>
-        </dl>
-      </section>
-    </>
-  );
-}
-
 function ProjectMore({
   d,
   sessionPanel,
@@ -1248,16 +1205,6 @@ function ProjectMore({
       {sessionPanel}
       <OperationalNavigation label="Project operations" onNavigate={onNavigate} />
       <Connections d={d} />
-      <section className="card source-gap">
-        <div className="section-title">
-          <h2>Journal</h2>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          No qualified journal source is installed in this project view. No
-          history is inferred.
-        </p>
-      </section>
       <section className="card source-gap">
         <div className="section-title">
           <h2>Resources &amp; systems</h2>
@@ -1495,6 +1442,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
+    [missionReadRevision, setMissionReadRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -1523,6 +1471,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       principalScope: string;
       generation: string;
     } | null>(null),
+    activationOriginal = useRef<{observation: OriginalOperationObservation;
+      binding: OrchestratorCommandBinding; frame: () => {principalScope: string; generation: string} | null;
+      selectionSeq: number} | null>(null),
+    [activationWorkReturn, setActivationWorkReturn] = useState<string | null>(null),
     pendingCommand = useRef<{
       generation: string;
       principalScope: string;
@@ -1611,6 +1563,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     } | null>(null),
     programSelection = useRef(selection),
     workRequest = useRef(0),
+    officeWorkFrame = useRef<ReturnType<typeof captureOfficeReadFrame> | null>(null),
     missionSelectionState =
       native &&
       !window.MastermindMissionHost?.readPrograms &&
@@ -1778,6 +1731,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const freshHost = window.MastermindMissionHost;
   const freshHostGeneration = (() => {try {return freshHost?.invalidationGeneration?.() ?? null;} catch {return null;}})();
   const freshAuthRevision = useMemo(() => () => authRevisionRef.current, []);
+  // The incumbent ledger belongs to this Host/binding issuance. Ordinary
+  // rerenders, Back, or auth refresh cannot bless an unannounced store swap.
+  // This is identity only: Workspace READ does not acquire an Executive grant.
+  const projectJourneyStoreOwner = useMemo(() => {
+    const host=freshHost,binding=commandBinding,store=binding?.store;
+    if(!host||!binding||!store)return null;
+    const read=store.read,reserve=store.reserve,clear=store.clearIfEqual;
+    return {store,current:()=>window.MastermindMissionHost===host&&host.commandBinding===binding&&
+      binding.store===store&&store.read===read&&store.reserve===reserve&&store.clearIfEqual===clear};
+  },[freshHost,commandBinding]);
+
   const freshExecutiveOwner = useMemo(() => {
     const host = freshHost, revision = authRevision, generation = freshHostGeneration;
     const binding = commandBinding, auth = host?.auth, getState = auth?.getState;
@@ -2805,6 +2769,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     const controller = new AbortController();
     const host = window.MastermindMissionHost;
     const read = host?.readWork;
+    // The Office consumes this existing acquisition, not a second queue read.
+    // Its view stays bound to the exact acquisition-start Host/READ epoch.
+    officeWorkFrame.current = captureOfficeReadFrame(host, authRevision, freshAuthRevision, "readWork");
     if (native && !read) {
       setWorkState({
         kind: "UNAVAILABLE",
@@ -2970,8 +2937,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         controller.abort();
       };
     }
-    const readV3 = window.MastermindMissionHost?.readMissionV3;
-    const read = readV3 ?? window.MastermindMissionHost?.readMission;
+    const missionHost = window.MastermindMissionHost;
+    const readV3 = missionHost?.readMissionV3;
+    const read = readV3 ?? missionHost?.readMission;
+    const missionHostGeneration = missionHost?.invalidationGeneration?.();
+    const readIsCurrent = () => window.MastermindMissionHost === missionHost &&
+      authRevisionRef.current === authRevision &&
+      missionHost?.invalidationGeneration?.() === missionHostGeneration &&
+      (missionHost?.readMissionV3 ?? missionHost?.readMission) === read;
     setMissionV3(null);
     if (typeof read !== "function") {
       setMission(
@@ -2986,9 +2959,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     setMission(unavailableMission(selection, "SOURCE_READ_PENDING"));
     setNotice("Reading the exact selected mission pair…");
     Promise.resolve()
-      .then(() => read({ ...selection, signal: controller.signal }))
+      .then(() => {
+        if (!readIsCurrent()) throw new Error("MISSION_READ_OWNER_CHANGED");
+        return read({ ...selection, signal: controller.signal });
+      })
       .then((raw) => {
-        if (!attached || missionRequest.current !== current) return;
+        if (!attached || missionRequest.current !== current || !readIsCurrent()) return;
         const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
         const decoded = readV3 ? v3 : decodeMission(raw, selection);
         office.acceptMission(officeRead, decoded);
@@ -3039,6 +3015,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.acquisition,
     officeSession.sessionRef,
     officeSession.bindingGeneration,
+    missionReadRevision,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -3172,7 +3149,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 : "Work source unavailable; zero work is not inferred."
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
-              : notice,
+              : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
+              ? copy.sourceClocksNotice : notice,
     open = (w: string, r: string | null, direct = false) => {
       setCatalogueProject(null);
       if (r) {
@@ -3285,10 +3263,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
+      const original = commandSlot.current?.binding === bindingAtStart
+        ? commandSlot.current.controller.observeOriginalOperation() : null;
       // Only this owner-qualified accepted launch releases its Office handoff.
       // A refusal or unknown effect keeps the frozen context and original hold.
       setLaunchHandoff(null);
       if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
+      // Navigation invalidates the command controller. Retain only its already
+      // validated public original receipt, with the exact caller and selection
+      // lifetime; this is neither a pending store nor a lifecycle projection.
+      if (original?.status === "accepted" && sel && original.missionSelection?.workRef === sel.workRef
+          && original.missionSelection.rootJobId === sel.rootJobId && freshExecutiveOwner())
+        activationOriginal.current = {observation: original, binding: bindingAtStart,
+          frame: freshExecutiveOwner, selectionSeq: selectionSeq.current};
     }
     pending.complete({ status: state.status });
     pendingCommand.current = null;
@@ -3355,6 +3342,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       presentationSeq: commandPresentation.current.seq,
       complete: onComplete,
     };
+    activationOriginal.current = null;
+    setActivationWorkReturn(null);
     setReopenedOperation(null);
     setHeldKind(kind);
     void Promise.resolve()
@@ -3600,6 +3589,29 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     commandSlot.current.principalScope === ownerContext.principalScope &&
     commandSlot.current.generation === ownerContext.generation
       ? commandSlot.current.controller.getState() : null;
+  const readActivationOriginal = (): OriginalOperationObservation | null => {
+    try {
+      const ctx = freshExecutiveOwner(), liveAuth = window.MastermindMissionHost?.auth?.getState();
+      if (!ctx || !liveAuth?.acquisition || !commandBinding) return null;
+      const slot = commandSlot.current;
+      const live = slot?.binding === commandBinding ? slot.controller.observeOriginalOperation() : null;
+      if (live) return live;
+      const prior = activationOriginal.current, sel = prior?.observation.missionSelection;
+      return prior?.binding === commandBinding && prior.frame === freshExecutiveOwner
+        && prior.selectionSeq === selectionSeq.current && prior.observation.owner.principalScope === ctx.principalScope
+        && prior.observation.owner.generation === ctx.generation && sel?.workRef === selection?.workRef
+        && sel?.rootJobId === selection?.rootJobId ? prior.observation : null;
+    } catch {return null;}
+  };
+  const activationModel = activationFacts(readActivationOriginal(), d);
+  const navigateActivation = (route: ReceiptRoute) => {
+    const current = activationFacts(readActivationOriginal(), d);
+    if (!current || current.operationKey !== activationModel?.operationKey || current.kind !== activationModel.kind
+        || current.targetKey !== activationModel.targetKey || !current.routes.includes(route)) return;
+    if (route === "original_status") {checkCommandStatus(); return;}
+    if (route === "work") {setActivationWorkReturn(current.operationKey); setActive("Work"); return;}
+    document.getElementById("activation-session-owner")?.focus();
+  };
   // Observer-only snapshot for the fallback disclosures. A throwing or
   // absent getter degrades to null, which the fields render as unknown
   // values; reading it triggers no request, refresh or subscription change.
@@ -4735,6 +4747,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  const projectSearchRegion = useRef<HTMLElement>(null);
+  const sourceSearchReturn = useRef<{host: typeof retainedResultHost; auth: number; generation: number | null; work: string | null; epoch: number} | null>(null);
+  useLayoutEffect(() => {
+    const intent = sourceSearchReturn.current;
+    if (!intent) return;
+    sourceSearchReturn.current = null;
+    if (active !== "Search" || intent.host !== window.MastermindMissionHost || intent.host !== retainedResultHost ||
+        intent.auth !== authRevision || intent.generation !== archiveHostGeneration ||
+        intent.work !== projectWorkRef || intent.epoch !== programIndexEpoch) return;
+    projectSearchRegion.current?.querySelector<HTMLInputElement>('.project-search__input')?.focus();
+  });
   const historyReadState = useRef({host: retainedResultHost, authRevision, workRef: projectWorkRef,
     owner: catalogueListOwner.current, index, programs: office.projection.programs,
     selectionEpoch: cataloguePresentationSequence.current});
@@ -4777,27 +4800,34 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authGeneration:authRevision,hostGeneration:archiveHostGeneration,canRead:projectReaders.canRead,
     readContext:knowledgePorts.readContext,transport:knowledgePorts.transport,store:commandBinding?.store,
     onSourceObserved:()=>setKnowledgeRefresh(value=>value+1)});
-  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference";
-    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null}|null>(null);
+  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference"|"correction";
+    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null;discovery:ProjectDiscoverySource|null}|null>(null);
   const currentKnowledgeEditor=knowledgeEditor?.scope===knowledgePublication.scope?knowledgeEditor:null;
   hasUnsentUserText.current ||= !!currentKnowledgeEditor;
   useLayoutEffect(()=>{if(knowledgeEditor && !currentKnowledgeEditor)setKnowledgeEditor(null);},[knowledgeEditor,currentKnowledgeEditor]);
   const knowledgeWriteAvailable=!!(commandBinding?.store && knowledgePorts.readContext && knowledgePorts.transport &&
     projectWorkRef && projectReaders.canRead());
-  const openKnowledgeEditor=(mode:"file"|"preference",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null)=>{
+  const openKnowledgeEditor=(mode:"file"|"preference"|"correction",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null,discovery:ProjectDiscoverySource|null=null)=>{
     if(!knowledgeWriteAvailable || context.workRef!==projectWorkRef ||
       ["submitting","checking","unknown"].includes(knowledgePublication.controller?.getState().status??"idle"))return;
     try {
       knowledgePublication.currentSource(context);
+      if(mode==='correction'&&(!discovery||!knowledgePublication.currentDiscovery(discovery)))return;
       if(!knowledgePublication.startDraft())return;
       const bytes=new Uint8Array(20);globalThis.crypto.getRandomValues(bytes);
       const suffix=Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
-      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,
-        requestId:`mmos-project-${mode==="file"?"file-add":"preference-set"}-${suffix}`});
+      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,discovery,
+        requestId:`mmos-project-${mode==="file"?"file-add":mode==='correction'?'discovery-correct':"preference-set"}-${suffix}`});
     } catch { /* No current source or original identifier means no editor action. */ }
   };
   const knowledgePublicationPanel=<>
-    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==="file"
+    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==='correction'
+      ? currentKnowledgeEditor.discovery&&<ProjectDiscoveryCorrectionEditor key={currentKnowledgeEditor.requestId}
+          source={currentKnowledgeEditor.discovery} requestId={currentKnowledgeEditor.requestId} locale={locale}
+          phase={knowledgePublication.phase} current={knowledgePublication.currentDiscovery}
+          onPrepare={knowledgePublication.prepareCorrection} onClose={()=>setKnowledgeEditor(null)} onCheckOriginal={knowledgePublication.checkOriginal}
+          onInspectOriginal={knowledgePublication.inspectOriginal}/>
+      :currentKnowledgeEditor.mode==="file"
       ? <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="file"
           sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
           authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
@@ -4814,9 +4844,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     {currentKnowledgeEditor && knowledgePublication.phase==="prepared" && knowledgePublication.prepared && <section className="card" aria-label={locale==="zh-CN"?"检查准备好的更改":"Review prepared changes"}>
       <h2>{locale==="zh-CN"?"检查你的更改":"Review your changes"}</h2>
       <p>{locale==="zh-CN"?"尚未发布。确认后才会提交这一次更改。":"Nothing has been published. Publish submits this original change once."}</p>
-      <pre className="visible-text">{"file" in knowledgePublication.prepared.request
+      {knowledgePublication.prepared.request.schema==='mastermind.project_discovery_correct_request.v1'
+        ? currentKnowledgeEditor.discovery&&<><DiscoveryCorrectionReview request={knowledgePublication.prepared.request} source={currentKnowledgeEditor.discovery} locale={locale}/>
+          <details><summary>{locale==='zh-CN'?'更改的来源记录':'Changed source records'}</summary><ul>{knowledgePublication.prepared.response.preview.postimages.map(image=><li key={image.path}>{image.path}</li>)}</ul></details></>
+        :<pre className="visible-text">{"file" in knowledgePublication.prepared.request
         ? `${knowledgePublication.prepared.request.file.display_name}\n${knowledgePublication.prepared.request.file.content_utf8}`
-        : knowledgePublication.prepared.request.value}</pre>
+        : knowledgePublication.prepared.request.value}</pre>}
       <button type="button" disabled={!knowledgePublication.canPublish} onClick={knowledgePublication.publish}>{locale==="zh-CN"?"发布更改":"Publish changes"}</button>
     </section>}
     {knowledgeWriteAvailable && <section className="card" aria-label={locale==="zh-CN"?"原始发布状态":"Original publication status"}>
@@ -4889,6 +4922,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const recordedProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef: projectWorkRef}}
       read={projectReaders.journal} generation={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"}
       authGeneration={authRevision} canRead={projectReaders.canRead} locale={locale}/> : null;
+  const officeJournalFrame = useMemo(() => captureOfficeReadFrame(retainedResultHost,
+    authRevision, freshAuthRevision, "readProjectJournal"), [retainedResultHost, retainedHostGeneration, authRevision, freshAuthRevision]);
+  const officeProjectJournal = projectWorkRef ? <ProjectJournalReader selection={{workRef:projectWorkRef}}
+    read={projectReaders.journal} generation={retainedHostGeneration} authGeneration={authRevision}
+    canRead={officeJournalFrame.current} locale={locale}/> : null;
+  const officeWorkRead: WorkState = officeWorkFrame.current?.current() ? workState
+    : {kind:"UNAVAILABLE",reason:"SOURCE_OWNER_NOT_CURRENT"};
   const planAdoptionHostCurrent = useMemo(() => {
     const host=retainedResultHost,revision=authRevision;
     return () => !!host && window.MastermindMissionHost===host && authRevisionRef.current===revision;
@@ -5243,21 +5283,22 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       {projectJourney.invalidLink ? <section className="card"><h1>{locale === "zh-CN" ? "项目设置链接不可用" : "Project setup link unavailable"}</h1>
         <p>{locale === "zh-CN" ? "请使用原始项目设置链接，或明确打开项目设置。" : "Use the original project setup link, or explicitly open project setup."}</p>
         <button type="button" onClick={openProjectJourney}>{locale === "zh-CN" ? "打开项目设置" : "Open project setup"}</button></section>
-      : nativeGoalQuarantined ? null : commandBinding ? <><ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
-        host={window.MastermindMissionHost ?? null} store={commandBinding.store}
+      : nativeGoalQuarantined ? null : commandBinding && projectJourneyStoreOwner ? <><ProjectPlanningJourney key={`project-journey:${authRevision}`} locale={locale}
+        host={window.MastermindMissionHost ?? null} store={projectJourneyStoreOwner.store}
         executiveOwner={() => {
-          if (!projectJourney.isHostCurrent() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
+          if (!projectJourney.isHostCurrent() || !projectJourneyStoreOwner.current() || window.MastermindMissionHost?.commandBinding !== commandBinding) return null;
           const live = readOwnerContext(commandBinding.port);
           return live && live.principalScope === ownerContext?.principalScope && live.generation === ownerContext?.generation ? live : null;
         }}
-        isHostCurrent={projectJourney.isHostCurrent} selection={projectJourney.selection}
+        isHostCurrent={() => projectJourney.isHostCurrent() && projectJourneyStoreOwner.current()} selection={projectJourney.selection}
         onSelection={value => {projectJourney.onSelection(value);void nativeGoal.beforeEdit();}}
         onOpenProject={openCreatedProject}
         goal={projectJourney.goal} goalReadOnly={native && !nativeGoal.canEdit}
         onGoalFocus={() => {void nativeGoal.beforeEdit();}}
         onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}
         draftFiles={projectJourney.draftFiles} onDraftFilesChange={projectJourney.onDraftFilesChange}
-        originalFileLookup={projectJourney.originalFileLookup} onOriginalFileLookupChange={projectJourney.onOriginalFileLookupChange}/>
+        originalFileLookup={projectJourney.originalFileLookup} onOriginalFileLookupChange={projectJourney.onOriginalFileLookupChange}
+        proposalOriginal={projectJourney.proposalOriginal} currentProposalOriginal={projectJourney.currentProposalOriginal} onProposalOriginalChange={projectJourney.onProposalOriginalChange}/>
       {projectJourney.filesHeld && <section className="card" aria-label={locale==='zh-CN'?'保留的文件草稿':'Held file draft'}>
         <p>{locale==='zh-CN'?'文件草稿已为原始项目及登录身份保留。':'The file draft is held for its original project and signed-in identity.'}</p>
         <button type="button" onClick={()=>void projectJourney.checkRetainedFileDraft()}>{locale==='zh-CN'?'查询文件草稿访问状态':'Check file draft access'}</button>
@@ -5289,6 +5330,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
             read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
           acceptedDirection={recordedDirection}
+          workRead={officeWorkRead}
+          onInspectWork={() => {if (officeWorkFrame.current?.current()) setActive("Work");}}
+          projectJournal={officeProjectJournal}
+          companyPriorities={<CompanyPrioritiesRead host={window.MastermindMissionHost} locale={locale}/>}
           onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
           selectedProject={projectWorkRef && currentProjectCards.length === 1 ? {
             title: currentProjectCards[0].title || projectWorkRef,
@@ -5350,6 +5395,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           append: observedConversation.appendSource, undo: observedConversation.undoSource,
           edit: () => showCurrentConversation()}}}
       onModeChange={setActive}
+      onReturnToSearch={() => {
+        if (window.MastermindMissionHost !== retainedResultHost || authRevisionRef.current !== authRevision) return;
+        sourceSearchReturn.current = {host: retainedResultHost, auth: authRevision, generation: archiveHostGeneration,
+          work: projectWorkRef, epoch: programIndexEpoch};
+        setSavedConversationNavigation(null); setActive("Search");
+      }}
       onOpenProject={office.projection.programs.source.state === "CURRENT" && index.state === "AVAILABLE"
         ? (target, mode) => {
             if (mode !== "current" || office.projection.programs.source.state !== "CURRENT" || index.state !== "AVAILABLE") return;
@@ -5378,6 +5429,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       readActions={knowledgeWriteAvailable?knowledgePublication.readActions:undefined}
       onAddFiles={knowledgeWriteAvailable?context=>openKnowledgeEditor("file",context,null):undefined}
       onEditPreference={knowledgeWriteAvailable?(context,memory)=>openKnowledgeEditor("preference",context,memory):undefined}
+      onCorrectDiscovery={knowledgeWriteAvailable?source=>openKnowledgeEditor('correction',source.sourceContext,null,source):undefined}
       onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/></>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
@@ -5550,7 +5602,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               <ResultCard locale={locale} state={resultState} />
             </>
           ) : projectTab === "Plan" ? (
-            <ProjectPlan d={d} />
+            <ProjectPlanPanel {...projectPlanProps} />
           ) : projectTab === "Work" ? (
             <>
               <section ref={resourcesWorkView} tabIndex={-1} aria-label={locale === "zh-CN" ? "所选工作详情" : "Selected work inspection"}>
@@ -5687,7 +5739,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       </section>
     );
   else if (active === "Session Estate")
-    content = <><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
+    content = <><div id="activation-session-owner" tabIndex={-1}><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
       controlsHeld={controlRoomSurfaceControls.held}
       canOpenSurface={controlRoomSurfaceControls.canAct && !controlRoomSurfaceControls.held
         && controlRoomSurfaceControls.action.state !== "PENDING"
@@ -5700,12 +5752,30 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <ControlRoomSurfaceControls key={"estate-controls:" + authRevision}
         navigation={currentControlRoom.state === "AVAILABLE" ? currentControlRoom.navigation : null}
         locale={locale} {...controlRoomSurfaceControls}/>
-    </SessionEstate>
+    </SessionEstate></div>
     <SupervisionLedger read={currentControlRoom.state === "AVAILABLE"
       ? currentControlRoom.supervision ?? { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }
       : { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }} locale={locale} onOpenMission={open}/>
-    <SupervisionTrace document={d} selection={selection} locale={locale}/>
-    <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={checkCommandStatus}/>
+    <SupervisionTrace document={d} selection={selection} locale={locale}
+      onReadCurrent={authState?.acquisition && selection && !selectionRefused &&
+        missionSelectionState === "AVAILABLE" &&
+        typeof (window.MastermindMissionHost?.readMissionV3 ?? window.MastermindMissionHost?.readMission) === "function"
+        ? (() => {
+          const host = window.MastermindMissionHost;
+          const read = host?.readMissionV3 ?? host?.readMission;
+          const generation = host?.invalidationGeneration?.();
+          const revision = authRevision;
+          return () => {
+            if (window.MastermindMissionHost !== host || authRevisionRef.current !== revision ||
+                (host?.readMissionV3 ?? host?.readMission) !== read ||
+                host?.invalidationGeneration?.() !== generation || !host?.auth?.getState().acquisition) return;
+            setMissionReadRevision(value => value + 1);
+          };
+        })() : undefined}/>
+    <ActivationFacts model={activationModel} locale={locale} onNavigate={navigateActivation}/>
+    <details className="reason-details"><summary>{locale === "zh-CN" ? "原始请求状态" : "Original request status"}</summary>
+      <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={() => navigateActivation("original_status")}/>
+    </details>
     <WebSessionPreview key={authRevision} document={d} selection={selection} locale={locale}/></>;
   else if (active === "Control Room")
     content = (
@@ -5816,6 +5886,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
+  if (active === "Work" && activationWorkReturn && activationModel?.operationKey === activationWorkReturn)
+    content = <><button type="button" onClick={() => {
+      const original = readActivationOriginal();
+      if (original?.pointer.operationKey !== activationWorkReturn) return;
+      setActive("Session Estate"); setActivationWorkReturn(null);
+    }}>{locale === "zh-CN" ? "返回激活回执" : "Back to activation receipts"}</button>{content}</>;
   if (active === "Projects" && conversationNavigation.projectReturn !== null &&
       !projectJourney.shown && !projectJourney.invalidLink &&
       conversationNavigation.projectReturn === projectWorkRef)
@@ -5823,6 +5899,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const privateEntryState = authState && !authState.acquisition && !authState.content &&
     (authState.status === "signed_out" || authState.status === "signing_in" ||
       authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  const successfulSignOut = privateEntryState === "signed_out" && authState?.reason === "USER_SIGNED_OUT";
   useEffect(() => {
     // Leaving the product shell must release its existing drawer focus owner.
     if (privateEntryState) setNavigationOpen(false);
@@ -5830,7 +5907,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
     illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
     preferencesControl={preferencesControl}
-    feedback={authState?.reason && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+    feedback={authState?.reason && !successfulSignOut && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
       authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
@@ -5991,7 +6068,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Tools" ? <details className="workspace-qualification"><summary>{locale === "zh-CN" ? "工具上下文" : "Tool context"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
           </div>
         </header>
         {nativeGoalNotice}
@@ -6013,7 +6090,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && !directRoute &&
+        {active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && active !== "Sources" && !directRoute &&
           !((active === "Meta-CEO" || active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice &&
           !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (
@@ -6057,7 +6134,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <button type="button" aria-pressed={knowledgeMode === "project"} onClick={() => { setRequestedProjectFile(undefined); setKnowledgeMode("project"); }}>{locale === "zh-CN" ? "项目资料库" : "Project library"}</button>
           <button type="button" aria-pressed={knowledgeMode === "retained"} onClick={() => setKnowledgeMode("retained")}>{locale === "zh-CN" ? "已保留的任务来源" : "Retained task sources"}</button>
         </div>}
-        {hasProjectSearch && <section hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)} aria-hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)}>
+        {hasProjectSearch && <section ref={projectSearchRegion} hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)} aria-hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)}>
           <ProjectSearchWorkspace workRef={projectWorkRef} authGeneration={authRevision}
             hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
             sessionHistory={projectHistoryOwner} savedHistory={projectConversationHistory.history}

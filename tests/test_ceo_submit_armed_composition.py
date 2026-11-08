@@ -360,7 +360,10 @@ class _BindingScope:
 
 def _scope_language(path: str) -> str:
     suffix = Path(path).suffix.lower()
-    if suffix == ".py":
+    # Pinned donor archives are still Python source for this identity audit.
+    # Parse their strings/aliases exactly as executable .py postimages; this
+    # does not exempt them from changed-source or literal-identity checking.
+    if suffix == ".py" or path.lower().endswith(".py.source"):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -813,21 +816,25 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
 
 
 def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
-    """Admit only an exact JS mkdir(directory, {recursive:true, mode:octal}) statement.
+    """Admit only the reviewed, closed JS directory-permission statements.
 
-    Like the Python mkdir keyword-mode exemption, this is a permission, not a
-    UID/GID or service-port literal. The exact closed one-statement shape
-    prevents unrelated identities, extra properties, callees or operations
-    from being smuggled through the exemption.
+    Keep the existing recursive dir form and the publisher's nonrecursive
+    current/quarantineDir forms. These octal mode slots are permissions, not
+    UID/GID values. Operand shape, options and the complete single statement
+    remain closed; attached identities or other operations stay guarded.
     """
     if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
         return False
     matched = re.fullmatch(
-        r"\s*await\s+mkdir\(\s*dir\s*,\s*\{\s*recursive\s*:\s*true"
-        r"\s*,\s*mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        r"\s*await\s+mkdir\(\s*(dir|current|quarantineDir)\s*,\s*\{\s*"
+        r"(recursive\s*:\s*true\s*,\s*)?"
+        r"mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
         line,
     )
-    return matched is not None and matched.group(1) == token_text
+    if matched is None or matched.group(3) != token_text:
+        return False
+    return (matched.group(1) == "dir" if matched.group(2)
+            else matched.group(1) in {"current", "quarantineDir"})
 
 
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
@@ -1592,14 +1599,16 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # static literal freezes the combined candidate, not independent review or
     # release authority, and grants no native SEND or installed-release
     # approval.
-    # PR #2151: the installed-only retirement config validator changes this
-    # full-file pin. The exact installed entry AST and all ten mutation
-    # refusals remain unchanged; no additional call is admitted.
+    # The adopted-context read composition changes this full-file pin. The
+    # exact installed entry AST and all ten mutation refusals remain unchanged;
+    # no additional event loop or execution call is admitted.
+    # The optional sealed observation owner composes with those protected reads;
+    # only this final full-file fingerprint changes, never the wrapper AST.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
+            '32dce8877ceb47a7d96dd017fc922e0e740b569b38089c2c820d9edd7b0e82c1'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -1843,6 +1852,18 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
             *(f"+{line}" for line in lines),
         ]
     )
+
+
+@pytest.mark.parametrize("suffix", [".py", ".py.source"])
+def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
+    path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
+    prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, prose), source_postimages={path: prose}) == []
+    for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
+        source = prose + executable
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
 
 
 _D8_PR1572_CSS = "\n".join([
@@ -3352,3 +3373,160 @@ def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
     # source change still invalidates every frozen site and is rejected by D8.
     assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
     assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
+    """Exercise the reviewed mode-only statements in real identity context."""
+    safe = (
+        "await mkdir(current, {mode: 0o700});",
+        "await mkdir(quarantineDir, {mode: 0o700});",
+    )
+    for line in safe:
+        assert _scan_identity_source_lines(
+            [line], identity_aliases={"current", "quarantineDir"}) == [], line
+    guarded = (
+        "await mkdir(current, {mode: 448});",
+        "await mkdir(current.uid, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700, owner: 501});",
+        "await other(current, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700}); uid = 501;",
+        "await mkdir(current, {mode: 0o700}); extra = 502;",
+        "await mkdir(current, {recursive: true, mode: 0o700});",
+        "await mkdir(unreviewed, {mode: 0o700});",
+    )
+    for line in guarded:
+        assert _scan_identity_source_lines([line], path_identity=True), line
+
+
+
+_WEB_OBSERVATION_PATH = "integrations/session_bridge/installed_web_observation.py"
+
+
+def _d8_web_observation_scan(source, *, path=_WEB_OBSERVATION_PATH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_web_observation_exact_file_bound_masks_only_one_operand():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    # Exercise the real scanner before inspecting the finite review record.
+    assert _d8_web_observation_scan(source) == []
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22"
+    )
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == (
+        (252, 46, 49, "int"),
+    )
+    lines = source.splitlines(keepends=True)
+    assert lines[251][46:49] == "512"
+    tokens = [token for token in tokenize.generate_tokens(io.StringIO(source).readline)
+              if token.start == (252, 46) and token.end == (252, 49)]
+    assert len(tokens) == 1
+    assert tokens[0].type == tokenize.NUMBER and tokens[0].string == "512"
+    expected = list(lines)
+    expected[251] = lines[251][:46] + "0  " + lines[251][49:]
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == "".join(expected)
+
+    owner = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_path_custody"
+    )
+    bounds = [
+        node for node in ast.walk(owner)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Attribute)
+        and isinstance(node.left.value, ast.Name)
+        and node.left.value.id == "info" and node.left.attr == "st_size"
+    ]
+    assert len(bounds) == 1
+    assert ast.dump(bounds[0], include_attributes=False) == ast.dump(
+        ast.parse("info.st_size > 512 * 1024", mode="eval").body,
+        include_attributes=False,
+    )
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _WEB_OBSERVATION_PATH),
+    (True, "integrations/session_bridge/other_web_observation.py"),
+    (True, "control_plane/unreviewed_observation.py"),
+])
+def test_d8_web_observation_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert _d8_web_observation_scan(source, path=path, postimage=postimage) == ["512"]
+
+
+def test_d8_web_observation_registry_removal_exposes_bound(monkeypatch):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _WEB_OBSERVATION_PATH)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == source
+    assert _d8_web_observation_scan(source) == ["512"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("512 * 1024", "513 * 1024", "513"),
+    ("512 * 1024", "512 * 2048", "512"),
+    ("info.st_size > 512 * 1024", "info.st_uid > 512 * 1024", "512"),
+    ("info.st_size > 512 * 1024", "info.st_gid > 512 * 1024", "512"),
+    ("or (not socket and info.st_size > 512 * 1024)):",
+     "or (not socket and info.st_size > 512 * 1024) or uid == 777):", "777"),
+])
+def test_d8_web_observation_operand_and_identity_context_drift_is_guarded(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    ast.parse(changed)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, changed) == changed
+    findings = _d8_web_observation_scan(changed)
+    assert expected in findings
+    if expected == "777":
+        assert "512" in findings
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n# unrelated source byte drift\n", "512"),
+    ("\npeer_uid = 777\n", "777"),
+    ("\npeer_gid = 777\n", "777"),
+    ("\npeer_port = 777\n", "777"),
+    ('\naccount = "_mastermind_unreviewed"\n', "_mastermind_unreviewed"),
+])
+def test_d8_web_observation_pin_cannot_hide_added_identity_or_source_drift(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    findings = _d8_web_observation_scan(source)
+    assert "512" in findings
+    assert expected in findings
+
+
+@pytest.mark.parametrize("changed_diff", [False, True])
+def test_d8_web_observation_false_postimage_is_rejected(changed_diff):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    changed = source.replace("512 * 1024", "513 * 1024")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_WEB_OBSERVATION_PATH, changed if changed_diff else source),
+            source_postimages={
+                _WEB_OBSERVATION_PATH: source if changed_diff else changed,
+            },
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_web_observation_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    if identity:
+        source += "\npeer_uid = 777\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _WEB_OBSERVATION_PATH, source, identity,
+    )

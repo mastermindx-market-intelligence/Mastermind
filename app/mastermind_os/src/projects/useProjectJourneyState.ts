@@ -5,6 +5,7 @@ import { projectGoalDraftScope } from "../auth-recovery/project-goal-scope";
 import type { ProjectDraftFile } from "./useProjectDraftFiles";
 import {decodeProjectDraftFileLookup,type ProjectDraftFileLookup} from "./project-draft-file-lookup";
 import type { ProjectJourneySelection } from "./ProjectPlanningJourney";
+import {decodePlanProposalOriginal,type PlanProposalOriginal} from "../planning/project-plan-proposal";
 import {
   PROJECT_JOURNEY_FLAG_KEY,
   PROJECT_JOURNEY_FLAG_VALUE,
@@ -38,6 +39,9 @@ export interface ProjectJourneyStateApi {
   goal: string;
   draftFiles: readonly ProjectDraftFile[];
   originalFileLookup: ProjectDraftFileLookup | null;
+  proposalOriginal: PlanProposalOriginal | null;
+  currentProposalOriginal: ()=>PlanProposalOriginal|null;
+  onProposalOriginalChange: (value:PlanProposalOriginal|null)=>void;
   filesHeld: boolean;
   onDraftFilesChange: (files:readonly ProjectDraftFile[])=>void;
   onOriginalFileLookupChange: (value:ProjectDraftFileLookup|null)=>void;
@@ -95,6 +99,8 @@ interface JourneyState {
   readonly files?:OwnedFiles|null;
   readonly fileLookup?:ProjectDraftFileLookup|null;
   readonly fileLookupCreateRequestId?:string|null;
+  readonly proposalOriginal?:PlanProposalOriginal|null;
+  readonly proposalCreateRequestId?:string|null;
   readonly shown: boolean;
   readonly invalidLink: boolean;
   /** Detached, reader-validated selection DATA; never evidence of a grant. */
@@ -108,6 +114,10 @@ interface JourneyState {
 function fileLookupFor(state:JourneyState,selection:ProjectJourneySelection|null):ProjectDraftFileLookup|null {
  return selection && state.fileLookupCreateRequestId===selection.createRequestId &&
   state.fileLookup?.work_ref===selection.workRef ? state.fileLookup : null;
+}
+
+function proposalOriginalFor(state:JourneyState,selection:ProjectJourneySelection|null):PlanProposalOriginal|null {
+ const value=state.proposalOriginal;return value&&selection&&state.proposalCreateRequestId===selection.createRequestId&&value.work_ref===selection.workRef&&value.operation_key===selection.planningOperationKey&&value.proposal_request.selection.job_id===selection.jobId?value:null;
 }
 
 function actorEquals(left: JourneyActor | null, right: JourneyActor | null): boolean {
@@ -173,7 +183,7 @@ function initialJourneyState(): JourneyState {
   if (!read.open) {
     return { shown: false, invalidLink: false, selection: null, goal: null, retained: null };
   }
-  return { shown: true, invalidLink: false, selection: read.selection, goal: null, retained: null, fileLookup:read.fileLookup??null, fileLookupCreateRequestId:read.fileLookup?read.selection?.createRequestId??null:null };
+  return { shown: true, invalidLink: false, selection: read.selection, goal: null, retained: null, fileLookup:read.fileLookup??null, fileLookupCreateRequestId:read.fileLookup?read.selection?.createRequestId??null:null,proposalOriginal:read.proposalOriginal??null,proposalCreateRequestId:read.proposalOriginal?read.selection?.createRequestId??null:null };
 }
 
 /** Close the pane. Visible owned text parks in the single retained slot
@@ -224,12 +234,13 @@ function adoptSelection(
       selection: next,
       fileLookup:state.selection?.createRequestId===next?.createRequestId?state.fileLookup:null,
       fileLookupCreateRequestId:state.selection?.createRequestId===next?.createRequestId?state.fileLookupCreateRequestId:null,
+      proposalOriginal:proposalOriginalFor(state,next),proposalCreateRequestId:proposalOriginalFor(state,next)?next?.createRequestId:null,
       files:state.files&&actorEquals(state.files.actor,actor)&&!state.files.held?{...state.files,createRequestId:nextId}:state.files,
       goal: state.goal === null ? null : { ...state.goal, createRequestId: nextId },
     };
   }
   const parked = parkOwnedGoal(state, actor);
-  return { ...parked, shown: markShown ? true : parked.shown, invalidLink: false, selection: next, fileLookup:null, fileLookupCreateRequestId:null };
+  return { ...parked, shown: markShown ? true : parked.shown, invalidLink: false, selection: next, fileLookup:null, fileLookupCreateRequestId:null,proposalOriginal:null,proposalCreateRequestId:null };
 }
 
 /** Commit the armed blank journey URL: origin and path preserved, prior
@@ -301,7 +312,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       // Resume the known original operation; never reset it to a fresh blank.
       commitProjectJourneySelection(window.location.href, current.selection, window.history, (committed) => {
         apply({ ...current, shown: true, invalidLink: false, selection: committed });
-      }, fileLookupFor(current,current.selection));
+      }, fileLookupFor(current,current.selection),proposalOriginalFor(current,current.selection));
       return true;
     }
     const retained = current.retained;
@@ -318,7 +329,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       const resumed = (selection: ProjectJourneySelection | null) =>
         apply({ ...current, shown: true, invalidLink: false, selection, goal, retained: null });
       if (retained.selection === null) writeBlankJourneyUrl(() => resumed(null));
-      else commitProjectJourneySelection(window.location.href, retained.selection, window.history, resumed,fileLookupFor(current,retained.selection));
+      else commitProjectJourneySelection(window.location.href, retained.selection, window.history, resumed,fileLookupFor(current,retained.selection),proposalOriginalFor(current,retained.selection));
       return true;
     }
     writeBlankJourneyUrl(() => apply({ ...current, shown: true, invalidLink: false, selection: null }));
@@ -353,7 +364,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     // detached validated copy, and a rejected write suppresses the update.
     commitProjectJourneySelection(window.location.href, value, window.history, (committed) => {
       apply(adoptSelection(stateRef.current, live, committed, false, true));
-    }, fileLookupFor(stateRef.current,value));
+    }, fileLookupFor(stateRef.current,value),proposalOriginalFor(stateRef.current,value));
   };
 
   const restoreLocation = (): void => {
@@ -369,7 +380,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       apply(closeJourney(current, live, false));
       return;
     }
-    apply({...adoptSelection(current, live, read.selection, true, false),fileLookup:read.fileLookup??null,fileLookupCreateRequestId:read.fileLookup?read.selection?.createRequestId??null:null});
+    apply({...adoptSelection(current, live, read.selection, true, false),fileLookup:read.fileLookup??null,fileLookupCreateRequestId:read.fileLookup?read.selection?.createRequestId??null:null,proposalOriginal:read.proposalOriginal??null,proposalCreateRequestId:read.proposalOriginal?read.selection?.createRequestId??null:null});
   };
 
   const returnToRetainedGoal = (): boolean => {
@@ -392,7 +403,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     const restore = (selection: ProjectJourneySelection | null) =>
       apply({ ...current, shown: true, invalidLink: false, selection, goal, retained: swap });
     if (retained.selection === null) writeBlankJourneyUrl(() => restore(null));
-    else commitProjectJourneySelection(window.location.href, retained.selection, window.history, restore,fileLookupFor(current,retained.selection));
+    else commitProjectJourneySelection(window.location.href, retained.selection, window.history, restore,fileLookupFor(current,retained.selection),proposalOriginalFor(current,retained.selection));
     return true;
   };
 
@@ -413,7 +424,7 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
       restored = true;
     };
     if (retained.selection === null) writeBlankJourneyUrl(() => restore(null));
-    else commitProjectJourneySelection(window.location.href, retained.selection, window.history, restore,fileLookupFor(current,retained.selection));
+    else commitProjectJourneySelection(window.location.href, retained.selection, window.history, restore,fileLookupFor(current,retained.selection),proposalOriginalFor(current,retained.selection));
     return restored;
   };
 
@@ -507,7 +518,16 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     commitProjectJourneySelection(window.location.href,value.selection,window.history,()=>{
       if(stateRef.current!==value||!actorEquals(ensureCurrent(),live))throw Error('PROJECT_FILE_ORIGINAL_UNAVAILABLE');
       apply({...value,fileLookup:lookup,fileLookupCreateRequestId:lookup?value.selection!.createRequestId:null});
-    },lookup);
+    },lookup,proposalOriginalFor(value,value.selection));
+  };
+  const onProposalOriginalChange=(raw:PlanProposalOriginal|null)=>{
+    const live=ensureCurrent(),value=stateRef.current;
+    if(!live||!value.selection?.workRef)throw Error('PLAN_PROPOSAL_UNAVAILABLE');
+    const original=raw===null?null:decodePlanProposalOriginal(raw,value.selection.workRef);
+    commitProjectJourneySelection(window.location.href,value.selection,window.history,()=>{
+      if(stateRef.current!==value||!actorEquals(ensureCurrent(),live))throw Error('PLAN_PROPOSAL_UNAVAILABLE');
+      apply({...value,proposalOriginal:original,proposalCreateRequestId:original?value.selection!.createRequestId:null});
+    },fileLookupFor(value,value.selection),original);
   };
   const invalidateFilesAuth=useCallback((preserve:boolean)=>{
     const value=stateRef.current;if(!value.files)return;
@@ -556,6 +576,8 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     goalBelongsToSelection: visible,
     draftFiles:filesVisible(state,actor)?state.files!.rows:[],
     originalFileLookup:fileLookupFor(state,state.selection),
+    proposalOriginal:proposalOriginalFor(state,state.selection),
+    currentProposalOriginal:()=>isCurrent()?proposalOriginalFor(stateRef.current,stateRef.current.selection):null,onProposalOriginalChange,
     filesHeld:!!state.files?.rows.length&&!filesVisible(state,actor),
     onDraftFilesChange,onOriginalFileLookupChange,invalidateFilesAuth,checkRetainedFileDraft,discardRetainedFiles,
     retainedGoal,

@@ -66,7 +66,7 @@ class Owner:
         if relative == "ops/executive_os/native_gateway_sources.py":
             if payload["case"] == "derived_prepare":
                 return b'prepared = False\ndef prepare_vendor_derivation(owner, recipe, acl):\n    global prepared\n    assert recipe["vendor_derivation"]["kind"] == "computer_env_guard"\n    prepared = True\ndef prepare_inventory(owner, recipe, acl):\n    assert prepared\n    raise RuntimeError("DERIVATION_BEFORE_INVENTORY")\n'
-            return b'class NativeSourceClosure:\n    def __init__(self, *args, **kwargs):\n        raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\ndef prepare_inventory(*args, **kwargs):\n    raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\n'
+            return b'class NativeSourceClosure:\n    def __init__(self, *args, **kwargs):\n        raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\ndef prepare_vendor_derivation(owner, recipe, acl):\n    assert recipe["vendor_derivation"]["kind"] == "diagnostic_privacy"\ndef prepare_inventory(*args, **kwargs):\n    raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\n'
         return (source_root / relative).read_bytes()
     def directory(self, relative):
         assert entries[relative]["type"] == "directory"

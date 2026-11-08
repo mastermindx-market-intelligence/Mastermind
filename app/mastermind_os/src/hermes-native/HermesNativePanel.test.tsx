@@ -51,6 +51,16 @@ describe("thin native Hermes Office", () => {
     expect(screen.getByText(/Capacity catalog and route preview only/i)).toBeTruthy();
     expect(screen.getAllByText(/configured-model/).length).toBeGreaterThan(0);
   });
+  it("labels qualified OMH advice without claiming execution or capacity-only scope", async () => {
+    const p = port(); const base = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async r => r.operation === "create"
+      ? view({ state: "OPENED", session: { ...nativeSession(), toolAccess: "ADVISORY_READ_ONLY" } }) : base(r));
+    await openChat(p);
+    expect(screen.getByText(/Local planning advice and capacity previews/)).toBeTruthy();
+    expect(screen.queryByText(/Capacity catalog and route preview only/)).toBeNull();
+    expect(screen.getByText(/Worker dispatch is not enabled/)).toBeTruthy();
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(0);
+  });
   it("sends original text once even under a rapid second click", async () => {
     const p = await openChat();
     const original = "  Original\n 中文\t";
@@ -281,19 +291,61 @@ describe("existing stored native conversations", () => {
   });
   it("holds conditional sending until history refresh succeeds after recovery", async () => {
     const p = await openSaved();
-    p.request.mockResolvedValueOnce(view({ operation: "send", state: "EFFECT_UNKNOWN" }));
+    const pendingOperation = { kind: "send" as const, sessionId: "session-one", requestId: "a".repeat(32) };
+    const started = () => ({ ...view({ operation: "recover", state: "ADMITTED", receipt: {
+      id: "original-admission", sessionId: "session-one", status: "started", sequence: 1,
+      outcome: null, executionGeneration: 1 } }), pendingOperation });
+    p.request.mockResolvedValueOnce({ ...started(), operation: "send" });
     fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "original" } });
     fireEvent.click(screen.getByRole("button", { name: "Check and send message" }));
+    await screen.findByText(/Sending is paused until the original request’s outcome is confirmed/);
+    expect(screen.queryByText(/Tool scope not qualified for sending/)).toBeNull();
+
+    // The started original is still held after recovery clears stale send eligibility.
+    p.request.mockResolvedValueOnce(started());
+    p.request.mockRejectedValueOnce(new Error("NATIVE_CLIENT_UNAVAILABLE"));
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText(/NATIVE_CLIENT_UNAVAILABLE/);
+    expect(screen.getByText(/Sending is paused until the original request’s outcome is confirmed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message Hermes" }), { key: "Enter", code: "Enter" });
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+
+    p.request.mockResolvedValueOnce({ ...view({ operation: "recover", state: "EFFECT_UNKNOWN" }), pendingOperation });
+    fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
     await screen.findByText(/Outcome unknown/);
+    expect(screen.getByText(/Sending is paused until the original request’s outcome is confirmed/)).toBeTruthy();
+    expect(screen.queryByText(/Tool scope not qualified for sending/)).toBeNull();
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+
     p.request.mockResolvedValueOnce({ ...view({ operation: "recover", state: "ADMITTED", receipt: {
-      id: "original-admission", sessionId: "session-one", status: "terminal", sequence: 1,
+      id: "original-admission", sessionId: "session-one", status: "terminal", sequence: 2,
       outcome: "completed", executionGeneration: 1 } }), pendingOperation: null });
     p.request.mockRejectedValueOnce(new Error("NATIVE_CLIENT_UNAVAILABLE"));
     fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
     await screen.findByText(/NATIVE_CLIENT_UNAVAILABLE/);
     expect(screen.queryByRole("button", { name: "Check and send message" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/Refresh the original conversation before sending again/)).toBeTruthy();
+    expect(screen.queryByText(/Sending is paused until/)).toBeNull();
+    expect(screen.queryByText(/Tool scope not qualified for sending/)).toBeNull();
     expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText(/current send access is checked when you send/);
+    expect(screen.getByText("The original retained answer.")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "next question" } });
+    expect(screen.getByRole("button", { name: "Check and send message" }).hasAttribute("disabled")).toBe(false);
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+  });
+  it("retains the scope refusal when no original effect or send check applies", async () => {
+    const p = await openSaved();
+    p.request.mockResolvedValueOnce(view({ operation: "read", session: { ...nativeSession(), canSend: false, toolAccess: "UNQUALIFIED" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText(/Tool scope not qualified for sending/);
+    expect(screen.queryByText(/Sending is paused until/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(0);
   });
 });
 

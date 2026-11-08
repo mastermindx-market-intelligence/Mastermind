@@ -169,7 +169,7 @@ def admission_status(value):
     return value
 
 
-def session_tool_access(info, readonly_capacity=False):
+def session_tool_access(info, readonly_capacity=False, readonly_omh=False):
     if type(info) is not dict:
         return "UNQUALIFIED"
     policy = info.get("launch_request")
@@ -181,14 +181,16 @@ def session_tool_access(info, readonly_capacity=False):
     if info.get("enabled_toolsets") == [] and type(info.get("tool_count")) is int and info["tool_count"] == 0:
         return "NONE"
     tools = info.get("tools")
-    if (readonly_capacity and info.get("enabled_toolsets") == ["mastermind-fabric-capacity"]
-            and type(info.get("tool_count")) is int and info["tool_count"] == 3
+    if (readonly_capacity and type(info.get("tool_count")) is int and info["tool_count"] == 3
             and tools == {"other": ["tool_search", "tool_describe", "tool_call"]}):
-        return "CAPACITY_READ_ONLY"
+        if info.get("enabled_toolsets") == ["mastermind-fabric-capacity"]:
+            return "CAPACITY_READ_ONLY"
+        if readonly_omh and info.get("enabled_toolsets") == ["mastermind-fabric-capacity", "mmx_omh"]:
+            return "ADVISORY_READ_ONLY"
     return "UNQUALIFIED"
 
 
-def project_result(operation, value, session_id=None, *, readonly_capacity=False):
+def project_result(operation, value, session_id=None, *, readonly_capacity=False, readonly_omh=False):
     if type(value) is not dict:
         raise BridgeRefusal("NATIVE_RESPONSE_INVALID")
     if operation in {"create", "read"}:
@@ -214,8 +216,8 @@ def project_result(operation, value, session_id=None, *, readonly_capacity=False
         return {"session": {"id": sid, "storedId": stored,
             "title": display(info.get("title") or "", 512),
             "requestedModel": display(info.get("model") or "", 160),
-            "canSend": session_tool_access(info, readonly_capacity) != "UNQUALIFIED",
-            "toolAccess": session_tool_access(info, readonly_capacity), "running": value["running"], "executionGeneration": integer(value.get("execution_generation")),
+            "canSend": session_tool_access(info, readonly_capacity, readonly_omh) != "UNQUALIFIED",
+            "toolAccess": session_tool_access(info, readonly_capacity, readonly_omh), "running": value["running"], "executionGeneration": integer(value.get("execution_generation")),
             "messageCount": integer(value.get("message_count")), "messages": messages[-100:],
             "historyTruncated": len(messages) > 100, "pending": projected,
             "promptsPending": bool(value.get("prompts") or value.get("open_requests"))}}
@@ -272,6 +274,10 @@ async def execute_request(request, runtime):
         operation, params = normalize_request(request)
         endpoint, public = qualify_identity(await runtime.identify(), runtime.home)
         readonly_capacity = bool(getattr(runtime, "readonly_capacity_qualified", lambda: False)())
+        # Deferred plugin tools are real scope. Inspect the exact installed source
+        # only when a mutation needs live send eligibility; never load/register it.
+        readonly_omh = readonly_capacity and operation in {"create", "send"} and bool(
+            getattr(runtime, "readonly_omh_qualified", lambda: False)())
         if operation == "status":
             return bound_envelope(request, "READY", operation=operation, runtime=public)
         if operation == "list":
@@ -320,7 +326,7 @@ async def execute_request(request, runtime):
                 # Absence, pruning and read failure never prove no effect.
                 target = await asyncio.to_thread(runtime.resolve_original, operation, params)
                 result = await client.rpc("prompt.receipt", session_id=target["session_id"], admission_id=target["admission_id"])
-                projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity)
+                projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity, readonly_omh=readonly_omh)
                 if projected["receipt"]["id"] != target["admission_id"]:
                     raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
                 return bound_envelope(request, "ADMITTED", operation="recover", runtime=public, **projected)
@@ -329,7 +335,7 @@ async def execute_request(request, runtime):
                 # submission. Attach only for the explicit send, omit transcript
                 # hydration, and recheck current policy and positive live holds.
                 original = await client.rpc("session.resume", session_id=params["session_id"], omit_messages=True)
-                observed = project_result("read", original, params["session_id"], readonly_capacity=readonly_capacity)
+                observed = project_result("read", original, params["session_id"], readonly_capacity=readonly_capacity, readonly_omh=readonly_omh)
                 live = observed["session"]
                 if not live["canSend"]:
                     raise BridgeRefusal("NATIVE_SESSION_POLICY_UNQUALIFIED")
@@ -340,7 +346,7 @@ async def execute_request(request, runtime):
             mutation_sent = operation in {"create", "send"}
             result = await client.rpc(METHODS[operation], **params)
             expected_session = original_create["session_id"] if original_create else params.get("session_id")
-            projected = project_result(operation, result, expected_session, readonly_capacity=readonly_capacity)
+            projected = project_result(operation, result, expected_session, readonly_capacity=readonly_capacity, readonly_omh=readonly_omh)
             if operation == "send":
                 original_send = await asyncio.to_thread(runtime.resolve_original, "recover_send",
                     {"session_id": params["session_id"], "request_id": request["requestId"]})
@@ -552,6 +558,49 @@ async def observe_request(request, runtime, emit, *, duration=600, interval=0.1)
         emit({**previous, "state": "interrupted", "code": code})
 
 
+# Qualification of the already-installed read-only Mastermind OMH adapter and
+# its actual interpreter dependency. No installer, runtime, registration or grant.
+OMH_READONLY_PINS = {
+    "release": "58ac65ae47824750cae32c5ab85b58b6f38e6d5e",
+    "plugin.yaml": "a426392c03a151903f3376a3343d666372c206cd04a244937291fe263ca64b22",
+    "__init__.py": "e72da67dfb64314c849c8b44b44c25e7707e3576f003df7a3ccabf3326a2cb70",
+    "descriptor": "7aa738444942825ef223c8af773c7541b678898686a184efa1ca47236ef1bf3b",
+    "python": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "pyvenv.cfg": "a4b4a334bb8aa27404a11068ba34f3f0f3470a6d5d109f0e6a9587e60422945c",
+    "metadata": "b3ac978c27cdbb94a1e17a0ee0035fc54c14c6ccc53fa7879dcb137e6e8fdc1a",
+    "dependency": "5178ac807671d0218b7668ebc3cd5d24a2d8fc4459ec245142cabc149afc03e4",
+    "dependency_files": 1240,
+    "stdlib_sitecustomize": "cbf9d8d0f07943b63ed5e5983e2b33d91fadc54251e66df7eb7c31f1b816b5d6",
+    "model_tools": "24850d5ce74f7bcf17e58638fc787d6b955bfb89f4980e74b361d7927de74581",
+}
+
+
+def qualified_source_bytes(path, expected=None, maximum=1024 * 1024):
+    """Read bounded pinned source without importing it or following symlinks."""
+    import stat
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+    if path.resolve() != path:
+        raise ValueError("source link")
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_size > maximum
+                or before.st_mode & 0o022):
+            raise ValueError("source file")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(maximum + 1)
+        after = os.fstat(fd)
+        if (len(raw) > maximum or
+                (before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
+                (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            raise ValueError("source changed")
+        if expected is not None and hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError("source digest")
+        return raw
+    finally:
+        os.close(fd)
+
+
 class NativeRuntime:
     def __init__(self):
         import pwd
@@ -724,8 +773,12 @@ class NativeRuntime:
                     count = integer(db.get_resume_message_count(row["id"]))
                     if self.owned_history(db, owner)[1] != receipt:
                         raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
-                    result.append({"id": identifier(owner), "title": display(row.get("title") or "", 512),
-                                   "running": None, "messageCount": count})
+                    result.append({
+                        "id": identifier(owner),
+                        "title": display(row.get("title") or "", 512),
+                        "running": None,
+                        "messageCount": count,
+                    })
                     if len(result) == 50:
                         break
                 if len(result) == 50 or len(rows) < 200:
@@ -819,6 +872,83 @@ class NativeRuntime:
                 and server.get("enabled") is True and server.get("command") == "/opt/homebrew/bin/python3"
                 and server.get("args") == [str(self.home / "bridges/fabric_capacity_mcp.py")])
         except Exception:
+            return False
+
+    def readonly_omh_qualified(self):
+        """Recognize one installed advisory bridge; never enable another toolset."""
+        try:
+            if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
+                return False
+            pins = OMH_READONLY_PINS
+            plugin = self.home / "plugins/mastermind-omh"
+            for name in ("plugin.yaml", "__init__.py"):
+                qualified_source_bytes(plugin / name, pins[name])
+            raw = qualified_source_bytes(plugin / "_runtime.json", pins["descriptor"])
+            descriptor = closed_json(raw)
+            source = plugin / "_source" / pins["release"]
+            venv = self.home.parent / ".local/share/omh/venv"
+            expected = {
+                "schema": "mastermind.hermes_omh.local_runtime/v1", "release_commit": pins["release"],
+                "source_root": str(source), "profile_home": str(self.home),
+                "omh_home": str(self.home.parent / ".omh"),
+                "python_executable": str(venv / "bin/python"),
+            }
+            if (type(descriptor) is not dict or set(descriptor) != set(expected) | {"source_files"}
+                    or any(descriptor[key] != value for key, value in expected.items())):
+                return False
+            # The descriptor's whole-file pin fixes this exact adapter closure.
+            sources = descriptor["source_files"]
+            if type(sources) is not dict or len(sources) != 19:
+                return False
+            if {path.relative_to(source).as_posix() for path in source.rglob("*.py")} != set(sources):
+                return False
+            for relative, digest in sources.items():
+                path = Path(relative)
+                if path.is_absolute() or ".." in path.parts:
+                    return False
+                qualified_source_bytes(source / path, digest)
+            qualified_source_bytes(venv / "pyvenv.cfg", pins["pyvenv.cfg"])
+            interpreter = (venv / "bin/python").resolve()
+            qualified_source_bytes(interpreter, pins["python"])
+            site = venv / "lib/python3.14/site-packages"
+            stdlib = interpreter.parent.parent / "lib/python3.14"
+            # -I still initializes site. This enrolled venv has no .pth hooks;
+            # only the exact Homebrew stdlib customization is present.
+            for root, expected_customizations in [(site, set()), (stdlib, {"sitecustomize.py"})]:
+                entries = list(root.iterdir())
+                if any(path.suffix.lower() == ".pth" for path in entries):
+                    return False
+                customizations = {path.name for path in entries
+                    if path.name.lower().startswith(("sitecustomize", "usercustomize"))}
+                if customizations != expected_customizations:
+                    return False
+            qualified_source_bytes(stdlib / "sitecustomize.py", pins["stdlib_sitecustomize"])
+            qualified_source_bytes(site / "oh_my_hermes-4.0.6.dist-info/METADATA", pins["metadata"])
+            package = site / "omh"
+            if any(path.suffix.lower() in {".so", ".dylib", ".pyd"}
+                    for root in (source, package) for path in root.rglob("*")):
+                return False
+            # Trusted installed-source qualification, not an attestation against
+            # a hostile local interpreter or tampered executable bytecode cache.
+            paths = []
+            for path in package.rglob("*.py"):
+                paths.append(path)
+                if len(paths) > pins["dependency_files"]:
+                    return False
+            if len(paths) != pins["dependency_files"]:
+                return False
+            digest, total = hashlib.sha256(), 0
+            for path in sorted(paths):
+                raw = qualified_source_bytes(path)
+                total += len(raw)
+                if total > 32 * 1024 * 1024:
+                    return False
+                digest.update(path.relative_to(package).as_posix().encode() + b"\0" + hashlib.sha256(raw).digest())
+            if digest.hexdigest() != pins["dependency"]:
+                return False
+            qualified_source_bytes(self.home / "hermes-agent/model_tools.py", pins["model_tools"])
+            return True
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
             return False
 
     @asynccontextmanager

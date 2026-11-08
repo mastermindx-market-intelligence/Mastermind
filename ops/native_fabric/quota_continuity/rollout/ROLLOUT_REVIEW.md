@@ -444,3 +444,221 @@ actual selected closure, exact registry/target/key policy and producer identity,
 then consume only that original invocation's detached result. Lost or ambiguous
 response is not permission to replay. No normal refresh or hook execution is
 implied by this capability.
+
+
+## 2026-11-07: original-artifact and admission-load repairs
+
+Operation: `fabric-admission-integrity-20261107-sol-001`, isolated attended Web
+workspace, based on protected `615146aac6a1b0c0933bc9b815517a2fd285ed4a`.
+Governing source pin remains compatible
+`e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`.
+This continues P3/P7 of the existing
+[Hermes/Fabric convergence plan](../../../../docs/superpowers/plans/2026-10-24-meta-ceo-open-harness-convergence-masterplan.md).
+Direct principal implementation is the bounded `CRITICAL_PATH_SHORTCUT` join;
+this Web session has no verified authenticated native root/parent binding for
+paid worker admission. Adapter availability is not worker-start proof.
+
+Two reproduced defects are repaired through their existing owners:
+
+- A request interruption after packet fsync and before descriptor publication
+  left the original run occupied, while status returned `NOT_FOUND`. The
+  original reader now checks the same fixed packet/result artifacts used by
+  the request duplicate guard. Retained or unreadable evidence returns existing
+  `STATUS_UNREADABLE` / `ARTIFACT_UNVERIFIED` vocabulary. It supplies no root
+  attestation, result contents, execution-absence proof or replay authority.
+  Truly absent artifacts still return `NOT_FOUND`.
+- Both the current native lane and the packaged attended backend sampled live
+  load before waiting for the physical admission lock. They now take the
+  default sample under that lock immediately before the existing admission
+  decision. Explicit fixture load, slot limits, resource floors, original lease
+  custody and release protocol are preserved.
+
+### Exact source and closure
+
+| Current source | SHA256 |
+| --- | --- |
+| Native `fabric_task.py` | `1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68` |
+| Native `lane_runtime.py` | `b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b` |
+| Packaged attended `lane_runtime.py` | `764d140d598734d3607f697bea911c873d72ede08331308347d45a8f9451a996` |
+
+The native builder accepts the repaired members only as one complete successor
+of parent manifest
+`815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347`.
+It checks the entire captured parent closure, not independently allowlisted
+member combinations. Historical validation uses a temporary inverse view;
+emitted manifests and inventories retain the actual repaired hashes.
+Historical inputs and their transformation pins are unchanged.
+
+| Built variant | Members | Manifest SHA256 |
+| --- | ---: | --- |
+| Native base | 107 | `8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6` |
+| Existing Go application extension | 109 | `2ef78df1ba17579339e3d86733bfb48343f5bba156e9a16108f31b7539acf571` |
+| Existing HTTP extension | 112 | `efb5ffc514dbd9a2fa3df44aab9e869ef544e36d4fbbb1b0651713c0ee1404fd` |
+
+Native forward fixture:
+`tests/fixtures/fabric-native-admission-integrity-20261107.patch`,
+SHA256 `68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753`.
+Packaged forward fixture:
+`tests/fixtures/fabric-bound-admission-load-20261107.patch`,
+SHA256 `d42895edd9d2e8507e402ab7a98a854486f5d7b466e2735da219180514a18cc0`.
+Both reconstruct the exact prior bytes in reverse and the current bytes forward.
+The packaged provenance records its distinct parent. Its existing identity
+literal locations and spellings are unchanged; the current whole-file source
+pin is qualified by the identity suite.
+
+### Observed qualification
+
+- Original packet crash test failed before the repair with `NOT_FOUND`.
+- Separate-process load tests failed against both original runtime copies:
+  after waiting for the lock, they admitted using the stale `0.0` sample.
+- Native request, physical admission and exact identity qualification:
+  **204 passed, 8 subtests passed**. The admission cases cover rising and falling
+  load while locked, the explicit-load seam, and two contenders for one slot.
+  The winner remains held until both admission decisions are observed.
+- Native generation qualification: **83 passed**, including real 107/109/112
+  builds, exact forward/reverse source reconstruction, retained historical
+  generations, and partial/foreign/backdated/changed-parent rejection.
+- Existing MCP facade suite: **70 passed**. Two fresh backend instances both
+  refuse the orphan original run after a status read; neither dispatches.
+- The broader security-composition run on the M2 was **35 passed, 32 failed**.
+  The first failure was the existing sparse-donor Git observation refusing as
+  unqualified; this run is not green and its cause is not inferred as a repaired
+  behavior. Required hosted Linux checks remain owed.
+- `git diff --check` passes. No provider, live worker or host admission is
+  established by these inert fixtures.
+
+### Existing application carrier consumption
+
+[PR #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175)
+remains the APPLICATION final carrier; its captured head for this analysis is
+`39f4b50bcb3840f5b254dbcd753f3f1f5fc8a7cf`. This independent native repair does not
+replace or modify that operation's branch/workspace, nor absorb the separate
+policy-publisher change in #2182.
+
+At #2175's next integration boundary, consume this complete protected successor
+on that original branch. Preserve its five-member APPLICATION cohort and
+original historical parent. Its whole-manifest base check must explicitly
+compose the exact two-member repair successor; merely merging leaf bytes,
+repinning historical inputs, or allowing arbitrary "current" hashes is invalid.
+Regenerate the actual final inventory and rerun its 107/109/112 and mixed-cohort
+qualification against the resulting head.
+
+### Acceptance still owed
+
+Protected merge and installation are separate. Rebuild from the merged source,
+then use the existing immutable-generation publisher/selector and exact fresh
+predecessor comparison. Preserve live writers, retained unknown effects and
+all operation-specific holds. Observe the installed selected generation and
+the original reader/physical admission behavior before claiming runtime repair.
+The packaged attended backend retains its existing enrollment boundary.
+
+These repairs neither establish a measured 99% useful-task SLO nor guarantee
+that a host can never fill. They prevent two concrete unsafe decisions while
+preserving finite capacity and conservative recovery.
+
+
+### CI current-manifest reconciliation — 2026-11-07
+
+The first hosted run, 42339309433 at source a6c849d76d5c16d3853e9a70cf16486872c7d11d, exposed stale current-manifest assertions in catalog staging, host-pull admission, and the paid initializer. The native manual-AUTO historical reconstruction also still began at the prerepair task. The related current-generation source-closure assertion was found by a bounded source scan and corrected with the same complete current manifest.
+
+Only current qualification pins now identify the actual repaired 107-member manifest 8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6 and lane b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b. The historical manual-AUTO test first inverses the hash-bound forward repair in its disposable stage, proves the exact 2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4 predecessor, and retains every older fixture and hash unchanged.
+
+Focused verification of all five affected qualification files passed (process 92160, terminal exit 0). The actual runtime repair, repaired release output, installer history, security floors, and production selector are unchanged. A fresh hosted run at the successor commit remains required; the earlier failing run is not delivery proof.
+
+Deployment constraint: the observed live 107-member generation ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46, sequence 35, has complete manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9. It contains eight other component successors that this protected107 source baseline does not contain. Do not select this baseline over it. The original APPLICATION composer #2175 must preserve those bytes and qualify the two repaired members against that complete parent before existing publication/selection. No live release was published or selected in this work.
+
+
+### Protected merge-queue translation qualification — 2026-11-07
+
+PR CI 42341854901 at 3b2338d3946209b6f6ce6a0b694cf609015fb07f passed all six repository shards and required test. Its original protected queue then composed protected 5f8c13da926011fb5fdc8cea21287b532ac968db at merge candidate 490ad30a9ed88c6133bd87d2deefd921e2a3e9a7. Queue CI 42345135020 failed only the actual Brain composition gate: the translation fixture still pinned the prior provider-realm module. The original queue entry was reconciled absent before any resubmission.
+
+The same native repair now incorporates that protected source. The translation fixture pins the complete actual control_plane/codex_provider_realm.py blob a51e2bce8d9bb312107f975d503abd6541bd5000. The protected delta adds the closed candidate-only commercial realm and rejects invalid use-policy flag combinations; it does not enroll an account or destination. All exact-source checks remain in place, and all 15 native translation pins remain unchanged.
+
+The required translation consumer suite passed all 23 cases in an isolated copy of the actual CI archive paths, paired with exact Macro f0375acf4ba076718e7cb420ed28ab61fb0a4f26. This executes the real owner, HTTP, admission, cache-lock, durable replacement, usage and close paths with synthetic provider observations. Source-capture SHA256: bf37f2383d38f608df5227ffd7b72c4f61e7f3d8162941c7274328bd6073bc59. Test-log SHA256: d21549e9dd8928fb20e680c3f2a80781e3f8831f0a4553ee6f8490a58e03712a. The isolated proof interpreter used claude-agent-sdk 0.2.179, matching the version resolved by the observed hosted CI installation.
+
+A separate 53-case realm/readiness run had 52 passes and one failure: the M2-installed Codex binary hashes to 8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31 while the existing readiness pin expects 16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704. That failed local installed-harness check is retained; neither the readiness pin nor the installed binary was changed. Its log SHA256 is 694bc8f1b0618d7e71ea60c694c131727aa24750822423d61fe6d0a2f8d3e578. It does not invalidate the independent inert translation proof or establish live harness readiness.
+
+The native release remains the repaired 8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6 manifest. The prohibition on selecting this baseline over installed sequence 35 remains. The APPLICATION composition is carried by original #2175, with the bounded #2194 contribution retaining the accepted scoped-model source and exact parent closures. No release selector, host admission, provider enrollment or unknown effect changed. Fresh exact-head required CI and protected queue proof remain the source-delivery gate.
+
+### Protected historical-realm fixture join — 2026-11-07
+
+The original queue entry was removed by the GitHub merge-queue bot at08:45:46 (event35423056040). Its removal reason was not inferred from that event. A fresh source merge preview independently found exactly one conflict against protected547a880894b0f3d28a6d5118ee2534287b3fc1c0, in the translation fixture. The protected change correctly pins the historical realm preimage consumed by application_http_sources instead of the unrelated current realm module. This merge consumes that complete test file byte-identically (blobb3e00e1c3d507dc276f0f24d40e0665448f1e18a); no source pin is weakened or bypassed. Governing source law is unchanged.
+
+The actual composed source was paired with exact Macro9eb5cb6b28b510ea9e2bf05ae9040528523339df in isolated source fixtures. The first export omitted scripts/translate_all.py and retained22 passes/one error. Adding that exact staged-tree input (blob117dc03971230945fcf50816447f7e6a2e651a5a) resolved the fixture gap. The complete23-case translation suite then passed, exit0, log SHA256 ea509ad0367a2a748ffd43b65f9a68042344e1be3ecea84774c6b5a9c831dd0b. Failed and successful exports are separate receipts in review_evidence/fabric_admission/protected-translation-20261107.json.
+
+The repaired native sources and manifest are unchanged from0a41; its retained installed APPLICATION generation constraint remains binding. No installed Codex or provider was invoked. New exact-head hosted CI and the normal protected queue remain required; the prior removed queue request is not treated as an active effect.
+
+
+## 2026-11-07: no-replay CI settlement boundary
+
+Required CI run `42359846449`, shard4 job `128365751637`, exposed an inherited race in `test_signed_consumed_parent_second_turn_original_read_and_no_replay`: its duplicate-turn event snapshot preceded the original dispatcher appending `JOB_COMPLETED` for `JOB-002`. The duplicate returned the correct original result; the test already awaited that original task later. The same test and turn owner bytes exist in protected `064a08b2c6360ece12999f1d7f2d712062ea0636` and the passing workspace-release shard.
+
+Moved the existing bounded original-task wait before the event snapshot. Full event-log equality and the exact two native turns remain required; no production path or assertion was loosened. The complete12-case turn file passed with zero failures/errors/skips. Evidence: `review_evidence/fabric_admission/turn-settlement-ci-20261107.json`. The native manifest remains the previously qualified WORKER107 identity and must not replace the larger APPLICATION installed generation.
+
+### Combined host-pull source image — 2026-11-07 (#1836)
+
+The host-pull composition advances the ordinary current source image from
+`8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6`
+to
+`a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3`.
+The existing builder emitted 107 members, 75 baseline files and 3,089,380
+payload bytes. Its source-inventory SHA256 is
+`553b24be3cbb9523d618ebdbfd95421b39dc9ef5783cff0946404dba5787c298`.
+
+Only `ext/host_pull.sh`, `ext/host_pull_backend.py` and
+`ext/host_pull_daemon.sh` change in that manifest and inventory. All other
+member hashes, metadata and installed-preimage identities remain intact.
+The builder validates one exact three-member inverse against the complete
+8af730 parent, then uses the unchanged 815ec admission-parent guard; emitted
+metadata continues to identify the actual repaired bytes. The historical
+95-member upgrade and 6ac208 manifest are unchanged.
+
+The earlier variant table and dated CI records above describe their original
+source epochs. Their 8af730 identity remains historical predecessor authority;
+it must not be globally replaced with the new current identity. Current
+qualification consumers bind the generated a42259 manifest. The catalog and
+paid-initializer expectations each require only that current-pin correction:
+the initializer's historical comparison still has 95 original members,
+12 additions, 36 changed common members and 59 unchanged original members.
+
+The three historical host-pull payloads are retained as authenticated fixture
+data for the old 102-member stage. Current Go tests first normalize the
+validated host epoch before exercising the older admission inverse. Hosted
+native preflight job 128415654001 in workflow 42376687583 passed these consumers;
+that run's ordinary shard 5 subsequently identified the two stale current-pin
+assertions above. This records the distinct results and does not claim the
+full workflow passed.
+
+The combined-image technical source review covers the unchanged production
+composition. Source qualification and a protected merge do not authorize an
+installed generation, CURRENT change, launchctl action, H1 admission, provider
+or worker start. Existing APPLICATION #2175 composition and enrollment
+constraints remain separate; no installed generation was replaced or selected.
+
+
+## Sparse-index advice compatibility successor (source only)
+
+The actual Git2.50.1 observation returned0 and optional sparse-index expansion
+advice; the strict stderr fence correctly refused. The prospective executor
+adds ONLY the command-scoped tuple `advice.sparseIndexExpanded=false` to the
+existing trusted settings. Direct argv and the sanitized pinned-helper environment
+share it. No stderr is filtered or accepted; unknown local config, nonzero status,
+config identity drift and uncertain owned-process cleanup retain their refusals.
+Git config is never written. Sparse-index=True andFalse positives remain covered.
+
+The new fixture appends an exact forward/reverse delta from executor710115e0
+to4a3ec239; earlier patches/maps/digests remain immutable. The canonical producer
+emits107 files, changing only executor bytes/hash. Public inverse
+`before_sparse_index_advice` binds the complete72 parent manifest45a90565 before
+the unchanged H/Q inverses. Captured current dependencies stay separate from
+historical validation. The historical executor guard still accepts its original
+710 endpoint, not the newly updated candidate pin in historical source epochs.
+Historical fixture views explicitly remove this new delta; they are not emitted
+or presented as current source captures. No install/enrollment/host effect occurs.
+
+The retained32 composed-security failures now all match GREEN case identities,
+within67 composed checks. The affected cohort/Go/host-pull/boundary group produced
+135PASS and one historical-fixture mismatch; that fixture was restored to its
+original710 source meaning and its affected case then passed. Two portability
+checks additionally avoid depending on an unmerged branch's historical Git object.
+These scopes are retained separately; do not claim one combined all-green run.

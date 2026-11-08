@@ -230,3 +230,324 @@ def test_core_source_issuer_rejects_fake_and_subclass_services(tmp_path, monkeyp
         pass
     with pytest.raises(ValueError, match="ISSUER_REQUIRED"):
         source_owner.bind_issuer(object.__new__(OtherService))
+
+
+def test_status_distinguishes_authorized_absence_from_refused_lookup(tmp_path, monkeypatch):
+    factory, principal, args, _, prepared = fixture(tmp_path, monkeypatch)
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    absent = asyncio.run(invoke(factory, principal, lookup, "status"))
+    assert absent["ok"] and absent["data"]["state"] == "NOT_FOUND"
+    assert absent["data"]["receipt"] is None
+
+    factory.planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = False
+    refused = asyncio.run(invoke(factory, principal, lookup, "status"))
+    assert not refused["ok"] and refused["data"] is None
+    assert refused["error"] == {
+        "code": "refused",
+        "message": "Project execution is unavailable for this request",
+    }
+    runtime = factory.service._require_runtime()
+    assert runtime.jobs.list_jobs() == [] and runtime.attempts.list_attempts() == []
+    assert prepared == []
+
+
+def test_failed_status_read_returns_opaque_refusal_without_another_store_read(tmp_path, monkeypatch):
+    factory, principal, args, _, prepared = fixture(tmp_path, monkeypatch)
+    runtime = factory.service._require_runtime()
+    reads = []
+
+    def unavailable(command):
+        reads.append(command)
+        raise ConnectionError("private storage failure must not escape the response")
+
+    async def read_status():
+        p = dataclasses.asdict(principal); p["scopes"] = list(p["scopes"])
+        w = dataclasses.asdict(factory.planning._test_workspace_principal)
+        w["scopes"] = list(w["scopes"])
+        frame = dict(schema=wire.SCHEMA, operation="status",
+            arguments={key: args[key] for key in ("operation_key", "work_ref")},
+            principal=p, workspace_principal=w)
+        async with _project_execution_foreground_dispatch(runtime, frame, lambda: None):
+            # The existing foreground owner has admitted this read. Fail the
+            # original-status lookup, not its earlier authorization boundary.
+            monkeypatch.setattr(runtime.store, "find_event_by_command_id", unavailable)
+            return await factory.handle_frame(frame)
+
+    refused = asyncio.run(read_status())
+    assert not refused["ok"] and refused["data"] is None
+    assert refused["error"] == {
+        "code": "refused",
+        "message": "Project execution is unavailable for this request",
+    }
+    assert len(reads) == 1
+    assert runtime.jobs.list_jobs() == [] and runtime.attempts.list_attempts() == []
+    assert prepared == []
+
+
+@pytest.mark.parametrize("authority_change", [
+    "unchanged", "execution_disarmed", "workspace_revoked", "expired_token",
+])
+def test_lost_submit_reopens_original_durable_job_without_fresh_plan_or_dispatch(
+    tmp_path, monkeypatch, authority_change,
+):
+    """H4/H5 source qualification: response loss followed by a cold owner reopen.
+
+    Runtime, Job/Event persistence, private input custody and the authenticated
+    request owner are real. Source observations and physical worker preparation
+    remain the existing fixture seams; no installed runtime or provider is used.
+    """
+    from control_plane.workspace_source_operations import SourceOperationEvents
+    from integrations.mastermind_executive_app.project_planning_factory import (
+        ProjectPlanningAppFactory,
+    )
+    from tests.test_project_execution_service import _reopen_project_service
+
+    factory, principal, args, armed, _ = fixture(tmp_path, monkeypatch)
+    attempts_to_prepare = []
+
+    async def lose_response(root, operation):
+        operation.require_root(root.job_id)
+        attempts_to_prepare.append(root.job_id)
+        raise ConnectionError("response lost after the original Job committed")
+
+    monkeypatch.setattr(factory, "_prepare_workspace", lose_response)
+    lost = asyncio.run(invoke(factory, principal, args))
+    assert not lost["ok"] and lost["error"]["code"] == "effect_unknown"
+    original_runtime = factory.service._require_runtime()
+    original_job = original_runtime.jobs.list_jobs()[0]
+    original_event = original_runtime.store.unique_root_created_event(original_job.job_id)
+    original_source = source_owner.read_source(original_runtime, original_job)
+    original_input = source_owner.read_original_input(factory._supervisor(), original_source)
+    assert attempts_to_prepare == [original_job.job_id]
+    assert original_runtime.attempts.list_attempts() == []
+
+    # Drop the Runtime/Store/Supervisor/App-factory objects that submitted the
+    # operation. Recovery must derive its answer from retained original owners.
+    old_planning = factory.planning
+    restored_service = _reopen_project_service(factory.service)
+    restored_service._service_state = "READY"
+    restored_service._ceo_ingress_ready = True
+    planning = ProjectPlanningAppFactory(
+        service=restored_service,
+        app_binding=restored_service._ceo_ingress_app_binding,
+        policies=old_planning.policies,
+        reader=old_planning.reader,
+        plan_reader=old_planning.plan_reader,
+        events=SourceOperationEvents(restored_service.runtime.store),
+        workspace_policy=old_planning.workspace_policy,
+        load_workspace_bindings=lambda: copy.deepcopy(old_planning._test_bindings[0]),
+        policy_loader=old_planning.policy_loader,
+        clock=old_planning.clock,
+    )
+    planning._test_workspace_principal = old_planning._test_workspace_principal
+    recovered = ProjectExecutionAppFactory(planning)
+
+    def forbidden(*_, **__):
+        raise AssertionError("original reconciliation consulted fresh plan or dispatch")
+
+    for name in ("_capture", "_binding", "_fixed_source", "_prepare_workspace"):
+        monkeypatch.setattr(recovered, name, forbidden)
+    monkeypatch.setattr(planning, "_canonical_plan", forbidden)
+    monkeypatch.setattr(planning, "_canonical_view", forbidden)
+
+    if authority_change == "execution_disarmed":
+        armed[0] = False
+    elif authority_change == "workspace_revoked":
+        old_planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = False
+    elif authority_change == "expired_token":
+        principal = dataclasses.replace(principal, expires_at=int(planning.clock()) - 1)
+
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    if authority_change == "expired_token":
+        # The existing foreground owner refuses an expired principal before the
+        # App factory can read the original event; it is not an unknown effect.
+        from control_plane.foreground_operation import ForegroundOperationRefusal
+
+        for selected, operation in ((lookup, "status"), (args, "submit")):
+            with pytest.raises(ForegroundOperationRefusal, match="principal window is not live"):
+                asyncio.run(invoke(recovered, principal, selected, operation))
+    else:
+        status = asyncio.run(invoke(recovered, principal, lookup, "status"))
+        replay = asyncio.run(invoke(recovered, principal, args))
+        if authority_change in {"unchanged", "execution_disarmed"}:
+            assert status["ok"] and replay["ok"], (status, replay)
+            for response in (status, replay):
+                assert response["data"]["receipt"]["job_id"] == original_job.job_id
+                assert response["data"]["receipt"]["intent_id"] == original_source["intent_id"]
+            changed = {**args, "handoff_text": "A different turn cannot replace the original"}
+            conflict = asyncio.run(invoke(recovered, principal, changed))
+            assert not conflict["ok"] and conflict["error"]["code"] == "operation_conflict"
+        else:
+            assert not status["ok"] and not replay["ok"]
+            assert status["data"] is None and replay["data"] is None
+            assert status["error"] == {
+                "code": "refused",
+                "message": "Project execution is unavailable for this request",
+            }
+            # The failed read does not resolve the earlier submission. Its
+            # original effect remains uncertain until authority is restored.
+            assert replay["error"]["code"] == "effect_unknown"
+            old_planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = True
+            for selected, operation in ((lookup, "status"), (args, "submit")):
+                restored = asyncio.run(invoke(recovered, principal, selected, operation))
+                assert restored["ok"], restored
+                assert restored["data"]["receipt"]["job_id"] == original_job.job_id
+                assert restored["data"]["receipt"]["intent_id"] == original_source["intent_id"]
+
+    runtime = restored_service._require_runtime()
+    assert runtime is not original_runtime and runtime.store is not original_runtime.store
+    assert runtime.store.path == original_runtime.store.path
+    assert [job.job_id for job in runtime.jobs.list_jobs()] == [original_job.job_id]
+    assert runtime.attempts.list_attempts() == []
+    assert runtime.store.unique_root_created_event(original_job.job_id).to_dict() == original_event.to_dict()
+    assert source_owner.read_source(runtime, runtime.jobs.get_job(original_job.job_id)) == original_source
+    assert source_owner.read_original_input(recovered._supervisor(), original_source) == original_input
+    assert attempts_to_prepare == [original_job.job_id]
+
+
+@pytest.mark.parametrize("operation,boundary,change", [
+    ("status", "input", "workspace_revoked"),
+    ("submit", "input", "workspace_revoked"),
+    ("status", "receipt", "permission_changed"),
+    ("submit", "receipt", "permission_changed"),
+    ("status", "input", "invocation_closed"),
+    ("status", "receipt", "principal_expired"),
+    ("status", "receipt", "execution_disarmed"),
+])
+def test_original_reconciliation_rechecks_read_authority_before_return(
+    tmp_path, monkeypatch, operation, boundary, change,
+):
+    """A lost submit stays original when access changes during its retained read."""
+    from control_plane.foreground_operation import current_foreground_operation
+
+    factory, principal, args, armed, prepared = fixture(tmp_path, monkeypatch)
+
+    async def lose_response(root, invocation):
+        invocation.require_root(root.job_id)
+        prepared.append(root.job_id)
+        raise ConnectionError("response lost after original commit")
+
+    monkeypatch.setattr(factory, "_prepare_workspace", lose_response)
+    lost = asyncio.run(invoke(factory, principal, args))
+    assert not lost["ok"] and lost["error"]["code"] == "effect_unknown"
+    runtime = factory.service._require_runtime()
+    (root,) = runtime.jobs.list_jobs()
+    event = runtime.store.unique_root_created_event(root.job_id).to_dict()
+    material = source_owner.read_source(runtime, root)
+    retained = source_owner.read_original_input(factory._supervisor(), material)
+    before_bindings = copy.deepcopy(factory.planning._test_bindings[0])
+    original_time = factory.planning.clock()
+    now = [original_time]
+    monkeypatch.setattr(factory.planning, "clock", lambda: now[0])
+
+    def forbidden(*_, **__):
+        raise AssertionError("original read consulted fresh plan, arm or dispatch")
+
+    for name in ("_capture", "_binding", "_fixed_source", "_prepare_workspace"):
+        monkeypatch.setattr(factory, name, forbidden)
+
+    changes = []
+
+    def change_access():
+        changes.append(change)
+        member = factory.planning._test_bindings[0]["profiles"]["member-0"]
+        if change == "workspace_revoked":
+            member["enabled"] = False
+        elif change == "permission_changed":
+            member["binding"]["permission_digest"] = "7" * 64
+        elif change == "invocation_closed":
+            current_foreground_operation()._mark_source_closed()
+        elif change == "principal_expired":
+            now[0] = principal.expires_at
+        else:
+            armed[0] = False
+
+    target, name = ((source_owner, "read_original_input") if boundary == "input"
+                    else (ceo_intent, "resolve_intent"))
+    actual_read = getattr(target, name)
+
+    def read_then_change(*positional, **keywords):
+        result = actual_read(*positional, **keywords)
+        change_access()
+        return result
+
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    with monkeypatch.context() as during:
+        during.setattr(target, name, read_then_change)
+        response = asyncio.run(invoke(factory, principal,
+            lookup if operation == "status" else args, operation))
+    assert changes == [change]
+    if change == "execution_disarmed":
+        # Reconciliation needs current read access, never a fresh execution arm.
+        assert response["ok"] and response["data"]["receipt"]["job_id"] == root.job_id
+    else:
+        assert not response["ok"] and response["data"] is None, response
+        expected_code = ("effect_unknown" if operation == "submit" else
+                         "context_changed" if change == "permission_changed" else "refused")
+        assert response["error"]["code"] == expected_code
+        if operation == "status":
+            assert response["error"]["message"] == "Project execution is unavailable for this request"
+
+    factory.planning._test_bindings[0] = before_bindings
+    now[0] = original_time
+    armed[0] = True
+    for selected, original_operation in ((lookup, "status"), (args, "submit")):
+        restored = asyncio.run(invoke(factory, principal, selected, original_operation))
+        assert restored["ok"], restored
+        assert restored["data"]["receipt"]["job_id"] == root.job_id
+        assert restored["data"]["receipt"]["intent_id"] == material["intent_id"]
+    assert [job.job_id for job in runtime.jobs.list_jobs()] == [root.job_id]
+    assert runtime.attempts.list_attempts() == []
+    assert runtime.store.unique_root_created_event(root.job_id).to_dict() == event
+    assert source_owner.read_source(runtime, runtime.jobs.get_job(root.job_id)) == material
+    assert source_owner.read_original_input(factory._supervisor(), material) == retained
+    assert prepared == [root.job_id]
+
+
+@pytest.mark.parametrize("change", ["workspace_revoked", "permission_changed"])
+def test_original_absence_requires_authority_through_the_completed_lookup(
+    tmp_path, monkeypatch, change,
+):
+    factory, principal, args, _, prepared = fixture(tmp_path, monkeypatch)
+    runtime = factory.service._require_runtime()
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    before = copy.deepcopy(factory.planning._test_bindings[0])
+    reads = []
+    actual_find = runtime.store.find_event_by_command_id
+
+    def find_then_change(command):
+        result = actual_find(command)
+        assert result is None
+        reads.append(command)
+        member = factory.planning._test_bindings[0]["profiles"]["member-0"]
+        if change == "workspace_revoked":
+            member["enabled"] = False
+        else:
+            member["binding"]["permission_digest"] = "7" * 64
+        return result
+
+    async def read_status():
+        p = dataclasses.asdict(principal); p["scopes"] = list(p["scopes"])
+        w = dataclasses.asdict(factory.planning._test_workspace_principal)
+        w["scopes"] = list(w["scopes"])
+        frame = dict(schema=wire.SCHEMA, operation="status",
+                     arguments=lookup, principal=p, workspace_principal=w)
+        async with _project_execution_foreground_dispatch(runtime, frame, lambda: None):
+            # Apply the race at the real lookup after this invocation's entry.
+            with monkeypatch.context() as during:
+                during.setattr(runtime.store, "find_event_by_command_id", find_then_change)
+                return await factory.handle_frame(frame)
+
+    refused = asyncio.run(read_status())
+    assert not refused["ok"] and refused["data"] is None, refused
+    assert refused["error"] == {
+        "code": "refused" if change == "workspace_revoked" else "context_changed",
+        "message": "Project execution is unavailable for this request",
+    }
+    assert len(reads) == 1
+    factory.planning._test_bindings[0] = before
+    restored = asyncio.run(invoke(factory, principal, lookup, "status"))
+    assert restored["ok"] and restored["data"]["state"] == "NOT_FOUND"
+    assert restored["data"]["receipt"] is None
+    assert runtime.jobs.list_jobs() == [] and runtime.attempts.list_attempts() == []
+    assert prepared == []

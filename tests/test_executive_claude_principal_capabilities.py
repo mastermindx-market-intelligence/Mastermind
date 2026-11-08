@@ -35,7 +35,9 @@ POLICY = ROOT / "config/executive_claude_principal_capabilities.json"
 DEFAULT_POLICY = ROOT / "config/executive_agent_capabilities.json"
 PROFILE_ID = "principal.claude-code.executive-coo.v1"
 GRANT_ID = "mastermind-executive-coo-v1"
-EXPECTED_POLICY_DIGEST = "978f7badb8c1ac32ccb74423b1bca3766a664819aa292c0149be78d76cce1d3d"
+# Adding the disabled adopted/current context and discovery alternatives changes only the aggregate
+# policy identity. Existing profile/grant/config identities below stay fixed.
+EXPECTED_POLICY_DIGEST = "ee404d21376ae1c588c11332b3e03bbee1f3511b9838077133d185774a981123"
 EXPECTED_PROFILE_DIGEST = "5d4a2b7e89c5fee0e34be6a623a4a19e5d91b5d743c7365826ef3384af8bf217"
 # The incumbent Claude config projection for the current COO tool catalog.
 # Adding Hermes preserves the existing Claude surface and grant projection;

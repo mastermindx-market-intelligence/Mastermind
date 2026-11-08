@@ -3,6 +3,7 @@ import fixture from "./project-source-operation-contract-cases.json";
 import {
   PROJECT_SOURCE_ACTION_ADD_FILE,
   PROJECT_SOURCE_ACTION_SET_PREFERENCE,
+  PROJECT_SOURCE_ACTION_CORRECT_DISCOVERY,
   PROJECT_SOURCE_ACTIONS,
   PROJECT_SOURCE_CONTEXT_SCHEMA,
   PROJECT_SOURCE_OPERATION_INVALID,
@@ -125,10 +126,11 @@ describe("project source operation contract fixture", () => {
     expect(CONTRACT.provenance.python_status_results.rejected).toBe(33);
   });
 
-  it("carries the two closed actions and their paired expectation tuples", () => {
+  it("carries three closed actions and preserves the two original fixture tuples", () => {
     expect([...PROJECT_SOURCE_ACTIONS]).toEqual([
       PROJECT_SOURCE_ACTION_ADD_FILE,
       PROJECT_SOURCE_ACTION_SET_PREFERENCE,
+      PROJECT_SOURCE_ACTION_CORRECT_DISCOVERY,
     ]);
     expect(Object.keys(CONTRACT.status_expectations)).toEqual([
       "add_project_file",

@@ -93,3 +93,5 @@
   .hermes-chat-recovery { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .hermes-chat *, .hermes-chat *::before, .hermes-chat *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+.hermes-chat-scope { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }

@@ -5,6 +5,7 @@ import { nativePendingPointer, readNativePending } from "../hermes-native/pendin
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
 import {parseFreshConversationTarget} from './fresh-conversation-target';
+import {parsePlanProposalTarget} from '../planning/project-plan-proposal';
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -78,6 +79,9 @@ type ClosedRecord = {
 } | {
   /** Same original native send lookup, with a Stop dispatch already reserved. */
   readonly v: 15; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
+} | {
+  /** Original PLAN publication lookup only; no private body or preview witness. */
+  readonly v: 15; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -136,7 +140,7 @@ const KIND_RECORDS = {
   project_create: { v: 4, key: /^mmos-project-create-[0-9a-f]{40}$/, consume: false },
   project_adopt: { v: 4, key: /^mmos-project-adopt-[0-9a-f]{40}$/, consume: false },
   direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
-  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set)-[0-9a-f]{40}$/, consume: false },
+  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set|discovery-correct)-[0-9a-f]{40}$/, consume: false },
   instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
   conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
   conversation_consume: { v: 10, key: /^mmos-conversation-consume-[0-9a-f]{40}$/, consume: false },
@@ -152,6 +156,7 @@ const KIND_VARIANTS = {
   conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
   conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false },
     { v: 15, key: /^mmos-hermes-stop-[0-9a-f]{32}$/, consume: false }],
+  project_source_write: [{v:15,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false}],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
     { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
@@ -201,8 +206,12 @@ function planningTargetMatches(targetKey: unknown): boolean {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
-  if (spec.v === 13 || spec.v === 14 || spec.v === 15) {
+  if (spec.v === 13 || spec.v === 14 || (spec.v === 15 && raw.kind === "conversation_turn")) {
     return readNativePending(raw as unknown as OperationPointer) !== null;
+  }
+  if (spec.v === 15 && raw.kind === "project_source_write") {
+    const target=parsePlanProposalTarget(raw.targetKey);
+    return target!==null && target.request_id===raw.operationKey && target.principal_scope===scope;
   }
   if (spec.v === 5) {
     if (typeof raw.targetKey !== "string") return false;

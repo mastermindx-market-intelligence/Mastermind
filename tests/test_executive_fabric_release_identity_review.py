@@ -49,7 +49,11 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
          '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
          '_mastermind_ops', '_mastermind_ops', '452', '457',
          '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
-         '432', '432'] if path == 'ops/executive_os/install.sh' else [])
+         '432', '432'] if path == 'ops/executive_os/install.sh' else
+        # Incumbent provider findings remain visible; only the ten new exact
+        # subscription principal sites are qualified by this source record.
+        ["_mastermind_worker","451","_mastermind_","_mastermind_worker","451","453","453","400","500","400","500","451","453","453"] if path ==
+        'ops/executive_os/provider_worker_slots.py' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 

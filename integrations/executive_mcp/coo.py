@@ -86,6 +86,138 @@ COO_TOOL_SCHEMA_DIGEST = (
     "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
 )
 
+# A separate reviewed catalogue. Existing descriptors and the v1 digest above
+# retain their exact meaning for every currently enrolled principal.
+from common import coo_agentos_context_contract as context_wire
+
+COO_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.TOOL,
+    "Read the complete canonical Agent OS context for one explicitly enrolled mission from its adopted snapshot. This read grants no execution authority.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Exact adopted context bytes and source/runtime receipt, with explicit degradation and omission accounting.", True))
+COO_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CONTEXT_TOOL_SPECS)
+COO_CONTEXT_TOOL_SCHEMA_DIGEST = "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
+COO_CURRENT_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.CURRENT_TOOL,
+    "Read current canonical Agent OS context for an enrolled mission using independently authenticated Executive and Workspace resources. This read grants no execution authority.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Exact current DATA context with pinned CODE, original publication and source/runtime evidence.", True))
+COO_CURRENT_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CURRENT_CONTEXT_TOOL_SPECS)
+
+# This v4 catalogue is an explicit opt-in over the same authenticated owner.
+# The original catalogue descriptors above retain their exact digests.
+from common import coo_discovery_contract as discovery_wire
+from common import workspace_discovery_correction_contract as correction_wire
+
+
+def _closed(properties):
+    return {"type": "object", "additionalProperties": False,
+            "required": list(properties), "properties": properties}
+
+
+def _hex_schema(size):
+    return {"type": "string", "pattern": "^[0-9a-f]{" + str(size) + "}$", "maxLength": size}
+
+
+def _record_ref(prefix):
+    return {"type": "string", "pattern": "^" + prefix + "[A-Z0-9]+(?:-[A-Z0-9]+)*$",
+            "minLength": len(prefix) + 2, "maxLength": len(prefix) + 64}
+
+
+_CORRECTION_IDENTITY = {
+    "request_id": {"type": "string", "pattern": "^" + correction_wire.REQUEST_PREFIX + "[0-9a-f]{40}$",
+                   "maxLength": len(correction_wire.REQUEST_PREFIX) + 40},
+    "work_ref": _record_ref("WS:"), "source_commit": _hex_schema(40), "base_revision": _hex_schema(64),
+    "discovery_ref": _record_ref("DSC:"), "expected_discovery_revision": _hex_schema(64),
+}
+_CORRECTION_LOOKUP = _closed({"action": {"const": correction_wire.ACTION}, **_CORRECTION_IDENTITY,
+                             "request_sha256": _hex_schema(64)})
+_BOUNDED_TEXT = {"type": "string", "minLength": 1, "maxLength": 2048}
+_DATE = {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10}
+_CORRECTION_REQUEST = _closed({"schema": {"const": correction_wire.REQUEST_SCHEMA}, **_CORRECTION_IDENTITY,
+    "correction_reason": dict(_BOUNDED_TEXT), "replacement": _closed({
+        **{key: dict(_BOUNDED_TEXT) for key in ("claim", "falsifier", "so_what", "verified_by")},
+        "kind": {"type": "string", "enum": sorted(correction_wire.KINDS)},
+        "confidence": {"type": "string", "enum": ["verified", "probable", "suspected"]},
+        "verified_at": dict(_DATE), "expires": {"anyOf": [dict(_DATE), {"type": "null"}]},
+        "body_utf8": {"type": "string", "maxLength": 8192},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": True,
+                     "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
+    })})
+_PREVIEW_WITNESS = _closed({"original_input": _closed({
+    "schema": {"const": "mastermind.terminal_original_input_reference.v1"},
+    "input_ref": {"type": "string", "pattern": "^terminal-input:[0-9a-f]{64}$", "maxLength": 79},
+    "artifact_sha256": _hex_schema(64), "payload_sha256": _hex_schema(64),
+}), "recipe_fingerprint_sha256": _hex_schema(64)})
+COO_DISCOVERY_TOOL_SPECS = (*COO_CURRENT_CONTEXT_TOOL_SPECS,
+    ToolSpec(discovery_wire.SOURCE_TOOL,
+        "Read one current discovery at an exact canonical DATA commit, or the retained original note for one exact correction lookup. Original custody is not current source state.",
+        {"type": "object", "oneOf": [
+            _closed({"mode": {"const": "current"}, "work_ref": _record_ref("WS:"),
+                     "discovery_ref": _record_ref("DSC:"), "expected_source_commit": _hex_schema(40)}),
+            _closed({"mode": {"const": "original"}, "lookup": copy.deepcopy(_CORRECTION_LOOKUP)}),
+        ]}, "Qualified original Workspace source body or explicit unavailability.", True),
+    ToolSpec(discovery_wire.CORRECTION_TOOL,
+        "Prepare, read, submit or reconcile one governed discovery correction through its original Workspace owner. Prepare returns a review; submit requires that exact witness. Retain all eight original lookup fields after uncertainty; never generate a replacement request or retry an unresolved submit.",
+        {"type": "object", "oneOf": [
+            _closed({"operation": {"const": "prepare"}, "request": copy.deepcopy(_CORRECTION_REQUEST)}),
+            _closed({"operation": {"enum": ["read", "reconcile"]}, "lookup": copy.deepcopy(_CORRECTION_LOOKUP)}),
+            _closed({"operation": {"const": "submit"}, "lookup": copy.deepcopy(_CORRECTION_LOOKUP),
+                     "preview_witness": copy.deepcopy(_PREVIEW_WITNESS)}),
+        ]}, "Original review or operation status; publication and acceptance remain separate owner facts.", False),
+)
+COO_DISCOVERY_TOOL_NAMES = tuple(spec.name for spec in COO_DISCOVERY_TOOL_SPECS)
+
+
+def coo_discovery_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_DISCOVERY_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+def coo_context_tool_schema_snapshot():
+    return [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+             "name": spec.name, "output_schema": None}
+            for spec in sorted(COO_CONTEXT_TOOL_SPECS, key=lambda item: item.name)]
+
+
+def coo_context_tool_schema_digest():
+    return hashlib.sha256(canonical_json(coo_context_tool_schema_snapshot())).hexdigest()
+
+
+def coo_current_context_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_CURRENT_CONTEXT_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+def catalogue_specs(catalogue):
+    if catalogue == context_wire.LEGACY_CATALOGUE: return COO_TOOL_SPECS
+    if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
+    if catalogue == context_wire.CURRENT_CATALOGUE: return COO_CURRENT_CONTEXT_TOOL_SPECS
+    if catalogue == discovery_wire.CATALOGUE: return COO_DISCOVERY_TOOL_SPECS
+    raise GatewayError("invalid_input", "unknown COO catalogue")
+
+
+def validate_coo_context_tool_arguments(name, arguments):
+    if name in discovery_wire.TOOLS:
+        try:
+            return discovery_wire.arguments(name, arguments)
+        except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+            raise GatewayError("invalid_input", "invalid COO discovery request") from None
+    if name not in {context_wire.TOOL, context_wire.CURRENT_TOOL}:
+        return validate_coo_tool_arguments(name, arguments)
+    try:
+        from common.workspace_project_plan_contract import validate_selection
+        if type(arguments) is not dict or set(arguments) != {"work_ref"} or not _check_work_ref(arguments["work_ref"]):
+            raise ValueError()
+        validate_selection(arguments)
+        return dict(arguments)
+    except (ValueError, TypeError):
+        raise GatewayError("invalid_input", "invalid COO context selector") from None
+
 
 def validate_coo_tool_arguments(name, arguments):
     if name not in COO_TOOL_NAMES:

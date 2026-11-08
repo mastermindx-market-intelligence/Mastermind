@@ -247,6 +247,13 @@ export function HermesNativePanel({ locale, port = nativeHermesPort, visible = t
   const unresolved = Boolean(held || unknownAdmission);
   const pending = Boolean(session?.running || activeAdmission);
   const sendEligible = Boolean(session?.canSend || session?.sendCheckRequired);
+  // Describe the original effect without inferring a new tool-policy observation.
+  const sessionIds = session ? [session.id, session.storedId] : [];
+  const receiptForSession = receipt && sessionIds.includes(receipt.sessionId) ? receipt : undefined;
+  const originalUnsettledForSession = Boolean(
+    (held?.kind === "send" && sessionIds.includes(held.sessionId)) ||
+    (receiptForSession && receiptForSession.status !== "terminal") ||
+    session?.pending.some(row => row.status !== "terminal"));
   const canSend = sendEligible && !busy && !unresolved && !pending && !session?.promptsPending && draft.trim().length > 0 && new TextEncoder().encode(draft).length <= 32768;
 
   if (!port.available()) return <section className="hermes-native-panel" aria-label={t("Native Hermes", "原生 Hermes")}>
@@ -263,6 +270,7 @@ export function HermesNativePanel({ locale, port = nativeHermesPort, visible = t
   return <HermesChatView locale={locale} runtime={runtime} session={session} history={history} receipt={receipt}
     role={role} draft={draft} busy={busy} notice={visibleNotice} held={held} pending={pending}
     canSend={canSend} canStop={Boolean(canStop)} sendEligible={sendEligible} unknownAdmission={Boolean(unknownAdmission)}
+    originalUnsettledForSession={originalUnsettledForSession}
     pendingText={pendingText} liveText={live?.text} liveStatus={liveStatus} liveActivity={live?.activity} onRole={setRole} onDraft={setDraft}
     onConnect={() => void perform({ operation: "status" })}
     onCreate={() => void perform({ operation: "create", role, requestId: requestId() })}

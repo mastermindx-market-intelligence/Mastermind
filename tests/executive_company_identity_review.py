@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "ea7aee823d3b38eb5c8b102d713678cc35a818213bb6777560cdce09a7976720",
-        "ast_sha256": "d6dc49f5ec033025ac0fbf1903374049a4ec7c5cde5daa504c3f0473e5507164",
+        "source_sha256": "14f94ba9fed9378d3d05b6c99f81e5eda23ca0da7d242a81228b0cf16b374017",
+        "ast_sha256": "d3a6f3851c6ec7383739c3ad962c8fdaa8b7710d3668f112d53aeafd24e05745",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -63,3 +63,20 @@ REVIEWED_ANCHORS = {
 # not inherited native SEND approval or installation/release authority.
 
 # Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.
+
+# Authenticated Agent OS context adds one 47-line read branch after the existing
+# catalog branch. Removing that exact insertion reproduces the previous source
+# bytes; the Company method, all three catalog operands and their AST paths are
+# unchanged. The new whole-source/method pins qualify that bounded composition.
+
+# Current-context composition extends that same App-peer branch with an
+# independently authenticated Workspace projection and the original canonical
+# DATA binding. Parent inspected the bounded diff and checked the complete
+# Company method plus each original Fabric operand/path against protected
+# source. Only whole-source/enclosing-method pins change; no new literal site
+# or scanner exemption is added. This is source review, not host acceptance.
+
+# Discovery correction extends the original authenticated App-peer branch.
+# The Company method and all three Fabric error operands, including their
+# complete AST paths and token spans, remain unchanged. Only the exact whole
+# source and enclosing ingress-method digests change for this composition.

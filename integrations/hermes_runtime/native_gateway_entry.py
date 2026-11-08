@@ -179,13 +179,14 @@ def _consumer_trust_gate(publication):
     """The incumbent MCP trust gate, consulted before a model-facing call."""
     from integrations.hermes_delegate.policy import TOOL_NAME
 
-    def gate() -> str | None:
+    def gate(tool_name=TOOL_NAME, booked=None, arguments=None) -> str | None:
         try:
             from tools.mcp_tool_handlers import _trust_gate_check
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
         try:
-            return _trust_gate_check(publication.mcp.server, TOOL_NAME, [], {})
+            return _trust_gate_check(publication.mcp.server, tool_name,
+                                     [] if booked is None else booked, {} if arguments is None else arguments)
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
 
@@ -272,6 +273,16 @@ async def _qualify_consumer(runner, document, role_home: Path, launch, *,
         except Exception:
             return False
 
+    from integrations.hermes_harness.native_executive_consumer import ExecutiveContextConsumerPublication
+    if type(publication) is ExecutiveContextConsumerPublication:
+        from .native_agentos_memory import NativeAgentOsMemoryFactory
+        if type(slot.memory_factory) is not NativeAgentOsMemoryFactory:
+            raise RuntimeRefusal("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
+        slot.memory_factory.configure(session_id=target["session_id"],
+            instance_id=target["instance_id"], authority_epoch=target["authority_epoch"],
+            server=server, session=session, loop=loop, currentness=session_guard,
+            connection_current=mcp_current)
+
     # The C28 sync contract is retained. Its finite worker uses the incumbent
     # executor; it cannot block the gateway loop needed by original enrollment.
     worker = asyncio.create_task(asyncio.to_thread(
@@ -300,13 +311,94 @@ async def _qualify_consumer(runner, document, role_home: Path, launch, *,
 
 
 
+_GENERAL_PLUGIN_LOADER_SHA256 = "9a22216f26382407ccd155796afd3d42b8186a5ba717c95865c37f4ca4cd1a3f"
+_PLUGIN_ISOLATION_SHA256 = "808f055dd182d5118b1ef187abdf632a3871557a7decd652951af0de0c53eb2c"
+_HELD_CONSUMER_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
+
+
+def _install_held_consumer_import(vendor, manager, slot, manifest, package, package_check):
+    """Keep original PluginManager gates/ledger; use the held source importer."""
+    import inspect
+    from integrations.hermes_harness.native_executive_consumer import CONSUMER_PLUGIN_NAME, CONSUMER_SLOT_ATTRIBUTE
+    loader = _vendor_module("hermes_cli.plugins_loader", vendor)
+    isolation = _vendor_module("hermes_cli.plugin_isolation", vendor)
+    for path, digest in (("hermes_cli/plugins_loader.py", _GENERAL_PLUGIN_LOADER_SHA256),
+                         ("hermes_cli/plugin_isolation.py", _PLUGIN_ISOLATION_SHA256)):
+        if _digest(vendor / path, maximum=128 * 1024) != digest:
+            raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_SOURCE_MISMATCH")
+    originals = {}
+    for name in ("_load_plugin", "_load_plugin_scoped", "_load_directory_module", "_policy_module_name",
+                 "_runs_in_plugin_host"):
+        method = getattr(manager, name, None)
+        fn = getattr(method, "__func__", None)
+        if (not inspect.ismethod(method) or method.__self__ is not manager
+                or fn is not getattr(loader.PluginLoaderMixin, name, None)
+                or fn.__globals__ is not vars(loader) or fn.__module__ != loader.__name__
+                or Path(fn.__code__.co_filename).resolve() != Path(loader.__file__).resolve()):
+            raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_SEAM_CHANGED")
+        originals[name] = method
+    publication = slot.publication
+
+    def reserved(candidate):
+        return (getattr(candidate, "name", None) == CONSUMER_PLUGIN_NAME
+                or getattr(candidate, "key", None) == CONSUMER_PLUGIN_NAME)
+
+    def current():
+        return (getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is slot
+            and slot.manager is manager and slot.publication is publication
+            and manager.scope_key == slot.scope
+            and manager._load_directory_module is directory_module
+            and manager._policy_module_name is policy_module_name
+            and getattr(manager, "_load_plugin_scoped", None) == originals["_load_plugin_scoped"]
+            and getattr(manager, "_runs_in_plugin_host", None) == originals["_runs_in_plugin_host"])
+
+    def require_load(candidate):
+        if (candidate is not manifest or not current() or not slot.load_attempted
+                or not slot.loader_entered or slot.load_outcome != "LOAD_PENDING"
+                or getattr(candidate, "source", None) != "user"
+                or str(getattr(candidate, "path", "")) != str(package)
+                or getattr(candidate, "portable", False)
+                or isolation.in_process_import_refusal("Mastermind native consumer", source="user") is not None
+                or originals["_runs_in_plugin_host"](candidate)
+                or type(getattr(manager, "_predeclared_modules", None)) is not dict
+                or CONSUMER_PLUGIN_NAME in manager._predeclared_modules):
+            raise RuntimeRefusal("NATIVE_CONSUMER_HELD_IMPORT_UNAVAILABLE")
+        package_check()
+
+    def policy_module_name(candidate):
+        if not reserved(candidate):
+            return originals["_policy_module_name"](candidate)
+        require_load(candidate)
+        # The original registry policy lease must name the module that really
+        # owns callbacks; a synthetic alias would fail to cover the held module.
+        return _HELD_CONSUMER_MODULE
+
+    def directory_module(candidate, *, module_name=None):
+        if not reserved(candidate):
+            return originals["_load_directory_module"](candidate, module_name=module_name)
+        require_load(candidate)
+        if module_name != _HELD_CONSUMER_MODULE:
+            raise RuntimeRefusal("NATIVE_CONSUMER_HELD_IMPORT_UNAVAILABLE")
+        module = importlib.import_module(_HELD_CONSUMER_MODULE)
+        if Path(module.__file__) != package / "__init__.py":
+            raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
+        require_load(candidate)
+        return module
+
+    if slot.import_current is not None:
+        raise RuntimeRefusal("NATIVE_CONSUMER_ORIGINAL_IMPORT_RETAINED")
+    manager._policy_module_name, manager._load_directory_module = policy_module_name, directory_module
+    slot.import_current = current
+    return require_load
+
+
 def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=True):
     """Fence the exact held package before discovery, then use native events."""
     import asyncio
     from integrations.hermes_harness.native_executive_consumer import (
         CONSUMER_PLUGIN_NAME, CONSUMER_PLUGIN_SOURCE, CONSUMER_SLOT_ATTRIBUTE,
         ConsumerSlot, held_plugin_package_digest, install_consumer_slot,
-        publication_from_document, validate_consumer_publication)
+        publication_from_document, selected_child_publication, validate_consumer_publication)
     raw = launch.recipe.get("executive_consumer")
     if raw is None:
         return None
@@ -334,13 +426,18 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
     slot = install_consumer_slot(manager, ConsumerSlot(
         owner=owner, profile_id=get_active_profile_name(), source=CONSUMER_PLUGIN_SOURCE,
         plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
+    from common.coo_discovery_contract import TOOLS as discovery_tools
+    provided = [] if selected_child_publication(publication) is None else ["mmx_delegate"]
+    if getattr(publication, "discovery", False):
+        provided.extend(discovery_tools)
     manifest = PluginManifest(
         name=CONSUMER_PLUGIN_NAME, version="1.0.0", source=CONSUMER_PLUGIN_SOURCE,
-        path=str(package), provides_tools=["mmx_delegate"], key=CONSUMER_PLUGIN_NAME)
+        path=str(package), provides_tools=provided, key=CONSUMER_PLUGIN_NAME)
     if slot.package_path is not None:
         raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_ALREADY_BOUND")
     slot.package_path, slot.package_check = str(package), package_check
     original_load = manager._load_plugin
+    require_held_import = _install_held_consumer_import(vendor, manager, slot, manifest, package, package_check)
 
     def load_plugin(candidate):
         if (getattr(candidate, "name", None) != CONSUMER_PLUGIN_NAME
@@ -355,12 +452,14 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
         # Native census/unbound discovery cannot import a role-owned substitute
         # or start registration. Only the held qualified load gets one admission.
         with slot._lock:
-            if slot.startup.binding is None:
+            if slot.delegate_binding is None and not (
+                    slot.memory_factory is not None and slot.memory_factory.loader_ready()):
                 return None
             if (candidate is not manifest or not slot.load_attempted
                     or slot.loader_entered or slot.load_outcome != "LOAD_PENDING"):
                 raise RuntimeRefusal("NATIVE_CONSUMER_ORIGINAL_LOAD_RETAINED")
             slot.loader_entered = True
+        require_held_import(candidate)
         package_check()
         return original_load(candidate)
 
@@ -479,6 +578,8 @@ def run(launch, argv: list[str]) -> int:
         install_runtime_owner(launch.owner.root.name)
         from .native_request_observation import install_request_observation
         request_observation = install_request_observation(launch, vendor, role_home, role)
+        from .native_agentos_memory import install_native_agentos_memory
+        install_native_agentos_memory(launch, vendor, role_home, request_observation)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,

@@ -193,6 +193,7 @@ export interface KnowledgeMemoryResult extends ProjectKnowledgeReadMetadata {
 export interface KnowledgeActionsResult {
   readonly addFiles: 'AVAILABLE' | 'UNAVAILABLE';
   readonly editPreference: 'AVAILABLE' | 'UNAVAILABLE';
+  readonly correctDiscovery?: 'AVAILABLE' | 'UNAVAILABLE';
 }
 
 /** Typed parent handoff payload for an explicit edit-preference callback. */
@@ -221,6 +222,13 @@ export interface KnowledgeLibrarySourceContext {
   readonly workRef: string;
   readonly sourceCommit: string;
   readonly baseRevision: string;
+}
+
+/** Exact source opened by the mounted Library owner. Object identity is
+ * retained by that owner; this DTO alone is never a grant or read receipt. */
+export interface ProjectDiscoverySource extends ProjectSourceDocument {
+  readonly discoveryRef:string;
+  readonly sourceContext:KnowledgeLibrarySourceContext;
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +263,7 @@ export interface KnowledgeLibraryReadActionsRequest {
 export interface KnowledgeLibrarySourceOwner {
   readonly codeContext?:()=>ProjectKnowledgeCodeContext|null;
   current(snapshot:KnowledgeLibrarySourceContext):KnowledgeLibrarySourceContext;
+  discoveryCurrent?(source:ProjectDiscoverySource):boolean;
 }
 export interface KnowledgeLibraryProps {
   readonly onCurrentSourceOwner?: (owner:KnowledgeLibrarySourceOwner|null)=>void;
@@ -275,6 +284,7 @@ export interface KnowledgeLibraryProps {
   readonly readActions?: (request: KnowledgeLibraryReadActionsRequest) => Promise<unknown>;
   readonly onAddFiles?: (context: KnowledgeLibrarySourceContext) => void;
   readonly onEditPreference?: (context: KnowledgeLibrarySourceContext, memory: ProjectMemoryDocument | null) => void;
+  readonly onCorrectDiscovery?: (source:ProjectDiscoverySource)=>void;
   readonly renderSourceCompanion?: (source: ProjectSourceDocument) => ReactNode;
 }
 
@@ -823,7 +833,8 @@ export function validate_actions(
   assertAcyclic(raw, new Set());
   assertWireBudget(raw);
   exactKeys(raw, ['schema', 'selection', 'source_commit', 'base_revision', 'actions']);
-  expectExactSchema(raw['schema'], KNOWLEDGE_ACTIONS_SCHEMA);
+  const correction=raw['schema']==='mastermind.project_knowledge_actions.v2';
+  if(!correction)expectExactSchema(raw['schema'], KNOWLEDGE_ACTIONS_SCHEMA);
   const selection = raw['selection'];
   if (!isPlainRecord(selection)) fail('MALFORMED_PAYLOAD');
   exactKeys(selection, ['work_ref']);
@@ -832,10 +843,11 @@ export function validate_actions(
   if (expectHex64(raw['base_revision'], 'MALFORMED_PAYLOAD') !== expectedBaseRevision) fail('SNAPSHOT_MISMATCH');
   const actions = raw['actions'];
   if (!isPlainRecord(actions)) fail('MALFORMED_PAYLOAD');
-  exactKeys(actions, ['add_files', 'edit_preference']);
+  exactKeys(actions, correction?['add_files', 'edit_preference','correct_discovery']:['add_files', 'edit_preference']);
   return cloneFrozen({
     addFiles: expectEnum(actions['add_files'], ['AVAILABLE', 'UNAVAILABLE'], 'MALFORMED_PAYLOAD'),
     editPreference: expectEnum(actions['edit_preference'], ['AVAILABLE', 'UNAVAILABLE'], 'MALFORMED_PAYLOAD'),
+    ...(correction?{correctDiscovery:expectEnum(actions['correct_discovery'], ['AVAILABLE', 'UNAVAILABLE'] as const, 'MALFORMED_PAYLOAD')}:{}),
   });
 }
 

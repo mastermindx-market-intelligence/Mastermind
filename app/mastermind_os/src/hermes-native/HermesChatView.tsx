@@ -39,6 +39,7 @@ export interface HermesChatViewProps {
   canStop: boolean;
   sendEligible: boolean;
   unknownAdmission: boolean;
+  originalUnsettledForSession: boolean;
   pendingText?: string;
   liveText?: string;
   liveStatus?: "connecting" | "live" | "interrupted";
@@ -85,6 +86,14 @@ export function HermesChatView(props: HermesChatViewProps) {
   const follow = useScrollFollow(true, 72);
   const previousSession = useRef(session?.id);
   const unresolved = Boolean(held || props.unknownAdmission);
+  const receiptForSession = receipt && session && [session.id, session.storedId].includes(receipt.sessionId) ? receipt : undefined;
+  const scopeDescription = session?.toolAccess === "ADVISORY_READ_ONLY" ? t("Local planning advice and capacity previews", "本地规划建议与容量预览")
+    : session?.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览")
+    : session?.toolAccess === "NONE" ? t("Text only", "仅文本")
+    : props.originalUnsettledForSession ? t("Sending is paused until the original request’s outcome is confirmed.", "确认原请求的结果前，发送已暂停。")
+    : session?.sendCheckRequired ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限")
+    : receiptForSession?.status === "terminal" && !props.sendEligible ? t("Refresh the original conversation before sending again.", "请先刷新原会话，再继续发送。")
+    : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送");
   const stopVisible = held?.kind === "send" && receipt && receipt.sessionId === held.sessionId && ["queued", "started"].includes(receipt.status);
 
   useEffect(() => {
@@ -178,6 +187,7 @@ export function HermesChatView(props: HermesChatViewProps) {
           {props.unknownAdmission && <p role="alert" className="hermes-chat-recovery">{t("The original native admission is unknown. Sending stays held until its owner resolves it.", "原生请求状态未知；解决原请求前暂停发送。")}</p>}
           {held && (!pending || props.notice || props.liveStatus === "interrupted" || held.kind === "send" && held.stopReserved) && <div className="hermes-chat-recovery"><span>{held.kind === "send" && held.stopReserved ? t("Stop outcome is not confirmed. Check the original request before continuing.", "停止结果尚未确认。请先检查原请求，再继续。") : props.liveStatus === "interrupted" ? t("Live updates paused. Check the original conversation to continue.", "实时更新已暂停。请检查原会话以继续。") : t("Check the previous request before sending again.", "请先检查原请求，再继续发送。")}</span><button type="button" disabled={!runtime || busy} onClick={props.onRecover}>{t("Check previous request", "检查原请求")}</button></div>}
           {session?.promptsPending && <p role="status">{t("A native prompt needs attention in Hermes. This client does not auto-approve it.", "Hermes 中有待处理提示；此客户端不会自动批准。")}</p>}
+          {session?.toolAccess === "UNQUALIFIED" && <p className="hermes-chat-scope" role="status">{scopeDescription}</p>}
           {session && <div className="hermes-chat-composer">
             <label className="hermes-chat-sr-only" htmlFor="hermes-chat-message">{t("Message Hermes", "发送给 Hermes")}</label>
             <textarea id="hermes-chat-message" ref={composer} rows={1} value={draft} onChange={e => props.onDraft(e.target.value)}
@@ -192,10 +202,11 @@ export function HermesChatView(props: HermesChatViewProps) {
           <div className="hermes-chat-footer-tools"><details className="hermes-chat-details"><summary>{t("Connection details", "连接详情")}</summary>
             <div><p>Hermes {runtime?.version ? `v${runtime.version}` : t("Not connected", "未连接")}</p>
               <label>{t("Conversation purpose", "会话用途")} <select value={props.role} disabled={busy || unresolved || pending} onChange={e => props.onRole(e.target.value as typeof props.role)}><option value="meta-ceo">Meta-CEO</option><option value="secretary">{t("Secretary", "秘书")}</option></select></label>
-              {session && <p>{t("Configured model", "已配置模型")}: {session.requestedModel || t("Not reported", "未提供")} · {session.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览") : session.toolAccess === "NONE" ? t("Text only", "仅文本") : session.sendCheckRequired ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限") : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>}
+              {session && <p>{t("Configured model", "已配置模型")}: {session.requestedModel || t("Not reported", "未提供")} · {session.toolAccess === "UNQUALIFIED" ? null : scopeDescription}</p>}
               {receipt && <p>{t("Native admission", "原生受理记录")}: <code>{receipt.id}</code> · {receipt.status}{receipt.outcome ? ` · ${receipt.outcome}` : ""}</p>}
               {held && <p>{t("Original request", "原请求")}: <code>{held.requestId}</code></p>}
               <p>{t("The message is sent exactly as written. No automatic resend.", "按原文发送，不自动重试。")}</p>
+              <p>{t("Worker dispatch is not enabled by this connection.", "此连接不会启用工作代理调度。")}</p>
             </div></details>
             {(session || receipt) && <button type="button" className="hermes-chat-text-button" disabled={busy} onClick={props.onRead} aria-label={t("Read original conversation", "读取原会话")}>{t("Refresh conversation", "刷新会话")}</button>}
           </div>

@@ -41,6 +41,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "config/strategic_state.yml",
     "control_plane/__init__.py",
     "control_plane/ceo_boot_packet.py",
+    "control_plane/company_orientation.py",
     "control_plane/chairman_control_room.py",
     "control_plane/chairman_control_room_remote.py",
     "control_plane/executive_inbox.py",

@@ -43,12 +43,14 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary', 'session_web_observation'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
     if raw.get('reply_events_armed',False) and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('reply events require explicit Web-CEO v3 receiver')
+    from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
+    validate_dot_canary_settings(raw)
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
@@ -79,6 +81,7 @@ def validate_document(raw):
     validate_optional_mounts(raw)
     build_installed_principal_ruling_target(raw)
     build_installed_selected_child_target(raw)
+    validate_web_observation(raw)
     return raw
 
 
@@ -305,6 +308,7 @@ def current_projection_loader(config_path, source, initial, block, field, *, exp
             ('workspace', 'bindings'),
             ('steward', 'content_profiles'),
             ('coo', 'binding'),
+            ('session_web_observation', 'permissions'),
         ):
             for value in (left, right):
                 if name in value:
@@ -317,6 +321,97 @@ def current_projection_loader(config_path, source, initial, block, field, *, exp
             raise ValueError('installed policy or configuration changed')
         return current[block] if field is None else current[block][field]
     return load
+
+
+
+def observation_policies(raw):
+    """The existing READ-capable policy variants, never a new identity realm."""
+    from integrations.mastermind_executive_app.gateway import load_app_policies
+    primary = load_app_policies(raw['policies'])
+    additional = build_additional_policies(raw, primary)
+    public = build_public_policies(raw, primary, additional)
+    pairs = (primary, *additional) + (() if public is None else (public,))
+    return tuple(policy for pair in pairs for policy in (pair.read, pair.submit))
+
+
+def validate_web_observation(raw):
+    if 'session_web_observation' not in raw:
+        return
+    if raw.get('executive_mcp_profile') != 'web_ceo_v3':
+        raise ValueError('profile observation requires explicit Web-CEO v3')
+    from integrations.session_bridge.installed_web_observation import parse_configuration
+    parse_configuration(raw['session_web_observation'], observation_policies(raw))
+
+
+def _web_observation_install_identity(config_path, source):
+    """Use the existing root seal plus descriptor-bound ACL checks and identity."""
+    from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+    require_sealed_path(source, directory=True)
+    require_sealed_path(config_path)
+    seen = set()
+    for root in (source, config_path):
+        for node in (root, *root.parents):
+            if node not in seen:
+                seen.add(node)
+                try:
+                    if has_macos_acl(node):
+                        raise ValueError('installed observation seal is unavailable')
+                except FilesystemSecurityError:
+                    raise ValueError('installed observation seal is unavailable') from None
+    info = config_path.lstat()
+    if not 0 < info.st_size <= 262144:
+        raise ValueError('installed observation source is unavailable')
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def installed_web_observation_owner(config_path, source, *, expected_uid,
+                                    initial=None, clock=None):
+    """Bind optional permissions to the same root-sealed installation only.
+
+    Only permission rows/generation may rotate. File-instance identity is part
+    of every ephemeral revision, so replacing or restoring identical grants
+    cannot revive a read captured under an earlier observed file instance.
+    No profile/browser/source access occurs in this network-safe constructor.
+    """
+    if initial is not None and 'session_web_observation' not in initial:
+        return None
+    from integrations.business_mcp_auth.contracts import AuthError
+    from integrations.session_bridge.installed_web_observation import (
+        ObservationPermissionReader, observation_state,
+    )
+    path, source = Path(config_path), Path(source)
+    try:
+        first = _web_observation_install_identity(path, source)
+        raw = validate_document(json.loads(path.read_text()) if initial is None
+                                else copy.deepcopy(initial))
+        if first != _web_observation_install_identity(path, source):
+            raise ValueError('installed observation source changed')
+        if 'session_web_observation' not in raw:
+            return None
+        policies = observation_policies(raw)
+        read_projection = current_projection_loader(path, source, raw,
+            'session_web_observation', None, expected_uid=expected_uid)
+
+        def load():
+            before = _web_observation_install_identity(path, source)
+            try:
+                value = read_projection()
+            except AuthError:
+                raise ValueError('installed observation policy is unavailable') from None
+            after = _web_observation_install_identity(path, source)
+            if before != after:
+                raise ValueError('installed observation source changed')
+            revision = hashlib.sha256(json.dumps(
+                {'file_instance': before, 'observation': value},
+                sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+                allow_nan=False).encode('ascii')).hexdigest()
+            return observation_state(value, policies, revision)
+
+        load()  # Qualify current identity/release/configuration; never cache it.
+        return ObservationPermissionReader(load_state=load, clock=clock)
+    except AuthError:
+        raise ValueError('installed observation policy is unavailable') from None
 
 
 def build_coo_principal_authorizer(raw, source, config_path):
@@ -588,14 +683,29 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
     validate_document(raw)
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.coo_installed import CooFactsClient
+    from integrations.mastermind_executive_app.coo_binding import principal_frame
+    from ops.executive_os.coo_principal_host import CooInstalledSource, CLAUDE_PRINCIPAL_POLICY
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
     public_mcp = executive.public_policies is not None
     if public_mcp and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('public COO requires the installed Web-CEO v3 profile')
     client = CooFactsClient(raw['ceo_ingress_socket_path'])
+    uid = raw['service_uid'] if expected_uid is None else expected_uid
+    def registry():
+        policy = Path(source) / CLAUDE_PRINCIPAL_POLICY
+        require_sealed_path(policy)
+        return ExecutionCapabilityRegistry.load(policy, source_root=source)
+    catalogue_source = CooInstalledSource(
+        current_projection_loader(config_path, source, raw, 'coo', None, expected_uid=uid), registry)
     settings = dict(executive=executive, policy=optional_policies(raw)['coo'],
         public_mcp=public_mcp,
         load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
-        authority_provider=client.authority, mission_provider=client.mission)
+        authority_provider=client.authority, mission_provider=client.mission,
+        catalogue_provider=lambda principal, work_ref=None: catalogue_source.catalogue_for_principal(
+            principal_frame(principal), work_ref=work_ref),
+        agentos_context_provider=client.agentos_context,
+        agentos_current_context_provider=client.agentos_current_context,
+        agentos_discovery_context_provider=client.agentos_discovery_context)
     publication = build_installed_selected_child_target(raw)
     if publication is not None:
         # One frozen publication, read through the SHARED generation-bound
@@ -841,15 +951,21 @@ def main(argv=None):
                 else build_web_ceo_v3_with_coo_mcp_app
             )
             v3_kwargs = {}
+            web_observation = installed_web_observation_owner(
+                args.config, source, expected_uid=raw["service_uid"], initial=raw)
+            if web_observation is not None:
+                v3_kwargs["session_web_read_tools"] = web_observation.network_tools(session_client)
             if coo_settings is not None:
                 v3_kwargs["coo_settings"] = coo_settings
                 v3_kwargs["principal_ruling_target"] = build_installed_principal_ruling_target(raw)
             if raw.get("reply_events_armed",False):
                 from integrations.session_bridge.installed_reply_events import build_installed_reply_event_rpc
                 from integrations.session_bridge.reply_policy_selection import ReplyPolicySelection
+                from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
                 v3_kwargs["reply_event_rpc"] = build_installed_reply_event_rpc(
                     settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
-                    clock=lambda:int(settings.clock()),enabled=True)
+                    clock=lambda:int(settings.clock()),enabled=True,
+                    canary_enabled=validate_dot_canary_settings(raw) is not None)
             # One installed client instance; the opt-in OS session transport
             # receives this same object only while the transport is enabled.
             os_transport_enabled = raw.get('os_executive_transport', False)

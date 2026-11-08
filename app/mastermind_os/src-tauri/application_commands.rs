@@ -75,4 +75,5 @@ pub const APPLICATION_COMMANDS: &[&str] = &[
     "executive_session_reply",
     "executive_session_references",
     "executive_project_session_references",
+    "read_company_priorities",
 ];

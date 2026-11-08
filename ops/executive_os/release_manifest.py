@@ -292,9 +292,11 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
         keys = keys | {"vendor_derivation"}
         if (type(derivation) is not dict
                 or set(derivation) != {"kind", "base_sha", "patch_sha256", "source_root"}
-                or derivation["kind"] != "computer_env_guard"
                 or derivation["base_sha"] != "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
-                or derivation["patch_sha256"] != "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"):
+                or (derivation["kind"], derivation["patch_sha256"]) not in (
+                    ("computer_env_guard", "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"),
+                    ("diagnostic_privacy", "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"),
+                    ("workspace_oauth_privacy", "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"))):
             raise ReleaseManifestError("Hermes vendor derivation is invalid")
         derivation = dict(derivation, source_root=_safe_installation_path(derivation["source_root"]))
     version = value.get("schema")
@@ -330,6 +332,15 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             # by the complete installation limit. It is never a qualified
             # publication until the same semantic owner runs under held imports.
             consumer = _closed_json(_canonical(consumer))
+            # Context v2 imports these native memory bodies. Require the fixed
+            # privacy repair even during deferred bootstrap qualification; the
+            # held owner separately verifies its full tree and installed receipt.
+            if (consumer.get("schema") == "mastermind.hermes_native_executive_consumer/v2"
+                    and (derivation is None or derivation["kind"] != "diagnostic_privacy")):
+                raise ReleaseManifestError("Hermes context requires diagnostic privacy derivation")
+            if (consumer.get("schema") in {"mastermind.hermes_native_executive_consumer/v3", "mastermind.hermes_native_executive_consumer/v4"}
+                    and (derivation is None or derivation["kind"] != "workspace_oauth_privacy")):
+                raise ReleaseManifestError("Hermes current context requires Workspace OAuth privacy derivation")
             if not _defer_consumer:
                 try:
                     from integrations.hermes_harness.native_executive_consumer import (

@@ -3,6 +3,7 @@ import {
   createDirectionPreview, previewIsCurrent, type DirectionPreview, type OfficeLaunchOutcome,
 } from "./preview";
 import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/ProgrammeDirection";
+import { OfficeWorkRead, type OfficeWorkReadState } from "./OfficeWorkRead";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { ByokRolesPanel } from "./ByokRolesPanel";
@@ -45,6 +46,12 @@ export interface MetaCeoOfficeProps {
   onOpenProjects?: () => void;
   /** Existing accepted Direction owner node; no authority is derived here. */
   acceptedDirection?: ReactNode;
+  /** Already acquired fixed Work read; never a company-total inference. */
+  workRead?: OfficeWorkReadState;
+  onInspectWork?: () => void;
+  /** Existing explicit selected-project journal reader, not company history. */
+  projectJournal?: ReactNode;
+  companyPriorities?: ReactNode;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
   /** Only the existing signed-in Executive owner may supply a continuation. */
@@ -113,6 +120,7 @@ const OFFICE_ZH = {
   "Moving with Meta-CEO": "与 Meta-CEO 一同推进",
   "Supplied mission view": "已提供的任务视图",
   "Work details are unavailable. Mission coverage and accountable owners are reported below.": "工作明细不可用。下方列出任务覆盖范围和负责人。",
+  "Separate Work and selected Mission sources": "工作与所选任务的独立来源",
   "No mission lanes were supplied. This is not a company-wide zero.": "尚未提供任务分支。这不代表全公司没有工作。",
   "Company total is not established.": "全公司总量尚未确认。",
   "Needs you": "需要你处理",
@@ -200,7 +208,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
 
 export function MetaCeoOffice({
   projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
-  selectedProject, onOpenProjects, acceptedDirection, organizationObservation,
+  selectedProject, onOpenProjects, acceptedDirection, organizationObservation, workRead, onInspectWork, projectJournal, companyPriorities,
   onOpenProject, onStartNewWork, byokObservation = { state: "SOURCE_UNBOUND" },
   canRefreshByok = false, onRefreshByok, locale = "en",
 }: MetaCeoOfficeProps) {
@@ -370,6 +378,7 @@ export function MetaCeoOffice({
       </aside>
     </div>
 
+    {companyPriorities}
     {acceptedDirection ? <details className="office-disclosure office-accepted-direction">
       <summary>{t("Accepted direction and history")}</summary>
       <p className="office-muted">{t("Read the accepted direction for this project. Its authored objective is a separate source record.")}</p>
@@ -434,8 +443,9 @@ export function MetaCeoOffice({
     <details className="office-disclosure office-movement-d">
       <summary>{t("Movement and mission lanes")}</summary>
       <section className="office-movement" aria-labelledby="office-moving-title">
-        <div className="office-section-label"><h2 id="office-moving-title">{t("Moving with Meta-CEO")}</h2><span className="office-muted">{t("Supplied mission view")}</span></div>
-        <p>{t("Work details are unavailable. Mission coverage and accountable owners are reported below.")}</p>
+        <div className="office-section-label"><h2 id="office-moving-title">{t("Moving with Meta-CEO")}</h2><span className="office-muted">{workRead ? t("Separate Work and selected Mission sources") : t("Supplied mission view")}</span></div>
+        {workRead ? <OfficeWorkRead state={workRead} locale={locale} onInspect={onInspectWork}/>
+          : <p>{t("Work details are unavailable. Mission coverage and accountable owners are reported below.")}</p>}
         {mission ? <>
           <p className="office-muted">{t("Coverage")} · {mission.children.coverage} · {t("total")} {mission.children.total_count ?? t("not established")}</p>
           <ul className="office-lanes">{mission.children.items.map(child => <li key={child.job_id}>
@@ -470,8 +480,9 @@ export function MetaCeoOffice({
       </section>
       <section className="office-panel" aria-labelledby="office-journal-title">
         <h2 id="office-journal-title">{t("What changed — and why")}</h2>
-        <p>{t("The durable journal is unavailable. A current snapshot does not establish a change history.")}</p>
-        <p className="office-ref">{projection.context.selection?.workRef ?? t("Project not selected")} · {projection.context.selection?.rootJobId ?? t("Root not selected")}</p>
+        {projectJournal ? <><p>{locale === "zh-CN" ? "所选项目日志；有界记录样本，不是全公司历史。" : "Selected-project journal: a bounded record sample, not company-wide history."}</p>{projectJournal}</>
+          : <p>{t("The durable journal is unavailable. A current snapshot does not establish a change history.")}</p>}
+        {!projectJournal && <p className="office-ref">{projection.context.selection?.workRef ?? t("Project not selected")} · {projection.context.selection?.rootJobId ?? t("Root not selected")}</p>}
         <p className="office-muted">{t("Agent OS retains decisions, discoveries and handoffs.")}</p>
       </section>
       </div>

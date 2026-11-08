@@ -3431,7 +3431,6 @@ class LaneLease:
             raise LaneRuntimeConfigError("lane_cpu_tctl_limit_out_of_bounds")
         chosen_max = config.max_active if max_active is None else int(max_active)
         chosen_ratio = config.max_load_ratio if load_ratio_limit is None else float(load_ratio_limit)
-        observed_load = float(os.getloadavg()[0] if load1 is None else load1)
         active_dir.mkdir(parents=True, exist_ok=True)
         admission_path = active_dir / ".admission.lock"
         admission_fd = os.open(admission_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -3446,6 +3445,10 @@ class LaneLease:
                     verify_for_admission(policy_here, active_dir)
                 except Exception as exc:
                     raise LaneRuntimeError("routing_policy_admission_refused") from exc
+            # Waiting for admission can outlive the picker's load observation.
+            # Sample live load under the same physical lock as slot admission;
+            # the explicit load1 value remains a deterministic fixture seam.
+            observed_load = float(os.getloadavg()[0] if load1 is None else load1)
             snapshot = evaluate_admission(
                 active_dir,
                 max_active=chosen_max,

@@ -288,13 +288,110 @@ class CooHostProvider:
     The installed launcher separately requires the exact root-sealed adapter.
     Keeping this dependency structural preserves the core/integration boundary.
     """
-    def __init__(self, source, workspace):
+    def __init__(self, source, workspace, *, agentos_context_reader=None):
         from control_plane.workspace_read_service import WorkspaceReadService
         if (not callable(getattr(source, "snapshot", None))
                 or not callable(getattr(source, "for_principal", None))
                 or type(workspace) is not WorkspaceReadService):
             _refuse()
         self.source, self.workspace = source, workspace
+        from control_plane.agentos_context_bundle import AgentOsContextBundleReader
+        if agentos_context_reader is not None and type(agentos_context_reader) is not AgentOsContextBundleReader:
+            _refuse()
+        self.agentos_context_reader = agentos_context_reader
+
+    def read_agentos_context(self, frame):
+        """One explicitly granted read; never invoke fresh-effect eligibility."""
+        from common import coo_agentos_context_contract as wire
+        from control_plane.agentos_context_bundle import AgentOsContextBundleReader
+        wire.validate_frame(frame)
+        context = wire.context(frame["principal_context"])
+        source, workspace, reader = self.source, self.workspace, self.agentos_context_reader
+        if type(reader) is not AgentOsContextBundleReader:
+            _refuse()
+
+        def capture():
+            if (self.source is not source or self.workspace is not workspace
+                    or self.agentos_context_reader is not reader):
+                _refuse()
+            source.require_context_source_current()
+            row, fact, authority = source.for_principal(frame["principal"], context.work_ref)
+            actual = PrincipalAdmissionContext(row["work_ref"], fact.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest)
+            if (row["enabled"] is not True or actual != context
+                    or authority.capability_profile_digest != frame["capability_profile_digest"]
+                    or wire.ACTION not in authority.principal_actions
+                    or source.catalogue_for_principal(frame["principal"]) != wire.CATALOGUE):
+                _refuse()
+            # generation(row) excludes enabled. Keep a detached full row as well
+            # as immutable facts so late mission disablement cannot be missed.
+            return json.loads(canonical(row)), dataclasses.replace(fact), dataclasses.replace(authority)
+
+        before = capture()
+        raw, receipt = reader.read(work_ref=context.work_ref)
+        result = wire.result(raw, receipt, principal_context=frame["principal_context"],
+            capability_profile_digest=frame["capability_profile_digest"])
+        if capture() != before:
+            _refuse()
+        return result
+
+    def read_current_agentos_context(self, frame):
+        return self._read_current_agentos_context(frame, discovery=False)
+
+    def read_discovery_agentos_context(self, frame):
+        return self._read_current_agentos_context(frame, discovery=True)
+
+    def _read_current_agentos_context(self, frame, *, discovery):
+        """Join two authenticated projections to the original installed DATA owner."""
+        import base64
+        from common import coo_agentos_context_contract as wire
+        from common.executive_workspace_contract import permission_stamp
+        from control_plane.installed_canonical_project_data_binding import read_installed_project_data
+        (wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
+        context = wire.context(frame["principal_context"])
+        source, workspace = self.source, self.workspace
+        binding, authorize, runtime = workspace._canonical_project_data, workspace.authorize, workspace.runtime
+        if binding is None or binding.store is not runtime.store:
+            _refuse()
+
+        def capture():
+            if (self.source is not source or self.workspace is not workspace
+                    or workspace._canonical_project_data is not binding or workspace.authorize is not authorize
+                    or workspace.runtime is not runtime or binding.store is not runtime.store):
+                _refuse()
+            source.require_context_source_current()
+            row, fact, authority = source.for_principal(frame["principal"], context.work_ref)
+            joined = source.for_workspace_read_principal(frame["workspace_principal"], context.work_ref)
+            actual = PrincipalAdmissionContext(row["work_ref"], fact.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest)
+            if (row["enabled"] is not True or actual != context or joined != (row, fact, authority)
+                    or authority.capability_profile_digest != frame["capability_profile_digest"]
+                    or wire.CURRENT_ACTION not in authority.principal_actions
+                    or source.catalogue_for_principal(frame["principal"]) !=
+                        (wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE)
+                    or authorize(frame["workspace_principal"]) is not True):
+                _refuse()
+            stamp = permission_stamp(authorize, frame["workspace_principal"])
+            if stamp is None:
+                _refuse()
+            return (json.loads(canonical(row)), dataclasses.replace(fact), dataclasses.replace(authority), stamp)
+
+        before = capture()
+        data = read_installed_project_data(binding, frame["workspace_principal"],
+            operation="agentos_current_context", selection={"work_ref": context.work_ref})
+        if data is None:
+            _refuse()
+        body, view, _ = data
+        if set(body) != {"bundle_encoding", "bundle_base64", "receipt"} or body["bundle_encoding"] != "base64":
+            _refuse()
+        raw = base64.b64decode(body["bundle_base64"], validate=True)
+        result = wire.current_result(raw, body["receipt"], principal_context=frame["principal_context"],
+            capability_profile_digest=frame["capability_profile_digest"], workspace_principal=frame["workspace_principal"],
+            discovery=discovery)
+        view.check()
+        if capture() != before:
+            _refuse()
+        return result
 
     async def read_workspace_host_observation(self, frame):
         from control_plane.workspace_host_observation_read import handle_from_original_coo

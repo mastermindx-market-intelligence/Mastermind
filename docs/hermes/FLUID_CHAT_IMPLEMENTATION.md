@@ -131,3 +131,20 @@ The original #2180 packaged UI now has an exact interactive sign-in gate: candid
 The company workspace key now retains the incumbent auth/selection/session/binding lifecycle and excludes routine source revision changes. A focused render regression passed: drafts survive tab changes and source refresh, company drafts reset on selection change, and native drafts clear on auth change. DeepSeek auth withdrawal hides and force-destroys its view; failed destruction retains the original generation fence and cannot refocus/reuse it under new authority. This closes an ignored-close-result privacy gap before qualification.
 
 The latest inspected DeepSeek source is b4bb540aa8248ae1408daa6dc4ff6af749659797. Its native read port provides bounded read projections over an already-owned socket pair, not a private-launch/authentication capability. The accepted deployment owns the private launch cookie ceremony; this branch will not scrape private service logs, add a broker, or repurpose that read port.
+
+
+## 2026-11-08 recovery and released-base composition
+
+The interrupted source-tree construction did not advance the original branch: GitHub and the admitted Mac workspace both read back 91459b44b0560f22894594f1ef38a506649ea38f. No commit/ref publication or installation from that interrupted construction is claimed. A possible unattached immutable tree object has no source-release receipt and was not replayed. Scratch expired; all published source and the admitted Mac checkout remained intact.
+
+PR #2180 is now protected-merged as 72eee6155c8e6c3c7e9c4e82a1e28f2d3ca392c7. Its installed source6e package, normal sign-in, original request reconciliation and exact original answer are accepted in that PR's canonical receipts. The earlier login/pointer hold in this document is historical and resolved. Do not repeat that acceptance or reinstall its package. New live-stream, Stop, layout and two-window acceptance remain owed by this commission.
+
+Protected master b230c2b07db4c895dcccb16a3b0f0822eefc3a6b is the current composition and law pin. INDEX remains compatible1.0.1/bootstrap1. The only changed applicable procedure file since58ac is BOOTSTRAP_KERNEL; it was read at this same pin. The remaining previously read applicable laws are byte-identical.
+
+This composition retains current master’s exact completed-login timer repair, singleton main-window reopening, qualified ADVISORY_READ_ONLY Hermes adapter/interpreter checks, captured Company work/journal/priorities readers, PLAN source recovery and current CI/archive gates. It adds read_company_priorities to the local-main command inventory. Explicit Dock Reopen restores main even when the DeepSeek window remains visible.
+
+The incumbent pointer store now discriminates both published v15 formats by kind and closed key grammar: native reserved Stop and PLAN source publication. No record renumbering or replacement store is introduced. A regression exercises persisted reopening of both formats, cross-kind rejection, principal binding and refusal to reserve Stop for a PLAN pointer.
+
+Native cargo check --locked passed on91459b44 (8.07 seconds,14 existing warnings). Its first ACL test compile exposed duplicate macOS Info.plist embedding from two generate_context! expansions. The composition uses one shared generic application_context function for production and the actual generated ACL fixture; next exact-head compilation/execution will qualify this repair.
+
+DeepSeek #2177 remains open at b6692a5ced2c66c735ab51a15df424cac2a0be9a. Its full client and native provider setup have extensive fixture/browser evidence, but public ingress and actual provider sign-in/production acceptance remain open. The native setup entry does not claim those effects or repurpose the read-only C4 port.

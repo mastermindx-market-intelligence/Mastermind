@@ -8,7 +8,7 @@ mod application_commands;
 fn only_the_local_main_view_can_reach_application_commands() {
     let app = mock_builder().invoke_handler(|invoke| {
         invoke.resolver.resolve("HANDLER_REACHED"); true
-    }).build(tauri::generate_context!()).expect("qualified generated context");
+    }).build(crate::application_context()).expect("qualified generated context");
     let local = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into())).build().unwrap();
     let remote = WebviewWindowBuilder::new(&app, "deepseek-chat", WebviewUrl::External("https://chat.mastermind-x.com/".parse().unwrap())).build().unwrap();
     for command in application_commands::APPLICATION_COMMANDS {

@@ -9,6 +9,7 @@ SCRIPT_DIR="$(/usr/bin/dirname "${BASH_SOURCE[0]}")"
 SYSTEM_PYTHON="/usr/bin/python3"
 PROVIDER_SLOT_RESOLVER="$SCRIPT_DIR/provider_worker_slots.py"
 PERSONAL_PRO_SLOT_IDS=("codex-pro-01" "codex-pro-02" "codex-pro-03")
+SUBSCRIPTION_SLOT_IDS=("alibaba-token-01" "minimax-token-01")
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -363,6 +364,13 @@ slot_field() {
   local field="$2"
   "$SYSTEM_PYTHON" -I -S -B "$PROVIDER_SLOT_RESOLVER" "$slot_id" "$field"
 }
+
+subscription_slot_field() {
+  local slot_id="$1"
+  local field="$2"
+  "$SYSTEM_PYTHON" -I -S -B "$PROVIDER_SLOT_RESOLVER" --subscription "$slot_id" "$field"
+}
+
 
 usage() {
   /bin/echo "usage: $0 --operator-user NAME [--control-uid N] [--worker-uid N] [--ops-gid N]" >&2
@@ -799,6 +807,19 @@ validate_secondary_worker() {
       [ "$SECONDARY_WORKER_UID" != "$reserved" ] && [ "$SECONDARY_WORKER_GID" != "$reserved" ] || secondary_refuse "reserved slot id"
     done
   done
+  for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+    [ "$SECONDARY_WORKER_ID" != "$slot_id" ] || secondary_refuse "reserved subscription worker id"
+    for field in worker_user worker_group; do
+      reserved="$(subscription_slot_field "$slot_id" "$field")" || secondary_refuse "subscription identity unavailable"
+      [ -n "$reserved" ] || secondary_refuse "subscription identity empty"
+      [ "$SECONDARY_WORKER_USER" != "$reserved" ] && [ "$SECONDARY_WORKER_GROUP" != "$reserved" ] || secondary_refuse "reserved subscription name"
+    done
+    for field in worker_uid worker_gid; do
+      reserved="$(subscription_slot_field "$slot_id" "$field")" || secondary_refuse "subscription identity unavailable"
+      case "$reserved" in 4[0-9][0-9]) ;; *) secondary_refuse "subscription identity invalid" ;; esac
+      [ "$SECONDARY_WORKER_UID" != "$reserved" ] && [ "$SECONDARY_WORKER_GID" != "$reserved" ] || secondary_refuse "reserved subscription id"
+    done
+  done
 }
 
 secondary_record_exists() {
@@ -927,6 +948,15 @@ for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
   ensure_group "$slot_group" "$slot_gid"
   ensure_user "$slot_user" "$slot_uid" "$slot_gid" "$slot_home"
 done
+for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+  slot_user="$(subscription_slot_field "$slot_id" worker_user)"
+  slot_group="$(subscription_slot_field "$slot_id" worker_group)"
+  slot_uid="$(subscription_slot_field "$slot_id" worker_uid)"
+  slot_gid="$(subscription_slot_field "$slot_id" worker_gid)"
+  slot_home="$(subscription_slot_field "$slot_id" provider_home)"
+  ensure_group "$slot_group" "$slot_gid"
+  ensure_user "$slot_user" "$slot_uid" "$slot_gid" "$slot_home"
+done
 
 # Control may inspect worker-created run artifacts through the worker primary
 # group. The worker broker receives only its exact reviewed macOS directory
@@ -953,6 +983,15 @@ for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
   slot_group="$(slot_field "$slot_id" worker_group)"
   slot_uid="$(slot_field "$slot_id" worker_uid)"
   slot_gid="$(slot_field "$slot_id" worker_gid)"
+  assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""
+  assert_numeric_owner Users UniqueID "$slot_uid" "$slot_user"
+  assert_numeric_owner Groups PrimaryGroupID "$slot_gid" "$slot_group"
+done
+for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+  slot_user="$(subscription_slot_field "$slot_id" worker_user)"
+  slot_group="$(subscription_slot_field "$slot_id" worker_group)"
+  slot_uid="$(subscription_slot_field "$slot_id" worker_uid)"
+  slot_gid="$(subscription_slot_field "$slot_id" worker_gid)"
   assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""
   assert_numeric_owner Users UniqueID "$slot_uid" "$slot_user"
   assert_numeric_owner Groups PrimaryGroupID "$slot_gid" "$slot_group"
@@ -995,6 +1034,19 @@ for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
   /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_home"
   /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_root/state"
 done
+for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+  slot_user="$(subscription_slot_field "$slot_id" worker_user)"
+  slot_group="$(subscription_slot_field "$slot_id" worker_group)"
+  slot_home="$(subscription_slot_field "$slot_id" provider_home)"
+  slot_root="${slot_home%/provider-home}"
+  [ "$slot_root" != "$slot_home" ] || {
+    /bin/echo "provider home for $slot_id is outside the reviewed slot shape" >&2
+    exit 65
+  }
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_root"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_home"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_root/state"
+done
 
 # Explicit forbidden fixtures for the real secret-canary proof. Values are
 # generated later by the acceptance command and never by this bootstrap.
@@ -1012,6 +1064,12 @@ for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
   /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 \
     "/var/log/mastermind-executive/workers/$slot_id"
 done
+for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+  slot_user="$(subscription_slot_field "$slot_id" worker_user)"
+  slot_group="$(subscription_slot_field "$slot_id" worker_group)"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 \
+    "/var/log/mastermind-executive/workers/$slot_id"
+done
 
 for protected_path in \
   "$SYSTEM_ROOT" "$SYSTEM_ROOT/bin" "$SYSTEM_ROOT/config" "$SYSTEM_ROOT/releases" \
@@ -1025,6 +1083,17 @@ for protected_path in \
 done
 for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
   slot_home="$(slot_field "$slot_id" provider_home)"
+  slot_root="${slot_home%/provider-home}"
+  for protected_path in "$slot_root" "$slot_home" "$slot_root/state" \
+    "/var/log/mastermind-executive/workers/$slot_id"; do
+    require_native_no_acl one "$protected_path" || {
+      /bin/echo "unexpected or unreadable filesystem ACL on $protected_path" >&2; exit 65
+    }
+  done
+done
+
+for slot_id in "${SUBSCRIPTION_SLOT_IDS[@]}"; do
+  slot_home="$(subscription_slot_field "$slot_id" provider_home)"
   slot_root="${slot_home%/provider-home}"
   for protected_path in "$slot_root" "$slot_home" "$slot_root/state" \
     "/var/log/mastermind-executive/workers/$slot_id"; do

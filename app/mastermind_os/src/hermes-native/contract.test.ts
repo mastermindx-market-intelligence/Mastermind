@@ -28,6 +28,13 @@ describe("native Hermes presentation contract", () => {
     expect(view.session?.messages[1].text).toBe("<script>not HTML</script>");
     expect(view.session?.requestedModel).toBe("configured-only");
   });
+  it("accepts the qualified advisory scope while rejecting unbounded OMH execution", () => {
+    const result = parseNativeView({ ...ready(), operation: "read",
+      session: { ...session(), toolAccess: "ADVISORY_READ_ONLY" } });
+    expect(result.session?.canSend).toBe(true);
+    expect(result.delegation).toBe("NOT_ENABLED");
+    expect(() => parseNativeView({ ...ready(), session: { ...session(), toolAccess: "FULL_OMH" } })).toThrow();
+  });
   it("keeps queued, started, unknown and terminal receipts distinct", () => {
     for (const status of ["queued", "started", "unknown", "terminal"]) {
       const view = parseNativeView({ ...ready(), state: "ADMITTED", operation: "send", receipt: {

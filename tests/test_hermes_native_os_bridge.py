@@ -183,11 +183,161 @@ class BridgeTests(unittest.TestCase):
         data["info"]["enabled_toolsets"].append("terminal")
         self.assertFalse(self.b.project_result("read", data, "session-1", readonly_capacity=True)["session"]["canSend"])
 
+    def test_omh_advice_is_a_distinct_exact_scope_not_an_ignored_extra_tool(self):
+        data = snapshot()
+        data["info"].update(enabled_toolsets=["mastermind-fabric-capacity", "mmx_omh"],
+            tool_count=3, tools={"other": ["tool_search", "tool_describe", "tool_call"]})
+        for capacity, omh in [(False, False), (True, False), (False, True)]:
+            self.assertFalse(self.b.project_result("read", data, "session-1",
+                readonly_capacity=capacity, readonly_omh=omh)["session"]["canSend"])
+        qualified = self.b.project_result("read", data, "session-1",
+            readonly_capacity=True, readonly_omh=True)["session"]
+        self.assertTrue(qualified["canSend"])
+        self.assertEqual(qualified["toolAccess"], "ADVISORY_READ_ONLY")
+        for change in [{"enabled_toolsets": ["mastermind-fabric-capacity", "mmx_omh", "unknown"]},
+                       {"enabled_toolsets": ["mmx_omh"]}, {"tool_count": 4},
+                       {"tools": {"other": ["tool_search", "tool_describe", "terminal"]}},
+                       {"launch_request": {**data["info"]["launch_request"], "accept_hooks": True}}]:
+            with self.subTest(change=change):
+                value = {**data, "info": {**data["info"], **change}}
+                self.assertFalse(self.b.project_result("read", value, "session-1",
+                    readonly_capacity=True, readonly_omh=True)["session"]["canSend"])
+
+    def test_qualified_omh_preflight_allows_only_one_original_submit(self):
+        for qualified in [False, True]:
+            runtime = FakeRuntime()
+            runtime.readonly_capacity_qualified = lambda: True
+            runtime.readonly_omh_qualified = lambda: qualified
+            original = runtime.rpc
+            async def rpc(method, **params):
+                result = await original(method, **params)
+                if method == "session.resume":
+                    result["info"].update(enabled_toolsets=["mastermind-fabric-capacity", "mmx_omh"],
+                        tool_count=3, tools={"other": ["tool_search", "tool_describe", "tool_call"]})
+                return result
+            runtime.rpc = rpc
+            result = asyncio.run(self.b.execute_request({"operation": "send", "sessionId": "session-1",
+                "requestId": "c" * 32, "text": "original"}, runtime))
+            self.assertEqual(result["state"], "ADMITTED" if qualified else "REFUSED")
+            self.assertEqual(sum(method == "prompt.submit" for method, _ in runtime.calls), int(qualified))
+            self.assertFalse(result["retryAllowed"])
+
     def test_invalid_request_never_reaches_runtime(self):
         runtime = FakeRuntime()
         result = asyncio.run(self.b.execute_request({"operation": "status", "token": "bad"}, runtime))
         self.assertEqual(result["state"], "REFUSED")
         self.assertEqual(runtime.identifies, 0)
+
+
+class OmhSourceQualificationTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.b = load()
+        self.directory = tempfile.TemporaryDirectory(prefix="native-omh-source-")
+        self.addCleanup(self.directory.cleanup)
+        self.home = Path(self.directory.name).resolve() / "user/.hermes"
+        self.runtime = object.__new__(self.b.NativeRuntime)
+        self.runtime.home = self.home
+        self.runtime.observed_code = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+        self.paths = self.fixture()
+
+    def fixture(self):
+        import hashlib
+        import json
+        pins = dict(self.b.OMH_READONLY_PINS)
+        def write(path, raw):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            return hashlib.sha256(raw).hexdigest()
+        plugin = self.home / "plugins/mastermind-omh"
+        source = plugin / "_source" / pins["release"]
+        # Executing any fixture package would fail. Qualification only reads it.
+        inert = b"raise AssertionError('qualification must not import installed code')\n"
+        paths = {}
+        for name in ("plugin.yaml", "__init__.py"):
+            paths[name] = plugin / name
+            pins[name] = write(paths[name], inert)
+        venv = self.home.parent / ".local/share/omh/venv"
+        paths["python"] = venv / "bin/python"
+        pins["python"] = write(paths["python"], b"fixture interpreter bytes")
+        paths["pyvenv.cfg"] = venv / "pyvenv.cfg"
+        pins["pyvenv.cfg"] = write(paths["pyvenv.cfg"], b"include-system-site-packages = false\n")
+        paths["model_tools"] = self.home / "hermes-agent/model_tools.py"
+        pins["model_tools"] = write(paths["model_tools"], inert)
+        stdlib = venv / "lib/python3.14"
+        paths["stdlib_sitecustomize"] = stdlib / "sitecustomize.py"
+        pins["stdlib_sitecustomize"] = write(paths["stdlib_sitecustomize"], inert)
+        site = stdlib / "site-packages"
+        paths["metadata"] = site / "oh_my_hermes-4.0.6.dist-info/METADATA"
+        pins["metadata"] = write(paths["metadata"], b"Name: oh-my-hermes\nVersion: 4.0.6\n")
+        sources = {}
+        for index in range(19):
+            name = f"module{index}.py"
+            sources[name] = write(source / name, inert)
+        paths["adapter"] = source / "module0.py"
+        package = site / "omh"
+        for name in ("__init__.py", "helper.py"):
+            write(package / name, inert)
+        paths["dependency"] = package / "helper.py"
+        digest = hashlib.sha256()
+        for path in sorted(package.rglob("*.py")):
+            digest.update(path.relative_to(package).as_posix().encode() + b"\0" + hashlib.sha256(path.read_bytes()).digest())
+        pins.update(dependency=digest.hexdigest(), dependency_files=2)
+        descriptor = {
+            "schema": "mastermind.hermes_omh.local_runtime/v1", "release_commit": pins["release"],
+            "source_root": str(source), "profile_home": str(self.home),
+            "omh_home": str(self.home.parent / ".omh"), "python_executable": str(paths["python"]),
+            "source_files": sources,
+        }
+        paths["descriptor"] = plugin / "_runtime.json"
+        pins["descriptor"] = write(paths["descriptor"], json.dumps(descriptor).encode())
+        self.b.OMH_READONLY_PINS = pins
+        return paths
+
+    def test_exact_installed_source_is_recognized_without_loading_it(self):
+        self.assertTrue(self.runtime.readonly_omh_qualified())
+        self.runtime.observed_code = "f" * 40
+        self.assertFalse(self.runtime.readonly_omh_qualified())
+
+    def test_changed_descriptor_plugin_dependency_or_interpreter_removes_eligibility(self):
+        for name, path in self.paths.items():
+            with self.subTest(name=name):
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n# changed")
+                self.assertFalse(self.runtime.readonly_omh_qualified())
+                path.write_bytes(original)
+        self.assertTrue(self.runtime.readonly_omh_qualified())
+
+    def test_startup_hooks_and_extension_shadows_are_refused_without_import(self):
+        site = self.paths["metadata"].parent.parent
+        for path in (site / "injected.pth", site / "sitecustomize.py",
+                     self.paths["dependency"].with_suffix(".so"),
+                     self.paths["adapter"].with_suffix(".so")):
+            with self.subTest(path=path.name):
+                path.write_text("raise AssertionError('must never execute')\n")
+                self.assertFalse(self.runtime.readonly_omh_qualified())
+                path.unlink()
+        self.assertTrue(self.runtime.readonly_omh_qualified())
+
+    def test_extra_dependency_source_and_symlink_or_writable_source_are_refused(self):
+        extra = self.paths["dependency"].with_name("injected.py")
+        extra.write_text("pass\n")
+        self.assertFalse(self.runtime.readonly_omh_qualified())
+        extra.unlink()
+        source = self.paths["adapter"]
+        original = source.read_bytes()
+        target = source.with_name("outside.py")
+        target.write_bytes(original)
+        source.unlink()
+        source.symlink_to(target)
+        self.assertFalse(self.runtime.readonly_omh_qualified())
+        source.unlink()
+        target.unlink()
+        source.write_bytes(original)
+        source.chmod(0o666)
+        self.assertFalse(self.runtime.readonly_omh_qualified())
+        source.chmod(0o600)
+        self.assertTrue(self.runtime.readonly_omh_qualified())
 
 
 class OriginalSettlementTests(unittest.TestCase):

@@ -132,6 +132,8 @@ class McpStdioSession:
         allowed_tools: frozenset[str],
         expected_tool_schema_digest: str,
         rpc_timeout_seconds: float = 30.0,
+        credential_enabled: bool = False,
+        credential_launch_guard: Callable[[], object] | None = None,
     ) -> None:
         if (
             not isinstance(argv, Sequence)
@@ -165,6 +167,10 @@ class McpStdioSession:
         self._buffer = b""
         self._receipt: McpSessionReceipt | None = None
         self._gate = threading.RLock()
+        if type(credential_enabled) is not bool or (credential_enabled and not callable(credential_launch_guard)):
+            raise BrowserRelayError("credential launch owner is unavailable")
+        self._credential_enabled = credential_enabled
+        self._credential_launch_guard = credential_launch_guard
 
     @property
     def receipt(self) -> McpSessionReceipt:
@@ -265,17 +271,18 @@ class McpStdioSession:
             if not os.path.isabs(executable):
                 raise BrowserRelayError("MCP executable must be absolute")
             try:
-                self._process = subprocess.Popen(
-                    list(self._argv),
-                    cwd="/",
-                    env=dict(self._env),
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    # No diagnostic reader exists; an undrained pipe can block
-                    # the child before it replies to initialize or tools/call.
-                    stderr=subprocess.DEVNULL,
-                    close_fds=True,
-                )
+                if self._credential_enabled:
+                    with self._credential_launch_guard() as launch:
+                        self._process = subprocess.Popen(list(launch["argv"]), cwd="/",
+                            env=dict(launch["env"]), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, close_fds=True, pass_fds=launch["pass_fds"])
+                else:
+                    self._process = subprocess.Popen(
+                        list(self._argv), cwd="/", env=dict(self._env),
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        # No undrained diagnostic pipe or ambient debug logger.
+                        stderr=subprocess.DEVNULL, close_fds=True,
+                    )
                 initialize = self._rpc(
                     "initialize",
                     {
@@ -346,6 +353,50 @@ class McpStdioSession:
                 "tools/call",
                 {"name": tool, "arguments": dict(arguments)},
             )
+
+    def credential_fill(self, use: dict, *, action_id: str, clock_ms) -> dict:
+        """One original RPC gate, target and action; no secret reaches tools/call."""
+        from .credential_use import (
+            validate_private_use, validate_credential_result, credential_result,
+            CredentialUseRefused,
+        )
+        from .vault_files import capture_existing_vault
+
+        with self._gate:
+            if not self._credential_enabled or self._receipt is None:
+                raise BrowserRelayError("credential receiver is not installed")
+            selected = validate_private_use(use, resource_id=use.get("resource_id"), now_ms=clock_ms())
+            prepared = self._rpc("mastermind/credential_prepare", {"use": selected, "action_id": action_id})
+            if set(prepared) != {"schema", "status", "target_ref"} or (
+                    prepared.get("schema") != "mastermind.workbench_browser_credential_target.v1"
+                    or prepared.get("status") != "READY"
+                    or type(prepared.get("target_ref")) is not str
+                    or _HEX32.fullmatch(prepared["target_ref"]) is None):
+                observed = validate_credential_result(prepared)
+                if observed["effect_state"] != "NOT_APPLIED":
+                    raise BrowserRelayError("credential preparation result is invalid")
+                return observed
+            target = prepared["target_ref"]
+            try:
+                validate_private_use(selected, resource_id=selected["resource_id"], now_ms=clock_ms())
+                # The qualified receiver has now checked the held document's
+                # exact origin. Read immutable file descriptors; do not decrypt.
+                material = capture_existing_vault(selected["grant"])
+            except CredentialUseRefused:
+                # No fill request was sent. Release only this original target;
+                # never create a replacement target or switch a backend.
+                try:
+                    self._rpc("mastermind/credential_abort", {"target_ref": target})
+                except BrowserRelayError:
+                    pass
+                return credential_result("NOT_APPLIED", "VAULT_UNAVAILABLE")
+            try:
+                observed = self._rpc("mastermind/credential_fill", {
+                    "target_ref": target, "material": material,
+                })
+            finally:
+                material.clear()
+            return validate_credential_result(observed)
 
     def close(self) -> None:
         with self._gate:
@@ -555,6 +606,21 @@ class BrowserRelayServer:
                 ok=True,
                 result=dict(result),
             )
+        if kind == "credential_fill":
+            from .credential_use import validate_private_use, CredentialUseRefused
+            if set(value) != {"schema", "kind", "request_id", "resource_id", "use"}:
+                raise BrowserRelayError("credential relay request is invalid")
+            if self._lease_expired() or not self._session._credential_enabled:
+                return self._response(request_id=request_id, ok=False, error="REQUEST_REFUSED")
+            try:
+                use = validate_private_use(value["use"], resource_id=self._resource_id, now_ms=self._clock_ms())
+            except CredentialUseRefused:
+                return self._response(request_id=request_id, ok=False, error="REQUEST_REFUSED")
+            try:
+                observed = self._session.credential_fill(use, action_id=request_id, clock_ms=self._clock_ms)
+            except (BrowserRelayError, CredentialUseRefused):
+                return self._response(request_id=request_id, ok=False, error="EFFECT_UNKNOWN")
+            return self._response(request_id=request_id, ok=True, result=observed)
         raise BrowserRelayError("relay request kind is invalid")
 
     def _read_request(self, connection: socket.socket) -> object:
@@ -772,6 +838,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tmp-dir", required=True)
     parser.add_argument("--barrier-fd", type=int, required=True)
     parser.add_argument("--expires-at-ms", type=int, required=True)
+    parser.add_argument("--credential-runtime-root")
+    parser.add_argument("--credential-manifest-sha256")
     args = parser.parse_args(argv)
 
     if _HEX32.fullmatch(args.resource_id) is None:
@@ -787,6 +855,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         mode=args.mode,
         profile_dir=args.profile_dir,
     )
+    credential_guard = None
+    if args.credential_runtime_root is not None or args.credential_manifest_sha256 is not None:
+        from control_plane.worker_browser_b1 import workbench_credential_launch
+        if (args.mode != BrowserMode.ISOLATED.value or args.profile_dir is not None
+                or args.credential_runtime_root is None or args.credential_manifest_sha256 is None):
+            raise BrowserRelayError("credential receiver configuration is invalid")
+        def credential_guard():
+            return workbench_credential_launch(
+                runtime_root=Path(args.credential_runtime_root),
+                expected_manifest_digest=args.credential_manifest_sha256,
+                node=Path(args.node_executable), mcp=Path(args.mcp_cli_path),
+                browser=Path(args.chrome_executable), python_executable=sys.executable,
+                output_dir=Path(args.output_dir), resource_id=args.resource_id,
+                expires_at_ms=args.expires_at_ms, environment=child_env)
+        child_argv = (args.node_executable,
+            str(Path(args.credential_runtime_root) / "node_modules/@mastermind/workbench-vault/child.cjs"),
+            args.credential_runtime_root, args.chrome_executable, args.output_dir,
+            args.resource_id, str(args.expires_at_ms))
     if args.barrier_fd < 3:
         raise BrowserRelayError("launch barrier descriptor is invalid")
     try:
@@ -796,18 +882,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if barrier != b"\x01":
         raise BrowserRelayError("launch barrier was not released")
 
-    session = McpStdioSession(
-        argv=child_argv,
-        env={
+    child_env = {
             "HOME": home_dir,
             "TMPDIR": tmp_dir,
             "LANG": "C",
             "LC_ALL": "C",
             "NO_COLOR": "1",
             "PATH": "/usr/bin:/bin",
-        },
+        }
+    session = McpStdioSession(
+        argv=child_argv,
+        env=child_env,
         allowed_tools=ALLOWED_BROWSER_TOOLS,
         expected_tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        credential_enabled=credential_guard is not None,
+        credential_launch_guard=credential_guard,
     )
     owner_pid = os.getppid()
     relay = BrowserRelayServer(

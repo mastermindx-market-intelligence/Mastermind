@@ -39,6 +39,7 @@ __all__ = [
     "AgentOsBindingResolver",
     "AgentOsCurrentnessGuard",
     "AgentOsHostPorts",
+    "AgentOsRemoteReadPort",
     "AgentOsMemoryProviderCore",
     "AgentOsRefusal",
     "DEFAULT_FRESHNESS_SECONDS",
@@ -180,7 +181,7 @@ class AgentOsBinding:
     profile: str
     hermes_home: str
     workstream: str
-    owner_root: str
+    owner_root: str | None
     generation: str
     # Explicit host delivery policy for this binding, not a model argument.
     # The host also proves total native request/context-window fit separately.
@@ -211,6 +212,18 @@ class AgentOsCurrentnessGuard(Protocol):
         ...
 
 
+@runtime_checkable
+class AgentOsRemoteReadPort(Protocol):
+    """The host's original authenticated read, with no local source fallback.
+
+    The port validates its fixed publication and the owner's original bytes
+    and receipt. It owns no connection: the native MCP owner remains intact.
+    """
+
+    def read(self, binding: AgentOsBinding, *, budget: int) -> tuple[bytes, dict]:
+        ...
+
+
 @dataclass(frozen=True)
 class AgentOsHostPorts:
     """The two host-owned ports a provider instance needs.
@@ -231,10 +244,26 @@ class _Snapshot:
     expires_at: float
     bundle_sha256: str
     workstream: str
+    receipt_sha256: str
+    rendered_context_sha256: str
+    rendered_context_bytes: int
+    record_sources_json: str | None = None
 
 
 def _render(observation: dict, raw: bytes) -> str:
     """Wrap the owner's exact bytes in a small, explicit evidence envelope."""
+    from control_plane.agentos_context_bundle import CURRENT_RECEIPT_SCHEMA_V2, canonical_digest
+    if observation.get("schema") == CURRENT_RECEIPT_SCHEMA_V2:
+        # Machine evidence stays private. The model sees an explicitly named
+        # projection, never an incomplete object mislabeled as the full receipt.
+        inventory = observation["selected_record_sources"]
+        observation = {**{key: value for key, value in observation.items()
+                         if key != "selected_record_sources"},
+            "schema": "mastermind.agentos_context_prompt_observation.v1",
+            "source_receipt_schema": CURRENT_RECEIPT_SCHEMA_V2,
+            "source_receipt_sha256": canonical_digest(observation),
+            "selected_record_sources_summary": {key: value for key, value in inventory.items()
+                                                 if key != "entries"}}
     envelope = {
         "context_focus": observation["workstream"],
         "agentos_read_observation": observation,
@@ -295,12 +324,18 @@ class AgentOsMemoryProviderCore:
         *,
         ports: Optional[AgentOsHostPorts] = None,
         reader: Optional[Callable[..., Any]] = None,
+        remote_reader: Optional[AgentOsRemoteReadPort] = None,
         spawn: Optional[Callable[..., Any]] = None,
         budget: int = DEFAULT_BUDGET,
         freshness_seconds: float = DEFAULT_FRESHNESS_SECONDS,
         clock: Optional[Callable[[], float]] = None,
     ) -> None:
+        if remote_reader is not None and (
+                reader is not None or not callable(getattr(remote_reader, "read", None))
+                or type(budget) is not int or budget != DEFAULT_BUDGET):
+            raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
         self._ports = ports
+        self._remote_reader = remote_reader
         self._reader = reader if reader is not None else read_context
         self._spawn = spawn
         self._budget = budget
@@ -309,6 +344,7 @@ class AgentOsMemoryProviderCore:
         self._freshness = _freshness_seconds(freshness_seconds)
         self._clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
         self._binding: Optional[AgentOsBinding] = None
         self._session_id: Optional[str] = None
         self._context: dict = {}
@@ -347,6 +383,7 @@ class AgentOsMemoryProviderCore:
             self._last_supplied = False
             self._epoch += 1
             self._context = dict(kwargs)
+            self._changed.notify_all()
         try:
             binding = self._resolve(session_id, kwargs)
         except AgentOsRefusal as exc:
@@ -359,6 +396,7 @@ class AgentOsMemoryProviderCore:
             self._binding = binding
             self._session_id = session_id
             self._reason = REASON_CONTEXT_PENDING
+            self._changed.notify_all()
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         """No tools: this provider adds no model-visible write or file read."""
@@ -441,6 +479,7 @@ class AgentOsMemoryProviderCore:
             self._revoked = False
             self._want_read = False
             self._context.update(kwargs)
+            self._changed.notify_all()
             current = self._binding
         try:
             binding = self._resolve_binding(new_session_id, dict(self._context))
@@ -468,6 +507,7 @@ class AgentOsMemoryProviderCore:
             self._binding = binding
             self._session_id = new_session_id
             self._reason = REASON_CONTEXT_PENDING
+            self._changed.notify_all()
 
     def shutdown(self) -> None:
         """Drop every cached and pending piece of material."""
@@ -479,6 +519,7 @@ class AgentOsMemoryProviderCore:
             self._want_read = False
             self._binding = None
             self._reason = REASON_CLOSED
+            self._changed.notify_all()
 
     # -- Host-controlled preparation and readiness seam ------------------------
 
@@ -538,6 +579,51 @@ class AgentOsMemoryProviderCore:
         with self._lock:
             return self._status_locked()
 
+    def wait_context(self, timeout_seconds: float) -> dict:
+        """Wait once for the original read; never start, replace or cancel it.
+
+        This is a host-only cold-turn barrier, outside native authority locks
+        and the owner's event loop. A timeout leaves the original pending read
+        owned by this instance. A session switch ends this wait immediately.
+        It neither polls nor extends the read's independent transport budget.
+        """
+        if (type(timeout_seconds) not in (int, float)
+                or not math.isfinite(timeout_seconds)
+                or not 0 <= timeout_seconds <= 31):
+            raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
+        with self._changed:
+            epoch = self._epoch
+            self._changed.wait_for(
+                lambda: self._pending == 0 or self._closed or self._epoch != epoch,
+                timeout=float(timeout_seconds))
+            return self._status_locked()
+
+    def context_observation(self) -> dict | None:
+        """Current transient snapshot identity; no read or text delivery."""
+        with self._lock:
+            state = self._status_locked()
+            snapshot = self._snapshot
+            if state["state"] != "READY" or snapshot is None:
+                return None
+            return {"bundle_sha256": snapshot.bundle_sha256,
+                    "receipt_sha256": snapshot.receipt_sha256,
+                    "rendered_context_sha256": snapshot.rendered_context_sha256,
+                    "rendered_context_bytes": snapshot.rendered_context_bytes,
+                    "remaining_ms": max(0, int((snapshot.expires_at - self._clock()) * 1000))}
+
+    def _record_sources_observation(self, *, rendered_context_sha256: str) -> dict | None:
+        """Private evidence for this exact current snapshot; no delivery claim."""
+        with self._lock:
+            state = self._status_locked()
+            snapshot = self._snapshot
+            if (state["state"] != "READY" or snapshot is None or snapshot.record_sources_json is None
+                    or snapshot.rendered_context_sha256 != rendered_context_sha256):
+                return None
+            from control_plane.agentos_context_bundle import validate_retained_record_sources
+            value = json.loads(snapshot.record_sources_json)
+            return validate_retained_record_sources(value, bundle_sha256=snapshot.bundle_sha256,
+                                                     data_commit=value["data_commit"])
+
     def _status_locked(self, guard_reason: Any = _GUARD_UNCHECKED) -> dict:
         """The bounded state of this instance. The caller holds the lock.
 
@@ -567,8 +653,14 @@ class AgentOsMemoryProviderCore:
                 bundle_sha256 = None
         elif self._pending:
             state = "PENDING"
+            supplied = False
+            bundle_sha256 = None
         else:
             state = "UNAVAILABLE"
+            if self._snapshot is not None:
+                reason = REASON_CONTEXT_EXPIRED
+            supplied = False
+            bundle_sha256 = None
         return {
             "schema": SCHEMA,
             "provider": PROVIDER_NAME,
@@ -578,7 +670,9 @@ class AgentOsMemoryProviderCore:
             "role": self._binding.role if self._binding else None,
             "profile": self._binding.profile if self._binding else None,
             "bundle_sha256": bundle_sha256,
-            # True only after the context was actually handed to a turn.
+            # True only after this provider returned text from prefetch. Native
+            # MemoryManager/turn handling may still discard or transform it;
+            # this is not proof of prompt inclusion or provider dispatch.
             "context_supplied": supplied,
         }
 
@@ -626,12 +720,22 @@ class AgentOsMemoryProviderCore:
         for name in ("role", "profile", "generation"):
             if not _plain(getattr(binding, name)):
                 raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
-        for name in ("hermes_home", "owner_root"):
+        for name in (("hermes_home", "owner_root") if self._remote_reader is None
+                     else ("hermes_home",)):
             value = getattr(binding, name)
             if type(value) is not str or not value.startswith("/"):
                 raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
-        if type(binding.workstream) is not str or not WORKSTREAM_RE.fullmatch(binding.workstream):
-            raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
+        if self._remote_reader is None:
+            if type(binding.workstream) is not str or not WORKSTREAM_RE.fullmatch(binding.workstream):
+                raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
+        else:
+            if binding.owner_root is not None:
+                raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
+            from common.workspace_project_plan_contract import validate_selection
+            try:
+                validate_selection({"work_ref": binding.workstream})
+            except (TypeError, ValueError):
+                raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE) from None
         if (type(binding.max_context_bytes) is not int
                 or not 0 < binding.max_context_bytes <= MAX_HOST_CONTEXT_BYTES):
             raise AgentOsRefusal(REASON_CONTEXT_LIMIT_INVALID)
@@ -672,6 +776,7 @@ class AgentOsMemoryProviderCore:
             self._snapshot = None
             self._needs_rebind = False
             self._reason = REASON_CONTEXT_PENDING
+            self._changed.notify_all()
         return True
 
     # -- The single background read -------------------------------------------
@@ -690,6 +795,7 @@ class AgentOsMemoryProviderCore:
             self._pending = max(0, self._pending - 1)
             self._want_read = False
             self._reason = REASON_HELPER_UNAVAILABLE
+            self._changed.notify_all()
 
     def _spawn_read(self, binding: AgentOsBinding, epoch: int) -> None:
         spawn = self._spawn
@@ -722,8 +828,11 @@ class AgentOsMemoryProviderCore:
             self._finish(epoch, None, reason)
             return
         try:
-            raw, observation = self._reader(
-                binding.workstream, self._budget, owner_root=binding.owner_root)
+            if self._remote_reader is None:
+                raw, observation = self._reader(
+                    binding.workstream, self._budget, owner_root=binding.owner_root)
+            else:
+                raw, observation = self._remote_reader.read(binding, budget=self._budget)
         except LaunchInputError as exc:
             self._finish(epoch, None, _closed_code(str(exc)))
             return
@@ -773,11 +882,23 @@ class AgentOsMemoryProviderCore:
         repo_sha = observation.get("repo_sha")
         if type(repo_sha) is not str or not repo_sha:
             raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH)
+        record_sources = None
+        from control_plane.agentos_context_bundle import (
+            CURRENT_RECEIPT_SCHEMA_V2, validate_current_context_read,
+        )
+        if observation.get("schema") == CURRENT_RECEIPT_SCHEMA_V2:
+            try:
+                validate_current_context_read(raw, observation, work_ref=binding.workstream)
+                record_sources = json.dumps(observation["selected_record_sources"], sort_keys=True,
+                    ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH) from None
         try:
             text = _render(observation, raw)
         except (ValueError, TypeError):
             raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH) from None
-        if len(text.encode("utf-8")) > binding.max_context_bytes:
+        rendered = text.encode("utf-8")
+        if len(rendered) > binding.max_context_bytes:
             # The complete oversized bundle is refused; mandatory owner
             # constraints are never trimmed to fit.
             raise AgentOsRefusal(REASON_CONTEXT_TOO_LARGE)
@@ -786,6 +907,11 @@ class AgentOsMemoryProviderCore:
             expires_at=self._clock() + self._freshness,
             bundle_sha256=digest,
             workstream=binding.workstream,
+            receipt_sha256=hashlib.sha256(json.dumps(observation, sort_keys=True,
+                ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            rendered_context_sha256=hashlib.sha256(rendered).hexdigest(),
+            rendered_context_bytes=len(rendered),
+            record_sources_json=record_sources,
         )
 
     def _guard_reason(self, binding: AgentOsBinding, epoch: int) -> Optional[str]:
@@ -816,6 +942,7 @@ class AgentOsMemoryProviderCore:
                 self._revoked = True
             elif reason == REASON_SCOPE_CHANGED:
                 self._needs_rebind = True
+            self._changed.notify_all()
 
     def _finish(self, epoch: int, snapshot: Optional[_Snapshot],
                 reason: Optional[str]) -> None:
@@ -842,6 +969,7 @@ class AgentOsMemoryProviderCore:
                     and self._binding is not None and not self._needs_rebind
                     and not self._revoked):
                 restart = self._reserve_read()
+            self._changed.notify_all()
         if restart is not None:
             self._spawn_read(*restart)
 
@@ -953,6 +1081,7 @@ def install_host_ports(ports: AgentOsHostPorts) -> AgentOsHostPorts:
 
 def create_provider(*, ports: Optional[AgentOsHostPorts] = None,
                     reader: Optional[Callable[..., Any]] = None,
+                    remote_reader: Optional[AgentOsRemoteReadPort] = None,
                     spawn: Optional[Callable[..., Any]] = None,
                     budget: int = DEFAULT_BUDGET,
                     freshness_seconds: float = DEFAULT_FRESHNESS_SECONDS,
@@ -966,6 +1095,7 @@ def create_provider(*, ports: Optional[AgentOsHostPorts] = None,
     return cls(
         ports=ports if ports is not None else _HOST_PORTS,
         reader=reader,
+        remote_reader=remote_reader,
         spawn=spawn,
         budget=budget,
         freshness_seconds=freshness_seconds,

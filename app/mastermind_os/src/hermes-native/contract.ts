@@ -13,7 +13,7 @@ export type NativeState = "READY" | "OPENED" | "ADMITTED" | "REFUSED" | "NOT_SEN
 export interface NativeMessage { role: "user" | "assistant"; text: string }
 export interface NativeSession {
   id: string; storedId: string; title: string; requestedModel: string;
-  canSend: boolean; toolAccess: "NONE" | "CAPACITY_READ_ONLY" | "UNQUALIFIED";
+  canSend: boolean; toolAccess: "NONE" | "CAPACITY_READ_ONLY" | "ADVISORY_READ_ONLY" | "UNQUALIFIED";
   /** Stored history requires a fresh owner check at the explicit send. */
   sendCheckRequired?: true;
   running: boolean | null; executionGeneration: number; messageCount: number;
@@ -67,7 +67,7 @@ function session(value: unknown): NativeSession {
   const required = ["id", "storedId", "title", "requestedModel", "canSend", "toolAccess", "running", "executionGeneration", "messageCount", "messages", "historyTruncated", "pending", "promptsPending"];
   const v = record(value, [...required, "sendCheckRequired"], required);
   const toolAccess = text(v.toolAccess, 32);
-  if (!["NONE", "CAPACITY_READ_ONLY", "UNQUALIFIED"].includes(toolAccess)) return invalid();
+  if (!["NONE", "CAPACITY_READ_ONLY", "ADVISORY_READ_ONLY", "UNQUALIFIED"].includes(toolAccess)) return invalid();
   const canSend = flag(v.canSend);
   if (canSend && toolAccess === "UNQUALIFIED") return invalid();
   const sendCheckRequired = v.sendCheckRequired !== undefined;

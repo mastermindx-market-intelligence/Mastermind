@@ -185,8 +185,9 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
     provider delivery, historical process attestation or model identity.
     """
     from .native_request_observation import (
-        SCHEMA as observation_schema, STAGE, CONTENT_FIELDS,
-        MAX_CONTENT_BYTES, MAX_EVENTS, MAX_METADATA_BYTES,
+        SCHEMA as observation_schema, PREVIOUS_SCHEMA, LEGACY_SCHEMA, STAGE, CONTENT_FIELDS,
+        TOOLS_STAGE, TOOL_COVERAGE, TOOL_IDENTIFIERS, TOOL_ERRORS, CANONICALIZATION,
+        MAX_CONTENT_BYTES, MAX_EVENTS, MAX_TOOL_EVENTS, MAX_METADATA_BYTES,
     )
 
     def refuse():
@@ -215,10 +216,43 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
     def literal(item, expected):
         return type(item) is str and item == expected
 
+    def digest_text(item):
+        if type(item) is not str or len(item) != 64 or any(char not in "0123456789abcdef" for char in item):
+            refuse()
+        return item
+
+    def tools_projection(item):
+        if type(item) is not dict:
+            refuse()
+        status = item.get("status")
+        if literal(status, "absent"):
+            shape(item, ("status",))
+            return {"status": status}
+        if literal(status, "unavailable"):
+            shape(item, ("status", "reason"))
+            if type(item["reason"]) is not str or item["reason"] not in {
+                    "content_limit", "unsupported_content", "observation_failed"}:
+                refuse()
+            return dict(item)
+        shape(item, ("status", "kind", "sha256", "bytes", "canonicalization"))
+        if (not literal(status, "observed") or type(item["kind"]) is not str
+                or item["kind"] not in {"null", "boolean", "number", "string", "array", "object"}
+                or not literal(item["canonicalization"], CANONICALIZATION)
+                or not 1 <= integer(item["bytes"]) <= MAX_CONTENT_BYTES):
+            refuse()
+        return dict(item, sha256=digest_text(item["sha256"]))
+
     fields = ("schema", "stage", "scope", "observations", "errors", "overflow", "coverage",
               "provider_dispatch_proven", "model_identity_verified")
+    v3 = type(value) is dict and literal(value.get("schema"), observation_schema)
+    v2 = v3 or type(value) is dict and literal(value.get("schema"), PREVIOUS_SCHEMA)
+    if v2:
+        fields += ("tools_stage", "tool_coverage", "executions", "commits", "tool_overflow", "metadata_overflow")
+    if v3:
+        fields += ("transport",)
     shape(value, fields)
-    if (not literal(value["schema"], observation_schema) or not literal(value["stage"], STAGE)
+    selected_schema = observation_schema if v3 else PREVIOUS_SCHEMA if v2 else LEGACY_SCHEMA
+    if (not literal(value["schema"], selected_schema) or not literal(value["stage"], STAGE)
             or value["provider_dispatch_proven"] is not False or value["model_identity_verified"] is not False
             or type(value["overflow"]) is not bool):
         refuse()
@@ -240,6 +274,8 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
         refuse()
     events = []
     required = ("fields", "content_sha256", "content_bytes", "canonicalization")
+    if v2:
+        required += ("tools",)
     identifiers = ("turn_id", "api_request_id", "agent_session_id")
     counters = ("api_call_count", "retry_count")
     optional = (*identifiers, *counters, "invalid_fields")
@@ -257,6 +293,8 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
             refuse()
         event = {"fields": list(selected), "content_sha256": digest, "content_bytes": size,
                  "canonicalization": "json_sorted_keys_utf8_no_spaces_v1"}
+        if v2:
+            event["tools"] = tools_projection(source["tools"])
         for key in identifiers:
             if key in source: event[key] = text(source[key])
         for key in counters:
@@ -271,15 +309,125 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
         events.append(event)
     errors = value["errors"]
     allowed_errors = ("unbound_or_stale_agent", "content_limit", "unsupported_content", "observation_failed")
+    if v2:
+        allowed_errors += TOOL_ERRORS
     if (type(errors) is not list or len(errors) > len(allowed_errors)
             or any(type(error) is not str or error not in allowed_errors for error in errors)
             or errors != sorted(set(errors))
             or not literal(value["coverage"], "assembly_hooks_only" if events else "no_assembly_observation")
-            or value["overflow"] and len(events) != MAX_EVENTS):
+            or not v2 and value["overflow"] and len(events) != MAX_EVENTS):
         refuse()
-    projected = {"schema": observation_schema, "stage": STAGE, "scope": scope,
+    projected = {"schema": selected_schema, "stage": STAGE, "scope": scope,
         "observations": events, "errors": list(errors), "overflow": value["overflow"],
         "coverage": value["coverage"], "provider_dispatch_proven": False, "model_identity_verified": False}
+    transport = None
+    if v3:
+        from .native_transport_observation import validate_document
+        transport = validate_document(value["transport"])
+        projected["transport"] = transport
+    if v2:
+        if (not literal(value["tools_stage"], TOOLS_STAGE) or not literal(value["tool_coverage"], TOOL_COVERAGE)
+                or type(value["tool_overflow"]) is not bool or type(value["metadata_overflow"]) is not bool
+                or value["metadata_overflow"] and not (value["overflow"] or value["tool_overflow"]
+                    or transport is not None and transport["overflow"])
+                or value["overflow"] and not value["metadata_overflow"] and len(events) != MAX_EVENTS):
+            refuse()
+
+        sequences = set()
+        def tool_records(source_records, *, commit):
+            if type(source_records) is not list or len(source_records) > MAX_TOOL_EVENTS:
+                refuse()
+            output, previous = [], 0
+            for source in source_records:
+                required = ("sequence", "identity", "invalid_fields", "state")
+                optional = ()
+                if commit:
+                    required += ("correlation",)
+                    optional = ("blocked", "is_error", "reported_effect_disposition")
+                shape(source, required, optional)
+                sequence = integer(source["sequence"], 1)
+                if sequence > 2 * MAX_TOOL_EVENTS or sequence <= previous or sequence in sequences:
+                    refuse()
+                sequences.add(sequence)
+                previous = sequence
+                identity = source["identity"]
+                shape(identity, (), TOOL_IDENTIFIERS)
+                identity = {key: text(item) for key, item in identity.items()}
+                states = ({"pending", "commit_tuple_returned", "commit_none_returned", "raised", "unrecognized_return"}
+                          if commit else {"entered", "returned", "raised"})
+                if type(source["state"]) is not str or source["state"] not in states:
+                    refuse()
+                invalid = source["invalid_fields"]
+                invalid_names = (*TOOL_IDENTIFIERS, *optional)
+                if (type(invalid) is not list or len(invalid) > len(invalid_names)
+                        or any(type(key) is not str or key not in invalid_names for key in invalid)
+                        or len(set(invalid)) != len(invalid)
+                        or any(key in identity or key in source for key in invalid)):
+                    refuse()
+                record = {"sequence": sequence, "identity": identity, "invalid_fields": list(invalid), "state": source["state"]}
+                if commit:
+                    for key in ("blocked", "is_error"):
+                        if key in source:
+                            if type(source[key]) is not bool:
+                                refuse()
+                            record[key] = source[key]
+                        elif key not in invalid:
+                            refuse()
+                    key = "reported_effect_disposition"
+                    if key in source:
+                        item = source[key]
+                        if item is not None and (type(item) is not str or item not in {"none", "unknown"}):
+                            refuse()
+                        record[key] = item
+                    elif key not in invalid:
+                        refuse()
+                    correlation = source["correlation"]
+                    shape(correlation, ("status",), ("execution_sequence",))
+                    status = correlation["status"]
+                    if type(status) is not str or status not in {"incomplete_identity", "coverage_limited",
+                            "ambiguous_identity", "callback_not_observed", "invalid_order", "unique_identity_match"}:
+                        refuse()
+                    if (status == "unique_identity_match") != ("execution_sequence" in correlation):
+                        refuse()
+                    record["correlation"] = {"status": status}
+                    if "execution_sequence" in correlation:
+                        record["correlation"]["execution_sequence"] = integer(correlation["execution_sequence"], 1)
+                output.append(record)
+            return output
+
+        executions = tool_records(value["executions"], commit=False)
+        commits = tool_records(value["commits"], commit=True)
+        if (sequences != set(range(1, len(sequences) + 1)) or value["tool_overflow"]
+                and not value["metadata_overflow"] and max(len(executions), len(commits)) != MAX_TOOL_EVENTS):
+            refuse()
+        def key(record):
+            identity = record["identity"]
+            return tuple(identity[name] for name in TOOL_IDENTIFIERS) if set(identity) == set(TOOL_IDENTIFIERS) else None
+        limited = (value["tool_overflow"] or value["metadata_overflow"]
+                   or bool(set(errors) & {*TOOL_ERRORS, "unbound_or_stale_agent"})
+                   or any(key(record) is None for record in (*executions, *commits)))
+        for commit in commits:
+            identity = key(commit)
+            matches = [record for record in executions if identity is not None and key(record) == identity]
+            repeated = [record for record in commits if identity is not None and key(record) == identity]
+            if identity is None:
+                expected = "incomplete_identity"
+            elif limited:
+                expected = "coverage_limited"
+            elif len(matches) > 1 or len(repeated) > 1:
+                expected = "ambiguous_identity"
+            elif not matches:
+                expected = "callback_not_observed"
+            elif matches[0]["sequence"] >= commit["sequence"]:
+                expected = "invalid_order"
+            else:
+                expected = "unique_identity_match"
+            if commit["correlation"]["status"] != expected:
+                refuse()
+            if expected == "unique_identity_match" and commit["correlation"]["execution_sequence"] != matches[0]["sequence"]:
+                refuse()
+        projected.update(tools_stage=TOOLS_STAGE, tool_coverage=TOOL_COVERAGE, executions=executions,
+                         commits=commits, tool_overflow=value["tool_overflow"], metadata_overflow=value["metadata_overflow"])
     if len(json.dumps(projected, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_METADATA_BYTES:
         refuse()
     return projected
@@ -532,7 +680,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     from tools.registry import registry
     from integrations.hermes_harness.native_executive_consumer import (
         CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
-        NativeConsumerCurrentness, schema_digest)
+        NativeConsumerCurrentness, schema_digest, selected_child_publication)
     from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
     descriptor = runner.session_runtime_descriptor
     if descriptor.get("state") != "ready" or runner._draining:
@@ -543,7 +691,7 @@ def _consumer_extension(runner, home: Path) -> dict:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
         registration = slot.registration
-        binding = slot.startup.binding
+        binding = slot.delegate_binding
         loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
         if (slot.manager is not manager or slot.scope != manager.scope_key
                 or slot.owner != current_runtime_owner() or str(slot.scope) != str(home)
@@ -555,7 +703,9 @@ def _consumer_extension(runner, home: Path) -> dict:
                 or getattr(slot.registration_context, "_manager", None) is not manager):
             raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     guard = binding.currentness_guard
-    publication = slot.publication
+    publication = selected_child_publication(slot.publication)
+    if publication is None:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
             or guard.session_id != binding.session_id
             or guard.instance_id != descriptor.get("instance_id")
@@ -578,7 +728,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     if guard() is not True or registration.check_fn() is not True:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
-        if (slot.registration is not registration or slot.startup.binding is not binding
+        if (slot.registration is not registration or slot.delegate_binding is not binding
                 or slot.load_outcome != "REGISTERED"
                 or getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME) is not loaded
                 or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot):
@@ -602,6 +752,46 @@ def _consumer_extension(runner, home: Path) -> dict:
         "mcp_tools_schema_sha256": publication.tools_schema_digest,
     }
 
+
+
+def _consumer_capabilities(runner, home: Path) -> dict:
+    """Read v2 capability stages from this same native process and enrollment."""
+    from hermes_cli.plugins import get_plugin_manager
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_SLOT_ATTRIBUTE, ConsumerSlot, ExecutiveContextConsumerPublication,
+        selected_child_publication)
+    from .native_agentos_memory import NativeAgentOsMemoryFactory, validate_consumer_readback
+    manager = get_plugin_manager()
+    slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
+    descriptor = runner.session_runtime_descriptor
+    if (not isinstance(slot, ConsumerSlot) or type(slot.publication) is not ExecutiveContextConsumerPublication
+            or type(slot.memory_factory) is not NativeAgentOsMemoryFactory
+            or slot.manager is not manager or slot.owner != current_runtime_owner()
+            or str(slot.scope) != str(home) or descriptor.get("state") != "ready" or runner._draining):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    publication = slot.publication
+    def enrollment():
+        value = read_enrolled_session(runner, home, slot.owner, publication.session.request_id,
+                                      publication.session.principal_id, role=publication.session.role)
+        if value["status"] != "ENROLLED":
+            raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+        return value["target"]
+    before = enrollment()
+    expected = {"implementation_sha": slot.owner,
+        "publication_sha256": slot.memory_factory.publication_sha256, "profile_id": str(home),
+        "instance_id": before["instance_id"], "authority_epoch": before["authority_epoch"],
+        "enrollment_request_id": publication.session.request_id,
+        "principal_id": publication.session.principal_id, "session_id": before["session_id"]}
+    if (expected["instance_id"] != descriptor.get("instance_id")
+            or expected["authority_epoch"] != descriptor.get("authority_epoch")):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    value = slot.memory_factory.readback()
+    if selected_child_publication(publication) is not None:
+        value["selected_child"] = _consumer_extension(runner, home)
+    if (enrollment() != before or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot
+            or not slot.memory_factory.registered_current()):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    return validate_consumer_readback(value, publication=publication, expected_binding=expected)
 
 
 def _implementation(value):
@@ -945,13 +1135,15 @@ def install_private_control(runner, home: Path, role: str, *,
                 return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject, role=role)
-            if operation == "consumer_extension":
+            if operation in {"consumer_extension", "consumer_capabilities"}:
                 # A finite read-only qualification of the serving process. The
                 # caller selects no target and no route: the profile is the
                 # one this private socket belongs to.
                 if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
                     raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
                 async def observe_extension():
+                    if operation == "consumer_capabilities":
+                        return role_result("OBSERVED", consumer=_consumer_capabilities(runner, home))
                     return role_result("OBSERVED", extension=_consumer_extension(runner, home))
                 coroutine = observe_extension()
                 try:
@@ -973,7 +1165,8 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception:
-            return role_result("UNAVAILABLE" if operation in {"observe", "read_original", "consumer_extension"} else "REFUSED")
+            return role_result("UNAVAILABLE" if operation in {
+                "observe", "read_original", "consumer_extension", "consumer_capabilities"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
         coroutine = _submit(runner, home, params, peer_subject, role=role)
@@ -1141,3 +1334,7 @@ class NativeSecretaryClient:
         owner, creates no session and mutates nothing.
         """
         return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})
+
+    def consumer_capabilities(self):
+        """Private v2 capability observation; not a role HTTP dispatch verb."""
+        return self._call({"operation": "consumer_capabilities", "profile_id": str(self.home)})
