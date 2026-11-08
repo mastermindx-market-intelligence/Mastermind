@@ -1607,11 +1607,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # The attended configuration adds one optional digest and its strict
     # validation. The installed event-loop anchor remains byte-for-byte the
     # same AST; retain every path, membership and mutation refusal below.
+    # The reviewed pure Memory-validator extraction also preserves that
+    # anchor and the imports; only the full-source fingerprint changes.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'd807c57902cd794bfd05ac3e0d4fab1c2214f18193a3be5c82d2cf8ec5ee599f'):
+            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
