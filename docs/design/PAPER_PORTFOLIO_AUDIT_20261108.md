@@ -1495,3 +1495,154 @@ Exact operation receipts retained by ID:
 The navigation proposal still requires real-path proof for standalone and embedded Lookup → definition A → related B → Back; Close listener ordering; actual Lens full-Guide integration; same-origin new-tab/direct entry/reload; JavaScript-off browser navigation; qualified origin and effective analytical state; missing trigger/position; rejected Return before navigation; actual failure after navigation; access/route changes; Keep reading while work is pending; and newer navigation defeating late completion. Generic scroll/focus restoration cannot certify original market/horizon restoration. No exact-return acceptance is claimed.
 
 The completed native design and copy corrections are saved here while the wider mission continues. Next is **D22 Portfolio and allocation**, starting with actual current Terminal pages pX/pY and their source contract. Read-only discovery already found recovery boards **`1Z0H-0`**, **`1ZET-0`** and pointer **`216F-0`** present; preserve them, their authorship and existing scope. Root did not create those additions in this Guide phase. Select a distinct evidenced gap only after inspecting the current objects/identity contract. The warned original MASTERMIND PAGES file remains read-only, and no original retention/organization action is implied.
+
+
+## D22 continuation — portfolio object identity, comparison and passive-read boundaries — 2026-11-08
+
+**Native design work completed and verified; product integration remains proposed.** Continued the original whole-Paper assignment into D22 after the D25 Guide work. The new study is [Terminal / Proposed · Portfolio objects & comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1F-0), board `261Q-0`. The new builder reference is [Terminal / p-X-0](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0), board `26NL-0`. The personal record and target recovery studies were retained without alteration.
+
+### User problem and implemented native design
+
+The D22 handoff requires actual holdings, paper portfolios and model allocations to remain distinct, and calls for comparing actual and paper portfolios without mixing balances or performance. The previous Personal Desk already covered record/target recovery. This slice adds source selection, metric-specific comparison eligibility and the missing read/access states instead of reopening that accepted work.
+
+The new composition has **258 simple text leaves**, two desktop specimens and **eleven narrower state specimens**: eight at 390px, two at 320px and one at 768px. EN/ZH and light/dark are represented. **33 control/status frames have a 44px minimum height**, including the explicitly unavailable workspace link. Native sizing and screenshots establish composition only; keyboard, zoom, responsive browser behavior and accessibility conformance remain to be proven in the consumer.
+
+| Native scope | Page | Node | Evidence |
+| --- | --- | --- | --- |
+| New study | p-1F-0 | 261Q-0 | 258 simple text leaves; 1440 auto height |
+| New builder reference | p-X-0 | 26NL-0 | 12 text leaves; full source and study pointer |
+| Desktop entry | p-1F-0 | 268B-0 | Personal / paper / model chooser |
+| Desktop comparison | p-1F-0 | 269Y-0 | Priced personal subtotal / provisional paper value |
+| Failed / empty / unconnected | p-1F-0 | 26DF-0 | 390 EN dark;390 ZH light;320 EN light |
+| Model availability | p-1F-0 | 26FO-0 | Known budget; valid zero; unavailable |
+| Refresh / changed account | p-1F-0 | 26HI-0 | 768 EN light;390 ZH dark |
+| Managed/shared read limits | p-1F-0 | 26P0-0 | Provisional / pending / shared read unbound |
+| Owner build contract | p-1F-0 | 26J9-0 | Source identities, effects, comparison and navigation |
+| Source/acceptance note | p-1F-0 | 26LF-0 | Exact source pins and remaining consumer evidence |
+
+The chooser distinguishes **your recorded holdings**, **managed paper books**, **shared self-directed paper**, and the **related Bitcoin Vector/crypto model views**. It does not invent a second personal portfolio store. The comparison keeps the illustrative personal USD 38,961.48 priced subtotal beside a separately identified provisional paper valuation, never a combined balance. Record coverage remains 9 of 13 records, with 12 securities overall and four records needing quantity. Nine priced records do not establish nine completely priced securities or value coverage. The original 59.7% is three-name concentration of eligible cost, not a portfolio return.
+
+The paper USD 1,020,000 example, USD 357,000 stocks and USD 663,000 cash are reused only as explicitly illustrative figures from the V3 reference. They are not observations of the current US Brain account, nor proof that the candidate label US Autonomous is a live alias. The final design labels the derived paper value provisional and uses day-precision marks. It does not promote a read timestamp or the V3 example's 16:00 ET text into a timestamp supplied by the current bounded projection.
+
+Numerical differences are withheld separately for balance scope, weight denominator, return method/period, clocks and security identity. Personal cost weighting and marked paper account weighting are not comparable merely because both are percentages. Cash flows, fees, realized/unrealized treatment and a compatible window would also be needed for return comparisons. No FX conversion, USD/USDT equivalence, ticker-only cross-market match, blended P&L or automatic personal target is inferred.
+
+The state atlas makes failed reads, verified-empty personal records and unconnected navigation distinct. It shows a valid model zero separately from a missing decision; the 40%/60% model example is explicitly hypothetical. A missing asset split may retain an otherwise valid, date-matched total. Opening Bitcoin Vector is ordinary source navigation, not a promise to retrieve the illustrative decision date or restore a cross-application comparison. A refreshed paper source can remove the previously displayed current amount; an account change removes the previous user's private data. The joined guards are expressly requirements still needing implementation and runtime proof.
+
+### Source identity and exact revisions
+
+The protected governing procedure pin remains `5c3d3885234358aefb97ecdbc59be0864df14f8b`. Only affected product facts were refreshed. Terminal master was read at protected head `b38d93c2cc8d05f9f5c29598a3691304330ffee6`; the relevant ledger/page/workspace blobs matched the previous ff49 pin. Macro main was read at `9fe19a5128f431f9962a2866451919b516ea26e3`; all three affected template blobs matched 277d15. Mastermind product source was refreshed to protected master `89c83b3a3172054b7dfce7d208d4cf0c209f4672`; index, registry and self-directed code matched the prior inspected pin, while app/web.py was refreshed to its new blob.
+
+| Repository | Exact source | Commit | Blob |
+| --- | --- | --- | --- |
+| Terminal | `terminal/lib/portfolio.ts` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `cc699dc56b92ca162d32875a894609a42648333d` |
+| Terminal | `terminal/app/(shell)/portfolio/page.tsx` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `c3bf1da4622bc9ca57fba0466ffdf50a4edda845` |
+| Terminal | `terminal/components/PortfolioWorkspace.tsx` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `64e0a44aa5711c64402eb51786666fe4966f194f` |
+| Terminal | `terminal/components/mounts/PortfolioViewMount.tsx` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `68c6fe45c430db8717a8991a009b9079f96ae7e7` |
+| Terminal | `terminal/components/PortfolioView.tsx` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `e5f8abbb848dc5a60c2d58f6b8a3c1ffe7b59ef6` |
+| Terminal | `terminal/lib/portfolioMoney.ts` | `b38d93c2cc8d05f9f5c29598a3691304330ffee6` | `81f5e45b4b9755ad16e52ae9517ccda6cb2be2c8` |
+| Mastermind | `app/static/index.html` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `dba545d94300588926a00ea767dcdab600724ef5` |
+| Mastermind | `app/web.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `1d61d2f54de9215fe703e539ba5e91a9cead3eb6` |
+| Mastermind | `portfolio/registry.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `f5eb632d8f2d8dfcdbe11abb19076f9d746b38fe` |
+| Mastermind | `portfolio/self_directed.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `11c46facb5c883d45ce21531665b56a4c5b9da74` |
+| Mastermind | `portfolio/paper_account.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `73b18d9c5ecaaeee30492d02af2312db4c57efd0` |
+| Mastermind | `app/decision_availability.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `529de3a392cb9f05914caad98184adbdf43805f6` |
+| Mastermind | `portfolio/performance_read.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `82a6db2ca1e46829aa71107bb49740dcc0a75a6f` |
+| Mastermind | `portfolio/performance_projection.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `371a407867fc25b8a635a31789c72a7d724a5d17` |
+| Mastermind | `app/settlement_price_read.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `88cebdb9dc000d50d32f57f029f414876adef4d5` |
+| Mastermind | `app/provider_diagnostic_read.py` | `89c83b3a3172054b7dfce7d208d4cf0c209f4672` | `df619102a779cc110c80919e3f41abcb3be19930` |
+| Macro | `templates/vector.html.j2` | `9fe19a5128f431f9962a2866451919b516ea26e3` | `9123692d3db7af30d7f6db5c70b981ff3eb9f201` |
+| Macro | `templates/crypto.html.j2` | `9fe19a5128f431f9962a2866451919b516ea26e3` | `0c657a1b1d7eaa41faa2edb14ec110878c0601bc` |
+| Macro | `templates/vector_allocation.html.j2` | `9fe19a5128f431f9962a2866451919b516ea26e3` | `130bea8dd5194b1106c8fce621a281fd5e1f6864` |
+
+Terminal's actual chain is Portfolio page → PortfolioViewMount → PortfolioView → PortfolioWorkspace. The page authenticates the user and reads user-scoped portfolio_positions; Position.id remains record identity. There is no portfolio_id or multiple-personal-portfolio schema in the inspected owner. portfolioMoney requires finite known same-currency values and applies no FX conversion. The existing record/target owners keep their mutation and readback responsibilities.
+
+Bot Paper Portfolio is a real existing source-backed product. The warned original file/page `01M2WGNCX9475G79JRKJTCM08P/p-14-0` is now a relocation pointer, `74XV-0/74Y4-0`, to the standalone [V3 design](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0). Root read the exact destination and its `1-0` handoff and `77-0` holdings reference. The original and standalone were read only. The handoff calls its account, return, target and receipt values illustrative. The existing runtime is not contingent on V3 PR #673 being accepted.
+
+Managed paper book `autonomous` uses the existing in-application route `/#/autonomous/overview` and current registry name US Brain. The storage compatibility default `flagship` is not the product default. The shared `self_directed` book uses `/self` and its own owner, separate from Terminal's private record collection. These routes establish paths inside the Mastermind application, not an absolute cross-application origin. No host or relative Terminal URL was guessed.
+
+Macro `/vector.html` is the BTC model view. `/crypto.html#allocation` shows the related model budget and BTC/ETH/altcoin/cash breakdown. `/vector_allocation.html` remains a compatibility redirect. The model views share a producer lineage; each displayed observation must still match its applicable decision date and integrity checks. They are not additive owned accounts or two independent allocation confirmations.
+
+### Architecture finding: general GET is not passive-account evidence
+
+Source inspection uncovered a material integration risk and an existing-owner solution. **Do not wire the proposed read-only comparison to the ordinary enriched portfolio routes or use opening the paper workspace as a no-effect fallback.** No such endpoint or account operation was invoked during this audit.
+
+| Source path | Source-observed effect boundary |
+| --- | --- |
+| General GET /api/portfolio for an active book | Can acquire/create a transaction lock and recover a prepared account transaction through _load_account; may acquire quotes; invalid bytes can be quarantined. A missing account may yield an in-memory funded-looking fresh-account object, which is not observed account evidence. |
+| Managed transaction recovery | Can write account state, repair/append fills, create a settlement receipt, update pending follow-up and remove the completed WAL. This remains the existing account owner's responsibility. |
+| GET /api/self_directed | Current handler uses read_only=True, which skips settlement, but its preliminary/inner account loaders can quarantine invalid data and it can acquire prices. |
+| GET /api/self_directed/history | history() calls settle_pending(); source-visible paths can append fills and rewrite account/pending state. |
+| GET /api/portfolios | Enriched status can reach shared-book loaders; pure registry metadata and this HTTP response have different effect boundaries. |
+
+The **existing managed-book candidate** is `GET /api/portfolio?portfolio=autonomous&view=decision_availability`. Its branch precedes recovery-capable loaders and quote/fresh-account fallbacks. app/decision_availability.py uses bounded file reads and signatures/hashes. It supports exactly autonomous, china and hk. It returns account cash, positions, persisted price fields and dates, provisional valuation, separate recorded NAV and consistency metadata. It observes a transaction WAL without recovering it. Inspected callback paths validate/bounded-read evidence rather than repairing accounts or acquiring marks.
+
+Its limits are part of the design: **account.effective_at is null; observed_at is read time; position price_asof is a day; persisted-mark valuation is provisional.** Changed, pending or unknown consistency cannot establish a qualified numerical comparison. A stable file observation is not an atomic accounting snapshot. Native states now show provisional valuation, an observed pending account update with values withheld, and the shared-book comparison that is not yet bound.
+
+The same managed projection returns **not_applicable** for self_directed. A pure shared account-file diagnostic was found, but no qualified full passive shared-book holdings projection was established. That blocks only the shared-book comparison binding. It does not make the product or book nonexistent and does not authorize using a different book's values.
+
+The existing performance route has a bounded persisted-source projection, but its account-history binding is book_path_only and settlement reconciliation is not_checked. It is separate historical evidence, not proof of a reconciled account/performance pair. No new API, account lifecycle, comparison store, auth layer or refresh loop was introduced.
+
+### Review, verification and preservation
+
+Context-aware reasoning review checked the actual new board against original 1L71 and the source facts. Its corrections were applied: change an implemented-sounding completion-guard claim into an explicit proposed requirement; remove the false user connection flow; label the unavailable workspace link; name Bitcoin Vector as the actual model destination; require exact decision/date binding; qualify access after an account change. Root also traced the passive-read architecture finding, removed unsupported intraday precision, labeled paper valuation provisional, added missing managed/shared states and replaced technical wording in product specimens with plain language.
+
+Native renders were inspected for the desktop chooser/comparison, the 320/390 read/model rows, the 768/390 continuity row, the three additional managed/shared states and the reference board. Layout remains in the existing tokens with neutral borders. Source JSX confirms 258 study leaves and 12 reference leaves, 8×390, 2×320, 1×768 and 33 minimum-44px frames. No browser execution, accessibility conformance, product implementation or production acceptance is asserted.
+
+Whole JSX equality, not only selected labels, preserved these **seven** source boards: `1L71-0`, `1LE4-0`, `1L19-0`, `216F-0`, `1Z0H-0`, `1ZET-0`, and native geometry source `23MJ-0`. Their 719 simple text leaves were unchanged. The new page is placed immediately after Personal Desk p-Y-0; removing only p-1F-0 from the resulting page list reproduces the entire previous page order exactly. The new p-X pointer is a separate owned board; the recovery reference was not relabeled or replaced.
+
+**42 distinct native operations returned APPLIED_RESPONSE_OBSERVED; no duplicate operation IDs or unresolved effects.** Scoped finish released only 261Q and 26NL. The initial focus precondition returned DOCUMENT_CHANGED without a document mutation; exact-target inspection and a target-bound prepare then returned PAPER_READY. There was no denied-effect carrier switch or unknown mutation replay. Compatible native tools were used; create_artboard/style/token gates were not bypassed.
+
+| Operation | Stable ID |
+| --- | --- |
+| create_page | `paper-portfolio-20261108-d22-create-page-01` |
+| duplicate-study | `paper-portfolio-20261108-d22-duplicate-study-01` |
+| rename-study | `paper-portfolio-20261108-d22-rename-study-01` |
+| study-shell | `paper-portfolio-20261108-d22-study-shell-01` |
+| entry-shell | `paper-portfolio-20261108-d22-entry-shell-01` |
+| personal-card | `paper-portfolio-20261108-d22-personal-card-01` |
+| paper-card | `paper-portfolio-20261108-d22-paper-card-01` |
+| model-card | `paper-portfolio-20261108-d22-model-card-01` |
+| comparison-shell | `paper-portfolio-20261108-d22-comparison-shell-01` |
+| personal-values | `paper-portfolio-20261108-d22-personal-values-01` |
+| paper-values | `paper-portfolio-20261108-d22-paper-values-01` |
+| eligibility-table | `paper-portfolio-20261108-d22-eligibility-table-01` |
+| mobile-read-shell | `paper-portfolio-20261108-d22-mobile-read-shell-01` |
+| mobile-paper-read-failed | `paper-portfolio-20261108-d22-mobile-paper-read-failed-01` |
+| mobile-personal-empty | `paper-portfolio-20261108-d22-mobile-personal-empty-01` |
+| mobile-unbound-paper | `paper-portfolio-20261108-d22-mobile-unbound-paper-01` |
+| mobile-model-shell | `paper-portfolio-20261108-d22-mobile-model-shell-01` |
+| mobile-model-split-missing | `paper-portfolio-20261108-d22-mobile-model-split-missing-01` |
+| mobile-model-valid-zero | `paper-portfolio-20261108-d22-mobile-model-valid-zero-01` |
+| mobile-model-unavailable | `paper-portfolio-20261108-d22-mobile-model-unavailable-01` |
+| continuity-shell | `paper-portfolio-20261108-d22-continuity-shell-01` |
+| tablet-source-refreshed | `paper-portfolio-20261108-d22-tablet-source-refreshed-01` |
+| mobile-access-changed | `paper-portfolio-20261108-d22-mobile-access-changed-01` |
+| build-contract-shell | `paper-portfolio-20261108-d22-build-contract-shell-01` |
+| build-contract-rows-1 | `paper-portfolio-20261108-d22-build-contract-rows-1-01` |
+| build-contract-rows-2 | `paper-portfolio-20261108-d22-build-contract-rows-2-01` |
+| source-and-proof-note | `paper-portfolio-20261108-d22-source-and-proof-note-01` |
+| review-clarity-fixes | `paper-portfolio-20261108-d22-review-clarity-fixes-01` |
+| model-binding-review-note | `paper-portfolio-20261108-d22-model-binding-review-note-01` |
+| duplicate-reference-pointer | `paper-portfolio-20261108-d22-duplicate-reference-pointer-01` |
+| rename-reference-pointer | `paper-portfolio-20261108-d22-rename-reference-pointer-01` |
+| reference-pointer-content | `paper-portfolio-20261108-d22-reference-pointer-content-01` |
+| place-study-after-personal | `paper-portfolio-20261108-d22-place-study-after-personal-01` |
+| read-projection-copy-fixes | `paper-portfolio-20261108-d22-read-projection-copy-fixes-01` |
+| paper-read-owner-contract | `paper-portfolio-20261108-d22-paper-read-owner-contract-01` |
+| paper-projection-state-shell | `paper-portfolio-20261108-d22-paper-projection-state-shell-01` |
+| mobile-paper-provisional | `paper-portfolio-20261108-d22-mobile-paper-provisional-01` |
+| mobile-paper-pending-update | `paper-portfolio-20261108-d22-mobile-paper-pending-update-01` |
+| mobile-shared-read-unbound | `paper-portfolio-20261108-d22-mobile-shared-read-unbound-01` |
+| place-read-states-before-contract | `paper-portfolio-20261108-d22-place-read-states-before-contract-01` |
+| plain-language-final-fixes | `paper-portfolio-20261108-d22-plain-language-final-fixes-01` |
+| finish-study-and-reference | `paper-portfolio-20261108-d22-finish-study-and-reference-01` |
+
+### Immutable artifact set and remaining work
+
+The companion artifact set is committed under `docs/design/evidence/paper_portfolio_20261108/d22/`: **two exact native JSX exports, eight original JPEG captures, and evidence.json** with source pins, artifact Git blob hashes, native IDs, operations and structural observations. JPEG bytes come directly from the Paper screenshot tool; no raster edits or synthetic screenshots were made. The export remains a design artifact, not application code. Snapshot guards are not treated as immutable document revisions; the committed content-addressed artifacts freeze the observed design state.
+
+Remaining implementation proof is specific: exact cross-app navigation binding and access; admitted passive managed-book consumer wiring; a qualified shared-book holdings projection if that comparison is later implemented; current-user/book/metric/basis completion fences; method/currency/clock/coverage qualification for an actual numerical pair; source navigation/focus; browser reflow and keyboard behavior; served-product acceptance. No account actions, model execution, trades, deployment or held-PR controls changed.
+
+**Continue the parent mission:** publish qualified D22 and D25 proposal discovery into the existing F03 source directory, using current exact Paper readback and note-first source publication. Preserve its original warned canvas, frozen census, prior exact returns and all product release holds. This is the next safe phase, not a task-completion or stopping checkpoint.
+
+Artifact-byte qualification: the GitHub text-only connector rejects JPEG decoding. The exact native JPEG and JSX bytes were independently hashed with the Git blob header; all ten computed object IDs match the created blob receipts. Canonical path-to-blob identities are read back after publication. Text bodies are compared exactly; no decoded JPEG body readback is claimed.
