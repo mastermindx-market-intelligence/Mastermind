@@ -4,7 +4,7 @@ Operation: `paper-experience-audit-20261108-c3`.
 
 ## Delivered outcome and scope
 
-The assigned goal was to audit and improve the existing Paper designs, especially architecture, feature coherence and clarity. This portfolio pass produced verified edits in **six existing Paper files**: content or interaction specimens on **13 boards**, plus clearer names and ordering for existing pages in Prophet and Sector Intelligence. The authored work includes **63 existing text-node updates**, four section-navigation compositions, one interaction-contract addition, two ineligible-action replacements and a preserved-node assessment reorder.
+The assigned goal was to audit and improve the existing Paper designs, especially architecture, feature coherence and clarity. This first wave produced verified edits in **six existing Paper files**: content or interaction specimens on **13 boards**, plus clearer names and ordering for existing pages in Prophet and Sector Intelligence. The authored work includes **63 existing text-node updates**, four section-navigation compositions, one interaction-contract addition, two ineligible-action replacements and a preserved-node assessment reorder.
 
 Before, several designs confused the scope of evidence with a conclusion, hid the meaning of a comparison or return link, or obscured the starting point among design versions. After, the affected screens communicate those distinctions explicitly, and the corrected states are visible in the editable Paper files.
 
@@ -265,3 +265,32 @@ Source basis at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`: [immutable sou
 **Concurrent work was preserved.** Between the architecture read and root preflight, Memory's proposed detail `YI-0` and contract `V1-0` acquired source details, full observed fingerprint, row locator, record-read clock, copy-reference/return actions, and proposed source-change recovery. Root observed new `159-0` / `15Z-0` groups and did not author, repeat, overwrite or claim them. Those current R2 changes superseded the earlier “missing detail return” finding. Root's Memory edits were confined to the disjoint R1 mismatch cards. Receipt binding, units, cutoff, account reuse and authenticated consumer proof were not promoted.
 
 **Portfolio investigation is current-source bound.** The historical census pin `857a5076fda7984df0c169635b2a399c046c0a9d` was superseded for implementation facts by ordinary protected-default-branch read `f0af84bbd6c28c2f6477bd8ffc031903979023bd`. Current source supports entry currency/basis, dirty-exit confirmation, exact mutation postconditions and account fences. The earlier currency/dirty-exit implementation-gap hypothesis was rejected. Further native recovery specimens will expose the existing contract and explicitly qualify any proposed read-only recovery control; they will not claim missing persistence or production proof.
+
+### Wave 2 Portfolio record-repair journey — applied and verified
+
+New [Personal Desk](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0) atlas **`1Z0H-0` — 07 · Portfolio · Record repair and recovery · DESIGN** adds three390px phone compositions and six companion states. The original six Personal Desk boards remain unchanged.
+
+The repair list uses exactly the existing09Oct2026 snapshot's four missing-quantity records: NEM record1of2, HL, MU, and NEM record2of2. The two NEM records remain distinct. All13 records and Overview have explicit returns. The editor carries the selected record and the filtered-list position, with separately labeled44px Previous/Next controls. Its entered12shares /100.00USD /09Oct2026 values are explicitly illustrative; no actual position UUID, account update, portfolio total, return or new quote was invented.
+
+The unconfirmed-save phone retains those exact entered values and selected record. Its proposed Check saved record control performs a read, not another submission. Next is unavailable while reconciliation is pending, and no enabled resubmit is presented. Companion states make the following outcomes concrete:
+
+1. POST pending, with entered details retained and navigation/close unavailable.
+2. Pre-submit dirty exit, with Keep editing focused and a distinct local-discard choice.
+3. Fully confirmed return: View updated record opens All open records at the same persisted ID; Continue returns to the recomputed missing-quantity list. The shown3remaining records is illustrative and must be derived from authoritative reread.
+4. Account change: old editor context clears; the current-account surface exposes no old NEM draft or outcome.
+5. Post-submit unconfirmed exit: closing clears local typing without implying that any account mutation was undone.
+6. Matching record read with missing acknowledgement: show that the current record matches, but keep this submission's confirmation unavailable.
+
+The build contract on the same board binds the exact acknowledgement + normalized-intent + record-ID + authoritative-readback + owner-scope predicate. A matching GET alone cannot establish which writer caused a value. Valid authoritative data may refresh the book while mutation confirmation remains unresolved. Source currency basis, date normalization and unshown fields such as notes remain intact. The fixture's display ordinal is never used as a mutation key.
+
+The conditional return fixes a real design edge: a repaired record can leave the Needs quantity filter. View updated record resolves the persisted ID under All open records and focuses its action. Continue focuses the next remaining record action, or the list heading when empty, rather than a removed row. No count decrement is hardcoded.
+
+Current protected Terminal source pin: `f0af84bbd6c28c2f6477bd8ffc031903979023bd`.
+- [Position owner](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/lib/portfolio.ts), blob `cc699dc56b92ca162d32875a894609a42648333d`.
+- [Mutation predicate](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/lib/portfolioMutation.ts), blob `e62b7dfc8964faa47d40c7ad53e7abd8e76a76a2`.
+- [Position modal](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/PositionModal.tsx), blob `6c07f488fa8b63b5c0aea121bfd936cfd58b5253`.
+- [Portfolio view](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/PortfolioView.tsx), blob `e5f8abbb848dc5a60c2d58f6b8a3c1ffe7b59ef6`.
+
+Root reviewed individual phone/state screenshots, the complete atlas and a72206-character JSX readback. A read-only C3 critique identified the missing-acknowledgement branch, unknown-exit branch and deterministic focus fallback; all three were incorporated and rechecked. This is advisory design reasoning, not a formal acceptance or GitHub approval. Existing currency persistence and dirty-exit implementation were not mislabeled as absent.
+
+All `portfolio-*` operation responses under the wave2 prefix were observed applied. `portfolio-record-recovery-finish-01` finished exactly `1Z0H-0`. The proposed explicit read-only recovery control, mobile navigation and new focus-return bindings still require implementation/consumer proof. No runtime change, account mutation or deployment occurred. The next independent design slice is Targets read failure versus a real empty target set, and retention when a holding is closed or unweighable.
