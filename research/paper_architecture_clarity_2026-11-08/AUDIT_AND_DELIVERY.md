@@ -457,3 +457,52 @@ Fresh final inspection found an independently authored Start / Study / Build sep
 Root inspected all four expanded-table screenshots, all four failed-selection screenshots, both narrow empty-series screenshots, and all four complete current Build artboards. Values, labels and full clocks match the synthetic fixture; narrow layouts wrap legibly; additions are contained without clipping. The exact six mobile row writes whose streamed output was interrupted were reconciled from original-target reads and the original stored successful responses; none was replayed or duplicated. All own mutation responses are observed; all four actual Build artboards were explicitly released.
 
 Next active unit: the D08C Options assessment target must remain explicit and stable when new firing receipts arrive, using the existing research revision owner and C07 save/readback contract. Standalone R1 capacity/read-only custody and native Plan #804 holds remain unchanged.
+
+
+## Continuation delivery 5 — Options assessment stays bound to its selected firing
+
+### Source-observed gap and custody
+
+Root read [InvestigationReviewPanel.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/workspaces/InvestigationReviewPanel.tsx), blob `0062b86553d77df773c6c7065366f5f14e29ffaa`, and [investigationReview.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/lib/investigationReview.ts), blob `5a59c2bf1b9414c8e25a8348d2d68ddd5fe31cbd`. The projector selects the newest timed receipt, and Save currently passes `review.fired?.fire_event_id`. A newly read receipt can therefore change the target an assessment will use without an explicit target decision. This is a source-observed race risk, not a reproduced live incident.
+
+The single-watch R1 fixture and its W3 lineage remain owned. Standalone desktop file `01M5EPQ16VBT7SBW2NQVX2RJG4` and mobile `01M5FNCKAND6CBSJNYM5FZWR8Y` were read only, respecting their capacity/read-only disposition. Terminal #1104 is merged; the older programme’s “next merge” wording was not reused as present status. D08C source #10687 is merged at `afae47f38a3c985af49ad73bbde406943d401903` / merge `3915b70e7a18a0485048f20e56fe76e030c0308f`; this does not release native Plan #804 or prove runtime save/watch acceptance.
+
+### Implemented editable companion
+
+Added a clearly **proposed review interaction** inside Terminal file `01M3NSZGE8JWN2EZCSF0DT05RM`, [D08C C00 Read me & Build contract](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0), artboard `1S0R-0`, inner `1S0S-0`.
+
+The new companion is `1YP6-0`. Existing C00 material, the independently authored source/admission bridge `1Y9G-0`, C07 `1PXO-0`, the ten D08C product candidates, and all original release holds were preserved.
+
+| Editable part | Node | Purpose |
+|---|---|---|
+| Three target states | `1YPC-0` | Chosen firing, new firing arriving, explicit General assessment |
+| Chosen firing identity | `1YPK-0` | Research r3, firing clock, recorded condition/version and existing shortened receipt ID |
+| Incoming firing notice | `1YQA-0` | Review new firing while the original target and draft stay visible |
+| Existing receipt-detail footer study | `1YSG-0` | Separate inspection from explicit “Use this firing” |
+| Recovery states | `1YUB-0` | Details unavailable, identity unavailable, research revision changed |
+| Narrow 320px specimen | `1YVH-0` | Fixed target, notification, preserved draft and 44px controls at narrow width |
+| Builder acceptance | `1YVJ-0` | Identity, dirty-draft decision, payload capture, conflict/reconciliation and runtime cases |
+| Immutable source links | `1YXP-0` | Existing review owner and C07 interactions |
+
+The retained illustrative R1 fixture is research r3, firing **21 Oct 15:40:03Z**, recorded **price ≥ 230.00 / condition v3**, short receipt **8f3a1c7e…c21d**, and the original Inconclusive note. Research revision, condition version and firing time have separate labels. No full ID, second event, new price, source vintage or delivery state was invented. The recorded comparator is evidence copied from that fixture; it does not redefine the current watch evaluator.
+
+### Required behavior
+
+- Capture the full receipt ID with investigation, owner and expected research revision. The shortened display ID and time cannot supply a missing identity.
+- A later firing updates the history and shows **New firing available** without changing the target. **Review new firing** inspects; **Use this firing** deliberately adopts a valid exact identity through the existing dirty-draft decision. Cancel/close preserves target, assessment and note exactly.
+- **General assessment / Not linked to a firing** is an explicit selection. Its optional firing reference remains omitted by the existing serializer even when a receipt arrives. Unreadable/missing data never silently selects General.
+- Unavailable details retain a previously established target. An identity never established blocks receipt-linked Save. A capped list’s omission does not prove deletion or nondelivery.
+- At Save, capture one fixed target + authored assessment/note + expected revision through the native command. Receipts arriving before or after submission cannot alter it.
+- Concurrent research revisions use the incumbent conflict path and preserve the draft. “New r4” is conditional on expected r3 remaining current; no silent rebase.
+- Pending/unknown Save does not permit target switching to create a second command. The existing [C07 interaction contract](https://github.com/mastermindx-market-intelligence/macro/blob/afae47f38a3c985af49ad73bbde406943d401903/research/design_candidates/production_design_20261102/d08c/INTERACTIONS.md) retains original-operation reconciliation, known commitment, read-only reopen retry and exact-revision proof.
+- Owner/account changes hide former-owner content and retire callbacks; they are not ordinary receipt-details failures. Keep one overlay and restore focus to the surviving invoking control.
+
+No parallel receipt store, watch evaluator, revision protocol, route, or save-admission mechanism was introduced. Required runtime proof includes receipt arrivals while typing/inspecting/saving, explicit General, missing details versus missing identity, revision conflict, owner retirement, canceled target change, unknown Save and matching exact-revision reopen. These cases remain unproved runtime acceptance.
+
+### Verification and local repair
+
+Root inspected the three-state row, receipt inspection footer, three recovery cards, 320px specimen, builder acceptance and complete fit-content C00 artboard. Text and controls are legible and contained. Recovery copy was refined to plain language and its final screenshot checked. The actual C00 artboard was explicitly released.
+
+One write initially returned `EFFECT_UNKNOWN`: operation `paper-enhance-20261108-c4-options-recovery-details`, upstream error **“Node Rectangle cannot have children.”** The empty row wrapper had been created as Rectangle `1YT2-0`. Same-carrier original-target tree and node-info readback proved it still had zero children and the containing section had no recovery card. This was recorded as **RECONCILED_NO_TARGET_EFFECT**. The failed insert was not replayed. A materially corrected same-carrier repair replaced that writer-owned empty rectangle with a populated Frame `1YUB-0`; subsequent additions returned observed success, and final tree/screenshot proved the intended three recovery cards. No own unresolved effect remains.
+
+Next active audit frontier: bounded review of Market Memory exact-source/revision recovery and Mastermind AI continuation/source navigation. Accepted work is preserved; any further edit requires a fresh target read and an actual material gap.
