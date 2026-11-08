@@ -1430,6 +1430,158 @@
           "afterSnapshot": "d90f91ad2c505f5d41222015d38a13cf68ebd26bbfbef42f397076afd4d8ec31"
         }
       ]
+    },
+    {
+      "key": "preservation_case_paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-v1",
+      "operationId": "paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-v1",
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "plan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "4EO-0",
+        "artboardName": "SOURCE ONLY · 06 · Sector Intelligence · Live baseline",
+        "nodeId": "4GM-0",
+        "kind": "accent-refinement-new93",
+        "expected": {
+          "boxShadow": "#FFFFFF1F 0px 1px 0px inset, #1F273A17 0px 5px 15px",
+          "paddingInline": "10px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#1F273A17 0px 5px 15px;",
+        "verify": {
+          "boxShadow": "#1F273A17 0px 5px 15px"
+        },
+        "change": "Remove the classified decorative container-edge or strip component while preserving semantic data marks, full surfaces and useful depth.",
+        "sourceClassification": {
+          "indexSha256": "603f3e8dcb4008a20b6d5136b913b807cc22cb6fe7d8b093e7c5ae12f15a786d",
+          "ledgerSha256": "0caff2d10ea0b224373bb4beaa8b40abacbbd964996a5b861553eeed568b929a",
+          "reasons": [
+            "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+          ],
+          "lanes": [
+            "shadow_gradient"
+          ]
+        },
+        "preservationRequirements": [
+          {
+            "nodeId": "4GQ-0",
+            "styles": {
+              "minWidth": "0px"
+            }
+          }
+        ]
+      },
+      "stage": "COMPLETE",
+      "sourceRoot": "4GM-0",
+      "currentRoot": "8QF-0",
+      "sourceRaw": "(\n    <div id=\"4GM-0\" style={{ alignItems: 'center', backgroundColor: '#11151D', borderColor: '#343D4C', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF1F 0px 1px 0px inset, #1F273A17 0px 5px 15px', boxSizing: 'border-box', display: 'flex', fontSynthesis: 'none', gap: '7px', height: '40px', justifyContent: 'center', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', paddingInline: '10px', position: 'absolute', WebkitFontSmoothing: 'antialiased', width: '128px' }}>\n      <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\" id=\"4GN-0\" style={{ width: '15px', height: '15px', flexShrink: '0', overflow: 'clip' }}>\n        <circle cx=\"8.7\" cy=\"8.7\" r=\"5.6\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} />\n        <path d=\"m12.9 12.9 4 4\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} />\n      </svg>\n      <div id=\"4GQ-0\" style={{ boxSizing: 'border-box', flexGrow: '1', height: '12px', minWidth: '0px', overflow: 'clip', width: '84px' }}>\n        <div id=\"4GR-0\" style={{ boxSizing: 'border-box', color: '#CBD3DF', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.275px', lineHeight: '11px', width: 'max-content' }}>\n          NVD\n        </div>\n      </div>\n    </div>\n  )",
+      "backupRoot": "8Q9-0",
+      "backupErrors": [],
+      "finalRaw": "(\n    <div id=\"8QF-0\" style={{ alignItems: 'center', backgroundColor: '#11151D', borderColor: '#343D4C', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#1F273A17 0px 5px 15px', boxSizing: 'border-box', display: 'flex', fontSynthesis: 'none', gap: '7px', height: '40px', justifyContent: 'center', left: 0, MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', paddingInline: '10px', position: 'absolute', top: 0, WebkitFontSmoothing: 'antialiased', width: '128px' }}>\n      <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\" id=\"8QG-0\" style={{ width: '15px', height: '15px', flexShrink: '0', overflow: 'clip' }}>\n        <circle cx=\"8.7\" cy=\"8.7\" r=\"5.6\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} />\n        <path d=\"m12.9 12.9 4 4\" fontFamily=\"-apple-system, &amp;quot\" fontSize=\"14px\" fontWeight=\"400\" fontStyle=\"normal\" letterSpacing=\"normal\" textDecoration=\"none\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} />\n      </svg>\n      <div id=\"8QJ-0\" style={{ boxSizing: 'border-box', flexGrow: '1', height: '12px', minWidth: '0px', overflow: 'clip', width: '84px' }}>\n        <div id=\"8QK-0\" style={{ boxSizing: 'border-box', color: '#CBD3DF', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.275px', lineHeight: '11px', width: 'max-content' }}>\n          NVD\n        </div>\n      </div>\n    </div>\n  )",
+      "finalErrors": [],
+      "originalRestorationVerified": false,
+      "cleanupVerified": true,
+      "utilityAfter": "8QM-0",
+      "extraOperations": [
+        {
+          "tool": "duplicate_nodes",
+          "operationId": "paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-utility-owned-seed-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "duplicatedNodes": [
+              {
+                "sourceId": "4GM-0",
+                "newId": "8Q1-0",
+                "name": "button.search-trigger",
+                "component": "Frame",
+                "worldX": null,
+                "worldY": null,
+                "x": null,
+                "y": null,
+                "descendantIdMap": {
+                  "4GN-0": "8Q4-0",
+                  "4GQ-0": "8Q2-0",
+                  "4GR-0": "8Q3-0",
+                  "4GO-0": "8Q6-0",
+                  "4GP-0": "8Q5-0"
+                }
+              }
+            ]
+          },
+          "beforeSnapshot": "2ab9365ddad8a1b51e4249f50dc14243f138bdab4d5fe226f6d92b5008a34c30",
+          "afterSnapshot": "bda8512332069ec415a98d4f64305e89239a40ba15de51efe3c0de4df6fd0e4d"
+        },
+        {
+          "tool": "write_html",
+          "operationId": "paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-utility-create-from-owned-seed-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "createdNodes": [
+              {
+                "id": "8Q7-0",
+                "name": "Empty audit preservation template",
+                "component": "Frame",
+                "worldX": 799.999,
+                "worldY": -5595,
+                "x": 0,
+                "y": 0
+              }
+            ]
+          },
+          "beforeSnapshot": "bda8512332069ec415a98d4f64305e89239a40ba15de51efe3c0de4df6fd0e4d",
+          "afterSnapshot": "fdb7ec6655cd6063e7e842e5fbb7a3639f75556d2b30bda74a5f47a6eeb08d99"
+        },
+        {
+          "tool": "duplicate_nodes",
+          "operationId": "paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-preserve-before-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "duplicatedNodes": [
+              {
+                "sourceId": "4GM-0",
+                "newId": "8Q9-0",
+                "name": "button.search-trigger",
+                "component": "Frame",
+                "worldX": null,
+                "worldY": null,
+                "x": null,
+                "y": null,
+                "descendantIdMap": {
+                  "4GN-0": "8QC-0",
+                  "4GQ-0": "8QA-0",
+                  "4GR-0": "8QB-0",
+                  "4GO-0": "8QE-0",
+                  "4GP-0": "8QD-0"
+                }
+              }
+            ]
+          },
+          "beforeSnapshot": "fdb7ec6655cd6063e7e842e5fbb7a3639f75556d2b30bda74a5f47a6eeb08d99",
+          "afterSnapshot": "ea7977bec45d7201f4c99395abbf513ea9d3b60d8f64dd057873c502dc6c25cb"
+        },
+        {
+          "tool": "write_html",
+          "operationId": "paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-clear-owned-backup-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "createdNodes": [
+              {
+                "id": "8QM-0",
+                "name": "Empty audit preservation template",
+                "component": "Frame",
+                "worldX": 799.999,
+                "worldY": -5595,
+                "x": 0,
+                "y": 0
+              }
+            ]
+          },
+          "beforeSnapshot": "ea7977bec45d7201f4c99395abbf513ea9d3b60d8f64dd057873c502dc6c25cb",
+          "afterSnapshot": "fdb7ec6655cd6063e7e842e5fbb7a3639f75556d2b30bda74a5f47a6eeb08d99"
+        }
+      ]
     }
   ],
   "popover16TRestoration": {
@@ -19837,6 +19989,101 @@
         "16t_native_restore_receipt"
       ],
       "newRestorationPatches": 0
+    }
+  },
+  "newMinimumPreservation": {
+    "classificationDocument": "CLASSIFICATION_DELTA.json",
+    "gitBlob": "554ea90c66ac222c4469e5be88cd57d3779a5d01",
+    "fourExistingControls": {
+      "status": "NO_REPAIR_REQUIRED",
+      "source": "fresh get_computed_styles",
+      "operationIds": [
+        "paper-accent-estate-20261108-c4-n90pf-vo-0-accent-refinement-added-v1",
+        "paper-accent-estate-20261108-c4-n90pf-ya-0-accent-refinement-added-v1",
+        "paper-accent-estate-20261108-c4-n90pf-10w-0-accent-refinement-added-v1",
+        "paper-accent-estate-20261108-c4-n90pf-13i-0-accent-refinement-added-v1"
+      ],
+      "nativeStyles": {
+        "styles": {
+          "3SO-0": {
+            "display": "flex",
+            "height": "48px",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "flexGrow": "1",
+            "flexBasis": "0px",
+            "minWidth": "0px",
+            "marginLeft": "-8px",
+            "marginRight": "-8px",
+            "paddingInline": "8px",
+            "borderRadius": "8px",
+            "backgroundColor": "var(--mx-dark-panel2)",
+            "borderBottomWidth": "2px",
+            "borderBottomStyle": "solid",
+            "borderBottomColor": "#00000000"
+          },
+          "3SR-0": {
+            "display": "flex",
+            "height": "48px",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "flexGrow": "1",
+            "flexBasis": "0px",
+            "minWidth": "0px",
+            "marginLeft": "-8px",
+            "marginRight": "-8px",
+            "paddingInline": "8px",
+            "borderRadius": "8px",
+            "backgroundColor": "var(--mx-light-panel2)",
+            "borderBottomWidth": "2px",
+            "borderBottomStyle": "solid",
+            "borderBottomColor": "#00000000"
+          },
+          "3SU-0": {
+            "display": "flex",
+            "height": "48px",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "flexGrow": "1",
+            "flexBasis": "0px",
+            "minWidth": "0px",
+            "marginLeft": "-8px",
+            "marginRight": "-8px",
+            "paddingInline": "8px",
+            "borderRadius": "8px",
+            "backgroundColor": "var(--mx-dark-panel2)",
+            "borderBottomWidth": "2px",
+            "borderBottomStyle": "solid",
+            "borderBottomColor": "#00000000"
+          },
+          "3SX-0": {
+            "display": "flex",
+            "height": "48px",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "flexGrow": "1",
+            "flexBasis": "0px",
+            "minWidth": "0px",
+            "marginLeft": "-8px",
+            "marginRight": "-8px",
+            "paddingInline": "8px",
+            "borderRadius": "8px",
+            "backgroundColor": "var(--mx-light-panel2)",
+            "borderBottomWidth": "2px",
+            "borderBottomStyle": "solid",
+            "borderBottomColor": "#00000000"
+          }
+        }
+      },
+      "allFourRetainMinimum": true
+    },
+    "strictPreflightActive": true,
+    "firstNewTarget": {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "nodeId": "4GM-0",
+      "caseKey": "preservation_case_paper-accent-estate-20261108-c4-s9m68-4gm-0-accent-refinement-new93-v1",
+      "nativeMinimumRetained": true,
+      "exactGeometryUnchanged": true
     }
   }
 }
