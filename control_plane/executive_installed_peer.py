@@ -1067,6 +1067,17 @@ _MAX_READ_BYTES = 32 * 1024 * 1024
 _MAX_CLOSURE_BYTES = 256 * 1024 * 1024
 _MAX_DIRECTORY_ENTRIES = 4096
 _MAX_WALK_ENTRIES = 8192
+# The sealed release is the whole-repository ``git archive`` plus installer-added
+# assets (install.sh stage_sealed_release), so its entry count tracks the
+# repository: about 9,800 tree entries on master when this bound was set, already
+# past the 8,192 runtime-walk bound above. Bound the release walk on its own.
+# This deliberate ceiling matches the 16,384-entry limit enforced by
+# release_manifest.py's Linux _HeldReleaseSources consumer. General manifest
+# create/verify do not impose that count; staging alone does not prove it.
+# Author-reported warm-cache observations were ~0.13 ms/entry hashed and ~0.04
+# ms/entry for the drift recheck. They do not qualify a cold/root host or imply
+# a guaranteed deadline; the unchanged service budget still fails closed.
+_MAX_RELEASE_ENTRIES = 16384
 _MAX_NAME_BYTES = 255
 _SERVICE_BUDGET_SECONDS = 25.0
 
@@ -2072,7 +2083,7 @@ def _walk_release(
             child_relative = name if not relative else relative + "/" + name
             if child_relative == _NETWORK_MANIFEST_NAME:
                 continue
-            if len(rows) >= _MAX_WALK_ENTRIES:
+            if len(rows) >= _MAX_RELEASE_ENTRIES:
                 raise _refuse("SERVICE_RELEASE_ENTRY_LIMIT")
             child = directory + "/" + name
             try:
