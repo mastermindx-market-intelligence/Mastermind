@@ -1006,7 +1006,7 @@ CODEX_CODE_MODE_HOST_BINARY="$(/usr/bin/dirname "$CODEX_BINARY")/codex-code-mode
 # Source/asset staging and the inert admin checkout never launch or install
 # Codex. A newer installed Codex must not block those source-only operations.
 # Every normal install still verifies the exact pinned package BEFORE effects.
-if [ "$STAGE_RELEASE_ONLY" != "1" ] && [ "$STAGE_ADMIN_CHECKOUT_ONLY" != "1" ]; then
+if [ "${STAGE_RELEASE_ONLY:-0}" != "1" ] && [ "${STAGE_ADMIN_CHECKOUT_ONLY:-0}" != "1" ]; then
   verify_codex_component "$CODEX_BINARY" "$CODEX_SHA256" codex 0 || exit 65
   verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 0 || exit 65
 fi
