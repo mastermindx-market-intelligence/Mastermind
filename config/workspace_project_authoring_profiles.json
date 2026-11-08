@@ -1,0 +1,21 @@
+{
+  "schema": "mastermind.workspace_project_authoring_profiles.v1",
+  "profiles": [
+    {
+      "id": "mastermind-os-delivery",
+      "label": {"en": "Mastermind OS delivery", "zhCN": "Mastermind OS 交付"},
+      "summary": {"en": "Clarify the goal and plan its scope before any execution is admitted.", "zhCN": "先澄清目标并确定计划范围，之后才进入执行准入。"},
+      "profile": {
+        "title": "Mastermind OS delivery",
+        "program": "executive-os",
+        "repos": ["macro", "mastermind"],
+        "owner": "astra-meta-ceo",
+        "class": "research",
+        "blast_radius": "reversible",
+        "ambiguity": "open",
+        "waves": [{"id": "CLARIFY", "title": "Clarify goal and plan scope", "status": "todo"}],
+        "next_action": "Clarify scope before execution admission."
+      }
+    }
+  ]
+}

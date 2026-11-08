@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Failing offline regression for the original commission's admission deadline.
+
+Run: python3 -B test_original_deadline.py
+
+The exact current CLI, foreground composer, request adapter, Bash controller,
+and request-artifact helper run unchanged in a private temporary fixture. Only
+route policy, the broker, and unreachable historical imports are inert fixtures.
+The broker grants nothing and respects the --wait it receives. Transport/task
+executables are deny-only local fixtures; no live configuration is loaded.
+
+One real-time run takes about 32 seconds: foreground has a 30-second minimum
+before an attempt can enter, so a 31-second original budget is the smallest
+comfortable full-CLI example. There are no fake clocks or production rewrites.
+The independent harness bounds the complete process group to 45 seconds.
+
+This is intentionally a red regression, not unittest.expectedFailure. The final
+assertion must fail on the pinned source because broker wait exceeds the outer
+budget. last-run.json and last-controller.stderr retain bounded local evidence.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+import unittest
+
+
+HERE = Path(__file__).resolve().parent
+SOURCE = Path('/workspace/scratch/518aa96c86d8/fabric-recovery/candidate')
+SOURCE_SHA256 = {
+    'fabric_continuation.py': '16a90c47ac8b8df63dc9a02cd6346316a5c928b9def443ed51674d4f889504ac',
+    'fabric_task.py': '6a064d4513c83ce79da89d66f01bad078249bfcc731ce04c679b14a78a2fbd84',
+    'remote_sub.sh': '967ec6bf54b3ed5b55a5db904557baa7720c3b7e2fa36051949e704aceff8a07',
+    'provider_outcome.py': '1dd42bd43d5581cebaccb96c460174b02e32d93c758132b1037cc1619a27a07b',
+}
+RUN = 'offline-original-deadline'
+BUDGET_SECONDS = 31
+HARNESS_SECONDS = 45
+COMPLETION_ALLOWANCE_SECONDS = 0.5
+
+
+def write(path: Path, body: str, *, executable: bool = False) -> None:
+    path.write_text(textwrap.dedent(body).lstrip(), encoding='utf-8')
+    path.chmod(0o700 if executable else 0o600)
+
+
+BROKER = '''
+import json, os, sys, time
+from pathlib import Path
+root = Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+if sys.argv[1:2] != ['acquire']:
+    (root / 'unexpected-broker-operation.json').write_text(json.dumps(sys.argv[1:]))
+    raise SystemExit(125)
+args = sys.argv[2:]
+wait = int(args[args.index('--wait') + 1])
+remaining = int(os.environ['POOL_COMMISSION_REMAINING_SECONDS'])
+assert 0 <= wait <= 3600 and 1 <= remaining <= 31
+start = time.monotonic()
+row = dict(requested_wait_seconds=wait, inherited_remaining_seconds=remaining,
+           started_monotonic=start, pid=os.getpid(), parent_pid=os.getppid(),
+           lease_granted=False, task_started=False)
+(root / 'broker-entered.json').write_text(json.dumps(row))
+# A capacity-unavailable broker may consume its caller's requested wait. Keep
+# this fixture finite, and return earlier if a repaired caller narrows --wait.
+delay = min(wait, remaining + 2)
+time.sleep(delay)
+row.update(returned_monotonic=time.monotonic(), slept_seconds=delay,
+           returncode=75)
+(root / 'broker-returned.json').write_text(json.dumps(row))
+raise SystemExit(75)
+'''
+
+DENY = '''
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+name = Path(sys.argv[0]).name
+with (root / 'forbidden-calls.jsonl').open('a') as stream:
+    stream.write(json.dumps(dict(command=name, arguments=sys.argv[1:])) + '\\n')
+raise SystemExit(125)
+'''
+
+
+class OriginalDeadline(unittest.TestCase):
+    def test_original_budget_bounds_real_cli_broker_wait_before_task_start(self):
+        with tempfile.TemporaryDirectory(prefix='run-', dir=HERE) as temporary:
+            root = Path(temporary)
+            ext, binaries, scratch = root / 'ext', root / 'bin', root / 'tmp'
+            for folder in (ext, binaries, scratch):
+                folder.mkdir(mode=0o700)
+            copied = {}
+            for name, expected in SOURCE_SHA256.items():
+                raw = (SOURCE / name).read_bytes()
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), expected,
+                                 'Pinned source changed; review the new preimage explicitly: ' + name)
+                (ext / name).write_bytes(raw)
+                copied[name] = hashlib.sha256((ext / name).read_bytes()).hexdigest()
+                self.assertEqual(copied[name], expected)
+
+            write(ext / 'pick.py', '''
+                def format_pick(*args, **kwargs):
+                    return 'POOL=minimax MODEL=fixture-model HOST=fixture MODE=minimax'
+                def launch_policy(*args, **kwargs):
+                    return {'allowed': True, 'reason': 'inert offline route fixture'}
+            ''')
+            write(ext / 'pool_ledger.py', '''
+                """Unused offline ledger; broker denial cannot create an outcome."""
+                def __getattr__(name):
+                    raise AssertionError('Unexpected ledger operation: ' + name)
+            ''')
+            for name in ('a04_terminal_reconcile', 'native_completion_reconcile',
+                         'native_prestart_reconcile', 'native_preexec_reconcile',
+                         'native_host_review_controller_reconcile'):
+                write(ext / (name + '.py'), '''
+                    RUN = RUN_ID = 'unavailable-historical-fixture'
+                    KNOWN_RUNS = ()
+                    def __getattr__(name):
+                        raise AssertionError('Historical operation not available in this fixture')
+                ''')
+            (ext / 'hosts.json').write_text(json.dumps({'fixture': {
+                'ssh_alias': 'offline-transport-denied', 'cores': 2,
+                'max_active': 1, 'load_gate': 1, 'roles': ['lanes'],
+                'allowed_modes': ['minimax'], 'min_free_gb': 0,
+                'checkout_reserve_gb': 0,
+            }}))
+            packet = root / 'packet.txt'
+            packet.write_text('Inert deadline regression. Never start a task.\n')
+            shebang = '#!' + sys.executable + '\n'
+            broker = binaries / 'fixture-broker'
+            write(broker, shebang + BROKER, executable=True)
+            for name in ('ssh', 'scp', 'rsync', 'curl', 'wget', 'claude', 'codex',
+                         'opencode', 'grok', 'node', 'perl'):
+                write(binaries / name, shebang + DENY, executable=True)
+            # A local dispatch would also be caught before any task execution.
+            write(ext / 'sub.sh', 'exec ' + repr(sys.executable) + ' '
+                  + repr(str(binaries / 'claude')) + ' "$@"\n')
+
+            # A fresh allowlist environment: no live provider/config/session
+            # values are inherited, and HOME/CODEX_HOME are never repurposed.
+            env = {
+                'PATH': str(binaries) + ':/usr/bin:/bin',
+                'LANG': 'C', 'LC_ALL': 'C', 'PYTHONDONTWRITEBYTECODE': '1',
+                'PYTHONNOUSERSITE': '1', 'TMPDIR': str(scratch),
+                'DEADLINE_FIXTURE_ROOT': str(root),
+                'REMOTE_SUB_MAX_SECS': str(BUDGET_SECONDS),
+                'REMOTE_SUB_POLL_SECS': '1',
+                'REMOTE_SUB_PYTHON': sys.executable,
+                'REMOTE_SUB_BROKER_CMD': str(broker),
+                'REMOTE_SUB_SSH_CMD': str(binaries / 'ssh'),
+                'REMOTE_SUB_SCP_CMD': str(binaries / 'scp'),
+                'REMOTE_SUB_RSYNC_CMD': str(binaries / 'rsync'),
+                'REMOTE_SUB_LEDGER_CMD': str(binaries / 'claude'),
+            }
+            command = [sys.executable, '-B', str(ext / 'fabric_task.py'),
+                       'request', '--id', RUN, '--class', 'mechanical',
+                       '--task-complexity', 'C0_MECHANICAL', '--cwd', '~',
+                       '--packet', str(packet), '--root', 'offline-deadline-root',
+                       '--parent', 'offline-deadline-parent', '--quota-fallback']
+            started = time.monotonic()
+            process = subprocess.Popen(command, cwd=root, env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, start_new_session=True)
+            harness_timed_out = False
+            try:
+                stdout, stderr = process.communicate(timeout=HARNESS_SECONDS)
+            except subprocess.TimeoutExpired:
+                harness_timed_out = True
+                # This harness created the isolated session; no native/live
+                # controller or unrelated process group can be targeted here.
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    stdout, stderr = process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    stdout, stderr = process.communicate(timeout=2)
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate(timeout=2)
+            elapsed = time.monotonic() - started
+            state = ext / 'state' / 'remote_sub'
+
+            def read_json(path):
+                return json.loads(path.read_text()) if path.exists() else None
+
+            calls = (root / 'forbidden-calls.jsonl').read_text().splitlines() if (
+                root / 'forbidden-calls.jsonl').exists() else []
+            controller_log = state / (RUN + '.log')
+            log = controller_log.read_text() if controller_log.exists() else ''
+            evidence = {
+                'schema': 'offline.original_deadline_regression.v1',
+                'source_directory': str(SOURCE), 'source_sha256': copied,
+                'original_budget_seconds': BUDGET_SECONDS,
+                'elapsed_seconds': elapsed,
+                'harness_limit_seconds': HARNESS_SECONDS,
+                'harness_timed_out': harness_timed_out,
+                'cli_returncode': process.returncode,
+                'broker_entered': read_json(root / 'broker-entered.json'),
+                'broker_returned': read_json(root / 'broker-returned.json'),
+                'continuation_request': read_json(state / (RUN + '.continuation-request.json')),
+                'continuation_finished': read_json(state / (RUN + '.continuation-finished.json')),
+                'transport_or_task_invocation_count': len(calls),
+                'unexpected_broker_operation': read_json(root / 'unexpected-broker-operation.json'),
+                'launch_log_present': 'LAUNCH stdout=' in log,
+                'controller_log': log,
+                'stdout': stdout,
+            }
+            (HERE / 'last-run.json').write_text(json.dumps(evidence, indent=2, sort_keys=True) + '\n')
+            (HERE / 'last-controller.stderr').write_text(stderr)
+
+            # Preconditions make the red assertion a real deadline failure,
+            # never a missing dependency, provider call, or fixture crash.
+            self.assertFalse(harness_timed_out, stderr)
+            self.assertEqual(process.returncode, 75, stderr)
+            self.assertIsNotNone(evidence['broker_entered'], stderr)
+            self.assertIsNotNone(evidence['broker_returned'], stderr)
+            self.assertEqual(evidence['continuation_request']['wall_seconds'], BUDGET_SECONDS)
+            self.assertEqual(evidence['continuation_finished']['controller_rc'], 75)
+            self.assertEqual(calls, [], 'Transport/task deny fixture was unexpectedly invoked')
+            self.assertIsNone(evidence['unexpected_broker_operation'])
+            self.assertFalse(evidence['launch_log_present'])
+            self.assertIn(' LEASE_WAIT ', log)
+            self.assertIn(' LEASE_REFUSED rc=75', log)
+            self.assertLessEqual(
+                elapsed, BUDGET_SECONDS + COMPLETION_ALLOWANCE_SECONDS,
+                'Original commission budget expired while real foreground/request/Bash '
+                'waited for broker admission. Actual --wait={wait}, inherited remaining={remaining}, '
+                'wall={wall:.3f}s, original={budget}s; no lease, SSH or task start.'.format(
+                    wait=evidence['broker_entered']['requested_wait_seconds'],
+                    remaining=evidence['broker_entered']['inherited_remaining_seconds'],
+                    wall=elapsed, budget=BUDGET_SECONDS))
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

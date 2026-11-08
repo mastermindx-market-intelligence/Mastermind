@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.dsh_agent_loop_build_input.v1",
+  "package": "@deepseek-ai/dsh-agent-loop",
+  "version": "0.2.0-rc.1",
+  "resolved": "https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.0-rc.1.tgz",
+  "integrity": "sha512-01JWFfTcne/44tqfGLAOH0KkMicq6VVFBV1YjQbO9vj6Q0SmcHsPObm11fP0opEZIqEmdUN5wwS6LAzCjViDlg==",
+  "files": {
+    "package.json": "e7ecfbef09d7dfd50be40d70a32ca87b1ee43ac3cefdfeb050468c7f0e31b0ea",
+    "lib/index.js": "00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2",
+    "lib/types/index.d.ts": "906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e"
+  },
+  "proof_scope": "Exact installed AgentLoop bytes added to the single-module DSH profile closure; package-lock integrity remains the supply owner."
+}

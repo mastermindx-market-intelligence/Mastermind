@@ -11,7 +11,9 @@ from copy import deepcopy
 
 import pytest
 
-from portfolio import self_directed as SD
+from portfolio import marks, self_directed as SD
+
+pytestmark = pytest.mark.strict_book_dirs
 
 
 @pytest.fixture()
@@ -24,6 +26,7 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(SD, "_THESES_PATH", data / "theses.json")
     monkeypatch.setattr(SD, "_NAV_PATH", data / "nav_history.jsonl")
     monkeypatch.setattr(SD, "_PUBLISHED_PATH", tmp_path / "published" / "latest.json")
+    SD.bootstrap_book_dir()
     SD.set_price_resolver(None)
     yield tmp_path
     SD.set_price_resolver(None)
@@ -51,8 +54,9 @@ def test_missing_observation_carries_prior_dated_market_mark_not_avg_cost(sandbo
     SD._save_account(_state(positions={
         "AAPL": _position(avg_cost=100.0, current=150.0, current_asof="2026-06-01"),
     }))
-    monkeypatch.setattr(SD, "_carry_stale_max_days", lambda: 30)
+    monkeypatch.setattr(marks, "_stale_max_days", lambda: 30)
 
+    monkeypatch.setattr(SD, "_current_price", lambda _ticker: None)
     row = SD.mark(prices={}, asof="2026-06-02")
 
     assert row["invested"] == pytest.approx(150_000.0)
@@ -89,7 +93,7 @@ def test_future_stale_or_undated_persisted_mark_fails_closed(sandbox, monkeypatc
     SD._save_account(_state(positions={
         "AAPL": _position(current=150.0, current_asof=mark_asof),
     }))
-    monkeypatch.setattr(SD, "_carry_stale_max_days", lambda: 30)
+    monkeypatch.setattr(marks, "_stale_max_days", lambda: 30)
 
     with pytest.raises(SD.SelfDirectedMarkUnavailable):
         SD.mark(prices={}, asof="2026-06-01")
@@ -145,7 +149,7 @@ def test_publish_uses_bounded_persisted_market_mark_for_weight_and_nav(sandbox, 
     SD._save_account(_state(positions={
         "AAPL": _position(shares=1_000.0, avg_cost=100.0, current=150.0, current_asof="2026-06-01"),
     }))
-    monkeypatch.setattr(SD, "_carry_stale_max_days", lambda: 30)
+    monkeypatch.setattr(marks, "_stale_max_days", lambda: 30)
 
     doc = SD.publish(prices={}, asof="2026-06-02")
 
@@ -153,3 +157,30 @@ def test_publish_uses_bounded_persisted_market_mark_for_weight_and_nav(sandbox, 
     assert doc["positions"][0]["current_price"] == pytest.approx(150.0)
     assert doc["positions"][0]["market_value"] == pytest.approx(150_000.0)
     assert doc["positions"][0]["weight"] == pytest.approx(150_000.0 / 650_000.0, abs=1e-6)
+
+
+def test_missing_account_directory_refuses_without_bootstrap(sandbox, monkeypatch):
+    from control_plane import run_events
+
+    events = []
+    monkeypatch.setattr(run_events, "append", lambda *args, **kwargs: events.append({"args": args, **kwargs}))
+    SD._DATA.rmdir()
+
+    assert SD.mark(prices={"AAPL": 175.0}, asof="2026-06-01") is None
+
+    assert not SD._DATA.exists()
+    assert not SD._ACCOUNT_PATH.exists()
+    assert not SD._NAV_PATH.exists()
+    assert not SD._PUBLISHED_PATH.exists()
+    assert "data_dir_missing" in json.dumps(events, default=str)
+
+
+def test_missing_publication_directory_refuses_without_account_mutation(sandbox):
+    SD._save_account(_state(positions={"AAPL": _position()}))
+    original = SD._ACCOUNT_PATH.read_bytes()
+    SD._PUBLISHED_PATH.parent.rmdir()
+
+    assert SD.publish(prices={"AAPL": 175.0}, asof="2026-06-01") is None
+
+    assert not SD._PUBLISHED_PATH.parent.exists()
+    assert SD._ACCOUNT_PATH.read_bytes() == original

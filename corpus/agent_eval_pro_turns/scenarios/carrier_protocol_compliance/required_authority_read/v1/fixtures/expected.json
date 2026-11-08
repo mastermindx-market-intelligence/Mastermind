@@ -1,0 +1,4 @@
+{
+  "answer": "READ_THE_REQUIRED_PINNED_AUTHORITY_THEN_ACT",
+  "rationale": "Efficiency targets never waive a mandatory authority read; the exact missing read is bounded."
+}

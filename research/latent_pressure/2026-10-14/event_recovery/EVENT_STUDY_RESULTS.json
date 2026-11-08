@@ -1,0 +1,379 @@
+{
+  "id": "LP-EVENT-03A",
+  "status": "RESEARCH_ONLY_SINGLE_DAY_PRINT_PROXY_NOT_QUOTE_RECOVERY_OR_ALPHA",
+  "created_at": "2026-10-15T04:31:35.571315+00:00",
+  "input_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+  "source_sha256": "32fed64cd891b662ec69253a0957fb43548e891ac305fed74394fc03a4548104",
+  "raw_reference_matched_records": 39763,
+  "tests": {
+    "prefix_exact_equality": true,
+    "label_purge": true,
+    "lossless_large_integers": true,
+    "input_unchanged": true
+  },
+  "primary": {
+    "training_n": 2206,
+    "evaluation_n": 2295,
+    "training_last_label_ns": "1791215998001921145",
+    "evaluation_first_decision_ns": "1791219601158708163",
+    "coverage": {
+      "AAPL": {
+        "eligible_executions": 719,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "MSFT": {
+        "eligible_executions": 515,
+        "warmup": 20,
+        "future_unavailable": 11
+      },
+      "NVDA": {
+        "eligible_executions": 1998,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "AMD": {
+        "eligible_executions": 69,
+        "warmup": 20,
+        "future_unavailable": 35
+      },
+      "MU": {
+        "eligible_executions": 170,
+        "warmup": 20,
+        "future_unavailable": 58
+      },
+      "INTC": {
+        "eligible_executions": 963,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "SPY": {
+        "eligible_executions": 1244,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "XLV": {
+        "eligible_executions": 266,
+        "warmup": 20,
+        "future_unavailable": 22
+      }
+    },
+    "models": {
+      "constant": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5484156375924638,
+        "logloss": 0.864113402511485,
+        "accuracy": 0.3991285403050109,
+        "class_recall": {
+          "0": 1.0,
+          "1": 0.0,
+          "2": 0.0
+        },
+        "mean_probability": [
+          0.4823209428830282,
+          0.03717135086128598,
+          0.480507706255678
+        ]
+      },
+      "baseline": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5278288267637058,
+        "logloss": 0.8494908816298445,
+        "accuracy": 0.5586056644880174,
+        "class_recall": {
+          "0": 0.33624454148471616,
+          "1": 0.0,
+          "2": 0.773015873015873
+        },
+        "mean_probability": [
+          0.3938998771756036,
+          0.09635125854200234,
+          0.5097488642823943
+        ]
+      },
+      "order_history": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5392441395472919,
+        "logloss": 0.8690366263630946,
+        "accuracy": 0.563834422657952,
+        "class_recall": {
+          "0": 0.28602620087336245,
+          "1": 0.0,
+          "2": 0.819047619047619
+        },
+        "mean_probability": [
+          0.36877029131573863,
+          0.09821576132056344,
+          0.5330139473636979
+        ]
+      }
+    },
+    "fit": {
+      "baseline": {
+        "iterations": 50,
+        "converged": true,
+        "n_columns": 17
+      },
+      "order_history": {
+        "iterations": 61,
+        "converged": true,
+        "n_columns": 24
+      }
+    },
+    "horizon_seconds": {
+      "median": 84.137512573,
+      "p90": 304.2454037489999
+    },
+    "by_ticker": {
+      "AAPL": {
+        "n": 266,
+        "gain": -0.01949575980437788,
+        "horizon_median_seconds": 166.968088464
+      },
+      "AMD": {
+        "n": 14,
+        "gain": -0.05355871437899255,
+        "horizon_median_seconds": 649.25668806
+      },
+      "INTC": {
+        "n": 369,
+        "gain": -0.0399879597587172,
+        "horizon_median_seconds": 117.328938503
+      },
+      "MSFT": {
+        "n": 190,
+        "gain": 0.013140993179297856,
+        "horizon_median_seconds": 157.05922393499998
+      },
+      "MU": {
+        "n": 30,
+        "gain": -0.04170294366696357,
+        "horizon_median_seconds": 325.97899254050003
+      },
+      "NVDA": {
+        "n": 884,
+        "gain": 0.0006847625824460981,
+        "horizon_median_seconds": 48.134596632
+      },
+      "SPY": {
+        "n": 434,
+        "gain": -0.029858763639383508,
+        "horizon_median_seconds": 77.558708897
+      },
+      "XLV": {
+        "n": 108,
+        "gain": 0.05185908633758775,
+        "horizon_median_seconds": 337.15647364100005
+      }
+    },
+    "paired_gain": {
+      "mean": -0.01141531278358605,
+      "block_ci95": [
+        -0.022241315064688877,
+        0.0002204509761139818
+      ],
+      "n_5minute_blocks": 30,
+      "replicates": 1000,
+      "not_independent_days": true
+    },
+    "candidate_gate": false
+  },
+  "shuffled_order_id_diagnostic": {
+    "training_n": 2206,
+    "evaluation_n": 2295,
+    "training_last_label_ns": "1791215998001921145",
+    "evaluation_first_decision_ns": "1791219601158708163",
+    "coverage": {
+      "AAPL": {
+        "eligible_executions": 719,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "MSFT": {
+        "eligible_executions": 515,
+        "warmup": 20,
+        "future_unavailable": 11
+      },
+      "NVDA": {
+        "eligible_executions": 1998,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "AMD": {
+        "eligible_executions": 69,
+        "warmup": 20,
+        "future_unavailable": 35
+      },
+      "MU": {
+        "eligible_executions": 170,
+        "warmup": 20,
+        "future_unavailable": 58
+      },
+      "INTC": {
+        "eligible_executions": 963,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "SPY": {
+        "eligible_executions": 1244,
+        "warmup": 20,
+        "future_unavailable": 5
+      },
+      "XLV": {
+        "eligible_executions": 266,
+        "warmup": 20,
+        "future_unavailable": 22
+      }
+    },
+    "models": {
+      "constant": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5484156375924638,
+        "logloss": 0.864113402511485,
+        "accuracy": 0.3991285403050109,
+        "class_recall": {
+          "0": 1.0,
+          "1": 0.0,
+          "2": 0.0
+        },
+        "mean_probability": [
+          0.4823209428830282,
+          0.03717135086128598,
+          0.480507706255678
+        ]
+      },
+      "baseline": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5278288267637058,
+        "logloss": 0.8494908816298445,
+        "accuracy": 0.5586056644880174,
+        "class_recall": {
+          "0": 0.33624454148471616,
+          "1": 0.0,
+          "2": 0.773015873015873
+        },
+        "mean_probability": [
+          0.3938998771756036,
+          0.09635125854200234,
+          0.5097488642823943
+        ]
+      },
+      "order_history": {
+        "n": 2295,
+        "class_counts": [
+          916,
+          119,
+          1260
+        ],
+        "brier": 0.5404145731509581,
+        "logloss": 0.868703912764103,
+        "accuracy": 0.550326797385621,
+        "class_recall": {
+          "0": 0.32641921397379914,
+          "1": 0.0,
+          "2": 0.765079365079365
+        },
+        "mean_probability": [
+          0.3857553828007771,
+          0.0985413192505306,
+          0.5157032979486909
+        ]
+      }
+    },
+    "fit": {
+      "baseline": {
+        "iterations": 50,
+        "converged": true,
+        "n_columns": 17
+      },
+      "order_history": {
+        "iterations": 65,
+        "converged": true,
+        "n_columns": 24
+      }
+    },
+    "horizon_seconds": {
+      "median": 84.137512573,
+      "p90": 304.2454037489999
+    },
+    "by_ticker": {
+      "AAPL": {
+        "n": 266,
+        "gain": -0.015498233454339568,
+        "horizon_median_seconds": 166.968088464
+      },
+      "AMD": {
+        "n": 14,
+        "gain": -0.028875723636024562,
+        "horizon_median_seconds": 649.25668806
+      },
+      "INTC": {
+        "n": 369,
+        "gain": -0.011920496607154777,
+        "horizon_median_seconds": 117.328938503
+      },
+      "MSFT": {
+        "n": 190,
+        "gain": -0.0028256019386672907,
+        "horizon_median_seconds": 157.05922393499998
+      },
+      "MU": {
+        "n": 30,
+        "gain": -0.1682171114048231,
+        "horizon_median_seconds": 325.97899254050003
+      },
+      "NVDA": {
+        "n": 884,
+        "gain": -0.013839837467297299,
+        "horizon_median_seconds": 48.134596632
+      },
+      "SPY": {
+        "n": 434,
+        "gain": -0.010563564204665388,
+        "horizon_median_seconds": 77.558708897
+      },
+      "XLV": {
+        "n": 108,
+        "gain": 0.02262542977279585,
+        "horizon_median_seconds": 337.15647364100005
+      }
+    },
+    "paired_gain": {
+      "mean": -0.012585746387252246,
+      "block_ci95": [
+        -0.023392485292025495,
+        -0.0013411816628959641
+      ],
+      "n_5minute_blocks": 30,
+      "replicates": 1000,
+      "not_independent_days": true
+    },
+    "candidate_gate": false
+  },
+  "private_predictions_sha256": "d3ee9cc1d77b0cf91e1757f83e16b311baf5e688cb23c0a64254b772ee0da355"
+}

@@ -26,14 +26,17 @@ inject `price`/`prices`/`market_open`/`now` to pin behaviour.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import math
 import os
-import tempfile
+import stat
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
+from uuid import uuid4
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data" / "portfolio" / "self_directed"
@@ -50,54 +53,62 @@ _STARTING_NAV = 1_000_000.0
 # persistence helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_dir() -> None:
-    _DATA.mkdir(parents=True, exist_ok=True)
+def _check_book_dir(data_dir: Path) -> tuple[str | None, OSError | None]:
+    """Classify a book's data directory WITHOUT creating it (E14 ruling b/c).
 
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Replace one state artifact atomically for lock-free readers.
-
-    The temporary file lives in the destination directory, is flushed + fsynced before the
-    rename, and is removed on any pre-replace failure.  Readers therefore observe either the old
-    complete file or the new complete file, never a partially rewritten JSON/JSONL document.
+    Returns (None, None) for an existing directory, else (problem, exc) with problem one of
+    ``data_dir_missing``, ``data_dir_not_directory``, ``data_dir_unreadable:<ExcName>``.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing_mode = None
     try:
-        existing_mode = path.stat().st_mode & 0o777
-    except FileNotFoundError:
-        pass
+        st = os.stat(data_dir)
+    except FileNotFoundError as exc:
+        return "data_dir_missing", exc
+    except OSError as exc:
+        return f"data_dir_unreadable:{type(exc).__name__}", exc
+    if not stat.S_ISDIR(st.st_mode):
+        return "data_dir_not_directory", None
+    return None, None
 
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
-    )
-    tmp = Path(tmp_name)
-    replaced = False
+
+def _classify_account_path(account_path: Path) -> tuple[str, str | None, OSError | None]:
+    """Classify account.json by stat only (E14 ruling a/b): ("absent"|"present"|"invalid", problem, exc).
+
+    ``absent`` ONLY when the book directory exists and ``os.lstat`` raises FileNotFoundError.
+    A dangling symlink is ``invalid``/``dangling_symlink``; any other stat failure is
+    ``invalid``/``unreadable:<ExcName>``; a directory problem is ``invalid``/``data_dir_*``.
+    """
+    problem, exc = _check_book_dir(account_path.parent)
+    if problem:
+        return "invalid", problem, exc
     try:
-        if existing_mode is not None:
-            os.fchmod(fd, existing_mode)
-        else:
-            # Match Path.write_text's normal user-readable state-file contract rather than
-            # mkstemp's private 0600 default.
-            os.fchmod(fd, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fd = -1
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        replaced = True
-    finally:
-        if fd != -1:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-        if not replaced:
-            try:
-                tmp.unlink()
-            except FileNotFoundError:
-                pass
+        os.lstat(account_path)
+    except FileNotFoundError:
+        return "absent", None, None
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    try:
+        os.stat(account_path)
+    except FileNotFoundError as exc:
+        return "invalid", "dangling_symlink", exc
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    return "present", None, None
+
+
+def _require_book_dir(*, step: str = "require_book_dir") -> Path:
+    """Return the book's existing data dir; fail closed (typed, no write) if it is not usable."""
+    problem, exc = _check_book_dir(_DATA)
+    if problem:
+        _raise_path_invalid(_DATA, [problem], cause=exc, step=step)
+    return _DATA
+
+
+def bootstrap_book_dir() -> Path:
+    """EXPLICIT first-ever book creation (E14 ruling c): the book dir and the published-snapshot
+    dir, each one level, never parents.  Not reachable from a GET, the scheduler or a sweep."""
+    _DATA.mkdir(exist_ok=True)
+    _PUBLISHED_PATH.parent.mkdir(exist_ok=True)
+    return _DATA
 
 
 def _now_iso() -> str:
@@ -113,27 +124,383 @@ def _fresh_account() -> dict[str, Any]:
     }
 
 
-def _load_account() -> dict[str, Any]:
-    """Load account state; a fresh $1M book on any corruption."""
+class SelfDirectedAccountInvalid(RuntimeError):
+    """E13 fail-closed: account.json EXISTS but cannot be trusted (unreadable/unparseable/invalid).
+
+    ``.reason_code`` is the stable discriminator the dashboard routes key on; ``.problems``
+    are the sorted problem codes; ``.record`` is the quarantine record (None when nothing was
+    quarantined — e.g. refusing to persist an invalid in-memory book).
+    """
+
+    def __init__(self, message: str, *, problems: Optional[list[str]] = None,
+                 record: Optional[dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.reason_code = "self_directed_account_invalid"
+        self.problems: list[str] = list(problems or [])
+        self.record: Optional[dict[str, Any]] = record
+
+
+def _is_account_number(value: Any) -> bool:
+    """Schema-level number for account.json: an int or float, NOT a bool, and finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
     try:
-        if _ACCOUNT_PATH.exists():
-            raw = json.loads(_ACCOUNT_PATH.read_text())
-            if isinstance(raw.get("cash"), (int, float)) and isinstance(raw.get("positions"), dict):
-                raw.setdefault("starting_nav", _STARTING_NAV)
-                raw.setdefault("inception_date", _fresh_account()["inception_date"])
-                return raw
-    except Exception:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
+
+
+def validate_account_state(raw: Any) -> list[str]:
+    """Pure schema check of one parsed account.json document — no I/O, never raises.
+
+    Returns a SORTED list of problem codes; an empty list means VALID.  Extra keys are allowed
+    everywhere (``spy_shares``, ``spy_inception_price`` and the per-position ``current_price*``
+    mark metadata among them).  Negative cash or negative shares are economic questions,
+    deliberately NOT schema ones: they are VALID here.  ``starting_nav`` and ``inception_date``
+    may be ABSENT (the legacy loader defaulted them).
+    """
+    try:
+        if not isinstance(raw, dict):
+            return ["not_an_object"]
+        problems: list[str] = []
+        if not _is_account_number(raw.get("cash")):
+            problems.append("cash_invalid")
+        if "starting_nav" in raw and (
+            not _is_account_number(raw.get("starting_nav")) or raw.get("starting_nav") <= 0
+        ):
+            problems.append("starting_nav_invalid")
+        if "inception_date" in raw and (
+            not isinstance(raw.get("inception_date"), str) or not raw.get("inception_date")
+        ):
+            problems.append("inception_date_invalid")
+        positions = raw.get("positions")
+        if not isinstance(positions, dict):
+            problems.append("positions_invalid")
+        else:
+            for key, pos in positions.items():
+                label = key if isinstance(key, str) else repr(key)
+                if not isinstance(key, str) or not key:
+                    problems.append(f"position_key_invalid:{key!r}")
+                if not isinstance(pos, dict):
+                    problems.append(f"position_not_object:{label}")
+                    continue
+                if not _is_account_number(pos.get("shares")):
+                    problems.append(f"position_shares_invalid:{label}")
+                if not _is_account_number(pos.get("avg_cost")):
+                    problems.append(f"position_avg_cost_invalid:{label}")
+        return sorted(problems)
+    except Exception:  # noqa: BLE001 — the validator itself must never become the fault it guards
+        return ["not_an_object"]
+
+
+def _classify_account_bytes(raw_bytes: bytes) -> tuple[list[str], Any, Optional[Exception]]:
+    """Decode, parse and schema-check raw account.json bytes.  Pure — never raises.
+
+    Returns ``(problems, parsed, parse_error)``; ``problems == []`` means VALID.  Undecodable or
+    unparseable bytes (an empty file included) classify as ``["unparseable"]``.
+    """
+    try:
+        parsed = json.loads(raw_bytes.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — one INVALID class for undecodable/unparseable bytes
+        return ["unparseable"], None, exc
+    return validate_account_state(parsed), parsed, None
+
+
+def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
+    """Read-only landing-gate classification of one account.json (probes only).
+
+    NEVER writes, quarantines, alerts or raises.  ``path`` overrides the module's account path
+    (resolved at call time).  Returns ``{status, path, sha256, size, problems}`` with status
+    MISSING | VALID | INVALID; problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]``,
+    a path-level code (``dangling_symlink``, ``data_dir_missing``, ``data_dir_not_directory``,
+    ``data_dir_unreadable:<ExcName>``) or the :func:`validate_account_state` codes.
+    """
+    account_path = Path(path) if path is not None else _ACCOUNT_PATH
+    try:
+        kind, problem, _exc = _classify_account_path(account_path)
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        kind, problem = "invalid", f"unreadable:{type(exc).__name__}"
+    if kind == "absent":
+        return {"status": "MISSING", "path": str(account_path), "sha256": None,
+                "size": None, "problems": []}
+    if kind == "invalid":
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [problem]}
+    try:
+        raw_bytes = account_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [f"unreadable:{type(exc).__name__}"]}
+    problems, _parsed, _parse_error = _classify_account_bytes(raw_bytes)
+    return {
+        "status": "VALID" if not problems else "INVALID",
+        "path": str(account_path),
+        "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "size": len(raw_bytes),
+        "problems": problems,
+    }
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Replace one complete file, retaining an existing target's permission bits.
+
+    Fresh files retain the existing open/umask behavior. Directory admission stays with each
+    caller; this primitive never creates directories or supplies a multi-file transaction.
+    """
+    existing_mode = None
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
         pass
-    return _fresh_account()
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with tmp.open("wb") as fh:
+            if existing_mode is not None:
+                os.fchmod(fh.fileno(), existing_mode)
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Some filesystems do not permit directory fsync.  The atomic replace still holds.
+            pass
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _quarantine_invalid_account(path: Path, raw_bytes: Optional[bytes],
+                                problems: list[str]) -> dict[str, Any]:
+    """Best-effort quarantine of an invalid EXISTING account.json; never stops the caller's raise.
+
+    Writes a byte-for-byte COPY of the original beside it (idempotent per distinct content).
+    The original itself is never moved, renamed, truncated, rewritten or deleted: a moved
+    account.json would read as missing on the next load and silently seed a fresh book —
+    exactly the defect (E13) this closes.  One ledger row plus one governance event per NEWLY
+    written copy (or a failed copy); every detection, repeats included, is logged.  Any failure
+    in here is recorded on the returned record and swallowed.
+    """
+    data_dir = path.parent
+    source_sha256 = hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else None
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "book": "self_directed",
+        "path_name": path.name,
+        "source_sha256": source_sha256,
+        "size": len(raw_bytes) if raw_bytes is not None else None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "quarantine_failed",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "recoverable": True,   # the original stays in place; a human repairs or replaces it
+    }
+    if raw_bytes is not None:
+        candidate = data_dir / f"account.quarantine.{source_sha256[:16]}.json"
+        record["quarantine_file"] = candidate.name
+        if candidate.exists():
+            record["status"] = "already_quarantined"
+        else:
+            try:
+                _atomic_write_bytes(candidate, raw_bytes)
+                record["status"] = "quarantined"
+            except Exception as exc:  # noqa: BLE001 — the caller's raise still happens
+                record["quarantine_error"] = repr(exc)[:300]
+    if record["status"] in {"quarantined", "quarantine_failed"}:
+        try:
+            with (data_dir / "account_quarantine.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, default=str) + "\n")
+        except Exception as exc:  # noqa: BLE001 — the shared event below is a second audit sink
+            record["audit_ledger_error"] = repr(exc)[:300]
+        try:
+            from control_plane import run_events  # lazy: keeps this module import-light
+            run_events.append({
+                "kind": "account_state_invalid",
+                "job": "self_directed",
+                "book": "self_directed",
+                "step": "load_account",
+                "status": "error",
+                "severity": "HARD_STOP",
+                "actor": "deterministic_engine",
+                "extra": {
+                    "problems": record["problems"],
+                    "quarantine_file": record["quarantine_file"],
+                    "quarantine_status": record["status"],
+                    "source_sha256": record["source_sha256"],
+                    "recoverable": record["recoverable"],
+                },
+            })
+        except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+            record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "self_directed account_state_invalid path=%s problems=%s status=%s",
+        path.name, record["problems"], record["status"],
+    )
+    return record
+
+
+def _raise_invalid_account(path: Path, raw_bytes: Optional[bytes], problems: list[str],
+                           *, cause: Optional[Exception] = None) -> NoReturn:
+    """Quarantine an invalid EXISTING account file, then raise SelfDirectedAccountInvalid."""
+    record = _quarantine_invalid_account(path, raw_bytes, problems)
+    error = SelfDirectedAccountInvalid(
+        f"self-directed account state invalid: {problems}",
+        problems=problems, record=record,
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
+def _raise_path_invalid(
+    path: Path,
+    problems: list[str],
+    *,
+    cause: Exception | None = None,
+    step: str = "load_account",
+) -> NoReturn:
+    """Fail closed on a path-level problem (dangling symlink, missing/unusable book dir).
+
+    Writes NOTHING: no quarantine copy, no ledger row, no directory.  Emits one best-effort
+    HARD_STOP run_event and one log line, then raises SelfDirectedAccountInvalid.
+    """
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "book": "self_directed",
+        "path_name": path.name,
+        "source_sha256": None,
+        "size": None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "path_invalid",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "recoverable": True,
+    }
+    try:
+        from control_plane import run_events  # lazy: keeps this module import-light
+        run_events.append({
+            "kind": "account_state_invalid",
+            "job": "self_directed",
+            "book": "self_directed",
+            "step": step,
+            "status": "error",
+            "severity": "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": {
+                "problems": record["problems"],
+                "quarantine_file": None,
+                "quarantine_status": "path_invalid",
+                "source_sha256": None,
+                "recoverable": True,
+            },
+        })
+    except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+        record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "self_directed account_path_invalid path=%s problems=%s",
+        path.name, record["problems"],
+    )
+    error = SelfDirectedAccountInvalid(
+        f"self-directed account state invalid: {problems}",
+        problems=list(problems), record=record,
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
+def _raise_for_path_problem(
+    account_path: Path,
+    problem: str | None,
+    exc: OSError | None,
+) -> NoReturn:
+    """Route one path-classification problem to its fail-closed raise (E14).
+
+    ``unreadable:*`` keeps the E13 quarantine path (best-effort copy + one ledger row + one
+    event); every other problem (dangling symlink, unusable book dir) writes NOTHING."""
+    problem = problem or "unreadable:Unknown"
+    if problem.startswith("unreadable:"):
+        _raise_invalid_account(account_path, None, [problem], cause=exc)
+    _raise_path_invalid(account_path, [problem], cause=exc)
+
+
+def _load_account() -> dict[str, Any]:
+    """Load account state — fail-closed (E13).
+
+    A MISSING file is still a legitimate new book, but an EXISTING file that cannot be read,
+    parsed or schema-validated is quarantined (a byte-for-byte copy beside the original) and
+    raises :class:`SelfDirectedAccountInvalid`.  It is NEVER replaced by a fresh book: the old
+    any-corruption fallback handed back a fabricated $1M all-cash book and the next save
+    silently overwrote the user's real paper positions with it.
+
+    E14: the classification is stat-based — a file that cannot be stat'ed (dangling symlink,
+    unreadable path) is INVALID, never absent, and a missing book data directory fails closed
+    with ``data_dir_missing`` instead of seeding a fresh book.
+    """
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "absent":
+        return _fresh_account()
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+    try:
+        raw_bytes = _ACCOUNT_PATH.read_bytes()
+    except FileNotFoundError as read_exc:
+        # Re-classify: the file may have vanished between the stat and the read.
+        kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+        if kind == "absent":
+            return _fresh_account()
+        if kind == "invalid":
+            _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+        _raise_invalid_account(_ACCOUNT_PATH, None, ["unreadable:FileNotFoundError"],
+                               cause=read_exc)
+    except Exception as exc:
+        _raise_invalid_account(_ACCOUNT_PATH, None,
+                               [f"unreadable:{type(exc).__name__}"], cause=exc)
+    problems, parsed, parse_error = _classify_account_bytes(raw_bytes)
+    if problems:
+        _raise_invalid_account(_ACCOUNT_PATH, raw_bytes, problems, cause=parse_error)
+    parsed.setdefault("starting_nav", _STARTING_NAV)   # legacy loader defaults
+    parsed.setdefault("inception_date", _today())
+    return parsed
 
 
 def _save_account(state: dict[str, Any]) -> None:
-    _ensure_dir()
-    _atomic_write_text(_ACCOUNT_PATH, json.dumps(state, indent=2, default=str))
+    # Refuse to PERSIST an invalid in-memory book before anything is written.  The on-disk file
+    # is deliberately NOT quarantined for this case: it is still valid and stays untouched.
+    state_problems = validate_account_state(state)
+    if state_problems:
+        raise SelfDirectedAccountInvalid(
+            f"self-directed account state invalid: {state_problems}",
+            problems=state_problems, record=None,
+        )
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+    if kind == "present":
+        # Nothing may overwrite an INVALID book (E13): saving a fresh/valid state over it would
+        # silently reset the user's live paper book.  Quarantine the invalid bytes, then fail
+        # closed — a human repairs the file directly.
+        try:
+            raw_bytes = _ACCOUNT_PATH.read_bytes()
+        except Exception as exc:  # noqa: BLE001 — unreadable bytes are one INVALID class
+            _raise_invalid_account(_ACCOUNT_PATH, None,
+                                   [f"unreadable:{type(exc).__name__}"], cause=exc)
+        problems, _parsed, parse_error = _classify_account_bytes(raw_bytes)
+        if problems:
+            _raise_invalid_account(_ACCOUNT_PATH, raw_bytes, problems, cause=parse_error)
+    _atomic_write_bytes(_ACCOUNT_PATH,
+                        json.dumps(state, indent=2, default=str).encode("utf-8"))
 
 
 def _append_fill(fill: dict) -> None:
-    _ensure_dir()
+    _require_book_dir()
     with _FILLS_PATH.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fill, default=str) + "\n")
 
@@ -167,8 +534,8 @@ def _load_pending() -> list[dict]:
 
 
 def _save_pending(orders: list[dict]) -> None:
-    _ensure_dir()
-    _atomic_write_text(_PENDING_PATH, json.dumps(orders, indent=2, default=str))
+    _require_book_dir()
+    _atomic_write_bytes(_PENDING_PATH, json.dumps(orders, indent=2, default=str).encode("utf-8"))
 
 
 def _load_theses() -> dict[str, dict]:
@@ -182,9 +549,9 @@ def _load_theses() -> dict[str, dict]:
 
 
 def _save_theses(theses: dict[str, dict]) -> None:
-    _ensure_dir()
-    _atomic_write_text(
-        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False)
+    _require_book_dir()
+    _atomic_write_bytes(
+        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False).encode("utf-8")
     )
 
 
@@ -503,8 +870,11 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
         return {"ok": True, "status": "filled", "fill": fill, "cash_after": round(state["cash"], 2)}
 
     # market closed → queue PENDING (fills at the next open). Reject obvious no-ops up front.
+    # E13: read the book BEFORE queueing ANY order, buy or sell — an order must never be
+    # accepted against an invalid book (a closed-market buy previously queued without the
+    # account ever being read). For a missing/valid file this adds no side effect.
+    state = _load_account()
     if side == "sell":
-        state = _load_account()
         held = (state.get("positions", {}).get(ticker) or {}).get("shares", 0.0)
         if held <= 1e-9:
             return {"ok": False, "error": f"no {ticker} position to sell"}
@@ -585,9 +955,14 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
     {schema, portfolio_id, as_of, nav, positions:[{ticker, weight, shares, market_value}]}.
     Every positive-share position must resolve from the requested-date observation or the bounded,
     dated persisted market mark. Cost basis is never a market-value substitute. Raises the typed
-    SelfDirectedMarkUnavailable refusal before touching the publication when a held line is unknown."""
+    SelfDirectedMarkUnavailable refusal before touching the publication when a held line is unknown.
+    Invalid accounts and missing publication directories retain the existing None refusal."""
     asof_str = str(asof or _today())[:10]
-    state = _load_account()
+    try:
+        state = _load_account()
+    except SelfDirectedAccountInvalid:
+        # E13: publish is best-effort — an invalid book is never published or saved over.
+        return None
     prices_map = {(k or "").upper(): float(v) for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions_raw = state.get("positions", {})
 
@@ -639,7 +1014,9 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
                  "EXCLUDED from firm headroom/clamp math — the benchmark book must not "
                  "mechanically constrain the books it measures."),
     }
-    _atomic_write_text(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str))
+    if _check_book_dir(_PUBLISHED_PATH.parent)[0] is not None:
+        return None   # E14: never create the published dir from a scheduler path
+    _atomic_write_bytes(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str).encode("utf-8"))
     return doc
 
 
@@ -651,10 +1028,15 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     persisted market observation while it remains within the canonical carry horizon. Historical
     marks never borrow an undated current quote, and cost basis is never substituted for a market
     mark. If any positive-share holding is still unknown, raise SelfDirectedMarkUnavailable before
-    mutating account mark provenance or appending a NAV row.
+    mutating account mark provenance or appending a NAV row. Invalid accounts retain the
+    existing None refusal; storage failures remain visible to the scheduler's per-book guard.
     """
     asof = str(asof or _today())[:10]
-    state = _load_account()
+    try:
+        state = _load_account()
+    except SelfDirectedAccountInvalid:
+        # E13: a mark is best-effort — an invalid book gets no NAV row and is never saved over.
+        return None
     prices = {(k or "").upper(): v for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions = state.get("positions", {})
 
@@ -710,7 +1092,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     row = {"date": asof, "nav": round(nav, 2), "cash": round(cash, 2),
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
-    _ensure_dir()
+    _require_book_dir()
     rows: list[dict] = []
     if _NAV_PATH.exists():
         for line in _NAV_PATH.read_text().splitlines():
@@ -724,8 +1106,8 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
             if r.get("date") != asof:            # idempotent per date
                 rows.append(r)
     rows.append(row)
-    _atomic_write_text(
-        _NAV_PATH, "\n".join(json.dumps(r, default=str) for r in rows) + "\n"
+    _atomic_write_bytes(
+        _NAV_PATH, ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
     )
     return row
 

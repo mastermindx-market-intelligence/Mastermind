@@ -1,0 +1,54 @@
+{
+  "schema": "mastermind.fabric_browser_scope_guard_evidence.v1",
+  "observed_at": "2026-10-17T10:45:05.811670+00:00",
+  "source_parent": "0961a9e7e30afb7b6b96e8e78c8b8c2f72acc1b3",
+  "changed_source_sha256": {
+    "app/mastermind_os/src/fabric/catalog-contract.ts": "ea7fc7cf3f6500cb97d1c916e879b5b0026e5307a46ab3a999733df84c4f5f75",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.tsx": "69d58176e4d57ed497d26a1f314e6ec8bd6f9012f6ff33dfd20fd365f9c81e5a",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.test.tsx": "0d45fadd7cd10ca6446b9860b7eaf344e5897582a1c7bc620dff920be08d0930",
+    "app/mastermind_os/src/host.ts": "5f0f6535498603f8025adc34e9e019c1e98291ffa0f212bd25a2d85cf3ad56b9",
+    "app/mastermind_os/src/App.fabric-fleet.test.tsx": "72f199f1beb3f52b612cefccedf5c82e91afce47ca28aef93e689b6401f7b16d"
+  },
+  "logs_sha256": {
+    "catalog-machine-scope-red-20261017.log": "bc6a2174fa4cd4a288472c2d1eb6185602412df4247b31e2440e52acebbfe2a3",
+    "catalog-machine-scope-red-type.log": "669595bce482fcd87b82616268b212ecd4e7e17ba12635ffba5879596149dc39",
+    "catalog-machine-scope-focused-20261017.log": "f7897ce41701dc8877d581a431c9fa00aac9e3871af5ef6820e9a216f754840e",
+    "catalog-machine-scope-types-20261017.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "catalog-browser-scope-final-suite-20261017.log": "2f9fb0e258e7a5d1660535dd0c43066a9866085db021244af6260f1fc22061d6",
+    "catalog-browser-scope-final-types-20261017.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "catalog-browser-scope-final-build-20261017.log": "a4686b0760193cbf75cf2da8a816f7a286bf1606c10c1e251442702a511ba82e"
+  },
+  "tests": {
+    "focused_pass": 36,
+    "focused_files": 3,
+    "full_pass": 1515,
+    "full_skipped": 1,
+    "full_failed": 0,
+    "full_files": 67,
+    "tsc_rc": 0,
+    "vite_build_rc": 0
+  },
+  "security_behavior": {
+    "machine_owner_diagnostic_decoder_unchanged": true,
+    "machine_owner_browser_host_refused": true,
+    "machine_owner_view_refused": true,
+    "exact_run_set_label_does_not_authenticate": true,
+    "source_grant_generated": false,
+    "new_network_calls": 0
+  },
+  "m2_retained_ledger_observation": {
+    "record_count": 10199,
+    "run_ids_matching_Runtime_Attempt": 0,
+    "explicit_Runtime_binding_field_count": 0,
+    "global_absence_proven": false
+  },
+  "effects": {
+    "new_worker": 0,
+    "backend_auth_changes": 0,
+    "M2_gateway_changes": 0,
+    "production_deployment": 0,
+    "independent_review": false,
+    "browser_proof": false
+  },
+  "release": "DRAFT_HOLD; original signed-in run-set producer and production acceptance pending"
+}

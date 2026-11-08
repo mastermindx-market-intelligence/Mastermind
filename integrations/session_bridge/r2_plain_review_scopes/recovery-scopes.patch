@@ -1,0 +1,78 @@
+--- a/original_delivery_collector.py
++++ b/original_delivery_collector.py
+@@ -61,6 +61,34 @@
+                                      'source_pins': {'log': 'a45d165e074694c10d59dbd4729759c607eb05d09d369e6a977d545c989f2193',
+                                                      'support': 'ff2d51c0a2b95a96ef2543b8e1d53d88e7706c6398f1b1fcbc09b44270f310fe'},
+                                      'destination': '/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/retained-returns/rf-mountinfo-review-01a1333c-v1-collection-v1'}}
++
++# Exact native construction/dispatch witnesses are in SCOPES.json and PROVENANCE.json.
++PLAIN_SCOPES.update({'r2-events-composition-review-20261015-01a13315': {'root': '01a13315-332b-7102-b7c8-0c7fc01fa92c',
++                                                    'parent': '01a13315-332b-7102-b7c8-0c7fc01fa92c',
++                                                    'host': 'ubuntu3',
++                                                    'mode': 'qwen',
++                                                    'requested_model': 'qwen3.8-max',
++                                                    'packet_path': '/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/1362-composition-review-packet.md',
++                                                    'packet_sha256': '9289b43965dca0d11a8e38f8a112124b0bf990515bf4dc717d4e22bd38647f7a',
++                                                    'support_digest': 'df14b5db0788c7417b48d253b92a331aa147e6c80573a47ad998e561d7421740',
++                                                    'source_pins': {'log': '8e76307669db6493c7eb0a54f51ba29fd71445d2fd84edddb67daa1510935747',
++                                                                    'support': 'c2e4d3faf5bb1c821565988a602bdbaa7384400d79c9dfc951b017e39f72ada0'},
++                                                    'lease_witness': {'path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/r2-events-composition-review-20261015-01a13315.lease.KQ8T0E',
++                                                                      'sha256': 'e6f0b1d171e1453897f16c274f44fa21dc7c5503a4f7a05de34008a7877c093c'},
++                                                    'destination': '/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/retained-returns/r2-events-composition-review-20261015-01a13315-collection-v1'},
++ 'r2-events-aead-current-review-20261015-01a13315': {'root': '01a13315-332b-7102-b7c8-0c7fc01fa92c',
++                                                     'parent': '01a13315-332b-7102-b7c8-0c7fc01fa92c',
++                                                     'host': 'mb',
++                                                     'mode': 'qwen',
++                                                     'requested_model': 'qwen3.8-max',
++                                                     'packet_path': '/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/1362-aead-review-packet.md',
++                                                     'packet_sha256': 'ec671493af948e49d8e4ceca5d91c64b8084e31c525be0bf948a51d455fc8c56',
++                                                     'support_digest': '5fc2034ca5e4b16a8d30a802beb5fa5c4697c44a0a2e10aa09d56f57ec722f62',
++                                                     'source_pins': {'log': 'c485b8578f3f1071e7279fe36a5a1602bb7a012d40ef61cb2dcc4fffd0448c71',
++                                                                     'support': '12750ade68e8b53b142e816eae58fa3633ec9a8f0410ae2d006e3cad5b0f930d'},
++                                                     'lease_witness': {'path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/r2-events-aead-current-review-20261015-01a13315.lease.VDxqSz',
++                                                                       'sha256': 'cde62d8f07e38b9583362717fbc0e63d0b0f383e1e89fda8ccdec00038735fa1'},
++                                                     'destination': '/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/retained-returns/r2-events-aead-current-review-20261015-01a13315-collection-v1'}})
+ BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
+ RECEIPT_SCHEMA = 'mastermind.original_delivery_receipt.v1'
+ MAX_STDOUT = 8 * 1024 * 1024
+@@ -106,6 +134,24 @@
+     if (not IDENT.fullmatch(root) or os.environ.get('CODEX_THREAD_ID') != root
+             or os.environ.get('POOL_ORCHESTRATOR_ID', root) != root):
+         raise ValueError('original_native_root_required')
++
++
++def verify_plain_lease_witness(run_id, plain):
++    # A local unchanged witness only. Never return its value, touch the lease,
++    # infer its settlement, or transmit it to the retained-result reader.
++    if plain is None or 'lease_witness' not in plain:
++        return
++    witness = plain['lease_witness']
++    if (type(witness) is not dict or set(witness) != {'path', 'sha256'}
++            or type(witness['path']) is not str or type(witness['sha256']) is not str
++            or not HEX.fullmatch(witness['sha256'])):
++        raise ValueError('plain_original_lease_witness_invalid')
++    path = Path(witness['path'])
++    if (path.parent != HERE/'state/remote_sub'
++            or not re.fullmatch(re.escape(run_id) + r'\.lease\.[A-Za-z0-9_]+', path.name)):
++        raise ValueError('plain_original_lease_witness_invalid')
++    if sha(delivery.local_file(path, 4096)) != witness['sha256']:
++        raise ValueError('plain_original_lease_witness_changed')
+ 
+ 
+ def load_binding(path, *, run_id, root, parent):
+@@ -122,6 +168,7 @@
+             or type(value['sources']) is not dict or set(value['sources']) != {'packet','log','support'}):
+         raise ValueError('original_binding_invalid')
+     plain = PLAIN_SCOPES.get(run_id)
++    verify_plain_lease_witness(run_id, plain)
+     if (value['mode'] == 'minimax' or plain is not None) and (plain is None
+             or value['mode'] != plain.get('mode', 'minimax') or value['artifact_names'] != []
+             or value['requested_model'] != plain.get('requested_model', 'MiniMax-M3')
+@@ -441,6 +488,7 @@
+     if plain is not None and (str(path) != str(Path(plain['destination'])/'receipt.json')
+             or root != plain['root'] or parent != plain['parent']):
+         raise ValueError('plain_collection_scope_mismatch')
++    verify_plain_lease_witness(run_id, plain)
+     raw=delivery.local_file(Path(path),65536)
+     if sha(raw)!=expected_sha256:raise ValueError('collection_receipt_changed')
+     receipt=reader.strict_json(raw)

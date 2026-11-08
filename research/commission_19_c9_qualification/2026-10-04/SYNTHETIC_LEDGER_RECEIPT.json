@@ -1,0 +1,44 @@
+{
+  "holdout_opened": false,
+  "kind": "research_only_owner_module_synthetic_probe",
+  "market_data_used": false,
+  "production_ledger_used": false,
+  "python": "3.14.7",
+  "qualification": "BLOCKED_DURABLE_ACCOUNTING",
+  "results": [
+    {
+      "accounting_divergence_reproduced": true,
+      "case": "trial",
+      "count_method": "literal_n",
+      "durable_file_exists": false,
+      "initial_error": "FileExistsError",
+      "memory_count_after_failed_append": 1,
+      "memory_count_after_retry": 1,
+      "positive_append_return": true,
+      "positive_restarted_count": 1,
+      "restarted_count": 0,
+      "retry_return_after_io_repair": false
+    },
+    {
+      "accounting_divergence_reproduced": true,
+      "case": "declared_budget",
+      "count_method": "declared_budget",
+      "durable_file_exists": false,
+      "initial_error": "FileExistsError",
+      "memory_count_after_failed_append": 7,
+      "memory_count_after_retry": 7,
+      "positive_append_return": true,
+      "positive_restarted_count": 7,
+      "restarted_count": 0,
+      "retry_return_after_io_repair": false
+    }
+  ],
+  "scope": "failed append and same-instance retry; not concurrency or crash proof",
+  "source": {
+    "commit": "9201f1602bfe47e05a63d61802fbed6f7f55a19d",
+    "git_blob": "eb364fe9fa53f46d0455e194d3e3ccdbb5732778",
+    "path": "engine/trial_ledger.py",
+    "repository": "mastermindx-market-intelligence/macro",
+    "sha256": "7b99683c9aee822df138d35b8294318e3316c3b6a8b5a80934614141a15413f7"
+  }
+}

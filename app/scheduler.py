@@ -93,7 +93,9 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     target = str(result.get("target_status") or "").strip().lower()
     extra = {"target_status": target or None}
-    if any(result.get(key) for key in ("publish_error", "decision_log_error", "mark_error")):
+    if any(result.get(key) for key in (
+        "publish_error", "write_error", "decision_log_error", "mark_error"
+    )):
         return "error", "FREEZE", {**extra, "reason": "projection_failed"}
     if result.get("cost_capped") is True:
         return "skip", "ADVISORY_ONLY", {**extra, "reason": "cost_capped"}
@@ -106,6 +108,22 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     if target in {"queued", "executed"}:
         if result.get("decision_effective") is True:
+            # Accepted execution and completed receipt projections are separate facts.
+            # No receipt is legitimate; a reported finalization must include its ACK.
+            finalization = result.get("settlement_receipt_finalization")
+            if result.get("settlement_receipt_retained") is True or (
+                "settlement_receipt_finalization" in result
+                and (
+                    not isinstance(finalization, dict)
+                    or finalization.get("ok") is not True
+                    or finalization.get("receipt_acknowledged") is not True
+                    or finalization.get("receipt_retained") is True
+                    or bool(finalization.get("finalization_errors"))
+                )
+            ):
+                return "error", "FREEZE", {
+                    **extra, "reason": "settlement_finalization_incomplete"
+                }
             return "ok", None, extra
         return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
     if target == "rejected_no_submission":
@@ -859,8 +877,16 @@ def _macro_refresh_job():
     handle = _ledger_start("macro_refresh", trigger="cron")
     try:
         from data_layer import macro_refresh
-        macro_refresh.refresh_and_check()
-        _ledger_end(handle, "ok")
+        info = macro_refresh.refresh_and_check()
+        from brain import perception_publication
+        publication = perception_publication.publish_after_refresh(info)
+        accepted = publication.get("status") in {"published", "unchanged"}
+        _ledger_end(handle, "ok" if accepted else "error")
+        if not accepted:
+            log.warning("perception publication unavailable: %s", publication.get("reason"))
+        else:
+            log.info("perception publication %s seq=%s",
+                     publication.get("status"), publication.get("seq"))
     except Exception as exc:  # noqa: BLE001 — a refresh miss must never kill the scheduler
         _ledger_end(handle, "error")
         log.warning("macro_refresh failed: %s", exc)
@@ -1373,61 +1399,39 @@ def _daily_mark_job():
         return
     try:
         from portfolio import self_directed, marks
-        from control_plane import locks as _locks
+        _sd_state = self_directed._load_account()
     except Exception as exc:  # noqa: BLE001 — Self-Directed setup failure must be queryable
         _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
     else:
-        _sd_lock = _locks.acquire_or_log(
-            "book:self_directed", job="daily_mark", book="self_directed"
-        )
-        if _sd_lock is None:
-            _step_failed_event(
-                "daily_mark", "self_directed", "lock_held:self_directed",
-                RuntimeError("lock held — skipping mark"), severity="ADVISORY_ONLY",
-            )
-        else:
-            with _sd_lock:
+        # only advance a NAV history once the hand-driven book actually HOLDS something (an empty
+        # book has nothing to mark; this also keeps the empty-books contract of the daily sweep).
+        if _sd_state.get("positions"):
+            try:
+                self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
+            except Exception as exc:  # noqa: BLE001
+                _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
+            else:
                 try:
-                    _sd_state = self_directed._load_account()
-                except Exception as exc:  # noqa: BLE001
-                    _step_failed_event(
-                        "daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE"
-                    )
-                else:
-                    # only advance a NAV history once the hand-driven book actually HOLDS something
-                    if _sd_state.get("positions"):
+                    try:
+                        marked = self_directed.mark(prices=union_usd, asof=asof)
+                        if marked is None:
+                            raise self_directed.SelfDirectedMarkUnavailable("self-directed mark returned unavailable")
+                    except Exception as exc:  # noqa: BLE001 — truthful-mark refusal is a visible FREEZE
+                        _step_failed_event("daily_mark", "self_directed", "mark:self_directed", exc, severity="FREEZE")
+                    else:
                         try:
-                            self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
+                            # W6/T3 — publish only after a truthful mark succeeds; firm_exposure
+                            # excludes this yardstick from all binding clamp/headroom math.
+                            published = self_directed.publish(prices=union_usd, asof=asof)
+                            if published is None:
+                                raise self_directed.SelfDirectedMarkUnavailable("self-directed publication returned unavailable")
                         except Exception as exc:  # noqa: BLE001
-                            _step_failed_event(
-                                "daily_mark", "self_directed", "self_directed_setup",
-                                exc, severity="FREEZE",
-                            )
-                        else:
-                            try:
-                                try:
-                                    self_directed.mark(prices=union_usd, asof=asof)
-                                except Exception as exc:  # noqa: BLE001
-                                    _step_failed_event(
-                                        "daily_mark", "self_directed", "mark:self_directed",
-                                        exc, severity="FREEZE",
-                                    )
-                                else:
-                                    try:
-                                        self_directed.publish(prices=union_usd, asof=asof)
-                                    except Exception as exc:  # noqa: BLE001
-                                        _step_failed_event(
-                                            "daily_mark", "self_directed", "publish:self_directed",
-                                            exc, severity="FREEZE",
-                                        )
-                            finally:
-                                try:
-                                    self_directed.set_price_resolver(None)
-                                except Exception as exc:  # noqa: BLE001
-                                    _step_failed_event(
-                                        "daily_mark", "self_directed",
-                                        "self_directed_resolver_cleanup", exc, severity="FREEZE",
-                                    )
+                            _step_failed_event("daily_mark", "self_directed", "publish:self_directed", exc, severity="FREEZE")
+                finally:
+                    try:
+                        self_directed.set_price_resolver(None)  # never leave the seam installed
+                    except Exception as exc:  # noqa: BLE001
+                        _step_failed_event("daily_mark", "self_directed", "self_directed_resolver_cleanup", exc, severity="FREEZE")
     _ledger_end(handle, "ok")
 
 
@@ -2080,7 +2084,8 @@ def maybe_first_autonomous_run() -> bool:
                 from bot.autonomous import run_autonomous
                 _result = run_autonomous()
                 _post_mark_forward_evaluation("autonomous", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("autonomous first-run failed: %s", exc)
@@ -2171,7 +2176,8 @@ def maybe_first_china_run() -> bool:
                 from bot.china import run_china
                 _result = run_china()
                 _post_mark_forward_evaluation("china", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("china first-run failed: %s", exc)
@@ -2213,7 +2219,8 @@ def maybe_first_hk_run() -> bool:
                 from bot.hk import run_hk
                 _result = run_hk()
                 _post_mark_forward_evaluation("hk", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("hk first-run failed: %s", exc)

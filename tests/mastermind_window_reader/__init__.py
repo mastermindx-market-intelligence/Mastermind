@@ -1,0 +1,1 @@
+"""Connected Reader consumer tests."""
