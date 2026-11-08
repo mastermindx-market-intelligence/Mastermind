@@ -414,7 +414,7 @@ PROVIDER_APPLICATION_RECORD_SHA256 = "7bbe9fbffd0087d7ae5c191a50e8c6f6ce28fae435
 # Retain the exact historical inputs authenticated by that unchanged record.
 # The current provider profile/realm may advance without retagging this cohort.
 PROVIDER_APPLICATION_PROFILE_SOURCE = "source/provider-application-profile.json.preimage"
-PROVIDER_APPLICATION_REALM_SOURCE = "source/provider-application-codex_provider_realm.py.preimage"
+PROVIDER_APPLICATION_REALM_SOURCE = "source/provider-application-codex_provider_realm.py.source"
 PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
     "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
     "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",

@@ -365,7 +365,7 @@ def _scope_language(path: str) -> str:
     # Pinned donor archives are still Python source for this identity audit.
     # Parse their strings/aliases exactly as executable .py postimages; this
     # does not exempt them from changed-source or literal-identity checking.
-    if suffix == ".py" or path.lower().endswith((".py.source", ".py.preimage")):
+    if suffix == ".py" or path.lower().endswith(".py.source"):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -1873,7 +1873,7 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
     )
 
 
-@pytest.mark.parametrize("suffix", [".py", ".py.source", ".py.preimage"])
+@pytest.mark.parametrize("suffix", [".py", ".py.source"])
 def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
     path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
     prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
@@ -1885,10 +1885,10 @@ def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
         assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
 
 
-def test_d8_retained_provider_preimage_keeps_python_scope_and_identity_guards():
+def test_d8_retained_provider_archive_keeps_python_scope_and_identity_guards():
     path = (
         "ops/native_fabric/quota_continuity/source/"
-        "provider-application-codex_provider_realm.py.preimage"
+        "provider-application-codex_provider_realm.py.source"
     )
     source = (ROOT / path).read_text()
     assert hashlib.sha256(source.encode()).hexdigest() == (
@@ -1902,6 +1902,14 @@ def test_d8_retained_provider_preimage_keeps_python_scope_and_identity_guards():
     for extra in ("peer_uid = 471\n", "value = 471\npeer_uid = value\n"):
         changed = source + "\n" + extra
         assert "471" in _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+        )
+    # The binary size bound is not an identity allowance: changing only the
+    # observed stat field to uid/gid makes the same 512 literal security relevant.
+    for field in ("st_uid", "st_gid"):
+        changed = source.replace("0 < before.st_size <= 512", f"0 < before.{field} <= 512", 1)
+        assert changed != source
+        assert "512" in _scan_added_identity_diff(
             _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
         )
     with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
