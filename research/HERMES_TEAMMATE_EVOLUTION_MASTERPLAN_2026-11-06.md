@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §§56–57. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–58. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2507,7 +2507,7 @@ These are finite paths, not open directory exemptions. The new common module mus
 
 ### Product contract / owner composition
 
-Add two finite tools through the existing native_discovery_tools registration/call owner: current knowledge reads (catalogue, project communication preference, exact opaque source at its expected DATA commit), and governed note/preference authoring (add_project_file / set_project_communication_preference with prepare/read/submit/reconcile). Use explicit v5 publication/catalogue/digest/profile selection; keep v2/v3/v4 bytes, tools and envelopes unchanged. The new profile remains disabled until its original installed admission qualifies it.
+Add two finite tools through the existing native_discovery_tools registration/call owner: current knowledge reads (catalogue, project communication preference, exact opaque source at its expected Git blob revision), and governed note/preference authoring (add_project_file / set_project_communication_preference with prepare/read/submit/reconcile). Use explicit v5 publication/catalogue/digest/profile selection; keep v2/v3/v4 bytes, tools and envelopes unchanged. The new profile remains disabled until its original installed admission qualifies it.
 
 Reuse the same ExecutiveContextConsumerPublication type, ConsumerSlot, native MCP connection, independently authenticated Executive/Workspace resources, original source-operation custody, private input, Events and Git publisher. Preserve matching issuer/subject/client, permissions, catalogue and owner currentness before and after awaited work. Add exact closed principal actions; do not infer write authority from the discovery action or local filesystem permissions.
 
@@ -2524,3 +2524,25 @@ Qualify the real native registration and existing signed HTTP/MCP/Workspace owne
 PR2175's shared filenames require ordinary semantic composition only; its active primary APPLICATION branch, original publication effects and independent holds are not transferred. This contribution does not include its model/provider application implementation. Do not take a former writer's source or request former-chat permission for an independent exact contribution.
 
 No runtime deployment, inference, real credential read, host activation, source-owner replacement, new vault/memory/auth/publication plane or recovery-carrier failover is authorized by this source amendment. OriginalC26/Fabric/socket denials and all held release/security obligations remain intact. **No v5 edits or qualification results exist at this authorization checkpoint. MISSION_COMPLETE=false.**
+
+## 58. Exact ProjectKnowledge identity-pin support and source-revision correction — 2026-11-08
+
+Before editing it, the assigned integration principal adds the exact contextual qualification path **tests/executive_company_identity_review.py** to operation **hermes-native-project-knowledge-20261108-c3**, carrier **sol/hermes-native-project-knowledge-20261108-c3**. This is the existing Company/Fabric identity-review record for ExecutiveControlService._handle_ceo_ingress_connection, not a new approval or masking plane. The v4/v5 ingress composition changes its whole-source and enclosing-method digests. Preserve the original Company-listener anchor, the three original HTTP-status operand values/spellings/AST paths and every unrelated review record; update only the actual source/method pins after comparing those retained operands. Do not widen the generic D8 scanner or add a new identity exception. The earlier Fabric REVIEWED_FILES-only shorthand missed this separate existing Company pin.
+
+The 20 production paths and other exact source/test paths in §57 otherwise remain the finite grant. No new runtime, socket, credential, live account or publication authority is added.
+
+### Verified source-revision distinction
+
+The accepted knowledge reader uses **40-hex Git blob identity** for catalogue rows' revision, memory.source.revision and exact source read expected_revision. DATA source.commit is a separate commit. Preference expected_preference_revision is the **64-hex content SHA-256**, not either 40-hex coordinate. The v5 bridge must carry the original opaque source reference and blob revision, check returned UTF-8 bytes against both SHA-256 and the Git blob calculation, and retain independent current DATA/CODE provenance.
+
+Current preference preparation compares catalogue memory revision to memory.source.revision and its content preimage to memory.source.content_sha256. Immutable snapshot joins compare repository/default_ref/CODE/DATA/reader-closure identities plus code_context; separate observation timestamps must not be required equal.
+
+Seven-field body-free recovery cannot reconstruct the original note extension or contents. Exact prepare checks the requested extension, body hash and both preimages; source readback checks exactly two intended paths with the deterministic scoped stem and one allowed extension, one publication commit and original owner/request-hash joins. PROPOSAL_OBSERVED has no source list and remains unknown publication; SOURCE_OBSERVED supplies the two-file source evidence.
+
+### Current source qualification frontier
+
+Thirty-nine incumbent v4 discovery/context/native cases passed after the initial v5 source composition (PID92058,53.97s). Forty native v5 owner/capability-policy cases passed (PID12943,9.15s); these include original future/uncertainty and historical-grant identity checks. They are source-only, not installed proof; exact final candidate checks remain owed.
+
+The new actual issued-compiler/temporary-Git journey caught two connected adapter gaps before publication: the raw HTTP path fence lacked the two v5 names, and the seven-field GET lookup needed the existing parser's literal null representation for expected_preference_revision=None. The path boundary has been extended to exactly the finite tool catalogue; the GET adapter now preserves the original None in retained identity and encodes only that known nullable query field as the existing null literal. No mutation retry or replacement request was introduced. Final journey results remain pending.
+
+Fresh PR2234 readback remains OPEN/Ready at c438, unmerged. Main CI42425902793 is now SUCCESS; runtime42425902801 remains cancelled and unproven. PR2257 at e1a2 has successful qualification42428004335, harness42428004485, proxy42428004278 and OAuth42428004383; main CI42428004264 was running and runtime42428004378 was cancelled. No re-arm, rerun or release-bypass action occurred. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
