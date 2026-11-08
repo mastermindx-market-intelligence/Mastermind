@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
-import subprocess
 from . import prepare_native_acp as native
 
 PREFIX = "integrations/deepseek_harness/runtime_compat/"
@@ -75,8 +74,8 @@ def verify(release: Path, config: dict, accepted: dict, source_repo: Path, sourc
             or any(type(value) is not str or re.fullmatch("[0-9a-f]{64}", value) is None for value in identity.values())
             or identity != accepted.get(KEY)):
         raise ValueError("native ACP package differs from protected build qualification")
-    raw = {key: subprocess.check_output(["git", "-c", "gc.auto=0", "-C", str(source_repo),
-                                         "show", source_sha + ":" + name]) for key, name in FILES.items()}
+    from ops.executive_os.install_source_policy import read_source_blob
+    raw = {key: read_source_blob(source_repo, source_sha, name) for key, name in FILES.items()}
     expected = validate(raw["source"], raw["patch"])
     path = release / "native-acp-receipt.json"
     if (path.resolve(strict=True) != path

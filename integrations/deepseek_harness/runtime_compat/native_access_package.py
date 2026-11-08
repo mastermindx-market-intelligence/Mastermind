@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 from . import prepare_native_access as access
 from . import prepare_native_host as host
 
@@ -106,8 +105,8 @@ def verify(release: Path, config: dict, accepted: dict, source_repo: Path, sourc
             or any(type(value) is not str or not re.fullmatch("[0-9a-f]{64}", value) for value in identity.values())
             or identity != accepted.get("native_owner_access")):
         raise ValueError("native owner access differs from protected build qualification")
-    raw = {key: subprocess.check_output(["git", "-c", "gc.auto=0", "-C", str(source_repo),
-                                         "show", source_sha + ":" + name])
+    from ops.executive_os.install_source_policy import read_source_blob
+    raw = {key: read_source_blob(source_repo, source_sha, name)
            for key, name in FILES.items()}
     expected, native_host = _inputs(raw)
     target = release / "native-owner-access-receipt.json"

@@ -784,7 +784,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '7d2bf22e3e27f9d40bfc9aec4e025e53ad0e91088028eeee4244a7b54ade2e43', 'sites': ((1706, 26, 31, 'int', '0o700'),)}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '45904c2b8c04d665706dce01ac41edb804253b28cd327bf2582de5bba5fd044e', 'sites': ((1769, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.

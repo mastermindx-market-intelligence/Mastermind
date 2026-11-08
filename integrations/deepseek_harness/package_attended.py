@@ -18,9 +18,15 @@ if __package__:
     from .runtime_compat import native_access_package as native_owner_access
     from .runtime_compat import native_acp_package as native_acp_lifecycle
 else:
-    from runtime_compat import prepare_native_session as native_session
-    from runtime_compat import native_access_package as native_owner_access
-    from runtime_compat import native_acp_package as native_acp_lifecycle
+    # The incumbent installer executes this exact sealed source with -I -S -B.
+    # Isolated Python omits the script directory; use this source root only.
+    import sys
+    source_root = Path(__file__).resolve().parents[2]
+    if str(source_root) not in sys.path:
+        sys.path.insert(0, str(source_root))
+    from integrations.deepseek_harness.runtime_compat import prepare_native_session as native_session
+    from integrations.deepseek_harness.runtime_compat import native_access_package as native_owner_access
+    from integrations.deepseek_harness.runtime_compat import native_acp_package as native_acp_lifecycle
 
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 HERE = Path(__file__).resolve().parent
@@ -158,10 +164,9 @@ def verify_native_session_package(release, config, accepted, source_repo, source
                    for value in identity.values())
             or identity != accepted.get("native_session_patch")):
         raise ValueError("Native session patch differs from protected build qualification")
-    source_raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
-                                          source_sha + ":" + NATIVE_SESSION_SOURCE_PATH])
-    patch_raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
-                                         source_sha + ":" + NATIVE_SESSION_PATCH_PATH])
+    from ops.executive_os.install_source_policy import read_source_blob
+    source_raw = read_source_blob(source_repo, source_sha, NATIVE_SESSION_SOURCE_PATH)
+    patch_raw = read_source_blob(source_repo, source_sha, NATIVE_SESSION_PATCH_PATH)
     expected = native_session.validate_manifest(json.loads(source_raw), patch_raw)
     receipt_path = release / "native-session-receipt.json"
     if (hashlib.sha256(source_raw).hexdigest() != identity["source_sha256"]
@@ -208,11 +213,58 @@ def package_native_worker(release):
     }
 
 
+def native_build_layout(args):
+    """Separate immutable installation coordinates from the private build tree."""
+    release = exact_path(args.release, exists=False)
+    native = getattr(args, "native_layout", False)
+    installed_release = getattr(args, "installed_release", None)
+    installed_node = getattr(args, "installed_node", None)
+    selected_node = getattr(args, "node", None)
+    if native:
+        if args.state is not None or not all((installed_release, installed_node, selected_node)):
+            raise ValueError("Native layout requires final release/Node coordinates and no app state")
+        installation = exact_path(installed_release, exists=False)
+        runtime_node = exact_path(installed_node, exists=False)
+        state = None
+        if runtime_node.is_relative_to(installation) or installation.is_relative_to(runtime_node):
+            raise ValueError("Native Node and package must have independent immutable destinations")
+    else:
+        if installed_release is not None or installed_node is not None or not args.state:
+            raise ValueError("Attended layout requires its original explicit state binding")
+        installation, state = release, exact_path(args.state, exists=False)
+        runtime_node = None
+    node = exact_path(selected_node) if selected_node else Path(shutil.which("node") or "").resolve(strict=True)
+    if not node.is_file() or not node.stat().st_mode & 0o111:
+        raise ValueError("Explicit executable build Node is required")
+    return release, installation, state, node, runtime_node or node, native
+
+
+def seal_native_layout(release):
+    """Seal only this newly built closure; account/profile state is never visited."""
+    release = exact_path(release)
+    for parent, dirs, files in os.walk(release, topdown=False, followlinks=False):
+        for name in dirs + files:
+            path = Path(parent) / name
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                target = os.readlink(path)
+                if Path(target).is_absolute() or not path.resolve(strict=True).is_relative_to(release):
+                    raise ValueError("Native layout requires contained relative dependency links")
+            elif stat.S_ISREG(info.st_mode):
+                if info.st_nlink != 1:
+                    raise ValueError("Native layout must own each regular file")
+                path.chmod(0o555 if info.st_mode & 0o111 else 0o444)
+            elif stat.S_ISDIR(info.st_mode):
+                path.chmod(0o755)
+            else:
+                raise ValueError("Native layout contains a special filesystem object")
+        Path(parent).chmod(0o755)
+
+
 def stage(args):
     donor = exact_path(args.donor)
-    release = exact_path(args.release, exists=False)
-    state = exact_path(args.state, exists=False)
-    node = Path(shutil.which("node") or "").resolve(strict=True)
+    release, installation, state, node, runtime_node, native_layout = native_build_layout(args)
+    node_digest = sha(node)
     public_url = origin(args.public_url)
     pnpm = exact_path(args.pnpm)
     if (json.loads((pnpm.parent.parent / "package.json").read_text())["version"] != "11.28.5"):
@@ -220,11 +272,14 @@ def stage(args):
     for port in (args.port, args.relay_port):
         if not 1024 <= port <= 65535:
             raise ValueError("Use an explicit unprivileged local/listener port")
-    if release.exists() or state.exists() or release.is_relative_to(donor) or state.is_relative_to(donor):
-        raise ValueError("Use fresh separate release and state directories")
-    if state.is_relative_to(release) or release.is_relative_to(state):
-        raise ValueError("Release and persistent state must be independent")
-    git = ["git", "-C", str(donor)]
+    if release.exists() or release.is_relative_to(donor):
+        raise ValueError("Use a fresh separate release directory")
+    if state is not None:
+        if state.exists() or state.is_relative_to(donor):
+            raise ValueError("Use a fresh separate attended state directory")
+        if state.is_relative_to(release) or release.is_relative_to(state):
+            raise ValueError("Release and persistent state must be independent")
+    git = ["git", "-c", "gc.auto=0", "-C", str(donor)]
     if (subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip() != PIN
             or subprocess.check_output(git + ["status", "--porcelain"], text=True).strip()):
         raise ValueError("Exact clean full-app donor required")
@@ -260,6 +315,7 @@ def stage(args):
     # The native title is a build value, not a DOM override or copied UI owner.
     build_env = {key: os.environ[key] for key in ("HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SDKROOT", "DEVELOPER_DIR") if key in os.environ}
     build_env.update(CI="true", DSH_CLIENT_TITLE="Mastermind", DSH_CLIENT_COMMIT_HASH=PIN)
+    build_env["PATH"] = str(node.parent) + os.pathsep + build_env.get("PATH", "/usr/bin:/bin")
     subprocess.run([str(node), str(pnpm), "run", "build:artifacts"],
                    cwd=release / "app", env=build_env, stdin=subprocess.DEVNULL, check=True)
     native_build = release / "app/.dsh-build/client-build-environment.json"
@@ -272,11 +328,12 @@ def stage(args):
     shutil.copy2(donor / "LICENSE", release / "UPSTREAM-LICENSE")
     shutil.copy2(HERE / "launch_attended.mjs", release / "launch_attended.mjs")
     native_worker = package_native_worker(release)
-    for child in ("home", "state/profiles/web", "workspace", "logs"):
-        (state / child).mkdir(mode=0o700, parents=True)
-    state.chmod(0o700)
+    if state is not None:
+        for child in ("home", "state/profiles/web", "workspace", "logs"):
+            (state / child).mkdir(mode=0o700, parents=True)
+        state.chmod(0o700)
     patch = [{"insert": [{"id": "mastermind-company",
-                         "name": str(release / "company_plugin/lib/index.js"), "config": {}}]}]
+                         "name": str(installation / "company_plugin/lib/index.js"), "config": {}}]}]
     # The immutable company overlay loads after the editable native profile.
     # Models/settings must remain writable and survive app restarts.
     company_patch = release / "company.patch.yml"
@@ -284,8 +341,9 @@ def stage(args):
     company_patch.chmod(0o600)
     config = {
         "schema": "mastermind.dsh_attended_package.v1", "donor_sha": PIN,
-        "release": str(release), "state": str(state),
-        "node": str(node), "node_sha256": sha(node),
+        "release": str(installation), "state": str(state) if state is not None else None,
+        **({"state_owner": "original-worker"} if native_layout else {}),
+        "node": str(runtime_node), "node_sha256": node_digest,
         "public_url": public_url, "port": args.port, "relay_port": args.relay_port,
         "company_client_sha256": build["client_sha256"],
         "company_host_exports": host_exports,
@@ -299,17 +357,18 @@ def stage(args):
         "execution": "native-attended", "company_worker_admission": False,
     }
     (release / "app.json").write_text(json.dumps(config, indent=2) + "\n")
-    plist = {
-        "Label": "com.mastermind.deepseek.web",
-        "ProgramArguments": [str(node), str(release / "launch_attended.mjs")],
-        "WorkingDirectory": str(state / "workspace"),
-        "RunAtLoad": True, "KeepAlive": False,
-        "ProcessType": "Interactive", "Umask": 0o077,
-        "StandardOutPath": str(state / "logs/native.stdout.log"),
-        "StandardErrorPath": str(state / "logs/native.stderr.log"),
-    }
-    with (release / "com.mastermind.deepseek.web.plist").open("wb") as stream:
-        plistlib.dump(plist, stream)
+    if not native_layout:
+        plist = {
+            "Label": "com.mastermind.deepseek.web",
+            "ProgramArguments": [str(runtime_node), str(installation / "launch_attended.mjs")],
+            "WorkingDirectory": str(state / "workspace"),
+            "RunAtLoad": True, "KeepAlive": False,
+            "ProcessType": "Interactive", "Umask": 0o077,
+            "StandardOutPath": str(state / "logs/native.stdout.log"),
+            "StandardErrorPath": str(state / "logs/native.stderr.log"),
+        }
+        with (release / "com.mastermind.deepseek.web.plist").open("wb") as stream:
+            plistlib.dump(plist, stream)
     host = urlsplit(public_url).hostname
     edge = f"""# Candidate for the incumbent public-edge owner; no route is installed here.
 {host} {{
@@ -331,11 +390,19 @@ def stage(args):
 """
     (release / "public-edge.caddy").write_text(edge)
     (release / "os-build.env").write_text("VITE_MM_DSH_APP_URL=" + public_url + "\n")
+    if sha(node) != node_digest:
+        raise ValueError("Build Node changed during native package construction")
+    if native_layout:
+        seal_native_layout(release)
     closure = inventory(release)
     manifest = {"schema": "mastermind.dsh_attended_package_closure.v1",
                 "donor_sha": PIN, "files": closure, "installed": False}
     (release / "package-manifest.json").write_text(json.dumps(manifest, sort_keys=True) + "\n")
-    return {"release": str(release), "state": str(state), "files": len(closure),
+    if native_layout:
+        (release / "package-manifest.json").chmod(0o444)
+    return {"release": str(release), "state": str(state) if state is not None else None,
+            **({"installation_release": str(installation), "state_owner": "original-worker"}
+               if native_layout else {}), "files": len(closure),
             "package_manifest_sha256": sha(release / "package-manifest.json"),
             "installed": False, "public_route_qualified": False, "provider_calls": 0}
 
@@ -358,8 +425,8 @@ QUALIFIED_BUILD_PATH = "integrations/deepseek_harness/attended-build.json"
 
 def protected_build(source_repo, source_sha):
     """Read the accepted build from its one fixed protected source path."""
-    raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
-                                   source_sha + ":" + QUALIFIED_BUILD_PATH])
+    from ops.executive_os.install_source_policy import read_source_blob
+    raw = read_source_blob(source_repo, source_sha, QUALIFIED_BUILD_PATH)
     record = json.loads(raw)
     if (type(record) is not dict or record.get("schema") != "mastermind.dsh_attended_build.v1"
             or record.get("donor_sha") != PIN or record.get("installed") is not False
@@ -376,9 +443,10 @@ PUBLICATION_SCHEMA = "mastermind.dsh_attended_publication_bundle.v1"
 PUBLICATION_CUSTODY = "root-qualified package snapshot; not a remote signature"
 
 
-def _qualified_release_source(*, release, source_repo, source_sha):
+def _qualified_release_source(*, release, source_repo, source_sha, installation_root=None):
     """The existing root qualification, shared by asset export and native custody."""
-    from ops.executive_os.install_source_policy import validate_acceptance_source
+    from ops.executive_os.install_source_policy import validate_acceptance_source, read_source_blob
+    installation = release if installation_root is None else exact_path(installation_root, exists=False)
     source_tree = validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha)
     manifest_path = release / "package-manifest.json"
     if manifest_path.is_symlink() or not 0 < manifest_path.stat().st_size <= 64 * 1024 * 1024:
@@ -406,7 +474,7 @@ def _qualified_release_source(*, release, source_repo, source_sha):
         if sha(release / name) != accepted_build[key]:
             raise ValueError("Captured artifact differs from protected build qualification")
     if (config.get("schema") != "mastermind.dsh_attended_package.v1"
-            or config.get("release") != str(release) or config.get("donor_sha") != PIN
+            or config.get("release") != str(installation) or config.get("donor_sha") != PIN
             or config.get("public_url") != "https://chat.mastermind-x.com/"
             or config.get("port") != 4180 or config.get("relay_port") != 4181
             or config.get("execution") != "native-attended"
@@ -431,16 +499,16 @@ def _qualified_release_source(*, release, source_repo, source_sha):
     for name, expected in build["source_sha256"].items():
         if not re.fullmatch(r"src/(?:client/)?[a-z.-]+\.ts", name):
             raise ValueError("Company source path refused")
-        raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
-            source_sha + ":integrations/deepseek_harness/company_plugin/" + name])
+        raw = read_source_blob(source_repo, source_sha,
+            "integrations/deepseek_harness/company_plugin/" + name)
         if hashlib.sha256(raw).hexdigest() != expected:
             raise ValueError("Company client source differs from protected source")
-    launcher = subprocess.check_output(["git", "-C", str(source_repo), "show",
-        source_sha + ":integrations/deepseek_harness/launch_attended.mjs"])
+    launcher = read_source_blob(source_repo, source_sha,
+        "integrations/deepseek_harness/launch_attended.mjs")
     if (release / "launch_attended.mjs").read_bytes() != launcher:
         raise ValueError("Native launcher differs from protected source")
     expected_patch = [{"insert": [{"id": "mastermind-company",
-        "name": str(company / "index.js"), "config": {}}]}]
+        "name": str(installation / "company_plugin/lib/index.js"), "config": {}}]}]
     if (json.loads((release / "company.patch.yml").read_bytes()) != expected_patch
             or sha(release / "company.patch.yml") != config["company_patch_sha256"]
             or sha(release / "app/.dsh-build/client-build-environment.json")
@@ -453,16 +521,18 @@ def _qualified_release_source(*, release, source_repo, source_sha):
             build_raw, manifest, config, build)
 
 
-def qualify_native_worker_package(*, release, source_repo, source_sha):
+def qualify_native_worker_package(*, release, source_repo, source_sha, _installation_root=None):
     """Root source qualification; no publication and no worker/provider execution."""
     from ops.executive_os import os_public_edge_publication as publication
     from control_plane.native_provider_attestation import (
         DSH_ENTRYPOINT, DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, DSH_MODEL_PROVIDER)
     publication._root()
+    from ops.executive_os.install_source_policy import read_source_blob
     release, source_repo = exact_path(release), exact_path(source_repo)
+    coordinates = {} if _installation_root is None else {"installation_root": _installation_root}
     (tree, manifest_path, raw, identity, accepted, build_raw, manifest,
      config, build) = _qualified_release_source(
-        release=release, source_repo=source_repo, source_sha=source_sha)
+        release=release, source_repo=source_repo, source_sha=source_sha, **coordinates)
     if (any(key not in config or config[key] != accepted.get(key)
             for key in ("native_session_patch", "native_owner_access", "native_acp_patch"))
             or type(config.get("company_host_exports")) is not dict
@@ -487,10 +557,10 @@ def qualify_native_worker_package(*, release, source_repo, source_sha):
             or patch_hash != accepted.get("native_worker_patch_sha256")):
         raise ValueError("Fixed native worker overlay is not source-qualified")
     entry, patch = release / DSH_ENTRYPOINT, release / "native_worker.patch.yml"
-    expected = subprocess.check_output(["git", "-C", str(source_repo), "show",
-        source_sha + ":integrations/deepseek_harness/" + DSH_ENTRYPOINT])
-    expected_patch = subprocess.check_output(["git", "-C", str(source_repo), "show",
-        source_sha + ":integrations/deepseek_harness/native_worker.patch.yml"])
+    expected = read_source_blob(source_repo, source_sha,
+        "integrations/deepseek_harness/" + DSH_ENTRYPOINT)
+    expected_patch = read_source_blob(source_repo, source_sha,
+        "integrations/deepseek_harness/native_worker.patch.yml")
     if (entry.resolve(strict=True) != entry or entry.read_bytes() != expected
             or sha(entry) != worker["sha256"] or patch.resolve(strict=True) != patch
             or patch.read_bytes() != expected_patch or sha(patch) != patch_hash
@@ -499,7 +569,8 @@ def qualify_native_worker_package(*, release, source_repo, source_sha):
     from ops.executive_os.install_source_policy import validate_acceptance_source
     if validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != tree:
         raise ValueError("Protected native worker source changed during qualification")
-    return {"schema": "mastermind.dsh_native_worker_qualification/v1",
+    return {"schema": ("mastermind.dsh_native_worker_qualification/v1" if _installation_root is None
+                       else "mastermind.dsh_native_worker_stage_qualification/v1"),
             "source_sha": source_sha, "source_tree": tree,
             "build_sha256": hashlib.sha256(build_raw).hexdigest(),
             "package_manifest_sha256": hashlib.sha256(raw).hexdigest(),
@@ -576,19 +647,14 @@ def export_publication(*, release, source_repo, source_sha, out):
 
 
 
-def native_attestation_publication(*, worker_config, worker_config_sha256,
-        source_repo, source_sha, reconcile=False, expected_receipt_sha256=None):
-    """Finite receipt edge for one already-enrolled Worker; never activation.
-
-    All installed coordinates come from the original root-pinned configuration.
-    This root observation does not impersonate the Worker's realm/account check.
-    """
+def _original_native_worker_input(worker_config, worker_config_sha256):
+    """Read the original config/enrollment without requiring artifacts to exist."""
     from control_plane import native_provider_attestation as attestation
     from control_plane.codex_provider_realm import _native_read_config, _native_enrollment
     from scripts import executive_os_phase1c_worker as worker
     if os.geteuid() != attestation._ROOT_UID:
-        raise ValueError("Native receipt publication requires root")
-    path, source_repo = exact_path(worker_config), exact_path(source_repo)
+        raise ValueError("Native package operation requires root")
+    path = exact_path(worker_config)
     original = _native_read_config(path, worker_config_sha256)
     if (original.get("schema_version") != worker.NATIVE_CONFIG_SCHEMA_VERSION
             or original.get("native_provider") != "deepseek"
@@ -598,14 +664,33 @@ def native_attestation_publication(*, worker_config, worker_config_sha256,
     config_observation = attestation._file_observation(path, content=True)
     if config_observation["sha256"] != worker_config_sha256:
         raise ValueError("Original native Worker configuration changed")
+
+    def current():
+        if (_native_read_config(path, worker_config_sha256) != original
+                or attestation._runtime_identity(path) != config_observation["identity"]):
+            raise ValueError("Original native Worker configuration changed")
+    current()
+    return original, enrollment, slot, current
+
+
+def native_attestation_publication(*, worker_config, worker_config_sha256,
+        source_repo, source_sha, reconcile=False, expected_receipt_sha256=None):
+    """Finite receipt edge for one already-enrolled Worker; never activation.
+
+    All installed coordinates come from the original root-pinned configuration.
+    This root observation does not impersonate the Worker's realm/account check.
+    """
+    from control_plane import native_provider_attestation as attestation
+    original, enrollment, slot, config_current = _original_native_worker_input(
+        worker_config, worker_config_sha256)
+    source_repo = exact_path(source_repo)
     binary = Path(original["deepseek_node_binary"])
     node_observation = attestation._file_observation(binary, content=True)
     if node_observation["sha256"] != enrollment["provider_binary_sha256"]:
         raise ValueError("Native Node differs from original enrolled binary")
     def current():
-        if (_native_read_config(path, worker_config_sha256) != original
-                or attestation._runtime_identity(path) != config_observation["identity"]
-                or attestation._runtime_identity(binary) != node_observation["identity"]):
+        config_current()
+        if attestation._runtime_identity(binary) != node_observation["identity"]:
             raise ValueError("Original native Worker or Node identity changed")
     current()
     arguments = dict(receipt_path=Path(original["deepseek_attestation_receipt"]),
@@ -637,6 +722,28 @@ def native_attestation_publication(*, worker_config, worker_config_sha256,
 
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] in {"materialize-native", "reconcile-native-materialization"}:
+        root = HERE.parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from integrations.deepseek_harness.native_materialization import (
+            native_materialization, NativeMaterializationPending, NativeMaterializationUnknown)
+        parser = argparse.ArgumentParser(description="Materialize/reconcile the original native Worker artifacts")
+        for name in ("worker-config", "worker-config-sha256", "source-repo", "source-sha"):
+            parser.add_argument("--" + name, required=True)
+        reconcile = sys.argv[1] == "reconcile-native-materialization"
+        if not reconcile:
+            parser.add_argument("--native-package", required=True)
+            parser.add_argument("--native-node", required=True)
+            parser.add_argument("--operator-uid", required=True, type=int)
+        try:
+            result = native_materialization(**vars(parser.parse_args(sys.argv[2:])), reconcile=reconcile)
+        except (NativeMaterializationPending, NativeMaterializationUnknown) as exc:
+            print(json.dumps({"ok": False, "error": type(exc).__name__,
+                              **getattr(exc, "evidence", {})}, sort_keys=True))
+            raise SystemExit(70)
+        print(json.dumps(result, sort_keys=True))
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] in {"publish-native-attestation", "reconcile-native-attestation"}:
         root = HERE.parents[1]
         if str(root) not in sys.path:
@@ -668,7 +775,12 @@ if __name__ == "__main__":
     parser.add_argument("--donor", required=True)
     parser.add_argument("--pnpm", required=True, help="Absolute installed pnpm 11.28.5 bin/pnpm.cjs")
     parser.add_argument("--release", required=True)
-    parser.add_argument("--state", required=True)
+    parser.add_argument("--state")
+    parser.add_argument("--native-layout", action="store_true",
+                        help="Package for the existing Worker; create no attended state or service plist")
+    parser.add_argument("--installed-release")
+    parser.add_argument("--node", help="Explicit build Node executable")
+    parser.add_argument("--installed-node")
     parser.add_argument("--public-url", required=True)
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--relay-port", required=True, type=int)

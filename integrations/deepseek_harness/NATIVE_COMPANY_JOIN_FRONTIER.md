@@ -1107,3 +1107,16 @@ Remaining production holds: accepted protected source; original root package/Nod
 Composed original625c13a29c9b471f91f0c1a8d77592b9a07a3fd5 with protected036e8d26cb2b158856f1250b2dfc9cca9700f28a. All41 disjoint protected paths are byte-identical; the four overlapping paths retain both archive/native work and #2268/#2269. Main and Meta CEO/Paperclip remain exact protected bytes, and the incumbent #2175 os_assets.py remains unchanged. The retained03512 governing pin remains compatible.
 
 The actual staging/asset and complete source-identity suites pass434 tests, with an unchanged input snapshot. Exact evidence: research/evidence/deepseek-native-protected-composition-c37-20261108.json. This is source composition, not deployment. Continue final-layout and finite native materialization using the already verified official Node candidate; original Worker config/enrollment remains the only destination/binary/account authority.
+
+
+## C38 finite native materialization and final layout — 2026-11-08
+
+Source parent: ebefb290f1c4d772490bf4424e0c1a938ee72b0b. Same managed operation and verified03512 governing pin; protected036e8 composition retained.
+
+Implemented native final-coordinate packaging, exact binary protected-source reads, finite root Node/package materialization through the existing stage-only installer, and read-only original-target reconciliation. Native state remains null/original-worker; no attended plist or second state tree is created. Original Worker config/enrollment remains destination/binary authority. Exclusive publication, held FDs, currentness, bounded closures, private-stage retention and separate partial outcomes are qualified. The actual isolated -I -S -B package CLI source bootstrap is fixed.
+
+Qualification: 696 composed source/staging/identity tests passed with unchanged inputs; after the isolated CLI correction, 91 affected producer/CLI tests passed (including five real interpreter entrypoints). Counts overlap. Initial fixture-only DEVNULL failure and its23-test repair are retained in research/evidence/deepseek-native-materialization-c38-20261108.json.
+
+C37 hosted OS, ACP and governed-MCP workflows passed. Hash-locked Linux environments now reach pytest. Broad CI is not green: it exposed actual sealed-Control integration imports and missing native v2 edge routes, plus precise historical/current fixture and profile-classification drift. C39 will repair those original source seams without waiving tests or introducing another owner.
+
+No live materialization, original layout observation, service restart, provider call or installed DeepSeek acceptance is claimed. The explicit installed receipt/config-read, Fabric/VPS, admin-protection and foreign-GC denials stay closed. Final package build must join the actual original Worker coordinates and enrolled official-Node digest; do not invent them. Preserve accepted Hermes and C21 evidence. Continue C39 in this healthy session; MORE_WORK_EXISTS.
