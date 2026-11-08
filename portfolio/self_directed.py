@@ -594,21 +594,20 @@ def _stockdata_price(ticker: str) -> Optional[float]:
     if sym is None:
         return None
     try:
-        # basename is CodeQL's modeled sanitizer for user-steered paths; after the allowlist it
-        # is provably a no-op (sym cannot contain separators), but it severs the taint flow so
-        # the sink is verifiably clean rather than clean-by-argument.
-        base = os.path.basename(sym)
-        if base != sym:
+        # No path is ever CONSTRUCTED from the ticker: the directory is enumerated and the
+        # sanitized symbol only selects an already-existing entry by exact name comparison.
+        # Tainted data flows into a comparison, never into a path join.
+        target = f"{sym}.json"
+        p = None
+        for entry in _STOCKDATA_DIR.iterdir():
+            if entry.name == target:
+                p = entry
+                break
+        if p is None:
             return None
-        p = (_STOCKDATA_DIR / f"{base}.json").resolve()
-        # Defence in depth on top of the allowlist: the resolved path must still sit directly in
-        # the stockdata dir. Unreachable while the allowlist holds, but cheap and explicit.
-        if p.parent != _STOCKDATA_DIR.resolve():
-            return None
-        if p.exists():
-            v = (json.loads(p.read_text()).get("tech") or {}).get("price")
-            if v is not None and float(v) > 0:
-                return float(v)
+        v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+        if v is not None and float(v) > 0:
+            return float(v)
     except Exception:
         pass
     return None
