@@ -148,7 +148,8 @@ def test_delegation_uses_existing_executive_and_never_pins_deepseek():
                 workstream="WS:EXECUTIVE-ECOSYSTEM-COMPLETION")
     result = run(client.submit_worker(args))
     assert result["data"]["accepted"] is False
-    assert calls == [("session_summon", args)]
+    assert calls == [("session_summon", {**args, "allowed_write_paths": [],
+                                     "validation": {}, "attempt_limit": 2})]
     with pytest.raises(Exception):
         run(client.submit_worker({**args, "provider": "deepseek"}))
     assert len(calls) == 1
