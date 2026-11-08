@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. D06 now also has a reader-recovery proposal that keeps an unavailable exact bar from silently becoming Latest, aligns reader and overlay behavior, and preserves selection through empty/refill. F03 now also indexes those three proposals through twelve exact source observations, with candidate/entry roles preserved and each observation's limits exposed in HTML builder detail and generated Markdown. The notes and directory integration are committed and byte-read back; 160 return/identity checks, 83 directory source probes and 26 structural checks pass. The next foreground is D25 Guide navigation: distinguish one-step browser Back, local explanation Close and a specifically qualified return to the invoking task. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. D06 now also has a reader-recovery proposal that keeps an unavailable exact bar from silently becoming Latest, aligns reader and overlay behavior, and preserves selection through empty/refill. F03 now also indexes those three proposals through twelve exact source observations, with candidate/entry roles preserved and each observation's limits exposed in HTML builder detail and generated Markdown. The notes and directory integration are committed and byte-read back; 160 return/identity checks, 83 directory source probes and 26 structural checks pass. D25 Guide now also has a six-pane EN/ZH return-clarity proposal, six corrected compact-help footers, source-aligned probability horizons and accurate dashboard action labels across all eight full Risk Guide variants. The original entry is unchanged, and every existing-board copy diff is bounded and verified. The next foreground is D22 Portfolio: inspect the current recovery additions and source contract before selecting a distinct unresolved feature gap. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -1312,3 +1312,186 @@ Real-browser proof remains UNVERIFIED under the earlier selected-browser loopbac
 This F03 discovery slice is complete and durably read back. The broader design mission continues. A bounded read-only D25 audit found a distinct Guide return issue: Macro `templates/reference.html.j2` at `277d15c4e443cebd85d3a209c597167faa0a0c1a`, blob `9575d5b8ba8a32e5b750ce41f955a5ecc9d91dfa`, reveals “Back to where you were” from same-origin referrer/hash but executes only `history.back()`. Related definition anchors can add Guide-local history, so one Back need not restore the original task; direct/new-tab entry is also unqualified. This is a source-derived finding, not a browser reproduction.
 
 Next: root inspects the exact source and current Guide `01M32XYWDYSFTNDZVJKQ5QHT33` entry `p-1-0 / 1RQ-1`, compact Risk `p-3-0 / 21C-1`, and full Risk `p-6-0 / 3CJ-0`. Design an explicit distinction between local Close, Back within Guide, opening a named destination and a qualified task-origin return. Preserve the ordinary history path and use only the incumbent navigation owner; no extra return stack, authentication or preference store. Terminal `p-10-0 / 1MP2-0` and `1MU2-0` are explicitly rejected pane redesigns and remain excluded.
+
+## Continuation — D25 Guide return clarity and exact probability horizons
+
+### Delivered native design and existing-board corrections
+
+File [Mastermind Market Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-8-0), exact new page `p-8-0` **Proposed · Guide return clarity**, board **`44J-0`** **PROPOSED · Guide return choices · EN/ZH**. The native 1440px auto-height board duplicates the established entry shell, reuses the existing Guide tokens and adds one desktop reading/destination composition, six 390px mobile panes, four action meanings, owner contracts and exact-source proof. It has **132 simple text leaves and 16 controls with a 44px minimum height**. These source geometry checks are not a complete accessibility audit.
+
+| Proposed surface | Exact node |
+| --- | --- |
+| Scope | `47C-0` |
+| Four action meanings | `47K-0` |
+| Unbound destination desktop and mobile section | `48D-0` |
+| Desktop reading / explicit dashboard choice | `492-0` / `496-0` |
+| Unbound mobile EN light / ZH dark | `49X-0` / `4A1-0` |
+| Conditional qualified return EN dark / ZH light | `4A5-0` / `4A9-0` |
+| Return rejected before navigation EN dark / ZH light | `4AD-0` / `4AH-0` |
+| Partial placement outcome | `4D9-0` |
+| Existing-owner contract section | `48S-0` |
+| Exact source and consumer proof | `48X-0` |
+| Additional US/SPY horizon-source correction | `4EY-0` |
+
+The three outcomes are distinct. An unbound link offers **Open Macro dashboard** and **Keep reading**. A qualified-origin example offers a specifically identified Risk Radar view, **United States · 10 trading days**, only if the existing navigation/product owners can qualify and restore it. This origin is illustrative, not an observed live selection. A return rejected **before navigation** preserves the Guide and offers explicit choices. A failure after navigation remains with the actual navigation/restore outcome; the design does not fabricate rollback or reverse history.
+
+**Keep reading** stays at the current entry without a new route/history entry, dismisses only the return prompt where applicable and retires a pending attempt that could navigate later. A still-usable origin may remain available for another explicit action. Analytical restoration, reading position and focus are separate outcomes; the specimen “View restored. Reading position unavailable.” is conditional on successful context restoration, with the existing destination focus fallback.
+
+The existing directory `p-1-0 / 37N-0` gained dated note **`4ET-0`**, leaves `4EU-0`–`4EW-0`, linking the new exact page/board. Its original full JSX is byte-identical after removing that single owned addition. All eight prior simple text leaves remain exact; three were added. The 900px directory screenshot confirms that the note fits. Existing page order is preserved, with p8 inserted after full Risk Guide p6 and before the retained-reference divider.
+
+### Source findings: distinguish four kinds of navigation
+
+All affected Macro source below is pinned to **`277d15c4e443cebd85d3a209c597167faa0a0c1a`**.
+
+| Source | Actual blob | Relevant finding |
+| --- | --- | --- |
+| [templates/reference.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/templates/reference.html.j2) | `9575d5b8ba8a32e5b750ce41f955a5ecc9d91dfa` | Same-origin referrer plus hash reveals the return bar; its button calls `history.back()`. Related terms are ordinary fragment anchors. Standalone Close is intercepted, clears the hash with replaceState and scrolls the current article. |
+| [templates/shared_shell_bridge.js](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/templates/shared_shell_bridge.js) | `00ee9b9fa4d1fba67359d3d6b95c7937aed150b7` | After accepted INIT, admitted anchors replace the child location and request a parent push. Existing VIEW_STATE captures x/y and a valid active-element ID when present; INIT.restore owns placement. LOCATION_ACCEPTED gates notification. The bridge wraps push/replace, not back. |
+| [templates/dashboard.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/templates/dashboard.html.j2) | `4a890c3224898639f680d6b0cefe836a0238d269` | The verified launcher is the separate Look up row, including `reference.html#risk-radar`. Its links have no origin payload or trigger ID. The `regime-radar` target exists in Macro mode. |
+| [site/reference.html](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/site/reference.html) | `785279a1fcd3b910d68820dc2ab4cecd7374f008` | Risk Radar's authored product link is `macro.html#regime-radar`, labeled Macro Dashboard. It identifies the dashboard decision surface, not a Risk Radar dialog or prior task state. |
+| [site/theme.js](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/site/theme.js) | `d85bf9fb55cd67faf32dd49e88423fe249fb8855` | Current Lens hide clears its trigger state without an explicit focus-restoration call. The inspected owner synthesizes no full-Guide link. It does not supply a generic related-anchor interception path. |
+| [templates/_lens.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/templates/_lens.html.j2) | `c2748c591a4fb184c2e8159a38e26f50764f5ad1` | The macro has no destination/href argument establishing Paper's full-Guide action. |
+
+**Source-derived standalone consequence:** dashboard Look up → definition A → related B can make one Back land on definition A. A same-origin referrer does not establish the intended original entry or a usable task-return path, including new-tab entry. Close itself is not the source of that additional history step.
+
+The shell branch must not be described as native child-history accumulation. Its admitted anchor interception and parent acceptance already own navigation; the real parent Back/restore outcome remains unproved here. Reference Close and the bridge both use document bubble listeners, and the bridge checks prior default prevention. Actual initialization/listener order therefore belongs in runtime proof. No second router, return stack, restoration store, auth mechanism or guessed history count was introduced.
+
+Paper compact Help's **Open full guide** remains a proposed integration requirement. The verified current source entry is the dashboard's Look up row. The new contract requires the existing link/navigation owner to qualify the actual origin before leaving the task, keep that origin distinct from Guide-local reading, and recheck it before Return. `rf-back`, referrer, history length, scroll/focus metadata and the current term alone do not qualify the analytical origin.
+
+### Six compact Close corrections
+
+Existing footers now say **“Close the explanation. Stay on this page.”** / **“关闭说明，仍停留在当前页面。”**. They no longer imply that current implementation restores an exact position or focus.
+
+| Board | Changed footer |
+| --- | --- |
+| `WG-0` | `Y2-0` |
+| `1NE-0` | `1OS-0` |
+| `1OU-0` | `1Q8-0` |
+| `1QA-0` | `1RO-0` |
+| `21C-1` | `21E-1` |
+| `224-1` | `226-1` |
+
+For each of the six boards, complete after-JSX equals the before-JSX with exactly that one text replacement. Existing explanation content, the illustrative 56/100 reading and its date, controls, layouts and full-Guide action remain otherwise unchanged. Focus restoration is still a proposed requirement through the existing Lens/trigger owner, not a claim created by copy.
+
+### Corrected probability horizons and destination labels
+
+A semantic review found **English “business days” versus Chinese “个交易日”** in the full Risk Guide. Root verified the actual probability owner and existing product copy before changing it.
+
+| Source | Actual blob | Meaning |
+| --- | --- | --- |
+| [engine/risk_radar_backtest.py](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/engine/risk_radar_backtest.py) | `918327cb330504cd0e15112fbecdb5c47b0cd04a` | Probability-quality horizons are positive observation counts. The target uses the next H native SPY closing observations after as-of and leaves incomplete/invalid windows unscored. The price index does not certify exchange-calendar completeness. |
+| [engine/risk_radar_audit.py](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/engine/risk_radar_audit.py) | `5e11f8f59ee15d6b453b09fbaf56916879b9f73d` | The prospective grader also slices future observations, but drops missing closes. Its convention is not identical to the current probability-quality replay. |
+| [scripts/build_risk_radar_probability_evidence.py](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/scripts/build_risk_radar_probability_evidence.py) | `f84ae2ed9dbe4978e965cc39a8e070f95215d887` | The projection requires horizons 5/10/21 and names native SPY closing observations as its price path. |
+| [data/risk_radar/probability_evidence.json](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/data/risk_radar/probability_evidence.json) | `3fd3b0a514e9531e1586f221aba371abc960c7cd` | The committed projection carries that same target and observation basis. |
+| [templates/risk_radar_workspace.js](https://github.com/mastermindx-market-intelligence/macro/blob/277d15c4e443cebd85d3a209c597167faa0a0c1a/templates/risk_radar_workspace.js) | `10f21b5bcb9c2b13a5872b471677fe77ed3823c8` | Current product captions pair trading days with 个交易日 for the 5/10/21 horizons. |
+
+The separate single-signal onset-lift helper uses BDay date arithmetic; it does not define the displayed probability window. The corrections are scoped to the US/SPY probability horizons and do not rename every calendar or international-model convention.
+
+Four English full-Guide boards now use **5 / 10 / 21 trading days**. All eight EN/ZH variants identify the closing-observation basis in their event description. The English copy is “US model: SPY falls ≥5% within the next 5, 10 or 21 closing observations.” The Chinese copy is “SPY 在后续 5/10/21 个收盘观测值内下跌至少 5%。”; each Chinese board retains its separate US-model teaching-example label. No fixed calendar deadline or complete market-session coverage is promised.
+
+All eight original full-Guide destination actions now read **Open Macro dashboard →** / **打开宏观仪表盘 →**, matching the verified existing destination. This removes an implied direct Risk Radar target without inventing `#risk-radar` or substituting the separate Risk dialog.
+
+| Full-Guide board | Exact changed leaves |
+| --- | --- |
+| `3CJ-0` | `3DE-0`, `3DI-0`, `3DK-0`, `3DM-0`, `3GV-0` |
+| `3IS-0` | `3KF-0`, `3KE-0`, `3KC-0`, `3KA-0`, `3IX-0` |
+| `3KW-0` | `3MJ-0`, `3L1-0` |
+| `3N0-0` | `3ON-0`, `3N5-0` |
+| `3P4-0` | `3QR-0`, `3QQ-0`, `3QO-0`, `3QM-0`, `3P9-0` |
+| `3RI-0` | `3T5-0`, `3T4-0`, `3T2-0`, `3T0-0`, `3RN-0` |
+| `3TW-0` | `3VJ-0`, `3U1-0` |
+| `3CK-0` | `3EU-0`, `3IO-0` |
+
+Complete after-JSX for all eight boards equals before-JSX with only the **20 horizon/basis text replacements plus eight action-label replacements**. Existing probability values, index, source dates, thresholds, calibration/evidence qualifications, posture descriptions, guardrails, identities and styles are unchanged. Source code and model output were not mutated.
+
+### Visual and preservation verification
+
+Root inspected actual native screenshots of the original entry/full Guide, new desktop and unbound states, corrected qualified return, rejection-before-navigation states, compact Chinese Close copy, final directory note, English desktop and mobile probability presentation, and final Chinese mobile Guide. No clipping or overlapping controls was observed in those inspected frames. The narrow cards remain 390px, and the explicit example origin now uses trading days consistently in both languages. This does not substitute for keyboard, touch, screen-reader, zoom or runtime navigation proof.
+
+Original entry **`1RQ-1`** is full-JSX byte-identical to its baseline. Existing directory **`37N-0`** is full-JSX byte-identical after removal of the single new note. The six compact and eight full-Guide scoped-copy checks all pass exactly. The new board's final readback contains 132 simple text leaves and six 390px panes. The final dated metadata was inspected at **2026-11-08 19:07:22 UTC**; it identifies the new page and board, not an immutable native revision.
+
+There were **75 unique logical operations**, all **APPLIED_RESPONSE_OBSERVED**, with zero unresolved effects. Scoped finish released exactly the new board, directory, six compact-help boards and eight full-Guide boards: 16 targets. No source/runtime implementation, user account, trading, authentication, release, PR control, message dispatch or organization effect occurred.
+
+Exact operation receipts retained by ID:
+
+- `paper-portfolio-20261108-guide-return-page-01`
+- `paper-portfolio-20261108-guide-return-board-01`
+- `paper-portfolio-20261108-guide-return-scope-01`
+- `paper-portfolio-20261108-guide-return-name-01`
+- `paper-portfolio-20261108-guide-return-actions-header-01`
+- `paper-portfolio-20261108-guide-return-meaning-close-header-01`
+- `paper-portfolio-20261108-guide-return-meaning-close-body-01`
+- `paper-portfolio-20261108-guide-return-meaning-back-header-01`
+- `paper-portfolio-20261108-guide-return-meaning-back-body-01`
+- `paper-portfolio-20261108-guide-return-meaning-open-header-01`
+- `paper-portfolio-20261108-guide-return-meaning-open-body-01`
+- `paper-portfolio-20261108-guide-return-meaning-return-header-01`
+- `paper-portfolio-20261108-guide-return-meaning-return-body-01`
+- `paper-portfolio-20261108-guide-local-close-copy-01`
+- `paper-portfolio-20261108-guide-return-unbound-section-01`
+- `paper-portfolio-20261108-guide-return-qualified-section-01`
+- `paper-portfolio-20261108-guide-return-expired-section-01`
+- `paper-portfolio-20261108-guide-return-contracts-section-01`
+- `paper-portfolio-20261108-guide-return-proof-section-01`
+- `paper-portfolio-20261108-guide-return-desktop-reading-head-01`
+- `paper-portfolio-20261108-guide-return-desktop-choice-head-01`
+- `paper-portfolio-20261108-guide-return-unbound-mobile-row-01`
+- `paper-portfolio-20261108-guide-return-desktop-reading-body-01`
+- `paper-portfolio-20261108-guide-return-desktop-reading-actions-01`
+- `paper-portfolio-20261108-guide-return-desktop-choice-body-01`
+- `paper-portfolio-20261108-guide-return-desktop-choice-actions-01`
+- `paper-portfolio-20261108-guide-return-unbound-en-head-01`
+- `paper-portfolio-20261108-guide-return-unbound-zh-head-01`
+- `paper-portfolio-20261108-guide-return-qualified-en-head-01`
+- `paper-portfolio-20261108-guide-return-qualified-zh-head-01`
+- `paper-portfolio-20261108-guide-return-expired-en-head-01`
+- `paper-portfolio-20261108-guide-return-expired-zh-head-01`
+- `paper-portfolio-20261108-guide-return-unbound-en-body-01`
+- `paper-portfolio-20261108-guide-return-unbound-zh-body-01`
+- `paper-portfolio-20261108-guide-return-qualified-en-body-01`
+- `paper-portfolio-20261108-guide-return-qualified-zh-body-01`
+- `paper-portfolio-20261108-guide-return-expired-en-body-01`
+- `paper-portfolio-20261108-guide-return-expired-zh-body-01`
+- `paper-portfolio-20261108-guide-return-unbound-en-actions-01`
+- `paper-portfolio-20261108-guide-return-unbound-en-footer-01`
+- `paper-portfolio-20261108-guide-return-unbound-zh-actions-01`
+- `paper-portfolio-20261108-guide-return-unbound-zh-footer-01`
+- `paper-portfolio-20261108-guide-return-qualified-en-actions-01`
+- `paper-portfolio-20261108-guide-return-qualified-en-footer-01`
+- `paper-portfolio-20261108-guide-return-qualified-zh-actions-01`
+- `paper-portfolio-20261108-guide-return-qualified-zh-footer-01`
+- `paper-portfolio-20261108-guide-return-expired-en-actions-01`
+- `paper-portfolio-20261108-guide-return-expired-en-footer-01`
+- `paper-portfolio-20261108-guide-return-expired-zh-actions-01`
+- `paper-portfolio-20261108-guide-return-expired-zh-footer-01`
+- `paper-portfolio-20261108-guide-return-unbound-note-head-01`
+- `paper-portfolio-20261108-guide-return-unbound-note-body-01`
+- `paper-portfolio-20261108-guide-return-qualified-note-head-01`
+- `paper-portfolio-20261108-guide-return-qualified-note-body-01`
+- `paper-portfolio-20261108-guide-return-expired-note-head-01`
+- `paper-portfolio-20261108-guide-return-expired-note-body-01`
+- `paper-portfolio-20261108-guide-return-partial-placement-receipt-01`
+- `paper-portfolio-20261108-guide-return-contract-local-close-01`
+- `paper-portfolio-20261108-guide-return-contract-return-owner-01`
+- `paper-portfolio-20261108-guide-return-contract-shell-01`
+- `paper-portfolio-20261108-guide-return-contract-close-order-01`
+- `paper-portfolio-20261108-guide-return-semantic-refine-01`
+- `paper-portfolio-20261108-guide-return-contract-continue-01`
+- `paper-portfolio-20261108-guide-return-proof-reference-01`
+- `paper-portfolio-20261108-guide-return-proof-shell-01`
+- `paper-portfolio-20261108-guide-return-proof-destination-01`
+- `paper-portfolio-20261108-guide-return-proof-lens-01`
+- `paper-portfolio-20261108-guide-return-proof-consumer-01`
+- `paper-portfolio-20261108-guide-return-directory-note-01`
+- `paper-portfolio-20261108-guide-spy-horizon-copy-01`
+- `paper-portfolio-20261108-guide-horizon-proposal-alignment-01`
+- `paper-portfolio-20261108-guide-horizon-source-proof-01`
+- `paper-portfolio-20261108-guide-product-destination-copy-01`
+- `paper-portfolio-20261108-guide-destination-source-note-01`
+- `paper-portfolio-20261108-guide-return-finish-01`
+
+### Remaining consumer proof and next foreground
+
+The navigation proposal still requires real-path proof for standalone and embedded Lookup → definition A → related B → Back; Close listener ordering; actual Lens full-Guide integration; same-origin new-tab/direct entry/reload; JavaScript-off browser navigation; qualified origin and effective analytical state; missing trigger/position; rejected Return before navigation; actual failure after navigation; access/route changes; Keep reading while work is pending; and newer navigation defeating late completion. Generic scroll/focus restoration cannot certify original market/horizon restoration. No exact-return acceptance is claimed.
+
+The completed native design and copy corrections are saved here while the wider mission continues. Next is **D22 Portfolio and allocation**, starting with actual current Terminal pages pX/pY and their source contract. Read-only discovery already found recovery boards **`1Z0H-0`**, **`1ZET-0`** and pointer **`216F-0`** present; preserve them, their authorship and existing scope. Root did not create those additions in this Guide phase. Select a distinct evidenced gap only after inspecting the current objects/identity contract. The warned original MASTERMIND PAGES file remains read-only, and no original retention/organization action is implied.
