@@ -1495,8 +1495,10 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
     _, recipe, _ = selected_recipe()
     selected = replace(compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
         secrets_file=tmp_path / "unread-secrets.env"),
-        model_provider="mastermind-fabric", native_provider_id=None,
+        model_provider="unaccepted-primary-fixture", native_provider_id=None,
         gateway_backend="native-session-authority")
+    # Keep this parser-negative fixture unqualified as new primary providers
+    # gain admission. The mixed-EVAL guard has its own explicit fixture above.
     path = tmp_path / "unsupported-profile.yaml"
     path.write_text(dump_profile(selected))
     monkeypatch.setattr(installer, "load_secrets",
@@ -1506,6 +1508,7 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
             systemd_user_dir=tmp_path / "uncreated-units", secrets_file=selected.secrets_file,
             hermes_bin=tmp_path / "unread-launcher", upstream_source=Path(recipe["vendor_root"]),
             native_installation=recipe)
+    assert "UNQUALIFIED_MODEL_ROUTE" in refused.value.code.split(",")
     assert refused.value.code != "NATIVE_EVAL_INPUTS_UNQUALIFIED"
     assert not selected.state_dir.exists()
 
