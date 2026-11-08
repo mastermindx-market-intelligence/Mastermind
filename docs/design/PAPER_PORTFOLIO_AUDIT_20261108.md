@@ -212,7 +212,7 @@ Latest available permits row dates to differ and must expose those dates. Aligne
 
 Preserve the live Today changes and the five primary destinations visible in the current shell. The New project reference includes a conversation-oriented goal flow plus retained draft-form material; a future change must verify the visible state and actual start consequence rather than infer behavior from hidden JSX. No duplicate conversation/project control plane or universal approval step was introduced here. Other archived, candidate, held or source-only designs remain governed by their existing owners and contracts.
 
-## Final disposition and continuity
+## First-pass disposition and continuity
 
 **PROVEN_OUTCOME — this bounded Paper audit and refinement pass.** The five completion conditions above are satisfied through inventory, evidenced findings, applied original-file changes, screenshot/exact readback and this durable source return. The wider production-design programme is not collectively accepted or deployed.
 
@@ -223,3 +223,18 @@ No pending Paper operation has an unknown effect in this session. The older OS u
 **DO_NOT_REDO:** accepted current GMI hierarchy; preserved Sector/system/Terminal navigation improvements; completed Memory summaries/source labels; completed Options labels; completed News return components; corrected R14 modes and headline. Reopen only for an actual change or a concrete integration defect.
 
 Existing programme follow-up remains under F03 and the domain assignments. Use this report as additive evidence; do not create a parallel registry or claim candidate approval from these edits.
+
+
+## Continuing mission — feature depth and builder clarity
+
+The Chairman extended this same mission: continue autonomously with further fixes, upgrades and enhancements; do not stop at checkpoints. The first-pass results above remain verified and are not being redone.
+
+Current foreground phases:
+- **Options changed-list inspection:** add a read-only explanation of the exact existing before/current roster facts to original states atlas `01M5EPQ16VBT7SBW2NQVX2RJG4 / p-1-0 / 1-0`. Entry target `3F-0 / 3G-0`; new bounded section inside `2D-0`, ahead of existing guidance `4W-0`. Preserve accepted current-list stepping and the existing origin back-link. Do not invent a full membership diff or a confirmation gate.
+- **Market Memory historical comparison:** qualify the existing retained CPI producer and reader before extending the evidence workflow. Original eight refined specimens remain intact. Proposed state/data contracts will be bound to the existing source fingerprint and real available fields.
+- **Prophet current comparison:** inspect D03's current INTC/MSFT selection and the existing two-column comparison reference; repair missing occurrence identity/save consequence and add a coherent current-candidate comparison only after reading exact targets. Never transplant fictional DEMO values to real tickers.
+- Continue with the next evidenced in-scope design/feature issue after each verified phase; preserve concurrent writers and all original acceptance boundaries.
+
+Principal does visual composition and guarded Paper edits for **PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD / UNIQUE_APPROVED_ACCESS**. Three native children supply bounded architecture/critique reasoning only (Memory source, Options context, Prophet workflow); none is a canvas/source writer or substitute implementation worker. Existing Paper carrier and tool-scoped schema are requalified; no effect is uncertain.
+
+Proposed Options detail states use only facts already visible in the original atlas: AAPL opened at 2 of 10 on 16 Oct; current list 3 of 11 on 17 Oct; previous/next NVDA/AMD versus AVGO/NVDA. The source hash/order may differ, but a count difference does not establish which members were added/removed. The inspection must say exactly what is known and retain the current list for stepping.
