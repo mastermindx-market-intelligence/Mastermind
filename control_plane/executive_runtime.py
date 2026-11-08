@@ -18895,6 +18895,13 @@ class AttemptRegistry:
             ) is None:
                 raise StateConflict("pre-start release requires a placement-bound claim")
             job_id = str(row["job_id"])
+            role = connection.execute(
+                "SELECT orchestration_role FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if role is None or role[0] is not None:
+                # Same rule as requeue_job: orchestration retries belong to the
+                # atomic COO retry decision, never this release.
+                raise StateConflict("orchestration pre-start release requires COO retry owner")
             error = {"error": "PRE_START_REFUSED", "reason": reason[:512]}
             connection.execute(
                 "UPDATE attempts SET status=?,lease_token=NULL,error_json=?,finished_at_ms=?,"
