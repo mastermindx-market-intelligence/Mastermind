@@ -2,9 +2,19 @@
 
 ## Applied outcome
 
-Completed a cross-product architecture and clarity pass directly in Paper: **44 artboards changed, 16 files improved**, plus read-only review of preserved product journeys. The largest structural improvements are in Sector Intelligence, Expectation Surface and GMI; workspace entry corrections span OS, Hub, AI, Guide, Ontology, Prophet, Terminal, News and the shared design system.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options and Market Memory. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
-The changes make the current design easier to find, bring the answer and its evidence forward, name the next action precisely, and distinguish unavailable, historical, draft and completed states. The final verification and exact effect ledger appear below.
+| Current design entry | Verified continuation improvement |
+|---|---|
+| [Sector responsive study](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0) | Evidence follows the working view, compare chronology is explicit, and the Chinese markup defect is fixed. |
+| [Terminal D06](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-17-0) | Selected chart context attaches explicitly to Brain; Scripts requires a visible destination and matching attachment receipt. |
+| [F02 build contract](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0) | Evidence jumps preserve route/filters and place focus correctly; settled filter status is announced without moving focus. |
+| [GMI Foundations](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) | Current candidate source is bound correctly, with precise return-focus and snapshot-proof boundaries. |
+| [Expectation Build states](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | EN/ZH desktop/mobile numeric disclosures, distinct clocks, null values, failed selection and empty-series studies. |
+| [Market Memory comparison](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | Selected source-version unavailability preserves both record references and the exact comparison return. |
+| [Options D08C companion](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) | Explicit assessment target, new-firing notice, General assessment, receipt/revision recovery and 320px study. |
+
+These are editable Paper improvements with visual/readback evidence. Proposed interactions remain explicitly qualified; source observations are not runtime reproductions or production acceptance. Existing owners, held files and release constraints remain preserved. Detailed deliveries below contain exact node IDs, sources, verification and reconciled effects.
 
 ## Assignment and scope
 
@@ -43,7 +53,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The bounded design pass is applied and visually verified. It changes 44 artboards across 11 files plus page/file navigation in five additional files: 16 files total. All session-owned effects are reconciled, and working indicators were released for the 44 explicitly owned artboards. Current source evidence is ready for a normal protected PR; it does not claim a master merge or application release. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Seven material continuation lanes are verified above; work remains active on bounded Mastermind AI and Market Guide journey improvements. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Market Memory companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -506,3 +518,34 @@ Root inspected the three-state row, receipt inspection footer, three recovery ca
 One write initially returned `EFFECT_UNKNOWN`: operation `paper-enhance-20261108-c4-options-recovery-details`, upstream error **“Node Rectangle cannot have children.”** The empty row wrapper had been created as Rectangle `1YT2-0`. Same-carrier original-target tree and node-info readback proved it still had zero children and the containing section had no recovery card. This was recorded as **RECONCILED_NO_TARGET_EFFECT**. The failed insert was not replayed. A materially corrected same-carrier repair replaced that writer-owned empty rectangle with a populated Frame `1YUB-0`; subsequent additions returned observed success, and final tree/screenshot proved the intended three recovery cards. No own unresolved effect remains.
 
 Next active audit frontier: bounded review of Market Memory exact-source/revision recovery and Mastermind AI continuation/source navigation. Accepted work is preserved; any further edit requires a fresh target read and an actual material gap.
+
+
+## Continuation delivery 6 — Market Memory exact-version recovery
+
+Fresh inspection found an independently authored R2 **Record comparison · Proposed** page with eight boards. Root preserved that proposal, all R1 screens including the accepted two-clock text on `2Q-0`, and the existing changed-source, access, incomplete-lookup, value-missing, basis and true-zero states.
+
+The material missing state was a selected artifact/version that the existing source reader **definitively classifies as unavailable**. That is different from an unreadable session, an unfinished scan, a returned fingerprint mismatch or a different observed source version.
+
+### Editable additions
+
+File `01M6PXFEP1E1T59M2B3N673PMG`, [02 · Record comparison · Proposed](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0), existing fit-content build board `V1-0`:
+
+- `1CM-0`: exact-version-unavailable study.
+- `1CN-0`: English light desktop recovery.
+- `1CS-0`: Chinese dark 390px recovery.
+- `1EE-0`: appended destination/restoration rule in the existing `1B4-0` contract.
+- `1EG-0`: classification and consumer-acceptance note.
+
+The specimens retain the existing earlier-record reference: CPIAUCSL / reference period 1987-01-01 / source-vintage date 1997-01-01, source row 180960 (zero-based), selected artifact display `eabad732…851f22c`, and **knowledge cutoff not provided**. Root read the existing successful earlier-record specimen `YI-0` to preserve those reference fields. No new source read, value, zero, difference, cutoff or publication timestamp was fabricated. Underlying data rows were not independently revalidated by this design increment.
+
+The actions are **Back to record comparison** and **Copy record reference**. The first restores both exact operands, period, snapshot, cutoff, scroll and invoking earlier/later action, with the established focus fallback. The second uses the full original selected key/provenance; its abbreviated on-screen fingerprint is not the copy payload. The existing source-change flow remains the only proposed route to inspect a replacement, and inspection does not adopt it.
+
+The classification contract explicitly keeps access denial, transient requests, incomplete scans and fingerprint mismatch separate. A timeout or an absent row in a partial scan cannot establish version unavailability. The proposed failure view supplies no newly verified result; the existing comparison references remain intact.
+
+### Verification and limits
+
+Root inspected both new recovery screenshots, the updated destination contract, and the entire current `V1-0` artboard. English and Chinese text, source references and 44px actions are legible without clipping. The full fit-content board contains the new section while preserving the earlier source-change specimen and all existing contracts. All own mutations returned observed success, and `V1-0` was explicitly released.
+
+This is a disjoint visual/behavioral extension of the existing R2 proposal. The authorized reader/comparison consumer still owes real-path proof of classified failure, exact-pair return, original-reference copying and outcome separation. No source owner, retrieval service, migration, publication route or new application implementation was introduced.
+
+Current remaining selected work: AI interrupted-response outcome with the incumbent request’s uncertainty preserved, then Guide direct-entry versus contextual-return handoff. Current-source and candidate custody checks are required before each addition.
