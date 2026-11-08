@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §§56–60. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–61. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2621,3 +2621,35 @@ The protected GitHub-native source route needs no host checkout. This record-onl
 The original installed operation remains **meta-ceo-byok-followon-parent-20261106-c35-01**, M2 workspace **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Original Ubuntu1/root C26 administrative access must be restored and that retained operation reconciled before dependent installed action. Its explicit PermissionError was not replayed; C3 remains source validation only.
 
 Primary APPLICATION2175, OutcomeLearning398, security-held409, Fleet C3/#531 and all original Fabric/socket/refused effects retain their exact custody and holds. Project source acceptance does not discharge real browser/account/provider, original note publication/current feedback, restart/revocation, host/fleet, technically valid held-out EVAL or seven-day acceptance. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
+
+## 61. Original knowledge release requested; Agent OS amendment published — 2026-11-08
+
+### Original release effects at the current boundary
+
+The assigned root requested ordinary protected auto-merge for **ProjectKnowledge2264** exactly once, leased to head **579f2d116e2e79707ed5b655ba45073b01ed8502**. C3 process55266 exited0. Native readback process57207 records autoMergeRequest enabled **2026-11-08T00:58:28Z**, by chriswong6031-creator, with merge method chosen by the native queue. Queue entry, mergedAt and mergeCommit were null. Later exact native process95416 confirms the same active request, unchanged source head and pending checks. Do not re-arm or edit through an unresolved release effect.
+
+The runtime Python3.12/3.13 matrix, harness Python3.12/3.13 matrix and OAuth checks succeeded on that published head. Required main CI [42431359545](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42431359545) remained pending at the snapshot; this is not a merge or installed-acceptance claim.
+
+Original **2234** and **2260** remain OPEN/unmerged, with their exact unchanged source heads and the same respective queue entries recorded in§60, AWAITING_CHECKS. Their autoMergeRequest=null fields reflect active queue custody. Closed redundant2262 remains retired; do not poll or reopen it.
+
+**AUTH2257 main CI is successful.** [Run42428004264](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42428004264), first attempt, exact **e1a2ef899c119e64fbff2e6c962b8153a2d46a80**, completed2026-11-08T00:51:24Z. The scope check, all six pytest shards and aggregate test passed; aggregate job128580975709 completed00:51:23Z. No additional non-timeout source repair was identified. The original diagnosed runtime cancellation remains owned by2260. Next action is actual accepted-source composition on2257 after original prerequisite acceptance, not another workflow repair or rerun.
+
+### Existing Agent OS record publication
+
+The finite §60 amendment is now [Macro PR #10844](https://github.com/mastermindx-market-intelligence/macro/pull/10844), operation **hermes-teammate-continuity-20261108-c3**, branch **sol/hermes-teammate-continuity-20261108-c3**. Exact head **5e24a2cd34c59d6f5faf5b8ccd6390e1c336f2df**, parent **29771cb7bd4acabc114981e4fea44dfa24e04709**, tree **6cdf7500de5ac81f0be51b847ba3532bb3c54741**. Only the existing handoff file changed; new blob **8433df6ce60ab72b8c664332b9453296a912ada9**. Complete file readback matches the prepared postimage and branch readback matches the exact head. No host checkout was mutated.
+
+The record is Ready and unarmed. No merge-on-green label, native auto-merge or merge receipt exists. Actual fences [42432291808](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42432291808) and authority [42432291377](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42432291377) passed. CI [42432291851](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42432291851) is running. Its completed ci-plan binds tested tree **fc244237291bd98ae77f0f3b67bf4e1a752ea0c6**, exactly one changed path, and three selected jobs in packs0/1/2; plan SHA256 **8b847bafb391bfac100a4a07162a445eb4665e8d8bce81c252c1040ef8324162**. The three packs and contract-delta remain in progress; actual Agent OS validation and final ci-gate are still owed. No unexecuted local validator is claimed.
+
+A bounded apparent-red diagnosis resolved the exact **ci-authority/codex/merge-queue-pilot** context. The authority workflow's actual receipt is allowed=true, reason=ordinary_change, authority_hit_count=0 for the one record path; active **ci-authority/main** succeeded. Protected source at **2ed4cf59a35df5d8704a784d46fa29eeaf3ae8ae**, **scripts/ci_authority.py** blobb8331d09035f6b4af6b5ed9adbe566c75a004b05, deliberately invalidates the inactive base. Existing **scripts/merge_on_green.py** blobdeb9bfec7e3b8a6e56ecc74b539c787862ab263c explicitly excludes this exact inactive context for main-target PRs in is_non_binding_check; active main authority remains binding. This is the incumbent predicate, not a new exception or a CI repair. The connector rejected the unsupported check-runs Fetch URL with HTTP400; the supported parent workflow-job log supplied the actual receipt. No administrative protection endpoint, denial replay, new checker or release bypass was used.
+
+After all actual binding checks conclude successfully, inspect exact10844 head, holds/reviews and effects, then request the existing Macro merge-on-green controller once. Do not use native auto-merge, manually merge or arm while the current packs remain pending.
+
+### Bounded ownership and remaining mission
+
+Principal source inspection confirms **2255** at **130444741b7c21501d01c63157678047666da3cc** is a distinct Draft residual-EVAL carrier, held until original2234 and APPLICATION2175 are protected. Its credential file remains byte-identical to pre-AUTH c438 (blob7d80a7f0cf08895f6953a22d2cfba09f6aa3bbd2), and its native consumer has no KNOWLEDGE_CONSUMER_SCHEMA or the five new v5 paths. Shared filenames require semantic composition; they are not evidence of a second implementation of2257/2264. Preserve2255's original parent/release sequencing and2175/10740's incumbent source custody.
+
+At this inspected frontier no additional distinct, already-authorized source implementation is ready beyond these original release/integration lanes. Do not invent v6, duplicate Harness2/Trial/grounding work, extra services or continuity paperwork while their real gates run. No daemon or durable runtime execution is claimed.
+
+The installed lane remains **EXACT_HUMAN_GATE**: restore the original authorized **Ubuntu1/root administrative connection** that returned the C26 journal-read PermissionError. Existing Chairman implementation authority remains valid; it does not restore the connection's access. Once recovery is observed, reconcile the retained original operation before any dependent installed effect. Preserve **meta-ceo-byok-followon-parent-20261106-c35-01** and its original M2 workspace, as specified in§60; C3 remains source validation only.
+
+Current concrete continuation: consume original2234/2260/2264 effects; finish10844's actual gates and ordinary controller; compose2257 only with accepted inputs; retain2255/2175/398/409/fleet predicates; after restored original access, reconcileC26 and prove the actual enrolled browser/account/provider/note/restart/revocation/fleet/EVAL/endurance journeys. **MISSION_COMPLETE=false.** Source publication, CI and merge remain distinct from installed acceptance.
