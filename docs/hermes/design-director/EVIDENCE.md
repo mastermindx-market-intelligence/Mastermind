@@ -86,6 +86,16 @@ on real output; it is not a successful full responsive/production design journey
 The package can be source-complete while the overall commission remains incomplete.
 A PR, green CI, native skill recognition or one Paper edit is not production readiness.
 
+## Scope corrections from the acceptance audit
+
+The Executive OS example now points to its actual OS shell and token stylesheet at
+the governing Mastermind pin, rather than Macro's financial theme. Its generated
+brief was regenerated. Continuations now separate evidence gathering from requested
+design changes: a missing responsive or runtime observation remains a broader
+qualification gap when outside the original task. It cannot authorize a redesign
+or silently add viewports to the bounded two-text canary. The original executed
+assignment, completion and critique are preserved unchanged.
+
 ## Native preflight and bounded specialist attempt
 
 The existing Hermes CLI successfully inspected the exact source skill via a direct

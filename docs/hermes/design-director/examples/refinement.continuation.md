@@ -12,9 +12,11 @@ Preserve:
 - Navigation, controls and evidence destinations
 - The original DSJ-0 artboard unchanged
 
-Change only:
+Evidence to gather within the original scope:
 - accessibility: Text is visually legible, but no measured contrast or runtime assistive/keyboard proof was performed.
 - responsive: Only the assigned 1440px desktop review copy was captured; no mobile return was fabricated.
+
+Do not alter the design while gathering evidence. If an observation needs another viewport, runtime, target or work beyond the original assignment, record it as a broader qualification gap. Missing evidence does not expand the assignment or authorize new design work.
 
 Re-read original targets and known overlapping writers. Return the same completion contract with new screenshot evidence. Do not recreate the original assignment, resend an uncertain action or repeat accepted work.
 
@@ -75,3 +77,4 @@ Re-read original targets and known overlapping writers. Return the same completi
   "data_and_interactions": "Scope is a bounded copy refinement on an isolated clone. No live data, controls or numeric values are changed. It is not a new financial model or full responsive production acceptance."
 }
 ```
+

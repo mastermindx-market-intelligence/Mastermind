@@ -351,19 +351,30 @@ def continuation(a: dict, r: dict, q: dict, evidence_root: Path) -> str:
     require(a.get("effect_state", "none") != "unknown", "Reconcile original effect before any continuation")
     require(result["action"] != "candidate_for_design_acceptance", "No material revision is justified")
     changes = [i["requested_change"] for i in result["issues"] if i["priority"] != "polish"]
+    changes.extend(f"{name}: {d['evidence']}" for name,d in q["dimensions"].items()
+                   if d["rating"] == "needs_work")
+    evidence = [f"{name}: {d['evidence']}" for name,d in q["dimensions"].items()
+                if d["rating"] == "not_observed"]
+    evidence.extend(r["gaps"])
     if result["unviewed_screenshots"]:
-        changes.append("Inspect and report the missing screenshot evidence before altering the design.")
+        evidence.append("Inspect and report the missing screenshot evidence before altering the design.")
     if result["new_scope_requires_canonical_verification"]:
-        changes.append("Verify the original creation receipt and amend exact target scope with the canonical owner before candidacy; do not repeat creation.")
-    if not changes:
-        changes.extend(f"{name}: {d['evidence']}" for name,d in q["dimensions"].items()
-                       if d["rating"] in {"needs_work", "not_observed"})
-        changes.extend(r["gaps"])
-        if not changes:
-            changes.append("Resolve the documented incomplete evidence; preserve accepted structure.")
+        evidence.append("Verify the original creation receipt and exact target scope with the canonical owner before candidacy; do not repeat creation.")
+    if result["action"] == "gather_missing_evidence":
+        if not evidence:
+            evidence.append("Resolve the documented incomplete evidence; preserve accepted structure.")
+        next_step = ("Evidence to gather within the original scope:\n" + bullet(evidence) + "\n\n"
+                     "Do not alter the design while gathering evidence. If an observation needs another viewport, "
+                     "runtime, target or work beyond the original assignment, record it as a broader qualification gap. "
+                     "Missing evidence does not expand the assignment or authorize new design work.\n")
+        if changes:
+            next_step += "\nRecorded findings to reassess after gathering evidence:\n" + bullet(changes) + "\n"
+    else:
+        next_step = "Change only within the original scope:\n" + bullet(changes) + "\n"
     return (f"# Continue the original design\n\nOperation: {a['operation_id']}\nAssignment: {a['assignment_id']}\n"
             f"Session: {r['session_ref']}\nPaper: {a['paper']['file_id']} / {a['paper']['page_id']}\n"
-            f"Prior completion: {digest(r)}\nCritique: {digest(q)} ({q['evidence_ref']})\n\nPreserve:\n{bullet(a['preserve'])}\n\nChange only:\n{bullet(changes)}\n\n"
+            f"Prior completion: {digest(r)}\nCritique: {digest(q)} ({q['evidence_ref']})\n\nPreserve:\n{bullet(a['preserve'])}\n\n"
+            + next_step + "\n"
             "Re-read original targets and known overlapping writers. Return the same completion contract with new screenshot evidence. "
             "Do not recreate the original assignment, resend an uncertain action or repeat accepted work.\n\n"
             f"## Original assignment, unchanged\n\n```json\n{json.dumps(a, ensure_ascii=False, indent=2)}\n```\n")

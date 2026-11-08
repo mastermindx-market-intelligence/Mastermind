@@ -2,7 +2,7 @@
 
 Operation: hermes-design-director-20261108-c1-01
 Assignment: executive-os-journey
-Assignment SHA-256: bb3d13c4ddc9fd4711ae18dbab5aa7fbe67b8338d1fed91d804bc385900e5eb6
+Assignment SHA-256: 1f9590118aeb2a6b508ab6c2cd5589fc924487951b9e8750c40563bc94926947
 Source: https://github.com/mastermindx-market-intelligence/Mastermind/blob/sol/hermes-design-director-20261108-c1-01/docs/hermes/design-director/COMMISSION.md
 
 ## The experience
@@ -14,8 +14,8 @@ Useful next step: Open the original decision or conversation with its evidence.
 
 ## Product context
 
-Shell: Preserve the target product’s existing shell and navigation; Terminal has a separately governed theme.
-Tokens/components: https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/templates/theme.css
+Shell: Preserve the Mastermind OS shell and navigation owned by https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/App.tsx and the exact assigned Paper targets.
+Tokens/components: https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/styles.css
 Preserve:
 
 - Original conversations and project links

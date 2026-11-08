@@ -3,8 +3,8 @@
   "operation_id": "hermes-design-director-20261108-c1-01",
   "issued_at": "2026-11-08T05:58:17.392603+00:00",
   "source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/sol/hermes-design-director-20261108-c1-01/docs/hermes/design-director/COMMISSION.md",
-  "shell_ref": "Preserve the target product’s existing shell and navigation; Terminal has a separately governed theme.",
-  "token_ref": "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/templates/theme.css",
+  "shell_ref": "Preserve the Mastermind OS shell and navigation owned by https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/App.tsx and the exact assigned Paper targets.",
+  "token_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/styles.css",
   "constraints": [
     "No decorative colored container edges",
     "Do not invent live data, approval or execution authority",

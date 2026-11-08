@@ -142,6 +142,23 @@ def check_unobserved_workflow_requires_evidence(documents):
     assert director.critique(a,r,q,root)["action"]=="gather_missing_evidence"
 
 
+def check_missing_evidence_does_not_expand_or_mutate_design_scope(documents):
+    a,r,q,c,root=documents
+    original=director.digest(a)
+    q["dimensions"]["responsive"]={"rating":"not_observed","evidence":"Only the assigned desktop is observed"}
+    q["issues"]=[{"priority":"material","dimension":"workflow","finding":"Ambiguous next action",
+                  "evidence":"Fixture screen","requested_change":"Clarify the decision label"}]
+    output=director.continuation(a,r,q,root)
+    assert "Evidence to gather within the original scope:" in output
+    assert "Do not alter the design while gathering evidence" in output
+    assert "broader qualification gap" in output
+    assert "Change only" not in output
+    assert "Clarify the decision label" in output and "reassess after gathering evidence" in output
+    assert director.digest(a)==original
+    retained=json.loads(output.split("## Original assignment, unchanged\n\n```json\n",1)[1].split("\n```",1)[0])
+    assert retained==a
+
+
 def check_revision_keeps_original_assignment_and_session(documents):
     a,r,q,c,root=documents
     q["issues"]=[{"priority":"material","dimension":"workflow","finding":"Ambiguous next action",

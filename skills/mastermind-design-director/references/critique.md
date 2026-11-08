@@ -29,3 +29,8 @@ Bundle changes around one coherent hypothesis. Continue the original session and
 assignment; carry the complete original requirements and exact prior critique. Inspect
 new screenshots and the affected journey before accepting the revision. Do not treat
 one desktop copy improvement as responsive or production qualification.
+
+Keep requests for evidence separate from requests to change a design. An unobserved
+dimension does not expand the original task. Gather evidence within its authorized
+targets and viewports; record any broader runtime or responsive qualification as a
+remaining gap. Do not silently turn a narrow copy refinement into a redesign.

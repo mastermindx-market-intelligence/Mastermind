@@ -7,6 +7,12 @@ Content: `docs/DESIGN_DOCTRINE.md`; visual grammar:
 `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md`; actual values: `templates/theme.css`.
 Use these immutable sources, then refresh only affected facts when source changes.
 
+Mastermind OS keeps its own tokens and component owner at
+`Mastermind@5955a246c0e020cd6800d12f8da7bd6ff3a792dc`:
+`app/mastermind_os/src/styles.css` and `app/mastermind_os/src/App.tsx`.
+The OS stylesheet defines the noir/champagne palette, OS typography, spacing,
+controls and light theme. Do not substitute Macro's financial theme in an OS brief.
+
 Within Macro, content doctrine precedes the visual system, qualified archetype example
 and current page. A reference needs its own integrity/acceptance receipt. Terminal
 has a separately governed theme; operational products keep their own accepted shell.
