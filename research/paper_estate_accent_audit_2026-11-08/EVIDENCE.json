@@ -9668,7 +9668,9 @@
       "state": "APPLIED_RESPONSE_OBSERVED",
       "change": "5px amber left border and amber fill replaced by even 1px neutral border and quiet neutral fill",
       "content": "three original text children cloned intact",
-      "verification": "same-carrier JSX and full-artboard screenshot requested"
+      "verification": "Same-carrier exact JSX and full-artboard screenshot verified. Fresh readback confirms even 1px neutral perimeter and three original text children.",
+      "verified": true,
+      "contentPreserved": true
     },
     {
       "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -13044,6 +13046,2001 @@
         "63V-0"
       ],
       "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-9-0",
+      "pageName": "06 · R6 · Flagship candidate · Design draft",
+      "artboardId": "IML-0",
+      "artboardName": "R6 · Candidate / study · Dark · EN · 1440",
+      "referenceNode": "IMR-0",
+      "oldNode": "IMR-0",
+      "newNode": "140F-0",
+      "operationId": "paper-accent-estate-20261108-c4-2mdjm-imr-0-sheen-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed crisp white inset top-edge sheen; retained other depth/lighting components",
+      "css": "box-shadow: none;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "IMR-0",
+        "IOE-0",
+        "IOL-0",
+        "IOR-0",
+        "IOS-0",
+        "IOM-0",
+        "IOO-0",
+        "IOQ-0",
+        "IOP-0",
+        "ION-0",
+        "IOF-0",
+        "IOI-0",
+        "IOK-0",
+        "IOJ-0",
+        "IOH-0",
+        "IOG-0",
+        "IN1-0",
+        "ING-0",
+        "IO8-0",
+        "IOB-0",
+        "IOD-0",
+        "IOC-0",
+        "IOA-0",
+        "IO9-0",
+        "13AD-0",
+        "13AE-0",
+        "13AF-0",
+        "13AG-0",
+        "13AH-0",
+        "13AI-0",
+        "13AJ-0",
+        "INH-0",
+        "INY-0",
+        "IO0-0",
+        "INZ-0",
+        "IPF-0",
+        "IN2-0",
+        "INA-0",
+        "IND-0",
+        "INF-0",
+        "INE-0",
+        "INC-0",
+        "INB-0",
+        "IN3-0",
+        "IN9-0",
+        "IN8-0",
+        "IN7-0",
+        "IN4-0",
+        "IN6-0",
+        "IN5-0",
+        "IMS-0",
+        "IMW-0",
+        "IMY-0",
+        "IN0-0",
+        "IMZ-0",
+        "IMX-0",
+        "IMT-0",
+        "IMV-0",
+        "IMU-0"
+      ],
+      "newIds": [
+        "140F-0",
+        "140G-0",
+        "140H-0",
+        "140I-0",
+        "140J-0",
+        "140K-0",
+        "140L-0",
+        "140M-0",
+        "140N-0",
+        "140O-0",
+        "140P-0",
+        "140Q-0",
+        "140R-0",
+        "140S-0",
+        "140T-0",
+        "140U-0",
+        "140V-0",
+        "140W-0",
+        "140X-0",
+        "140Y-0",
+        "140Z-0",
+        "1410-0",
+        "1411-0",
+        "1412-0",
+        "1413-0",
+        "1414-0",
+        "1415-0",
+        "1416-0",
+        "1417-0",
+        "1418-0",
+        "1419-0",
+        "141A-0",
+        "141B-0",
+        "141C-0",
+        "141D-0",
+        "141E-0",
+        "141T-0",
+        "141U-0",
+        "141V-0",
+        "141W-0",
+        "141X-0",
+        "141Y-0",
+        "141Z-0",
+        "1420-0",
+        "1421-0",
+        "1422-0",
+        "1423-0",
+        "1424-0",
+        "1425-0",
+        "1426-0",
+        "1427-0",
+        "1428-0",
+        "1429-0",
+        "142A-0",
+        "142B-0",
+        "142C-0",
+        "142D-0",
+        "142E-0",
+        "142F-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-9-0",
+      "pageName": "06 · R6 · Flagship candidate · Design draft",
+      "artboardId": "IS8-0",
+      "artboardName": "R6 · Candidate / study · Dark · ZH · 1440",
+      "referenceNode": "ISE-0",
+      "oldNode": "ISE-0",
+      "newNode": "142H-0",
+      "operationId": "paper-accent-estate-20261108-c4-2mdjm-ise-0-sheen-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed crisp white inset top-edge sheen; retained other depth/lighting components",
+      "css": "box-shadow: none;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "ISE-0",
+        "IU0-0",
+        "IU7-0",
+        "IUD-0",
+        "IUE-0",
+        "IU8-0",
+        "IUA-0",
+        "IUC-0",
+        "IUB-0",
+        "IU9-0",
+        "IU1-0",
+        "IU4-0",
+        "IU6-0",
+        "IU5-0",
+        "IU3-0",
+        "IU2-0",
+        "ISO-0",
+        "IT3-0",
+        "ITU-0",
+        "ITX-0",
+        "ITZ-0",
+        "ITY-0",
+        "ITW-0",
+        "ITV-0",
+        "13BN-0",
+        "13BO-0",
+        "13BP-0",
+        "13BQ-0",
+        "13BR-0",
+        "13BS-0",
+        "13BT-0",
+        "IT4-0",
+        "ITK-0",
+        "ITM-0",
+        "ITL-0",
+        "IV1-0",
+        "ISP-0",
+        "ISX-0",
+        "IT0-0",
+        "IT2-0",
+        "IT1-0",
+        "ISZ-0",
+        "ISY-0",
+        "ISQ-0",
+        "ISW-0",
+        "ISV-0",
+        "ISU-0",
+        "ISR-0",
+        "IST-0",
+        "ISS-0",
+        "ISF-0",
+        "ISJ-0",
+        "ISL-0",
+        "ISN-0",
+        "ISM-0",
+        "ISK-0",
+        "ISG-0",
+        "ISI-0",
+        "ISH-0"
+      ],
+      "newIds": [
+        "142H-0",
+        "142I-0",
+        "142J-0",
+        "142K-0",
+        "142L-0",
+        "142M-0",
+        "142N-0",
+        "142O-0",
+        "142P-0",
+        "142Q-0",
+        "142R-0",
+        "142S-0",
+        "142T-0",
+        "142U-0",
+        "142V-0",
+        "142W-0",
+        "142X-0",
+        "142Y-0",
+        "142Z-0",
+        "1430-0",
+        "1431-0",
+        "1432-0",
+        "1433-0",
+        "1434-0",
+        "1435-0",
+        "1436-0",
+        "1437-0",
+        "1438-0",
+        "1439-0",
+        "143A-0",
+        "143B-0",
+        "143C-0",
+        "143D-0",
+        "143E-0",
+        "143F-0",
+        "143G-0",
+        "143V-0",
+        "143W-0",
+        "143X-0",
+        "143Y-0",
+        "143Z-0",
+        "1440-0",
+        "1441-0",
+        "1442-0",
+        "1443-0",
+        "1444-0",
+        "1445-0",
+        "1446-0",
+        "1447-0",
+        "1448-0",
+        "1449-0",
+        "144A-0",
+        "144B-0",
+        "144C-0",
+        "144D-0",
+        "144E-0",
+        "144F-0",
+        "144G-0",
+        "144H-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-9-0",
+      "pageName": "06 · R6 · Flagship candidate · Design draft",
+      "artboardId": "IWU-0",
+      "artboardName": "R6 · Candidate / glance · Dark · EN · 390",
+      "referenceNode": "IWW-0",
+      "oldNode": "IWW-0",
+      "newNode": "144J-0",
+      "operationId": "paper-accent-estate-20261108-c4-2mdjm-iww-0-sheen-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed crisp white inset top-edge sheen; retained other depth/lighting components",
+      "css": "box-shadow: none;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "IWW-0",
+        "IXH-0",
+        "IXL-0",
+        "IXO-0",
+        "IXS-0",
+        "IXT-0",
+        "IXP-0",
+        "IXR-0",
+        "IXQ-0",
+        "IXM-0",
+        "IXN-0",
+        "IXI-0",
+        "IXK-0",
+        "IXJ-0",
+        "IX2-0",
+        "IXD-0",
+        "IXG-0",
+        "IXF-0",
+        "IXE-0",
+        "13DE-0",
+        "13DF-0",
+        "13DG-0",
+        "13DH-0",
+        "IX6-0",
+        "IX8-0",
+        "IX7-0",
+        "IX3-0",
+        "IX5-0",
+        "IX4-0",
+        "IWX-0",
+        "IWZ-0",
+        "IX1-0",
+        "IX0-0",
+        "IWY-0"
+      ],
+      "newIds": [
+        "144J-0",
+        "144K-0",
+        "144L-0",
+        "144M-0",
+        "144N-0",
+        "144O-0",
+        "144P-0",
+        "144Q-0",
+        "144R-0",
+        "144S-0",
+        "144T-0",
+        "144U-0",
+        "144V-0",
+        "144W-0",
+        "144X-0",
+        "144Y-0",
+        "144Z-0",
+        "1450-0",
+        "1451-0",
+        "1452-0",
+        "1453-0",
+        "1454-0",
+        "1455-0",
+        "1456-0",
+        "1457-0",
+        "1458-0",
+        "1459-0",
+        "145A-0",
+        "145B-0",
+        "145C-0",
+        "145D-0",
+        "145E-0",
+        "145F-0",
+        "145G-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-9-0",
+      "pageName": "06 · R6 · Flagship candidate · Design draft",
+      "artboardId": "IZ0-0",
+      "artboardName": "R6 · Candidate / glance · Dark · ZH · 390",
+      "referenceNode": "IZ2-0",
+      "oldNode": "IZ2-0",
+      "newNode": "145I-0",
+      "operationId": "paper-accent-estate-20261108-c4-2mdjm-iz2-0-sheen-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed crisp white inset top-edge sheen; retained other depth/lighting components",
+      "css": "box-shadow: none;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "IZ2-0",
+        "IZN-0",
+        "IZR-0",
+        "IZU-0",
+        "IZY-0",
+        "IZZ-0",
+        "IZV-0",
+        "IZX-0",
+        "IZW-0",
+        "IZS-0",
+        "IZT-0",
+        "IZO-0",
+        "IZQ-0",
+        "IZP-0",
+        "IZ8-0",
+        "IZJ-0",
+        "IZM-0",
+        "IZL-0",
+        "IZK-0",
+        "13DO-0",
+        "13DP-0",
+        "13DQ-0",
+        "13DR-0",
+        "IZC-0",
+        "IZE-0",
+        "IZD-0",
+        "IZ9-0",
+        "IZB-0",
+        "IZA-0",
+        "IZ3-0",
+        "IZ5-0",
+        "IZ7-0",
+        "IZ6-0",
+        "IZ4-0"
+      ],
+      "newIds": [
+        "145I-0",
+        "145J-0",
+        "145K-0",
+        "145L-0",
+        "145M-0",
+        "145N-0",
+        "145O-0",
+        "145P-0",
+        "145Q-0",
+        "145R-0",
+        "145S-0",
+        "145T-0",
+        "145U-0",
+        "145V-0",
+        "145W-0",
+        "145X-0",
+        "145Y-0",
+        "145Z-0",
+        "1460-0",
+        "1461-0",
+        "1462-0",
+        "1463-0",
+        "1464-0",
+        "1465-0",
+        "1466-0",
+        "1467-0",
+        "1468-0",
+        "1469-0",
+        "146A-0",
+        "146B-0",
+        "146C-0",
+        "146D-0",
+        "146E-0",
+        "146F-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-11-0",
+      "pageName": "00 · Read me & Build contract · D07 Company",
+      "artboardId": "1NJL-0",
+      "artboardName": "D07 · Study C · Financials 664 + evidence 320",
+      "referenceNode": "1NK0-0",
+      "oldNode": "1NK0-0",
+      "newNode": "1ZHD-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-1nk0-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-light-panel2); border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "1NK0-0",
+        "1NK1-0"
+      ],
+      "newIds": [
+        "1ZHD-0",
+        "1ZHE-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-4-0",
+      "pageName": "03 · History + Scenarios",
+      "artboardId": "L9-0",
+      "artboardName": "34 · R10 · History + Scenarios · Desktop",
+      "referenceNode": "N2-0",
+      "oldNode": "N2-0",
+      "newNode": "NRR-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-n2-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 14px; background-color: var(--mx-dark-panel2); border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "N2-0",
+        "N3-0"
+      ],
+      "newIds": [
+        "NRR-0",
+        "NRS-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "3PA-0",
+      "artboardName": "10 · R11 · DESKTOP · Research Long Read",
+      "referenceNode": "3RU-0",
+      "oldNode": "3RU-0",
+      "newNode": "63X-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-3ru-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "3RU-0",
+        "3RV-0"
+      ],
+      "newIds": [
+        "63X-0",
+        "63Y-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-4-0",
+      "pageName": "03 · History + Scenarios",
+      "artboardId": "L9-0",
+      "artboardName": "34 · R10 · History + Scenarios · Desktop",
+      "referenceNode": "N2-0",
+      "oldNode": "NRR-0",
+      "newNode": "NRU-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-n2-0-tab-spacing-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Added balanced internal spacing to the quiet selected-tab surface",
+      "css": "padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "NRR-0",
+        "NRS-0"
+      ],
+      "newIds": [
+        "NRU-0",
+        "NRV-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "3PA-0",
+      "artboardName": "10 · R11 · DESKTOP · Research Long Read",
+      "referenceNode": "3RU-0",
+      "oldNode": "63X-0",
+      "newNode": "640-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-3ru-0-tab-spacing-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Added balanced internal spacing to the quiet selected-tab surface",
+      "css": "padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "verified": true,
+      "oldIds": [
+        "63X-0",
+        "63Y-0"
+      ],
+      "newIds": [
+        "640-0",
+        "641-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3QI-0",
+      "artboardName": "Utility · Material UI Migration Packet · Working Template",
+      "referenceNode": "3QM-0",
+      "oldNode": "3QM-0",
+      "newNode": "9XU-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3qm-0-rail-spacing-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed the empty side gutter from the simplified warning block",
+      "css": "gap: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "3QM-0",
+        "3QN-0",
+        "3QO-0"
+      ],
+      "newIds": [
+        "9XU-0",
+        "9XV-0",
+        "9XW-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true,
+      "reconciliation": "Explicit computed-style read confirms normalized zero gap; omitted JSX gap is the default. No repeated mutation."
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3QI-0",
+      "artboardName": "Utility · Material UI Migration Packet · Working Template",
+      "referenceNode": "3QM-0",
+      "oldNode": "9XU-0",
+      "newNode": "9XY-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3qm-0-warning-align-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Centered the warning text after removing its decorative side rail",
+      "css": "align-items: center;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "9XU-0",
+        "9XV-0",
+        "9XW-0"
+      ],
+      "newIds": [
+        "9XY-0",
+        "9XZ-0",
+        "9Y0-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3RX-0",
+      "artboardName": "Utility · Archetype Starter Map · Dark",
+      "referenceNode": "3UM-0",
+      "oldNode": "3UM-0",
+      "newNode": "9Y2-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3um-0-rail-spacing-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed the empty side gutter from the simplified warning block",
+      "css": "gap: 0px; align-items: center;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "3UM-0",
+        "3UN-0",
+        "3UO-0"
+      ],
+      "newIds": [
+        "9Y2-0",
+        "9Y3-0",
+        "9Y4-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3UP-0",
+      "artboardName": "Utility · Archetype Starter Map · Light",
+      "referenceNode": "3XE-0",
+      "oldNode": "3XE-0",
+      "newNode": "9Y6-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3xe-0-rail-spacing-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed the empty side gutter from the simplified warning block",
+      "css": "gap: 0px; align-items: center;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "3XE-0",
+        "3XF-0",
+        "3XG-0"
+      ],
+      "newIds": [
+        "9Y6-0",
+        "9Y7-0",
+        "9Y8-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3QI-0",
+      "artboardName": "Utility · Material UI Migration Packet · Working Template",
+      "referenceNode": "3QN-0",
+      "oldNode": "9XZ-0",
+      "newNode": "9YA-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3qn-0-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "9XZ-0"
+      ],
+      "newIds": [
+        "9YA-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3RX-0",
+      "artboardName": "Utility · Archetype Starter Map · Dark",
+      "referenceNode": "3UN-0",
+      "oldNode": "9Y3-0",
+      "newNode": "9YC-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3un-0-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "9Y3-0"
+      ],
+      "newIds": [
+        "9YC-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboardId": "3UP-0",
+      "artboardName": "Utility · Archetype Starter Map · Light",
+      "referenceNode": "3XF-0",
+      "oldNode": "9Y7-0",
+      "newNode": "9YE-0",
+      "operationId": "paper-accent-estate-20261108-c4-vjvzn-3xf-0-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "9Y7-0"
+      ],
+      "newIds": [
+        "9YE-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-8-0",
+      "pageName": "07 / R7 / Consumer flagship + business",
+      "artboardId": "50D-0",
+      "artboardName": "R7 / Consumer home desktop",
+      "referenceNode": "6E3-1",
+      "oldNode": "6E3-1",
+      "newNode": "6GG-0",
+      "operationId": "paper-accent-estate-20261108-c4-pxqz0-6e3-1-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "6E3-1"
+      ],
+      "newIds": [
+        "6GG-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-8-0",
+      "pageName": "07 / R7 / Consumer flagship + business",
+      "artboardId": "50D-0",
+      "artboardName": "R7 / Consumer home desktop",
+      "referenceNode": "6EA-1",
+      "oldNode": "6EA-1",
+      "newNode": "6GI-0",
+      "operationId": "paper-accent-estate-20261108-c4-pxqz0-6ea-1-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "6EA-1"
+      ],
+      "newIds": [
+        "6GI-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-8-0",
+      "pageName": "07 / R7 / Consumer flagship + business",
+      "artboardId": "50D-0",
+      "artboardName": "R7 / Consumer home desktop",
+      "referenceNode": "6EJ-1",
+      "oldNode": "6EJ-1",
+      "newNode": "6GK-0",
+      "operationId": "paper-accent-estate-20261108-c4-pxqz0-6ej-1-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative strip paint and geometry while preserving warning/product-story text",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "6EJ-1"
+      ],
+      "newIds": [
+        "6GK-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IPZ-0",
+      "oldNode": "IPZ-0",
+      "newNode": "YN6-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-ipz-0-nav-surface-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Clarified mobile navigation using legible labels and a quiet selected surface",
+      "css": "flex-direction: row; gap: 0px; height: 32px; justify-content: center; border-radius: 6px; background-color: #292929;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "IPZ-0",
+        "IQ0-0",
+        "IQ1-0"
+      ],
+      "newIds": [
+        "YN6-0",
+        "YN7-0",
+        "YN8-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true,
+      "reconciliation": "Fresh exact-target JSX confirms CSS default flex-direction: row; no repeated mutation."
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ0-0",
+      "oldNode": "YN7-0",
+      "newNode": "YOA-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq0-0-nav-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed short navigation edge bars while preserving labels and notification status",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YN7-0"
+      ],
+      "newIds": [
+        "YOA-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ1-0",
+      "oldNode": "YN8-0",
+      "newNode": "YOC-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq1-0-nav-label-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Improved mobile navigation label readability after removing decorative bars",
+      "css": "font-size: 10px; line-height: 14px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YN8-0"
+      ],
+      "newIds": [
+        "YOC-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ2-0",
+      "oldNode": "IQ2-0",
+      "newNode": "YOE-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq2-0-nav-surface-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Clarified mobile navigation using legible labels and a quiet selected surface",
+      "css": "flex-direction: row; gap: 0px; height: 32px; justify-content: center; border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "IQ2-0",
+        "IQ3-0",
+        "IQ4-0"
+      ],
+      "newIds": [
+        "YOE-0",
+        "YOF-0",
+        "YOG-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ3-0",
+      "oldNode": "YOF-0",
+      "newNode": "YOI-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq3-0-nav-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed short navigation edge bars while preserving labels and notification status",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YOF-0"
+      ],
+      "newIds": [
+        "YOI-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ4-0",
+      "oldNode": "YOG-0",
+      "newNode": "YOK-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq4-0-nav-label-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Improved mobile navigation label readability after removing decorative bars",
+      "css": "font-size: 10px; line-height: 14px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YOG-0"
+      ],
+      "newIds": [
+        "YOK-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ5-0",
+      "oldNode": "IQ5-0",
+      "newNode": "YOM-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq5-0-nav-surface-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Clarified mobile navigation using legible labels and a quiet selected surface",
+      "css": "flex-direction: row; gap: 4px; height: 32px; justify-content: center; border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "IQ5-0",
+        "IQ6-0",
+        "IQ7-0",
+        "IQ8-0",
+        "IQ9-0"
+      ],
+      "newIds": [
+        "YOM-0",
+        "YON-0",
+        "YOO-0",
+        "YOP-0",
+        "YOQ-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ7-0",
+      "oldNode": "YOO-0",
+      "newNode": "YPQ-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq7-0-nav-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed short navigation edge bars while preserving labels and notification status",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YOO-0"
+      ],
+      "newIds": [
+        "YPQ-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQ9-0",
+      "oldNode": "YOQ-0",
+      "newNode": "YPS-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iq9-0-nav-label-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Improved mobile navigation label readability after removing decorative bars",
+      "css": "font-size: 10px; line-height: 14px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YOQ-0"
+      ],
+      "newIds": [
+        "YPS-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQA-0",
+      "oldNode": "IQA-0",
+      "newNode": "YPU-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqa-0-nav-surface-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Clarified mobile navigation using legible labels and a quiet selected surface",
+      "css": "flex-direction: row; gap: 0px; height: 32px; justify-content: center; border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "IQA-0",
+        "IQB-0",
+        "IQC-0"
+      ],
+      "newIds": [
+        "YPU-0",
+        "YPV-0",
+        "YPW-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQB-0",
+      "oldNode": "YPV-0",
+      "newNode": "YPY-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqb-0-nav-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed short navigation edge bars while preserving labels and notification status",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YPV-0"
+      ],
+      "newIds": [
+        "YPY-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQC-0",
+      "oldNode": "YPW-0",
+      "newNode": "YQ0-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqc-0-nav-label-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Improved mobile navigation label readability after removing decorative bars",
+      "css": "font-size: 10px; line-height: 14px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YPW-0"
+      ],
+      "newIds": [
+        "YQ0-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQD-0",
+      "oldNode": "IQD-0",
+      "newNode": "YQ2-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqd-0-nav-surface-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Clarified mobile navigation using legible labels and a quiet selected surface",
+      "css": "flex-direction: row; gap: 0px; height: 32px; justify-content: center; border-radius: 6px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "IQD-0",
+        "IQE-0",
+        "IQF-0"
+      ],
+      "newIds": [
+        "YQ2-0",
+        "YQ3-0",
+        "YQ4-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQE-0",
+      "oldNode": "YQ3-0",
+      "newNode": "YQ6-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqe-0-nav-strip-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed short navigation edge bars while preserving labels and notification status",
+      "css": "background-color: transparent; width: 0px; height: 0px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YQ3-0"
+      ],
+      "newIds": [
+        "YQ6-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "fileName": "Mastermind OS",
+      "pageId": "p-8-0",
+      "pageName": "REF · Global shell + Navigation",
+      "artboardId": "IOE-0",
+      "artboardName": "SH1M · Current Mastermind OS shell — mobile",
+      "referenceNode": "IQF-0",
+      "oldNode": "YQ4-0",
+      "newNode": "YQ8-0",
+      "operationId": "paper-accent-estate-20261108-c4-ne1rh-iqf-0-nav-label-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Improved mobile navigation label readability after removing decorative bars",
+      "css": "font-size: 10px; line-height: 14px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YQ4-0"
+      ],
+      "newIds": [
+        "YQ8-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-11-0",
+      "pageName": "00 · Read me & Build contract · D07 Company",
+      "artboardId": "1NMQ-0",
+      "artboardName": "D07 · Study D · Revenue FY2025 selected",
+      "referenceNode": "1NP6-0",
+      "oldNode": "1NP6-0",
+      "newNode": "1ZM8-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-1np6-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-light-panel2); border-radius: 6px; justify-content: center;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "1NP6-0",
+        "1NP7-0"
+      ],
+      "newIds": [
+        "1ZM8-0",
+        "1ZM9-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "artboardId": "OYS-0",
+      "artboardName": "ARCHIVED · Duplicate dark C01 calculation state · replaced by KY3-1",
+      "referenceNode": "P3Y-0",
+      "oldNode": "P3Y-0",
+      "newNode": "1ZMR-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-p3y-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 3px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "P3Y-0",
+        "P3Z-0"
+      ],
+      "newIds": [
+        "1ZMR-0",
+        "1ZMS-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "artboardId": "OYS-0",
+      "artboardName": "ARCHIVED · Duplicate dark C01 calculation state · replaced by KY3-1",
+      "referenceNode": "OZO-0",
+      "oldNode": "OZO-0",
+      "newNode": "1ZN6-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-ozo-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "OZO-0",
+        "OZP-0"
+      ],
+      "newIds": [
+        "1ZN6-0",
+        "1ZN7-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "artboardId": "12Q0-0",
+      "artboardName": "SUPERSEDED · Duplicate of 12DM-0 · Hidden · Do Not Build",
+      "referenceNode": "12RX-0",
+      "oldNode": "12RX-0",
+      "newNode": "1ZN9-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-12rx-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 3px; background-color: var(--mx-light-panel2); border-radius: 6px; justify-content: center;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "12RX-0",
+        "12RY-0"
+      ],
+      "newIds": [
+        "1ZN9-0",
+        "1ZNA-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "artboardId": "13TC-0",
+      "artboardName": "SUPERSEDED · Dark ZH Call duplicate · Hidden",
+      "referenceNode": "13VC-0",
+      "oldNode": "13VC-0",
+      "newNode": "1ZNC-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-13vc-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 3px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "13VC-0",
+        "13VD-0"
+      ],
+      "newIds": [
+        "1ZNC-0",
+        "1ZND-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "artboardId": "13VZ-0",
+      "artboardName": "SUPERSEDED · Dark ZH Sources duplicate · Hidden",
+      "referenceNode": "13YZ-0",
+      "oldNode": "13YZ-0",
+      "newNode": "1ZNF-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-13yz-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 3px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "13YZ-0",
+        "13Z0-0"
+      ],
+      "newIds": [
+        "1ZNF-0",
+        "1ZNG-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-F-0",
+      "pageName": "11 · Company · Earnings + Dossiers · North Star Study",
+      "artboardId": "YKI-0",
+      "artboardName": "11 · DESKTOP · Company Event Workspace",
+      "referenceNode": "YN7-0",
+      "oldNode": "YN7-0",
+      "newNode": "1ZNI-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-yn7-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YN7-0",
+        "YN8-0"
+      ],
+      "newIds": [
+        "1ZNI-0",
+        "1ZNJ-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-F-0",
+      "pageName": "11 · Company · Earnings + Dossiers · North Star Study",
+      "artboardId": "YUD-0",
+      "artboardName": "13 · DESKTOP · Company Dossier",
+      "referenceNode": "YX2-0",
+      "oldNode": "YX2-0",
+      "newNode": "1ZNL-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-yx2-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "YX2-0",
+        "YX3-0"
+      ],
+      "newIds": [
+        "1ZNL-0",
+        "1ZNM-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboardId": "B4-0",
+      "artboardName": "32 · R10 · Macro + Policy · Desktop",
+      "referenceNode": "CT-0",
+      "oldNode": "CT-0",
+      "newNode": "NS3-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-ct-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 14px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "CT-0",
+        "CU-0"
+      ],
+      "newIds": [
+        "NS3-0",
+        "NS4-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboardId": "GH-0",
+      "artboardName": "33 · R10 · Risk + Transmission · Desktop",
+      "referenceNode": "I8-0",
+      "oldNode": "I8-0",
+      "newNode": "NS6-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-i8-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 14px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "I8-0",
+        "I9-0"
+      ],
+      "newIds": [
+        "NS6-0",
+        "NS7-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-E-0",
+      "pageName": "10 · Retained Shared Shell · Stocks + Setups",
+      "artboardId": "XOA-0",
+      "artboardName": "09 · DESKTOP · Stocks + Setups · Base",
+      "referenceNode": "XQV-0",
+      "oldNode": "XQV-0",
+      "newNode": "1ZNO-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-xqv-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "XQV-0",
+        "XQW-0"
+      ],
+      "newIds": [
+        "1ZNO-0",
+        "1ZNP-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-E-0",
+      "pageName": "10 · Retained Shared Shell · Stocks + Setups",
+      "artboardId": "XW1-0",
+      "artboardName": "09A · R16 STATE of 09 · Desktop · Watchlist Dialog",
+      "referenceNode": "XYM-0",
+      "oldNode": "XYM-0",
+      "newNode": "1ZNR-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-xym-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "XYM-0",
+        "XYN-0"
+      ],
+      "newIds": [
+        "1ZNR-0",
+        "1ZNS-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9ML-0",
+      "artboardName": "143 · R10 · Company exposure · Desktop",
+      "referenceNode": "9O3-0",
+      "oldNode": "9O3-0",
+      "newNode": "NS9-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9o3-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 14px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "9O3-0",
+        "9O4-0"
+      ],
+      "newIds": [
+        "NS9-0",
+        "NSA-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9ZX-0",
+      "artboardName": "148 · R10 · Company transmission · Hypothesis workspace",
+      "referenceNode": "A1H-0",
+      "oldNode": "A1H-0",
+      "newNode": "NSC-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-a1h-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 14px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "A1H-0",
+        "A1I-0"
+      ],
+      "newIds": [
+        "NSC-0",
+        "NSD-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18G0-0",
+      "artboardName": "3D01 · Chain Observatory · Desktop · Synthetic design",
+      "referenceNode": "18HG-0",
+      "oldNode": "18HG-0",
+      "newNode": "1ZNU-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18hg-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "18HG-0",
+        "18HH-0"
+      ],
+      "newIds": [
+        "1ZNU-0",
+        "1ZNV-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18OH-0",
+      "artboardName": "3D02 · Volatility Terrain · Synthetic study",
+      "referenceNode": "18PF-0",
+      "oldNode": "18PF-0",
+      "newNode": "1ZNX-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18pf-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "18PF-0",
+        "18PG-0"
+      ],
+      "newIds": [
+        "1ZNX-0",
+        "1ZNY-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18TJ-0",
+      "artboardName": "3D03 · Replay and Change · Synthetic study",
+      "referenceNode": "18UF-0",
+      "oldNode": "18UF-0",
+      "newNode": "1ZO0-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18uf-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "18UF-0",
+        "18UG-0"
+      ],
+      "newIds": [
+        "1ZO0-0",
+        "1ZO1-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18XX-0",
+      "artboardName": "3D04 · Flow and Package Investigation · Synthetic study",
+      "referenceNode": "18YT-0",
+      "oldNode": "18YT-0",
+      "newNode": "1ZO3-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18yt-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "18YT-0",
+        "18YU-0"
+      ],
+      "newIds": [
+        "1ZO3-0",
+        "1ZO4-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "192N-0",
+      "artboardName": "3D05 · Scenario Lab · Entry-cost robustness · Synthetic study",
+      "referenceNode": "193L-0",
+      "oldNode": "193L-0",
+      "newNode": "1ZO6-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-193l-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "193L-0",
+        "193M-0"
+      ],
+      "newIds": [
+        "1ZO6-0",
+        "1ZO7-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "3VC-0",
+      "artboardName": "31 · R11 STATE · Desktop · Evidence Inspector",
+      "referenceNode": "3XX-0",
+      "oldNode": "3XX-0",
+      "newNode": "643-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-3xx-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "3XX-0",
+        "3XY-0"
+      ],
+      "newIds": [
+        "643-0",
+        "644-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "476-0",
+      "artboardName": "34 · R11 · DESKTOP · Light · Research Long Read",
+      "referenceNode": "49Q-0",
+      "oldNode": "49Q-0",
+      "newNode": "646-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-49q-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-light-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "49Q-0",
+        "49R-0"
+      ],
+      "newIds": [
+        "646-0",
+        "647-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "428-0",
+      "artboardName": "32 · R11 · MOBILE · Guided Long Read",
+      "referenceNode": "432-0",
+      "oldNode": "432-0",
+      "newNode": "649-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-432-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "432-0",
+        "433-0"
+      ],
+      "newIds": [
+        "649-0",
+        "64A-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "4D8-0",
+      "artboardName": "35 · R11 · MOBILE · Research Outline",
+      "referenceNode": "4E3-0",
+      "oldNode": "4E3-0",
+      "newNode": "64C-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-4e3-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "4E3-0",
+        "4E4-0"
+      ],
+      "newIds": [
+        "64C-0",
+        "64D-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "4HS-0",
+      "artboardName": "36 · R11 · TABLET · Guided Long Read",
+      "referenceNode": "4IM-0",
+      "oldNode": "4IM-0",
+      "newNode": "64F-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-4im-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "4IM-0",
+        "4IN-0"
+      ],
+      "newIds": [
+        "64F-0",
+        "64G-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-Y-0",
+      "pageName": "Terminal · Portfolio · Personal Desk · 2026-10-11",
+      "artboardId": "1LVI-0",
+      "artboardName": "05 · Research · Market Ontology joined journey · FUTURE PREVIEW",
+      "referenceNode": "1LWV-0",
+      "oldNode": "1LWV-0",
+      "newNode": "1ZO9-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-1lwv-0-tab-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Replaced selected-tab edge underline with a quiet surface; preserved label and existing selected typography",
+      "css": "border-bottom-width: 0px; padding-bottom: 2px; background-color: var(--mx-dark-panel2); border-radius: 6px; padding-inline: 12px;",
+      "sourceReferenceAmended": false,
+      "visualLimitation": null,
+      "verified": true,
+      "oldIds": [
+        "1LWV-0",
+        "1LWW-0",
+        "1LWX-0",
+        "1LWY-0"
+      ],
+      "newIds": [
+        "1ZO9-0",
+        "1ZOA-0",
+        "1ZOB-0",
+        "1ZOC-0"
+      ],
+      "contentPreserved": true,
+      "styleVerification": true
     }
   ],
   "remaining": [
@@ -13058,7 +15055,7 @@
     "status": "IN_PROGRESS",
     "productArtboardsInventoried": 1892,
     "artboardsRead": 465,
-    "artboardsRemaining": 1427,
+    "artboardsRemaining": 1521,
     "coverage": [
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -13188,7 +15185,8 @@
         "potential": 1,
         "bytes": 11239,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13214,7 +15212,8 @@
         "potential": 2,
         "bytes": 16252,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13240,7 +15239,8 @@
         "potential": 1,
         "bytes": 9757,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13279,7 +15279,8 @@
         "potential": 7,
         "bytes": 14045,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -13292,7 +15293,8 @@
         "potential": 4,
         "bytes": 11880,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13305,7 +15307,8 @@
         "potential": 9,
         "bytes": 18362,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -13318,7 +15321,8 @@
         "potential": 2,
         "bytes": 5205,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -13344,7 +15348,8 @@
         "potential": 1,
         "bytes": 13347,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -13357,7 +15362,8 @@
         "potential": 1,
         "bytes": 4390,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -13370,7 +15376,8 @@
         "potential": 7,
         "bytes": 15496,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13383,7 +15390,8 @@
         "potential": 1,
         "bytes": 24226,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -13396,7 +15404,8 @@
         "potential": 1,
         "bytes": 20462,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
@@ -13409,7 +15418,8 @@
         "potential": 9,
         "bytes": 24069,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13422,7 +15432,8 @@
         "potential": 1,
         "bytes": 5788,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13435,7 +15446,8 @@
         "potential": 4,
         "bytes": 22468,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -13445,10 +15457,11 @@
         "artboardId": "5IE-0",
         "artboardName": "SOURCE ONLY · 08 · Mastermind AI · Chat live baseline",
         "nodes": 118,
-        "potential": 4,
+        "potential": 9,
         "bytes": 54901,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13461,7 +15474,8 @@
         "potential": 1,
         "bytes": 15901,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13474,7 +15488,8 @@
         "potential": 14,
         "bytes": 27017,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -13484,10 +15499,11 @@
         "artboardId": "1-0",
         "artboardName": "90 · LEGACY REF · Desktop · Quiet Command Center",
         "nodes": 154,
-        "potential": 11,
+        "potential": 13,
         "bytes": 37508,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -13497,10 +15513,11 @@
         "artboardId": "H7R-0",
         "artboardName": "SH1 · Current Mastermind OS shell — desktop",
         "nodes": 121,
-        "potential": 2,
+        "potential": 4,
         "bytes": 27346,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -13513,7 +15530,8 @@
         "potential": 7,
         "bytes": 17404,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13526,7 +15544,8 @@
         "potential": 3,
         "bytes": 30033,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13539,7 +15558,8 @@
         "potential": 2,
         "bytes": 24717,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13565,7 +15585,8 @@
         "potential": 4,
         "bytes": 22254,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13578,7 +15599,8 @@
         "potential": 4,
         "bytes": 24133,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -13591,7 +15613,8 @@
         "potential": 13,
         "bytes": 23110,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -13604,7 +15627,8 @@
         "potential": 2,
         "bytes": 17952,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -13617,7 +15641,8 @@
         "potential": 4,
         "bytes": 12240,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -13630,7 +15655,8 @@
         "potential": 2,
         "bytes": 8243,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13643,7 +15669,8 @@
         "potential": 3,
         "bytes": 11383,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13656,7 +15683,8 @@
         "potential": 3,
         "bytes": 24147,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13669,7 +15697,8 @@
         "potential": 1,
         "bytes": 15701,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13682,7 +15711,8 @@
         "potential": 6,
         "bytes": 35976,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13695,7 +15725,8 @@
         "potential": 1,
         "bytes": 10038,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -13708,7 +15739,8 @@
         "potential": 4,
         "bytes": 10067,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13718,10 +15750,11 @@
         "artboardId": "1MP2-0",
         "artboardName": "REJECTED · Entire-pane redesign · Desktop",
         "nodes": 177,
-        "potential": 15,
+        "potential": 16,
         "bytes": 39778,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13734,7 +15767,8 @@
         "potential": 8,
         "bytes": 25014,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -13747,7 +15781,8 @@
         "potential": 3,
         "bytes": 42660,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -13760,7 +15795,8 @@
         "potential": 2,
         "bytes": 29063,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
@@ -13838,7 +15874,8 @@
         "potential": 1,
         "bytes": 17628,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13851,7 +15888,8 @@
         "potential": 10,
         "bytes": 28097,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13864,7 +15902,8 @@
         "potential": 10,
         "bytes": 28097,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -13877,7 +15916,8 @@
         "potential": 10,
         "bytes": 32435,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -13890,7 +15930,8 @@
         "potential": 1,
         "bytes": 4097,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -13900,10 +15941,11 @@
         "artboardId": "1RQ-1",
         "artboardName": "R14 · Guide · Light · EN · Desktop",
         "nodes": 90,
-        "potential": 1,
+        "potential": 5,
         "bytes": 21564,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -13916,7 +15958,8 @@
         "potential": 1,
         "bytes": 20517,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -13926,10 +15969,11 @@
         "artboardId": "1WO-1",
         "artboardName": "R14 · Guide · Light · EN · Mobile",
         "nodes": 77,
-        "potential": 1,
+        "potential": 5,
         "bytes": 18765,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -13939,10 +15983,11 @@
         "artboardId": "1Z0-1",
         "artboardName": "R14 · Guide · Light · ZH · Mobile",
         "nodes": 77,
-        "potential": 1,
+        "potential": 5,
         "bytes": 18577,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13968,7 +16013,8 @@
         "potential": 3,
         "bytes": 7602,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -13991,10 +16037,11 @@
         "artboardId": "1MFJ-0",
         "artboardName": "REJECTED · R2 grey wave · Desktop",
         "nodes": 172,
-        "potential": 8,
+        "potential": 9,
         "bytes": 46656,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14007,7 +16054,8 @@
         "potential": 1,
         "bytes": 24702,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14033,7 +16081,8 @@
         "potential": 2,
         "bytes": 26157,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14046,7 +16095,8 @@
         "potential": 2,
         "bytes": 26578,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14059,7 +16109,8 @@
         "potential": 2,
         "bytes": 25987,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14072,7 +16123,8 @@
         "potential": 2,
         "bytes": 25857,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M312VSDSZFVT45674GDVJVZN",
@@ -14111,7 +16163,8 @@
         "potential": 2,
         "bytes": 23974,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14124,7 +16177,8 @@
         "potential": 10,
         "bytes": 13340,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14137,7 +16191,8 @@
         "potential": 3,
         "bytes": 9986,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14150,7 +16205,8 @@
         "potential": 3,
         "bytes": 9986,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14163,7 +16219,8 @@
         "potential": 3,
         "bytes": 10224,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14176,7 +16233,8 @@
         "potential": 3,
         "bytes": 10224,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14189,7 +16247,8 @@
         "potential": 7,
         "bytes": 24095,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14202,7 +16261,8 @@
         "potential": 7,
         "bytes": 24144,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14215,7 +16275,8 @@
         "potential": 2,
         "bytes": 6406,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -14228,7 +16289,8 @@
         "potential": 4,
         "bytes": 5350,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14241,7 +16303,8 @@
         "potential": 6,
         "bytes": 29671,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14254,7 +16317,8 @@
         "potential": 3,
         "bytes": 16112,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14267,7 +16331,8 @@
         "potential": 4,
         "bytes": 18938,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14280,7 +16345,8 @@
         "potential": 4,
         "bytes": 19146,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14293,7 +16359,8 @@
         "potential": 4,
         "bytes": 20511,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -14303,10 +16370,11 @@
         "artboardId": "HJW-0",
         "artboardName": "SR1 · Global Search — current Noir desktop",
         "nodes": 239,
-        "potential": 6,
+        "potential": 8,
         "bytes": 55989,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -14319,7 +16387,8 @@
         "potential": 1,
         "bytes": 17165,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -14342,10 +16411,11 @@
         "artboardId": "244-1",
         "artboardName": "R14 · Search Answer · EN · Desktop",
         "nodes": 53,
-        "potential": 1,
+        "potential": 2,
         "bytes": 12477,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14355,10 +16425,11 @@
         "artboardId": "26W-1",
         "artboardName": "R14 · Search Answer · EN · Mobile",
         "nodes": 40,
-        "potential": 1,
+        "potential": 2,
         "bytes": 9917,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14368,10 +16439,11 @@
         "artboardId": "2AP-1",
         "artboardName": "R14 · No Match Recovery · EN · Mobile",
         "nodes": 35,
-        "potential": 1,
+        "potential": 2,
         "bytes": 9205,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14381,10 +16453,11 @@
         "artboardId": "2Z4-1",
         "artboardName": "R20 · Search + Browse State System",
         "nodes": 160,
-        "potential": 6,
+        "potential": 8,
         "bytes": 39283,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14410,7 +16483,8 @@
         "potential": 4,
         "bytes": 15618,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -14420,10 +16494,11 @@
         "artboardId": "1-0",
         "artboardName": "00 Cover — reference set",
         "nodes": 59,
-        "potential": 2,
+        "potential": 3,
         "bytes": 13693,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -14631,7 +16706,8 @@
         "potential": 4,
         "bytes": 12210,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -14667,10 +16743,11 @@
         "artboardId": "BI8-0",
         "artboardName": "ARCHIVE COPY · Returns v2 · Mobile Study",
         "nodes": 166,
-        "potential": 6,
+        "potential": 7,
         "bytes": 39896,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14680,10 +16757,11 @@
         "artboardId": "BBL-0",
         "artboardName": "ARCHIVE COPY · Returns v2 · Desktop Study",
         "nodes": 232,
-        "potential": 8,
+        "potential": 9,
         "bytes": 58409,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -14709,7 +16787,8 @@
         "potential": 1,
         "bytes": 7674,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -14722,7 +16801,8 @@
         "potential": 2,
         "bytes": 11238,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -14732,10 +16812,11 @@
         "artboardId": "FN7-0",
         "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
         "nodes": 488,
-        "potential": 55,
+        "potential": 73,
         "bytes": 143695,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -14748,7 +16829,8 @@
         "potential": 13,
         "bytes": 34142,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -14761,7 +16843,8 @@
         "potential": 13,
         "bytes": 28288,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -14774,7 +16857,8 @@
         "potential": 11,
         "bytes": 27064,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -14787,7 +16871,8 @@
         "potential": 7,
         "bytes": 15335,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -14800,7 +16885,8 @@
         "potential": 4,
         "bytes": 15224,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14810,10 +16896,11 @@
         "artboardId": "IJW-0",
         "artboardName": "R6 · Candidate / study · Light · EN · 1440",
         "nodes": 71,
-        "potential": 7,
+        "potential": 8,
         "bytes": 18941,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14823,10 +16910,11 @@
         "artboardId": "IML-0",
         "artboardName": "R6 · Candidate / study · Dark · EN · 1440",
         "nodes": 71,
-        "potential": 8,
+        "potential": 9,
         "bytes": 18942,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14836,10 +16924,11 @@
         "artboardId": "IPV-0",
         "artboardName": "R6 · Candidate / study · Light · ZH · 1440",
         "nodes": 71,
-        "potential": 7,
+        "potential": 8,
         "bytes": 17193,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14849,10 +16938,11 @@
         "artboardId": "IS8-0",
         "artboardName": "R6 · Candidate / study · Dark · ZH · 1440",
         "nodes": 71,
-        "potential": 8,
+        "potential": 9,
         "bytes": 17194,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14862,10 +16952,11 @@
         "artboardId": "IVH-0",
         "artboardName": "R6 · Candidate / glance · Light · EN · 390",
         "nodes": 39,
-        "potential": 3,
+        "potential": 4,
         "bytes": 10014,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14878,7 +16969,8 @@
         "potential": 4,
         "bytes": 10011,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14888,10 +16980,11 @@
         "artboardId": "IXX-0",
         "artboardName": "R6 · Candidate / glance · Light · ZH · 390",
         "nodes": 39,
-        "potential": 3,
+        "potential": 4,
         "bytes": 9125,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -14904,7 +16997,8 @@
         "potential": 4,
         "bytes": 9122,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14917,7 +17011,8 @@
         "potential": 3,
         "bytes": 16164,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14930,7 +17025,8 @@
         "potential": 3,
         "bytes": 15221,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14943,7 +17039,8 @@
         "potential": 3,
         "bytes": 16087,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14956,7 +17053,8 @@
         "potential": 3,
         "bytes": 15244,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14969,7 +17067,8 @@
         "potential": 3,
         "bytes": 16442,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14982,7 +17081,8 @@
         "potential": 3,
         "bytes": 16465,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -14995,7 +17095,8 @@
         "potential": 3,
         "bytes": 15522,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -15008,7 +17109,8 @@
         "potential": 3,
         "bytes": 15545,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15021,7 +17123,8 @@
         "potential": 24,
         "bytes": 83345,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15034,7 +17137,8 @@
         "potential": 25,
         "bytes": 79005,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15047,7 +17151,8 @@
         "potential": 2,
         "bytes": 24284,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15060,7 +17165,8 @@
         "potential": 2,
         "bytes": 23386,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15073,7 +17179,8 @@
         "potential": 17,
         "bytes": 35181,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15086,7 +17193,8 @@
         "potential": 11,
         "bytes": 28728,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15099,7 +17207,8 @@
         "potential": 17,
         "bytes": 33905,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -15112,7 +17221,8 @@
         "potential": 1,
         "bytes": 20218,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -15122,10 +17232,11 @@
         "artboardId": "HWS-0",
         "artboardName": "TL1 · All Tools utility launcher — current Noir desktop",
         "nodes": 305,
-        "potential": 6,
+        "potential": 10,
         "bytes": 73591,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NRCX55B452A12819WNE1RH",
@@ -15151,7 +17262,8 @@
         "potential": 8,
         "bytes": 23174,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15164,7 +17276,8 @@
         "potential": 12,
         "bytes": 25059,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15177,7 +17290,8 @@
         "potential": 8,
         "bytes": 16334,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15190,7 +17304,8 @@
         "potential": 8,
         "bytes": 16311,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15203,7 +17318,8 @@
         "potential": 6,
         "bytes": 12945,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15229,7 +17345,8 @@
         "potential": 6,
         "bytes": 15048,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15242,7 +17359,8 @@
         "potential": 6,
         "bytes": 12693,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15255,7 +17373,8 @@
         "potential": 9,
         "bytes": 17102,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15268,7 +17387,8 @@
         "potential": 8,
         "bytes": 37879,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15281,7 +17401,8 @@
         "potential": 2,
         "bytes": 11318,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15294,7 +17415,8 @@
         "potential": 9,
         "bytes": 18492,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15307,7 +17429,8 @@
         "potential": 9,
         "bytes": 18253,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15317,10 +17440,11 @@
         "artboardId": "XJA-0",
         "artboardName": "V06 · Selected-expiry source · Mobile EN",
         "nodes": 40,
-        "potential": 6,
+        "potential": 7,
         "bytes": 12911,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15330,10 +17454,11 @@
         "artboardId": "XKM-0",
         "artboardName": "V06 · Selected-expiry source · Mobile ZH",
         "nodes": 40,
-        "potential": 6,
+        "potential": 7,
         "bytes": 12558,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15346,7 +17471,8 @@
         "potential": 1,
         "bytes": 7800,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15359,7 +17485,8 @@
         "potential": 1,
         "bytes": 7492,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15372,7 +17499,8 @@
         "potential": 19,
         "bytes": 49576,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15385,7 +17513,8 @@
         "potential": 5,
         "bytes": 21169,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15424,7 +17553,8 @@
         "potential": 5,
         "bytes": 23718,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15437,7 +17567,8 @@
         "potential": 4,
         "bytes": 31846,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15476,7 +17607,8 @@
         "potential": 4,
         "bytes": 8565,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -15489,7 +17621,8 @@
         "potential": 22,
         "bytes": 55356,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -15502,7 +17635,8 @@
         "potential": 15,
         "bytes": 42600,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -15515,7 +17649,8 @@
         "potential": 8,
         "bytes": 28099,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -15528,7 +17663,8 @@
         "potential": 9,
         "bytes": 20141,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15541,7 +17677,8 @@
         "potential": 1,
         "bytes": 10822,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15554,7 +17691,8 @@
         "potential": 1,
         "bytes": 48067,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15580,7 +17718,8 @@
         "potential": 1,
         "bytes": 10837,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15593,7 +17732,8 @@
         "potential": 1,
         "bytes": 8917,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15616,10 +17756,11 @@
         "artboardId": "1B5I-0",
         "artboardName": "05 · Returns v2 · Mobile Study · 390",
         "nodes": 168,
-        "potential": 6,
+        "potential": 7,
         "bytes": 44469,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15632,7 +17773,8 @@
         "potential": 2,
         "bytes": 13031,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15642,10 +17784,11 @@
         "artboardId": "1SIB-0",
         "artboardName": "A01 · Flow Command · Desktop 1440 · Dark EN",
         "nodes": 179,
-        "potential": 9,
+        "potential": 11,
         "bytes": 38667,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15655,10 +17798,11 @@
         "artboardId": "1Y3I-0",
         "artboardName": "A05 · Flow in shared shell · 1440 · Noir EN · DRAFT",
         "nodes": 212,
-        "potential": 11,
+        "potential": 13,
         "bytes": 48124,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15671,7 +17815,8 @@
         "potential": 1,
         "bytes": 18178,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15681,10 +17826,11 @@
         "artboardId": "1STH-0",
         "artboardName": "A04 · Flow scan · Phone 390 · Dark EN",
         "nodes": 94,
-        "potential": 6,
+        "potential": 7,
         "bytes": 22811,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -15697,7 +17843,8 @@
         "potential": 3,
         "bytes": 14196,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15707,10 +17854,11 @@
         "artboardId": "14Y-0",
         "artboardName": "20 · BUILDER SPEC · R7 · Answer Craft",
         "nodes": 55,
-        "potential": 2,
+        "potential": 3,
         "bytes": 15333,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15723,7 +17871,8 @@
         "potential": 1,
         "bytes": 14166,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15733,10 +17882,11 @@
         "artboardId": "18K-0",
         "artboardName": "22 · BUILDER REF · R7 · Popup + Narrow Specimens",
         "nodes": 63,
-        "potential": 3,
+        "potential": 5,
         "bytes": 17479,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15749,7 +17899,8 @@
         "potential": 9,
         "bytes": 17878,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15762,7 +17913,8 @@
         "potential": 10,
         "bytes": 23656,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15775,7 +17927,8 @@
         "potential": 8,
         "bytes": 23602,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15788,7 +17941,8 @@
         "potential": 6,
         "bytes": 21666,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -15801,7 +17955,8 @@
         "potential": 4,
         "bytes": 14270,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15814,7 +17969,8 @@
         "potential": 5,
         "bytes": 12235,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15827,7 +17983,8 @@
         "potential": 1,
         "bytes": 20468,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15840,7 +17997,8 @@
         "potential": 5,
         "bytes": 12405,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15853,7 +18011,8 @@
         "potential": 1,
         "bytes": 21058,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15866,7 +18025,8 @@
         "potential": 2,
         "bytes": 22137,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15879,7 +18039,8 @@
         "potential": 2,
         "bytes": 21801,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15892,7 +18053,8 @@
         "potential": 5,
         "bytes": 12313,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15905,7 +18067,8 @@
         "potential": 5,
         "bytes": 12342,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15918,7 +18081,8 @@
         "potential": 2,
         "bytes": 21878,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15931,7 +18095,8 @@
         "potential": 2,
         "bytes": 21558,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -15957,7 +18122,8 @@
         "potential": 1,
         "bytes": 2916,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -15970,7 +18136,8 @@
         "potential": 9,
         "bytes": 18820,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -15983,7 +18150,8 @@
         "potential": 9,
         "bytes": 18756,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -15996,7 +18164,8 @@
         "potential": 9,
         "bytes": 17663,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16009,7 +18178,8 @@
         "potential": 9,
         "bytes": 17599,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16022,7 +18192,8 @@
         "potential": 9,
         "bytes": 21879,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16035,7 +18206,8 @@
         "potential": 9,
         "bytes": 21815,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16048,7 +18220,8 @@
         "potential": 9,
         "bytes": 20722,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16061,7 +18234,8 @@
         "potential": 9,
         "bytes": 20658,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16087,7 +18261,8 @@
         "potential": 14,
         "bytes": 50958,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16100,7 +18275,8 @@
         "potential": 10,
         "bytes": 48816,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16113,7 +18289,8 @@
         "potential": 7,
         "bytes": 34144,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16126,7 +18303,8 @@
         "potential": 6,
         "bytes": 25379,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16136,10 +18314,11 @@
         "artboardId": "1-0",
         "artboardName": "Market Guide · Light · EN · Desktop",
         "nodes": 87,
-        "potential": 1,
+        "potential": 5,
         "bytes": 20433,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16152,7 +18331,8 @@
         "potential": 1,
         "bytes": 19302,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16162,10 +18342,11 @@
         "artboardId": "EY-0",
         "artboardName": "Market Guide · Light · ZH · Desktop",
         "nodes": 82,
-        "potential": 1,
+        "potential": 5,
         "bytes": 18927,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16178,7 +18359,8 @@
         "potential": 1,
         "bytes": 18782,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16188,10 +18370,11 @@
         "artboardId": "7M-0",
         "artboardName": "Market Guide · Light · EN · Mobile",
         "nodes": 74,
-        "potential": 1,
+        "potential": 5,
         "bytes": 18292,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16204,7 +18387,8 @@
         "potential": 1,
         "bytes": 18145,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16214,10 +18398,11 @@
         "artboardId": "ME-0",
         "artboardName": "Market Guide · Light · ZH · Mobile",
         "nodes": 74,
-        "potential": 1,
+        "potential": 5,
         "bytes": 17852,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16230,7 +18415,8 @@
         "potential": 1,
         "bytes": 17722,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16243,7 +18429,8 @@
         "potential": 8,
         "bytes": 19163,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16256,7 +18443,8 @@
         "potential": 6,
         "bytes": 10840,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16266,10 +18454,11 @@
         "artboardId": "A5I-0",
         "artboardName": "45 · Pullback · US · Light EN · Forecast withheld",
         "nodes": 69,
-        "potential": 10,
+        "potential": 13,
         "bytes": 17672,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16282,7 +18471,8 @@
         "potential": 10,
         "bytes": 19457,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16295,7 +18485,8 @@
         "potential": 10,
         "bytes": 17189,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16305,10 +18496,11 @@
         "artboardId": "A1M-0",
         "artboardName": "43 · Pullback · China · Light EN",
         "nodes": 69,
-        "potential": 10,
+        "potential": 13,
         "bytes": 17855,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16321,7 +18513,8 @@
         "potential": 10,
         "bytes": 15956,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16334,7 +18527,8 @@
         "potential": 6,
         "bytes": 10319,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16344,10 +18538,11 @@
         "artboardId": "A3K-0",
         "artboardName": "44 · Pullback · China · Light ZH",
         "nodes": 69,
-        "potential": 10,
+        "potential": 13,
         "bytes": 18127,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16360,7 +18555,8 @@
         "potential": 10,
         "bytes": 18657,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16373,7 +18569,8 @@
         "potential": 2,
         "bytes": 18238,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16386,7 +18583,8 @@
         "potential": 6,
         "bytes": 16538,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16399,7 +18597,8 @@
         "potential": 3,
         "bytes": 19082,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16412,7 +18611,8 @@
         "potential": 4,
         "bytes": 15882,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16422,10 +18622,11 @@
         "artboardId": "STD-0",
         "artboardName": "21 · R6 · Mobile Filter Preview · All Four Accounted For",
         "nodes": 70,
-        "potential": 3,
+        "potential": 4,
         "bytes": 19921,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16438,7 +18639,8 @@
         "potential": 1,
         "bytes": 15192,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16451,7 +18653,8 @@
         "potential": 1,
         "bytes": 15637,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -16461,10 +18664,11 @@
         "artboardId": "SZ2-0",
         "artboardName": "24 · R6 · Tablet Memory Comparison · Context Beside Company",
         "nodes": 97,
-        "potential": 2,
+        "potential": 5,
         "bytes": 28586,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -16477,7 +18681,8 @@
         "potential": 18,
         "bytes": 57693,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -16490,7 +18695,8 @@
         "potential": 43,
         "bytes": 79713,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -16503,7 +18709,8 @@
         "potential": 22,
         "bytes": 51462,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16555,7 +18762,8 @@
         "potential": 4,
         "bytes": 30903,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16568,7 +18776,8 @@
         "potential": 1,
         "bytes": 6435,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16581,7 +18790,8 @@
         "potential": 1,
         "bytes": 6519,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16594,7 +18804,8 @@
         "potential": 1,
         "bytes": 6181,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16607,7 +18818,8 @@
         "potential": 1,
         "bytes": 6237,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16620,7 +18832,8 @@
         "potential": 2,
         "bytes": 8131,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16633,7 +18846,8 @@
         "potential": 2,
         "bytes": 7865,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16646,7 +18860,8 @@
         "potential": 1,
         "bytes": 6909,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16659,7 +18874,8 @@
         "potential": 1,
         "bytes": 5612,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16672,7 +18888,8 @@
         "potential": 1,
         "bytes": 7274,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -16685,7 +18902,8 @@
         "potential": 1,
         "bytes": 5653,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -16695,10 +18913,11 @@
         "artboardId": "1-0",
         "artboardName": "01 · Desktop · EN · Dark · Full monitor",
         "nodes": 139,
-        "potential": 9,
+        "potential": 10,
         "bytes": 36651,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -16708,10 +18927,11 @@
         "artboardId": "59-0",
         "artboardName": "02 · Desktop · EN · Light · Full monitor",
         "nodes": 139,
-        "potential": 9,
+        "potential": 10,
         "bytes": 36644,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -16721,10 +18941,11 @@
         "artboardId": "AQ-0",
         "artboardName": "03 · Mobile · EN · Light · Full monitor",
         "nodes": 141,
-        "potential": 9,
+        "potential": 10,
         "bytes": 40962,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -16734,10 +18955,11 @@
         "artboardId": "GE-0",
         "artboardName": "04 · Mobile · 中文 · Dark · Full monitor",
         "nodes": 145,
-        "potential": 9,
+        "potential": 10,
         "bytes": 39752,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -16750,7 +18972,8 @@
         "potential": 6,
         "bytes": 16798,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16760,10 +18983,11 @@
         "artboardId": "1-0",
         "artboardName": "MM · Revision lens · Light EN · 1440",
         "nodes": 84,
-        "potential": 6,
+        "potential": 7,
         "bytes": 20578,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16776,7 +19000,8 @@
         "potential": 6,
         "bytes": 23792,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16789,7 +19014,8 @@
         "potential": 6,
         "bytes": 22881,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16799,10 +19025,11 @@
         "artboardId": "9N-0",
         "artboardName": "MM · Revision lens · Light EN · 390",
         "nodes": 89,
-        "potential": 6,
+        "potential": 7,
         "bytes": 23895,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16812,10 +19039,11 @@
         "artboardId": "EV-0",
         "artboardName": "R1 · Light · ZH · 390",
         "nodes": 89,
-        "potential": 6,
+        "potential": 7,
         "bytes": 22984,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16828,7 +19056,8 @@
         "potential": 6,
         "bytes": 19501,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16838,10 +19067,11 @@
         "artboardId": "51-0",
         "artboardName": "MM · 修订证据 · 浅色 · ZH · 1440",
         "nodes": 84,
-        "potential": 6,
+        "potential": 7,
         "bytes": 19604,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16854,7 +19084,8 @@
         "potential": 6,
         "bytes": 20437,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -16890,10 +19121,11 @@
         "artboardId": "5FQ-0",
         "artboardName": "S01 · GMI foundations & components",
         "nodes": 214,
-        "potential": 7,
+        "potential": 8,
         "bytes": 55217,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -16906,7 +19138,8 @@
         "potential": 2,
         "bytes": 36652,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -16919,7 +19152,8 @@
         "potential": 2,
         "bytes": 36392,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -16932,7 +19166,8 @@
         "potential": 8,
         "bytes": 28927,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -16945,7 +19180,8 @@
         "potential": 2,
         "bytes": 27600,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16968,10 +19204,11 @@
         "artboardId": "1-0",
         "artboardName": "Risk Radar V2 · US · Primary",
         "nodes": 210,
-        "potential": 23,
+        "potential": 42,
         "bytes": 49058,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16981,10 +19218,11 @@
         "artboardId": "8PS-0",
         "artboardName": "20 · Risk Radar · STATE · Evidence + Same-context Return",
         "nodes": 91,
-        "potential": 10,
+        "potential": 25,
         "bytes": 24317,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -16997,7 +19235,8 @@
         "potential": 2,
         "bytes": 10316,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17007,10 +19246,11 @@
         "artboardId": "8SH-0",
         "artboardName": "31 · Risk Radar · STATE · Mobile Evidence + Return",
         "nodes": 76,
-        "potential": 9,
+        "potential": 24,
         "bytes": 20240,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17023,7 +19263,8 @@
         "potential": 2,
         "bytes": 9279,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17033,10 +19274,11 @@
         "artboardId": "8ZF-0",
         "artboardName": "33 · Risk Radar · Mobile Evidence · Light ZH",
         "nodes": 76,
-        "potential": 9,
+        "potential": 24,
         "bytes": 18560,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17049,7 +19291,8 @@
         "potential": 2,
         "bytes": 10362,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17059,10 +19302,11 @@
         "artboardId": "98K-0",
         "artboardName": "35 · Risk Radar · Mobile Evidence · Light EN",
         "nodes": 76,
-        "potential": 9,
+        "potential": 24,
         "bytes": 20310,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17075,7 +19319,8 @@
         "potential": 2,
         "bytes": 9233,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M38EVF74SJWG1GANN5VP380Z",
@@ -17085,10 +19330,11 @@
         "artboardId": "9AI-0",
         "artboardName": "37 · Risk Radar · Mobile Evidence · Dark ZH",
         "nodes": 76,
-        "potential": 9,
+        "potential": 24,
         "bytes": 18490,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17140,7 +19386,8 @@
         "potential": 1,
         "bytes": 18271,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17218,7 +19465,8 @@
         "potential": 1,
         "bytes": 24099,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17231,7 +19479,8 @@
         "potential": 10,
         "bytes": 48225,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17244,7 +19493,8 @@
         "potential": 7,
         "bytes": 55560,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17257,7 +19507,8 @@
         "potential": 1,
         "bytes": 15682,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17267,10 +19518,11 @@
         "artboardId": "TS6-0",
         "artboardName": "26 · R7 · Mobile Save Choice · Live Filter",
         "nodes": 59,
-        "potential": 1,
+        "potential": 2,
         "bytes": 15687,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17280,10 +19532,11 @@
         "artboardId": "TUE-0",
         "artboardName": "27 · R7 · Mobile Save Pending · One Request",
         "nodes": 44,
-        "potential": 2,
+        "potential": 3,
         "bytes": 12442,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17293,10 +19546,11 @@
         "artboardId": "TW0-0",
         "artboardName": "28 · R7 · Mobile Save Unknown · Check Original Request",
         "nodes": 44,
-        "potential": 2,
+        "potential": 3,
         "bytes": 12610,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17306,10 +19560,11 @@
         "artboardId": "TXO-0",
         "artboardName": "29 · R7 · Mobile Save Confirmed · Exact Fixed Group",
         "nodes": 44,
-        "potential": 2,
+        "potential": 3,
         "bytes": 12537,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17319,10 +19574,11 @@
         "artboardId": "TZC-0",
         "artboardName": "30 · R7 · Mobile Save Rejected · Draft Preserved",
         "nodes": 44,
-        "potential": 2,
+        "potential": 3,
         "bytes": 12511,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17335,7 +19591,8 @@
         "potential": 1,
         "bytes": 13484,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17348,7 +19605,8 @@
         "potential": 2,
         "bytes": 18728,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17358,10 +19616,11 @@
         "artboardId": "U68-0",
         "artboardName": "33 · R7 · Mobile Updated Result · WDC and Reversible Filter",
         "nodes": 65,
-        "potential": 3,
+        "potential": 4,
         "bytes": 16824,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17374,7 +19633,8 @@
         "potential": 4,
         "bytes": 16579,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17387,7 +19647,8 @@
         "potential": 2,
         "bytes": 10198,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17397,10 +19658,11 @@
         "artboardId": "UGO-0",
         "artboardName": "36 · R8 · Mobile Reopened Live Filter · Zero Observed Matches",
         "nodes": 69,
-        "potential": 5,
+        "potential": 7,
         "bytes": 18147,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17413,7 +19675,8 @@
         "potential": 5,
         "bytes": 15270,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17426,7 +19689,8 @@
         "potential": 11,
         "bytes": 41642,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17439,7 +19703,8 @@
         "potential": 11,
         "bytes": 38980,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17452,7 +19717,8 @@
         "potential": 9,
         "bytes": 22870,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17465,7 +19731,8 @@
         "potential": 10,
         "bytes": 22021,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17478,7 +19745,8 @@
         "potential": 9,
         "bytes": 23029,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17491,7 +19759,8 @@
         "potential": 10,
         "bytes": 22179,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17504,7 +19773,8 @@
         "potential": 9,
         "bytes": 23273,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17517,7 +19787,8 @@
         "potential": 10,
         "bytes": 22318,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17530,7 +19801,8 @@
         "potential": 8,
         "bytes": 38595,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17543,7 +19815,8 @@
         "potential": 2,
         "bytes": 16510,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17556,7 +19829,8 @@
         "potential": 15,
         "bytes": 51787,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17569,7 +19843,8 @@
         "potential": 6,
         "bytes": 19044,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17582,7 +19857,8 @@
         "potential": 4,
         "bytes": 17792,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17595,7 +19871,8 @@
         "potential": 2,
         "bytes": 16510,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17608,7 +19885,8 @@
         "potential": 7,
         "bytes": 20889,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17621,7 +19899,8 @@
         "potential": 4,
         "bytes": 17826,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -17634,7 +19913,8 @@
         "potential": 4,
         "bytes": 18257,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17647,7 +19927,8 @@
         "potential": 7,
         "bytes": 36767,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17660,7 +19941,8 @@
         "potential": 9,
         "bytes": 27152,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17673,7 +19955,8 @@
         "potential": 7,
         "bytes": 19967,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17686,7 +19969,8 @@
         "potential": 4,
         "bytes": 18319,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17699,7 +19983,8 @@
         "potential": 4,
         "bytes": 15570,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17712,7 +19997,8 @@
         "potential": 3,
         "bytes": 11154,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17751,7 +20037,8 @@
         "potential": 1,
         "bytes": 17240,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17764,7 +20051,8 @@
         "potential": 2,
         "bytes": 9914,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17777,7 +20065,8 @@
         "potential": 17,
         "bytes": 63442,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17790,7 +20079,8 @@
         "potential": 17,
         "bytes": 65588,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17803,7 +20093,8 @@
         "potential": 6,
         "bytes": 31109,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17816,7 +20107,8 @@
         "potential": 3,
         "bytes": 14980,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17829,7 +20121,8 @@
         "potential": 6,
         "bytes": 17397,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17842,7 +20135,8 @@
         "potential": 3,
         "bytes": 10370,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17855,7 +20149,8 @@
         "potential": 1,
         "bytes": 10054,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -17868,7 +20163,8 @@
         "potential": 2,
         "bytes": 4100,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17894,7 +20190,8 @@
         "potential": 4,
         "bytes": 33594,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17920,7 +20217,8 @@
         "potential": 9,
         "bytes": 27203,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17933,7 +20231,8 @@
         "potential": 9,
         "bytes": 26142,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17946,7 +20245,8 @@
         "potential": 16,
         "bytes": 52988,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17959,7 +20259,8 @@
         "potential": 9,
         "bytes": 27237,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -17998,7 +20299,8 @@
         "potential": 12,
         "bytes": 44431,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18011,7 +20313,8 @@
         "potential": 4,
         "bytes": 16933,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18024,7 +20327,8 @@
         "potential": 3,
         "bytes": 16695,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18037,7 +20341,8 @@
         "potential": 2,
         "bytes": 10231,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18050,7 +20355,8 @@
         "potential": 10,
         "bytes": 32302,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18063,7 +20369,8 @@
         "potential": 5,
         "bytes": 18032,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18076,7 +20383,8 @@
         "potential": 9,
         "bytes": 20323,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18089,7 +20397,8 @@
         "potential": 13,
         "bytes": 46337,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18102,7 +20411,8 @@
         "potential": 4,
         "bytes": 30378,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18115,7 +20425,8 @@
         "potential": 7,
         "bytes": 31168,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18125,10 +20436,11 @@
         "artboardId": "6A7-0",
         "artboardName": "02 · Explore a theme · Day · EN · Desktop",
         "nodes": 128,
-        "potential": 7,
+        "potential": 9,
         "bytes": 31400,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18141,7 +20453,8 @@
         "potential": 4,
         "bytes": 17700,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18151,10 +20464,11 @@
         "artboardId": "6FY-0",
         "artboardName": "04 · Theme evidence · Day · EN · Mobile",
         "nodes": 63,
-        "potential": 4,
+        "potential": 5,
         "bytes": 17940,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18167,7 +20481,8 @@
         "potential": 7,
         "bytes": 30997,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18177,10 +20492,11 @@
         "artboardId": "6LQ-0",
         "artboardName": "06 · Theme research · Day · ZH · Desktop",
         "nodes": 128,
-        "potential": 7,
+        "potential": 9,
         "bytes": 31229,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18193,7 +20509,8 @@
         "potential": 4,
         "bytes": 17315,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18203,10 +20520,11 @@
         "artboardId": "6R7-0",
         "artboardName": "08 · Theme evidence · Day · ZH · Mobile",
         "nodes": 63,
-        "potential": 4,
+        "potential": 5,
         "bytes": 17555,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18219,7 +20537,8 @@
         "potential": 4,
         "bytes": 22156,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -18229,10 +20548,11 @@
         "artboardId": "6Y9-0",
         "artboardName": "10 · Company evidence · Day · ZH · Mobile",
         "nodes": 93,
-        "potential": 4,
+        "potential": 5,
         "bytes": 22611,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18245,7 +20565,8 @@
         "potential": 2,
         "bytes": 31375,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18284,7 +20605,8 @@
         "potential": 2,
         "bytes": 43669,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18297,7 +20619,8 @@
         "potential": 1,
         "bytes": 5720,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18349,7 +20672,8 @@
         "potential": 1,
         "bytes": 30188,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18359,10 +20683,11 @@
         "artboardId": "OND-1",
         "artboardName": "N97 · Inspector states + source contract · Builder atlas",
         "nodes": 161,
-        "potential": 8,
+        "potential": 10,
         "bytes": 45073,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18375,7 +20700,8 @@
         "potential": 1,
         "bytes": 16429,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18388,7 +20714,8 @@
         "potential": 15,
         "bytes": 36342,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18398,10 +20725,11 @@
         "artboardId": "1K9F-0",
         "artboardName": "01 · Chart Context · Desktop · Sidebar reader",
         "nodes": 149,
-        "potential": 16,
+        "potential": 19,
         "bytes": 71432,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18411,10 +20739,11 @@
         "artboardId": "1KNZ-0",
         "artboardName": "02 · Chart Context · Mobile · Below the chart",
         "nodes": 102,
-        "potential": 11,
+        "potential": 14,
         "bytes": 59295,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18427,7 +20756,8 @@
         "potential": 19,
         "bytes": 32804,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18544,7 +20874,8 @@
         "potential": 1,
         "bytes": 13136,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -18635,7 +20966,8 @@
         "potential": 10,
         "bytes": 49636,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18648,7 +20980,8 @@
         "potential": 7,
         "bytes": 29096,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18661,7 +20994,8 @@
         "potential": 7,
         "bytes": 25720,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18674,7 +21008,8 @@
         "potential": 10,
         "bytes": 32003,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18687,7 +21022,8 @@
         "potential": 7,
         "bytes": 25069,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18700,7 +21036,8 @@
         "potential": 3,
         "bytes": 15247,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18713,7 +21050,8 @@
         "potential": 4,
         "bytes": 14636,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18726,7 +21064,8 @@
         "potential": 18,
         "bytes": 53943,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18739,7 +21078,8 @@
         "potential": 18,
         "bytes": 54166,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18752,7 +21092,8 @@
         "potential": 22,
         "bytes": 62754,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18765,7 +21106,8 @@
         "potential": 17,
         "bytes": 35526,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18778,7 +21120,8 @@
         "potential": 3,
         "bytes": 10991,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18791,7 +21134,8 @@
         "potential": 21,
         "bytes": 42970,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18804,7 +21148,8 @@
         "potential": 17,
         "bytes": 35576,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18817,7 +21162,8 @@
         "potential": 2,
         "bytes": 4174,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18830,7 +21176,8 @@
         "potential": 18,
         "bytes": 53943,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18843,7 +21190,8 @@
         "potential": 22,
         "bytes": 62754,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18856,7 +21204,8 @@
         "potential": 18,
         "bytes": 54166,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18869,7 +21218,8 @@
         "potential": 17,
         "bytes": 35526,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18882,7 +21232,8 @@
         "potential": 3,
         "bytes": 10991,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18895,7 +21246,8 @@
         "potential": 21,
         "bytes": 42970,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -18908,7 +21260,8 @@
         "potential": 17,
         "bytes": 35576,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18918,10 +21271,11 @@
         "artboardId": "1DAR-0",
         "artboardName": "RP01 · Rotation & Positioning · Desktop · Illustrative",
         "nodes": 118,
-        "potential": 9,
+        "potential": 11,
         "bytes": 36322,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18934,7 +21288,8 @@
         "potential": 8,
         "bytes": 47297,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18947,7 +21302,8 @@
         "potential": 12,
         "bytes": 30161,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18960,7 +21316,8 @@
         "potential": 10,
         "bytes": 29366,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18973,7 +21330,8 @@
         "potential": 6,
         "bytes": 25145,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18986,7 +21344,8 @@
         "potential": 8,
         "bytes": 24333,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -18999,7 +21358,8 @@
         "potential": 3,
         "bytes": 17818,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19012,7 +21372,8 @@
         "potential": 3,
         "bytes": 17132,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19025,7 +21386,8 @@
         "potential": 7,
         "bytes": 16308,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19038,7 +21400,8 @@
         "potential": 20,
         "bytes": 62485,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19048,10 +21411,11 @@
         "artboardId": "1LE4-0",
         "artboardName": "02 · Holdings · Record-level editing & coverage repair",
         "nodes": 248,
-        "potential": 18,
+        "potential": 19,
         "bytes": 70833,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19061,10 +21425,11 @@
         "artboardId": "1LLF-0",
         "artboardName": "03 · Risk & exposure · Honest coverage, not empty widgets",
         "nodes": 153,
-        "potential": 15,
+        "potential": 18,
         "bytes": 40319,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19077,7 +21442,8 @@
         "potential": 16,
         "bytes": 48233,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19087,10 +21453,11 @@
         "artboardId": "1LQD-0",
         "artboardName": "04 · Targets · Your allocation, never automated trade advice",
         "nodes": 170,
-        "potential": 16,
+        "potential": 17,
         "bytes": 45331,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       },
       {
         "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -19103,7 +21470,8 @@
         "potential": 9,
         "bytes": 31832,
         "state": "OBSERVED",
-        "complete": true
+        "complete": true,
+        "auditParserVersion": 2
       }
     ],
     "candidateDisposition": "371 broad candidate records from 465 artboards; includes genuine data marks and already-corrected targets. Classification still in progress.",
@@ -19113,6 +21481,14 @@
       "thinCandidates": 142,
       "shadowCandidates": 38,
       "note": "Advisory review completed; root screenshot review overrode the initial KEEP recommendation for OS five mobile navigation edge bars. Those are pending correction, not accepted icons."
+    },
+    "expandedDetection": {
+      "parserVersion": 2,
+      "extraThinCandidates": 144,
+      "extraShadowCandidates": 95,
+      "thinClearRemovals": 6,
+      "outerShadowClearRemovals": 0,
+      "note": "A read-only batch was interrupted; no mutations occurred in it. Resume from the saved inventory. Expanded detections on cached boards and earlier edit proofs remain retained."
     }
   },
   "canonicalGuidance": {
@@ -19135,6 +21511,7 @@
         "html": "Graphite shell with restrained cool illumination. Meaningful AI states may glow; never as container-edge strips or a navy page wash."
       }
     ],
-    "verified": true
+    "verified": true,
+    "visualVerification": "Full canonical artboard screenshot inspected; all three updated paragraphs fit without clipping."
   }
 }
