@@ -20,19 +20,44 @@ import pytest
 # Explicit source-qualification input only; never selects or reads an installed generation.
 NATIVE=Path(os.environ.get('MMX_PROTECTED_MEMORY_TEST_STAGE',
     str(Path(__file__).resolve().parents[1]/'ops/native_fabric/provider_plans/memory118/native_owner'))).resolve()
-sys.path[:0]=[str(NATIVE),str(Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/candidate'),
-              str(Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/source')]
-from fabric_operator_owner import OperatorOwner, DelegationRefused
-from lease_broker import Broker
-import pool_ledger
-from protected_memory_economic import ProtectedMemoryEconomicOwner
-assert Path(importlib.import_module('fabric_operator_owner').__file__).resolve()==NATIVE/'fabric_operator_owner.py'
-assert Path(importlib.import_module('lease_broker').__file__).resolve()==NATIVE/'lease_broker.py'
+# Build one genuine, internally consistent explicit-owner namespace. Ordinary
+# test modules may have already imported the canonical107 contract; replacing
+# only sys.path cannot repair those cached module identities or lazy imports.
+_candidates = (NATIVE, Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/candidate',
+               Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/source')
+_names = {path.stem for directory in _candidates for path in directory.glob('*.py')}
+_absent = object()
+_previous = {name: sys.modules.get(name, _absent) for name in _names}
+_previous_path = list(sys.path)
+try:
+    sys.path[:0] = [str(path) for path in _candidates]
+    for name in _names:
+        sys.modules.pop(name, None)
+    from fabric_operator_owner import OperatorOwner, DelegationRefused
+    from lease_broker import Broker
+    import pool_ledger
+    from protected_memory_economic import ProtectedMemoryEconomicOwner
+    assert Path(importlib.import_module('fabric_operator_owner').__file__).resolve()==NATIVE/'fabric_operator_owner.py'
+    assert Path(importlib.import_module('lease_broker').__file__).resolve()==NATIVE/'lease_broker.py'
+    _ECONOMIC_MODULES = {name: sys.modules[name] for name in _names if name in sys.modules}
+    assert hasattr(_ECONOMIC_MODULES['fabric_operator_contract'], 'validate_protected_launch')
+finally:
+    sys.path[:] = _previous_path
+    for name, module in _previous.items():
+        if module is _absent:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 @pytest.fixture
 def economy(tmp_path,monkeypatch,request):
     fixture_lifecycle=request
+    namespace = pytest.MonkeyPatch()
+    fixture_lifecycle.addfinalizer(namespace.undo)
+    namespace.syspath_prepend(str(NATIVE))
+    for name, module in _ECONOMIC_MODULES.items():
+        namespace.setitem(sys.modules, name, module)
     here=tmp_path/'ext';(here/'broker').mkdir(parents=True)
     policy=tmp_path/'orch/fabric/pools.yaml';policy.parent.mkdir(parents=True)
     policy.write_text(json.dumps({'pools':{'glm':{'models':{'executor':'glm-5.3-flash'}}}}))
@@ -86,6 +111,23 @@ def economy(tmp_path,monkeypatch,request):
         finally:monkeypatch.setattr(os,'geteuid',current)
     engine._fixture_root_authority=authority
     return owner,broker,engine,token,request,selector,route,clock,ledger
+
+
+@pytest.fixture
+def _prior_economic_namespace():
+    previous_path = list(sys.path)
+    missing = object()
+    previous = {name: sys.modules.get(name, missing) for name in _ECONOMIC_MODULES}
+    yield
+    assert sys.path == previous_path
+    assert all(sys.modules.get(name, missing) is module for name, module in previous.items())
+
+
+def test_real_economic_fixture_owns_nominal_modules_only_for_its_lifetime(_prior_economic_namespace, economy):
+    assert all(sys.modules[name] is module for name, module in _ECONOMIC_MODULES.items())
+    assert sys.path[0] == str(NATIVE)
+    assert type(economy[0]) is OperatorOwner and type(economy[1]) is Broker
+    assert type(economy[2]) is ProtectedMemoryEconomicOwner
 
 
 def authorize(economy):
