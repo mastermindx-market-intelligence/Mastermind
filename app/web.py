@@ -2095,7 +2095,12 @@ def api_etf_outcomes() -> JSONResponse:
         from portfolio import etf_outcomes
         return JSONResponse(etf_outcomes.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {"status": "building"}, "error": str(exc)})
+        _log.warning("ETF outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "etf_outcomes_unavailable",
+        })
 
 
 @router.get("/api/overnight-tape")
@@ -2792,26 +2797,41 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
 def api_outcomes() -> JSONResponse:
     """Realized thesis outcomes — triple-barrier + rel-return vs SPY (the learning signal that
     feeds the Brier track record). `labels` per thesis, `summary` stats, and the graded
-    `track_record`. Best-effort: returns empty-but-valid on any failure."""
+    `track_record`. Failed reads are unavailable; calibration-only failure preserves
+    the other evidence with an explicit partial status."""
     try:
         import bot  # noqa: F401 — bootstraps vendor/macro for the price accessor
         from datetime import date as _date
         from brain import calibration, outcomes, scorer
         asof = _date.today()
         realized = outcomes.realized_returns(asof)
+        calibration_failed = False
         try:
             cal = calibration.load() or calibration.compute(asof)
-        except Exception:  # noqa: BLE001
-            cal = {}
-        return JSONResponse({
+        except Exception as exc:  # noqa: BLE001 — preserve the healthy outcome evidence
+            _log.warning("outcomes calibration read failed: %s", type(exc).__name__)
+            cal = None
+            calibration_failed = True
+        payload = {
             "labels": outcomes.all_labels(asof),
             "summary": outcomes.summary(asof),
             "track_record": scorer.track_record(asof, realized=realized),
             "calibration": cal,
-        })
+        }
+        if calibration_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["calibration"]
+        return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"labels": [], "summary": {}, "track_record": {},
-                             "calibration": {}, "error": str(exc)})
+        _log.warning("outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "outcomes_unavailable",
+            "labels": None,
+            "summary": None,
+            "track_record": None,
+            "calibration": None,
+        })
 
 
 @router.get("/api/shadow_books")
@@ -2898,7 +2918,13 @@ def api_shadow_bandit() -> JSONResponse:
         from portfolio import bandit
         return JSONResponse(bandit.rank_shadow_books())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "arms": [], "error": str(exc)})
+        _log.warning("shadow bandit read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "arms": None,
+            "error": "shadow_bandit_unavailable",
+        })
 
 
 @router.get("/api/student")
@@ -2952,7 +2978,12 @@ def api_interim_marks() -> JSONResponse:
         from brain import interim_marks
         return JSONResponse(interim_marks.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {}, "error": str(exc)})
+        _log.warning("interim marks read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "interim_marks_unavailable",
+        })
 
 
 @router.get("/api/engine_backtest")
@@ -3113,14 +3144,14 @@ class _MMAIActNudgesReq(BaseModel):
     codes: list[str] | None = None    # missing/empty = all currently open nudges
 
 
-def _mastermind_ai_mutation_module():
+def _portfolio_loop_mutation_module():
     """Load the incumbent mutation owner before any effectful method is called."""
     import bot  # noqa: F401
     from brain import mastermind_ai
     return mastermind_ai
 
 
-def _mastermind_ai_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
+def _portfolio_loop_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
     return JSONResponse({
         "ok": False,
         "effect_status": effect_status,
@@ -3134,16 +3165,16 @@ def api_mastermind_ai_settings(req: _MMAISettingsReq) -> JSONResponse:
     """Operator settings patch — bounded to the known mastermind_ai keys (unknown/out-of-range
     keys are rejected, never applied)."""
     try:
-        mastermind_ai = _mastermind_ai_mutation_module()
+        mastermind_ai = _portfolio_loop_mutation_module()
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio settings setup failed: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_settings_unavailable", effect_status="not_applied", retry_safe=True)
     try:
         return JSONResponse(mastermind_ai.update_settings(req.settings or {}))
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio settings update effect unknown: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_settings_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
@@ -3153,16 +3184,16 @@ def api_mastermind_ai_directive(req: _MMAIDirectiveReq) -> JSONResponse:
     snapshot push, ingested by the next nightly macro build). Intake-scrubbed: secrets,
     env names, and $-amounts are refused — this text lands on a public artifact."""
     try:
-        mastermind_ai = _mastermind_ai_mutation_module()
+        mastermind_ai = _portfolio_loop_mutation_module()
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio directive setup failed: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_directive_unavailable", effect_status="not_applied", retry_safe=True)
     try:
         return JSONResponse(mastermind_ai.add_directive(req.text))
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio directive effect unknown: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_directive_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
@@ -3173,16 +3204,16 @@ def api_mastermind_ai_act_on_nudges(req: _MMAIActNudgesReq) -> JSONResponse:
     as a standing grant via the auto_act_on_findings setting (in which case run_cycle drafts
     them automatically). Every drafted text passes the same intake scrub as a typed one."""
     try:
-        mastermind_ai = _mastermind_ai_mutation_module()
+        mastermind_ai = _portfolio_loop_mutation_module()
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio nudge-action setup failed: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_act_on_nudges_unavailable", effect_status="not_applied", retry_safe=True)
     try:
         return JSONResponse(mastermind_ai.draft_directives_from_nudges(req.codes))
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio nudge-action effect unknown: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_act_on_nudges_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
@@ -3191,16 +3222,16 @@ def api_mastermind_ai_run() -> JSONResponse:
     """Run one self-improvement cycle now (non-LLM, observational; same code path as the
     nightly loop_maintenance step)."""
     try:
-        mastermind_ai = _mastermind_ai_mutation_module()
+        mastermind_ai = _portfolio_loop_mutation_module()
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio manual-run setup failed: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_run_unavailable", effect_status="not_applied", retry_safe=True)
     try:
         return JSONResponse(mastermind_ai.run_cycle(trigger="manual"))
     except Exception as exc:  # noqa: BLE001
         _log.warning("mastermind portfolio manual-run effect unknown: %s", type(exc).__name__)
-        return _mastermind_ai_mutation_failure(
+        return _portfolio_loop_mutation_failure(
             "mastermind_ai_run_effect_unknown", effect_status="unknown", retry_safe=False)
 
 

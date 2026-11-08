@@ -1,15 +1,17 @@
 # MastermindX lightning CI architecture and execution plan
 
-Updated: 2026-11-07, 20:00 UTC evidence milestone. Engineering targets below remain unachieved.
+Updated: 2026-11-07, 22:10 UTC evidence milestone. Engineering targets below remain unachieved.
 Program: existing Mastermind #917 / #1607, Macro #6351 and WS:CI-MERGE-CONTROL-PLANE.
-Source carrier: Mastermind #2191 / `ci-lightning-architecture-20261107-c2`.
+Accepted architecture: [#2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191), merged as [accb4a6b](https://github.com/mastermindx-market-intelligence/Mastermind/commit/accb4a6bcc1f721b93b10f43881cda67eca104ea).
+This revision continues the same source document on a fresh follow-up carrier; the merged #2191 branch is retired.
 
 Verified procedure pin: Mastermind protected `66780ab7e3e9fdbfd40713bb5791fb1888529f7c`,
 INDEX `b69d45de68d1f1c31d12dcf5203037122c694711`, skillpack 1.0.1 / bootstrap 1.
 The compatible pin and same-SHA source laws govern this execution.
-Current inspected composition bases are Macro `07c55fb9e2c60dde232b6ad8b436fb2239cfd9ad`
-and Terminal `f8c845b94d6b799b6ca294328859bd086bf8b64f`.
-Macro's admission controller was separately inspected at `309cbf2511bcedbddf8a221acb4f942a0b79988c`.
+Current composed Mastermind source includes protected `20e17eb2985710f1509a5726f3719e5b8d6a37a7`.
+The complete intervening protected-source censuses preserve the verified law pin; no governing guide changed.
+Macro's completed #10788 consumer tested `1aadfe404d99f456a8adae2b0541541231f68b07`; Terminal's #1341 unit consumer tested `3fe618a630bd1ace2f9e1635c376d3e7cded7eca`.
+The next Terminal source review uses protected `d83970570b4feb78f75105606dd27b63e88151e0`.
 These are inspected source boundaries, not a claim that protected branches stopped advancing.
 This extends P3.O3 / Phase 4 of the existing
 [delivery-turnaround task tree](superpowers/plans/2026-11-02-delivery-turnaround-execution.md).
@@ -26,6 +28,7 @@ source receipts and earlier implementation history remain immutable in
 [the 16:00 source-linked evidence record](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8b549d74e3977e7e37749b623a224e30423c75d6/docs/CI_LIGHTNING_ARCHITECTURE.md).
 The preceding milestone is also immutable at
 [980429a1](https://github.com/mastermindx-market-intelligence/Mastermind/blob/980429a1ffdc30fac79c36f87e7d766539967ee0/docs/CI_LIGHTNING_ARCHITECTURE.md).
+The accepted [20:00 architecture milestone](https://github.com/mastermindx-market-intelligence/Mastermind/blob/accb4a6bcc1f721b93b10f43881cda67eca104ea/docs/CI_LIGHTNING_ARCHITECTURE.md) retains the preceding full frontier.
 Those historical statuses do not supersede the current disposition below.
 
 ## Outcome and completion criterion
@@ -43,28 +46,27 @@ local test, isolated runner canary, green workflow or plan is evidence at its ow
 
 ## Current disposition
 
-**The architecture is concrete and several delivery slices are qualified; the
-three-repository upgrade is not accepted and no five-minute p95 is claimed.**
-The remaining gap is dominated by mandatory qualification and large executable
-units, in addition to source freshness and a few unresolved original effects.
+**The master architecture is accepted into source, and several implementation slices have real native consumers. The three-repository speed upgrade is incomplete; no five-minute p95 is claimed.**
+
+The remaining work is a concrete task graph: reduce oversized execution units, eliminate repeated acquisition/construction, make independent mandatory work schedulable, qualify enough isolated capacity, then prove the complete natural delivery path. Faster selected commands alone do not satisfy the objective.
 
 | Lane | Current source and evidence | Remaining gate |
 | --- | --- | --- |
-| Mastermind parallel execution and RWE, [#2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Published `9e36bab664078f20bdd4115466ad4b23f98a4a86`, including four qualified local commits. Fresh required [42407487042](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42407487042) has successful source qualification and shard 2, but shards 4 and 5 are red at this milestone; another shard remains active. | Diagnose the newly observed predecessor-fixture hash mismatch and installed-ASGI assertion. Consume the complete current native receipts, including RWE [42407487040](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42407487040). A new positive H1 invocation does not settle the older invocation. |
-| Mastermind controlled profile experiment | Frozen `d26440a`: serial [42398700247](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42398700247) passed; four-process [42402970898](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42402970898) failed. Both cover 2,334 complete module companions / 70,693 cases with exact collection/finished identity parity; two modules differ in outcome. | The trial has complete diagnostic evidence but failed parity. Its timings are not an accepted speedup. The two demonstrated source defects were repaired and locally qualified before publication. |
-| Mastermind fixtures, partition and diagnostics | Published commits `2c433be8`, `dc4f4aa6`, `e888d046` and `9e36bab6`. Trend 44 cases remain conserved across 17/16/11 modules; immutable fixture reuse and copy isolation preserve real consumer work. H1 diagnostics retain only bounded public admission fields. The two RWE repairs pass 425 tests across four complete owning files. | Bind every benefit to native Linux evidence and the whole required path. Original release/settlement holds remain separate. |
-| Macro narrowed-pack compaction, [#10752](https://github.com/mastermindx-market-intelligence/macro/pull/10752) | Head `5e23be9cd4f73bfb298206ddd79886ef9d9e168e`; [42397007951](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42397007951) passed: 319 logical jobs / 691 semantic steps, about 89m20s. Enrolled once through the existing MOG label after a clean admission fence. | Current catalog changes stale that proof under the existing policy. Consume the existing controller's full refresh disposition. A natural genuinely narrowed consumer, rather than a full fallback, must still prove latency benefit. |
-| Macro two-interpreter FIF, [#10658](https://github.com/mastermindx-market-intelligence/macro/pull/10658) | Head `9f3fe48a28c5d3fe45494ad111a63742efbc1737`; [42400346906](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42400346906) passed: 97 logical jobs / 290 steps. All 120 file launches are observed; the kernel group takes 1,854.396s. The narrow scope-only correction is now published at `dc90e19d8b2764a8a5592cf5f2d0f15849403cb8`, after 20 owning tests passed. | The implementation remains far outside the final budget. Consume new-head checks while preserving controller state, and compose with the split once. |
-| Macro FIF split/composition, [#10788](https://github.com/mastermindx-market-intelligence/macro/pull/10788) | Remote remains `4281c188`; local main integration `50e1994190c8d78de17f738dea6bc8c3dfde17ac` preserves accepted main. The local composition uses the incumbent helper in 44/37/39 sibling lists, preserving 120 unique targets. Eight-file qualification produced 570 passes, 10 subtests, two existing sparse-checkout skips and one real dependency-closure failure. | Added the missing helper path to the existing control-plane owner and narrowed the worker assertion to FIF. Qualify those changed inputs. Original International timeout still lacks whole-tree settlement; do not replay its old command or restore its workspace. |
-| Terminal isolated runner lane, [#1306](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1306) | Head `418f44dd`; hosted-default [42397250070](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42397250070) passed all 19 jobs. Browser inventory is 4,693: 3,693 pass, 999 skip, one flaky, zero final failures. | Restricted-runner trust, isolation, capacity and rollout remain separate. No fleet variable or runner was activated. |
-| Terminal readiness, [#1338](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1338) | Head `92c5b806b4168f1cd011d25044e3355aa32011e9`; [42399940917](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42399940917) passed all 19 jobs. All 14 startup probes succeeded. Browser inventory is 4,693: 3,690 pass, 999 skip, four flaky, zero final failures. Native queue admission is confirmed. | Consume the actual integrated queue result. The longest browser job is 54m05s; readiness repairs reliability and attribution, not the full runtime. No zero-retry or skip-reason-audit claim. |
-| Terminal topology/tracing, [#1223](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1223) | Draft `e3486290`; original create-commit effect remains uncertain. Existing 7/5/5 topology, tracing, timings and Node discovery source is preserved. | Original invocation/commit receipt remains required. Bounded lookup is exhausted; do not replay, re-home or duplicate the held implementation. |
-| Durable continuity | Accepted Macro #10825/#10827 remain immutable. Fresh original continuity carrier [#10841](https://github.com/mastermindx-market-intelligence/macro/pull/10841) updates only the existing W-ACCELERATION wave. | Publish this consolidated source/evidence milestone and read back its exact document and continuity references. |
+| Mastermind parallel execution and qualification, [#2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Published e6737ba03, including protected 20e17 and three explicit qualification lanes. Three-lane contracts:791 passed; preceding protected-source composition:271 passed; final composed cold/purity cohort:137 passed. Natural [required42419148121](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42419148121) and [RWE42419148128](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42419148128) queued at publication. | Consume their exact tested source, twelve-job fan-in, full outcomes and stage timings. Preserve the original H1/Gateway/initializer holds; no merge enrollment. |
+| Mastermind cold compiler repair | Published2b36 and retained in e673. Original qualification800 passed, one unchanged real-root-only skip; exact final cold contracts137 passed. Three pure helpers moved with identical ASTs; default root resolution made lazy without changing canonical resolution. | Current native consumer must prove the cold-import guard and original workflows. Local qualification is not a native performance receipt. |
+| Mastermind controlled comparison | Frozen d264 serial succeeds and four-process trial fails two module outcomes; complete 70,693-case identity parity is retained. Later ce38 required/RWE consumers cover71,571 cases with one cold-guard outcome difference. | Preserve failed experiments. Neither differing outcomes nor differing environments establish controlled speedup. Measure hot units after current-source correctness is established. |
+| Macro narrowed packs, [#10752](https://github.com/mastermindx-market-intelligence/macro/pull/10752) | Existing one-time MOG enrollment retained. Complete prior native proof:319 logical jobs/691 steps; 89m20s. | Existing freshness controller owns refresh/admission. A genuinely narrowed natural consumer must still prove latency benefit. No manual refresh or rearm. |
+| Macro two-interpreter FIF, [#10658](https://github.com/mastermindx-market-intelligence/macro/pull/10658) | Current dc90 [native 42408989367](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42408989367) succeeds:97 selected jobs/290 steps,47m11s. Original120 modules execute; kernel group2,020.853s. Existing MOG retained. | Its composition with the split is now separately proved below. Do not infer five-minute performance from fresh-interpreter isolation. |
+| Macro composed split, [#10788](https://github.com/mastermindx-market-intelligence/macro/pull/10788) | Published5e7; [native 42412023592](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42412023592) succeeds:321 logical jobs/694 steps,63m22s. All120 FIF modules execute exactly once across44/37/39 siblings; 4,253 passed/one skipped. | Current checks are ready, but the explicit #10764-before-#10788 sequencing prerequisite remains: #10764 is still open/merge-blocked. Keep #10788 unarmed while advancing that original dependency. Fresh International success does not settle the old timed-out invocation. |
+| Macro contract-analysis census, [#8094](https://github.com/mastermindx-market-intelligence/macro/pull/8094) | Published372935 with current-main composition; natural [42415102365](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42415102365) still running at the22:04 read. Complete manifest validation remains before curated-only inference; ordinary planner and other five census classes are unchanged. | Draft/unarmed, semantic release hold retained. The refused long benchmark/Fabric action is not replayed. Partial natural CI is not full-finding or wall-time equivalence. |
+| Macro materialization, [#6351](https://github.com/mastermindx-market-intelligence/macro/issues/6351) | Existing W-SELFHOSTED-BRIDGE owner; W3 closed. Current depth-one pack fetches range from173s to1,267s in completed observations; all 147,038 paths are materialized. | Implement the conservative full-default execution-materialization contract described below; first qualify earnings-economic-dossier. Existing #10803 history repair stays on its own carrier. |
+| Terminal readiness, [#1338](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1338) | Merged as69c38931 after successful integrated [42407566693](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42407566693). All prior 14 startup probes and full12-shard browser proof retained. | Accepted work: do not reopen. Reliability improvement does not close browser or unit runtime. |
+| Terminal capture producer, [#1341](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1341) | Published05a; one-time native admission retained. [42414479074 unit job](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42414479074/job/128529577756) succeeds:20,424 passed/50 skipped/three todo,48 Node contracts, current-capture records-mode consumers pass. Full browser matrix still pending at the recorded snapshot. | Consume final native verdict and integrated queue outcome. The650s capture and307s npm-test phases remain outside budget. No matched causal speed claim. |
+| Terminal next source slice | Ticker first-load design removes17 redundant explicit documents,74→57, while retaining21 project cases/14 enabled/seven expected skips and every later presentation reset. Exact owner bytes match tested 3fe618 and protected d839. | Implement on a source-disjoint canonical workspace; prove actual document requests and original recovery/symbol/theme/language behavior. A source operation count is not a runtime result. |
+| Terminal held topology / fleet | #1223's original mutation remains uncertain. #1306's hosted defaults are native-qualified; fleet administration was denied. | Do not duplicate topology/traces/Node-discovery work, replay its mutation, or activate a restricted fleet without the exact authorized control. |
+| Durable ownership | Accepted architecture#2191; existing Agent OS [#10841](https://github.com/mastermindx-market-intelligence/macro/pull/10841) at 528eb8e, one MOG enrollment retained. | Update the same W-ACCELERATION frontier at material milestones and verify exact source readback. |
 
-The operating sequence is: finish qualified original-carrier deliveries; repair
-concrete native defects; make remaining expensive units independently schedulable;
-qualify enough isolated capacity; and demonstrate the complete end-to-end budget
-on natural traffic. A green slice does not close the product upgrade.
+Execution remains within existing source, planning, proof, delivery and admission owners. No new scheduler, queue, worker daemon, result authority or materialization programme is introduced.
 
 ## Historical intake baseline
 
@@ -219,15 +221,7 @@ fixture sharing, contention, package versions and runner class change those cost
 The matched d264 RWE pair now exists, but the parallel trial failed two outcomes;
 its elapsed reduction still cannot be accepted as a qualified speedup.
 
-Macro's current FIF-B unit has an observed 1,706.863s command; the newest completed
-FIF-C command reports 1,213.133s. Its International composite consumed a 1,200s
-deadline. Weight correction improves placement but cannot make these units fit 190s.
-The latest two-interpreter FIF kernel group still takes 1,854.396s. Terminal's
-latest readiness-qualified workflow has a 53m16s browser command and a separate
-425s capture-validation step; its historical four-worker canary also reported 431s
-of one shard's test work. These facts make granularity and work reduction mandatory,
-alongside capacity qualification. They are different measured units and profiles,
-not additive estimates or a causal speed comparison.
+The current composed FIF commands still take629.906s,820.212s and765.374s; Macro's full run retains a2,742s pack execution tail. Its checkout alone can exceed twenty minutes. Terminal's newly qualified capture is650s and npm-test307s, while the prior full browser matrix has a53m16s command. These different units independently exceed their design allocations. Work reduction, task granularity, materialization and qualified capacity must close together; they are not additive or causal speed comparisons.
 
 Capacity is chosen only after measuring the fresh graph. Model concurrent runs,
 jobs per run and workers per job together; include memory, ports, browser/server
@@ -241,7 +235,7 @@ No new runner, scheduler, queue, lease store or admission plane is introduced.
 | Mastermind merged #2044 / #2129 / #1570 and profiler | Six outer shards, trusted merge-group scope, exact-SHA postmerge reuse and ci-profile | Extend their contracts; do not reconstruct them. |
 | Mastermind #2065 | Four prepartitioned child interpreters, exact cover, terminal receipts, observer, RWE adapter, physical capacity-test partition | Complete matched-profile proof, hot-unit work and current required source qualification. |
 | Mastermind reserved #1714 | SDK/runtime lane at `47164aef5c1cf928f0618be28996d465c9564efa`, including `pyproject.toml` and both RWE locks | Regenerate lock provenance from the combined inputs when composed. The narrow pytest qualification does not complete this future integration. The reservation alone proves neither a live writer nor a global exclusive fence. |
-| Macro #10788 + #10658 | 120 FIF modules; #10788's 44/37/39 split and #10658's one fresh interpreter per file, with at most two files running concurrently | After current-main qualification, use the existing helper on each split sibling's own file list. Add its path to all three closures: 1,139 → 1,140 raw entries and 1,135 → 1,136 unique paths each; preserve the four existing duplicates. Declare the helper in the exclusive control-plane owner too. Preserve B's P2/G-pack/Node ownership and ancestor-package additions. |
+| Macro #10788 + #10658 | 120 FIF modules; #10788's 44/37/39 split and #10658's one fresh interpreter per file, with at most two files running concurrently | Implemented and native-qualified at 5e7: the existing helper runs each split sibling's own file list. Its path is in all three closures: 1,139 → 1,140 raw entries and 1,135 → 1,136 unique paths each; preserve the four existing duplicates. Declare the helper in the exclusive control-plane owner too. Preserve B's P2/G-pack/Node ownership and ancestor-package additions. |
 | Macro #10738 | Historical failed four-worker shared-xdist experiment | It is not a qualified two-to-four-worker progression or fallback for #10658. |
 | Macro #10752 | Genuinely narrowed-plan compaction and exact baseline/full/off/shadow fallback | Keep twelve-slot output, selected-job objects/digests/order and real consumer closure. |
 | Macro #10735 / #10745 / #10764 | Control-plane family split, replay environment, manifest-scoped freshness | #10755 cap 640 and #10770/#10766 are accepted. Preserve #10674's original uncertainty, then compose #10745 and #10735 through their original owners. |
@@ -249,226 +243,113 @@ No new runner, scheduler, queue, lease store or admission plane is introduced.
 | Terminal accepted #1320 / #1324 / #1297 / #1334 | Native browser deduplication, scoped QA, trusted docs scope and accepted News navigation repair | Preserve their selectors, original journeys and required aggregate. #1297 acceptance is `90ddc139`; no redo. |
 | Terminal #1306 | Optional lane binder, selected ports/workers, trust/isolation/rollback runbook | Published scoped-CI integration is independent of fleet activation and #1223's held mutation. |
 | Terminal #1223 | Already-authored weighted topology, traces, attempt timing and Node discovery | Reconcile its original create-commit. A new implementation on another carrier would duplicate held work. |
-| Terminal #1338 | Existing context-entry repair and actual EN/ZH evidence | The new fixture-startup slice remains in the existing helper; preserve app assertions, runtime, topology, traces and historical evidence. |
+| Terminal accepted #1338 | Context-entry repair, actual EN/ZH evidence and strict fixture-startup probe | Merged69c38931; preserve app assertions, runtime, topology, traces and historical evidence. |
 
 ## Critical-path evidence and consequences
 
-The following historical native observations remain useful cost attribution. Current exact-head results are in the execution frontier:
+These are actual completed native measurements. They come from different runs and environments; comparisons are observational unless explicitly qualified.
 
-| Observed source/run | Component | Measured elapsed | Decision |
-|---|---|---:|---|
-| [Terminal 42302235414](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42302235414), mobile 2 | Playwright test / whole job / npm ci | 3298 / 3345 / 17 seconds | Test execution is 98.6% of this job. Prioritize browser/runtime/fixture work over another dependency cache. |
-| Same Terminal run | Unit job / current-checkout capture / Vitest | 1013 / 544 / 285 seconds | Capture and Vitest account for 81.8% of the unit job. Browser-shard tuning alone leaves a roughly 17-minute constraint. |
-| [Mastermind serial run 42331481657](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42331481657), shard 0 | Whole job / pytest / native application custody | 2131 / 1437 / 373 seconds | The serial qualification prefix must be included in the graph, not hidden inside pytest averages. |
-| Same Mastermind run, shards 2 / 3 | Pytest | 1655 / 1683 seconds | Broad serial execution is still expensive across several shards. |
-| [Mastermind xdist candidate 42202096909](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42202096909), head b3fdd6ad | Shard 0 whole / pytest / custody / private HTTP compatibility | 1650 / 956 / 382 / 125 seconds | Four workers improve the pytest part, while qualification before pytest dominates the remaining tail. |
-| Same xdist candidate, shard 2 | Whole / pytest | 1330 / 1226 seconds | The longest test granules still need work. Other shard jobs were 620-998 seconds. |
+| Native source/run | Observed cost | Architectural consequence |
+| --- | --- | --- |
+| Mastermind ce38 [required42410396607](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42410396607) | Source qualification590s; required verdict15m58 with the cold-compiler failure | Qualification is independently too large. Three explicit lanes are now implemented; new queue/setup costs still count. |
+| Mastermind ce38 [RWE42410396564](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42410396564) | Successful33m15; outer receipt durations1,194.90–1,751.46s; aggregate waited158s, then executed4s | Pytest work and aggregate scheduling remain large constraints after the qualification split. No worker-count inference from wall time alone. |
+| Macro #10658 [42408989367](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42408989367) | Contract-delta job 883s:100s checkout and767.4s analysis command | A mandatory independent analysis branch exceeds300s by itself. #8094 addresses one census band, not the entire branch. |
+| Macro #10788 [pack 0](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42412023592/job/128522729070) / [pack 1](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42412023592/job/128522729142) | Exact depth-one fetch1,266.824s /850.457s; subsequent checkout63.881s /91.416s; 147,038 paths each | Do not propose depth0→1 as an unimplemented pack optimization. Separate acquisition and materialization; current logs do not split network/remote/local Git cost. |
+| Macro #10788 [pack 3](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42412023592/job/128522729066) | Fetch173.013s plus checkout93.552s; 147,038 paths | Object caching can reduce acquisition; a verified execution closure can also reduce worktree writes. Neither saving is yet measured for a qualified W4 profile. |
+| Macro #10788 FIF | Three kernel commands629.906s,820.212s,765.374s; original 120 modules all complete | The composed split has a real consumer and preserves module coverage, but each command remains far beyond190s. Do not add concurrent command durations as verdict wall. |
+| Macro #10788 last pack 6 | Validate/run step 2,742s; full verdict63m22s | The next command-level owner must be identified from that actual tail. FIF tuning alone does not close the graph. |
+| Terminal integrated readiness [42407566693](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42407566693) | Unit1,297s: capture 698s, Vitest 408s, other191s | The independent unit path remains a separate budget constraint after browser reliability improves. |
+| Terminal #1341 [unit128529577756](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42414479074/job/128529577756) | Unit1,107s: capture 650s, npm-test307s, typecheck79s | One redundant composition read is removed and native consumers pass. Further capture and unit graph work is still required. |
 
-These different runs are observational comparisons with potentially different source
-and load. They do not establish a controlled causal speedup.
+For a workflow DAG, latency follows the actual dependency path, including every queue/setup/collection/readiness interval and final aggregation. Summed concurrent durations describe work consumption, not latency. Conversely, serial prefixes cannot be modeled as parallel.
 
-For a workflow DAG, measure queue + setup + collection + the actual dependent
-execution path + aggregation. Concurrent job durations are not added to estimate
-latency; their sum is compute consumption. Conversely, a serial prefix and its
-dependent shard cannot be treated as parallel.
+### Why the three Mastermind qualification lanes are needed
 
-### Amdahl and test granularity
+The590s source-qualification observation includes approximately 63s setup,2s preflight,31s Paper,179s Fabric,7s compile/shell,215s native bundle,40s capsule and49s Brain acquisition/composition. The native bundle contains13.95s of unittest prelude plus200.59s of native pytest.
 
-The historical 788.9-second capacity-artifact module imposed a 13m09s constraint
-while it remained one unchanged unit under xdist loadfile. The [xdist distribution
-contract](https://pytest-xdist.readthedocs.io/en/stable/distribution.html) keeps all
-tests in one file on one worker. The published #2065 execution slice has physically split
-that module into twelve coherent files while preserving all 466 cases. This removes
-that particular indivisible unit; it does not establish a five-minute full run.
+After setup, the approximately 523s of work cannot fit two perfectly balanced lanes inside the210s qualification budget: the idealized split is261.5s per lane before new overhead. The implemented three-lane grouping puts native pytest, Fabric, and the remaining core work on separate jobs; the unittest prelude stays intact in the core lane. This is a dependency-preserving design based on observed components, not a prediction that the new jobs will finish in 201/179/143s. Fresh setup, contention and scheduling must be measured.
 
-Macro's old 1630-second FIF unit divided perfectly into three remains approximately
-9m03s per sibling before setup. The observed 69-minute pack also shows that
-calibration, nested execution or fixture behavior differs from that old estimate.
+### Amdahl, total work and task granularity
 
-The next optimization must therefore do one of the following with evidence:
-remove repeated deterministic fixture construction, shorten legitimate individual
-test work, separate independent fixture-affinity groups, or place the same work on
-qualified faster capacity. Increasing timeouts or deleting assertions is not an
-optimization. Parallelism is bounded by:
+The old788.9s capacity-artifact file has already been physically split into twelve coherent files preserving466 cases. Trend's44 cases have already been divided into17/16/11 complete units. Do not redo those accepted transformations.
 
-`concurrent runs × jobs per run × workers per job`
+The next optimization must remove repeated deterministic construction, shorten legitimate work, separate independent fixture-affinity groups, or qualify faster execution capacity. Timeout increases, retries and assertion deletion do not qualify. Choose concurrent runs × jobs per run × workers per job together, with real memory/ports/browser/server/setup demand and the incumbent admission budget.
 
-Choose all three together. Reserve capacity for the existing merge/admission path
-through its current owner. Do not create another reservation service.
+The historical10,565.219 module-seconds /24-process440.217s ideal-balance model is not CPU service or a hard lower bound. It does show why placement alone cannot justify the190s fresh-execution budget on an assumed unchanged profile. Actual task demand and admitted capacity must close together.
 
 ## Repository implementation design
 
 ### Mastermind
 
-Keep `ci_pr_scope.py`, `ci_parallel_shard.py`, `ci_pytest.py`,
-`ci_pytest_timing.py`, `ci_xdist_guard.py`, `rwe_env.py` and the existing
-workflow/aggregate as the owners.
+Keep the incumbent scope, shard, pytest timing, xdist guard, RWE environment, workflow and postmerge-proof owners.
 
-1. **Use the completed controlled comparison to finish correctness.** The existing
-   RWE workflow ran processes 0 and 4 sequentially on frozen d264 source. All twelve
-   receipt archives match the lock, realized package environment and vendored Macro
-   pin. Collection and finished identities match for all 70,693 cases; two module
-   outcomes failed. Preserve the [complete comparison](CI_RWE_CONTROLLED_PAIR_20261107.json),
-   qualify the two repairs in the natural new-head consumer, and resolve newly
-   observed current-source defects before accepting speed. Do not compare the
-   unlocked required profile to the RWE lock as a controlled experiment.
-2. **Retain precollection partitioning.** Six outer jobs each receive their
-   canonical module selection; four independent child interpreters collect only
-   their assigned subsets. Keep independent partition domains, exact once-only
-   cover, private child directories and complete receipts. Do not nest another
-   four xdist workers inside each child. Serial remains the explicit control.
-3. **Reduce fixture construction with outcome conservation.** Trend now constructs
-   its synthetic holdout once per function-scoped fixture and returns a fresh
-   deep copy on every loader call. The independent reproducibility a/b runs,
-   seeds, horizons, all 44 tests and production code remain unchanged.
-   Capacity's optional crash-module seed shares only immutable Git producer
-   construction; every case receives an ordinary full copy and builds its own
-   real transport. All descriptor, ownership, fsync, repair, replay and rollback
-   operations still run. The shared helper's default remains independent.
-4. **Prioritize actual native hot units.** At `9a849c4e`, Trend reports 182.691931s
-   in serial and 208.098650s in required parallel, with 44 cases. Capacity crash
-   replay reports 106.928820s and 68.532505s respectively, with 18 cases.
-   These are summed pytest phase durations under different profiles. Trend is
-   the clearer remaining 90s-unit obstacle. That partial slow-case
-   evidence produced a published, locally qualified three-module split: 17 core,
-   16 reference and 11 run-contract cases. All test bodies, decorators, parameters
-   and support ASTs are preserved from the qualified fixture candidate. The
-   existing selector places them at outer/child 3/0, 3/1 and 4/0 without any new
-   pins or movement of unrelated modules. Obtain native timings for those units. No statistical scenario or
-   independent reproducibility run may be removed to hit the target.
-5. **Shorten the independent qualification branch.** Earlier source qualification
-   took 10m15s; the latest source-qualification job is 7m04s. These observations
-   are not a controlled comparison. The existing design extracts source qualification from pytest
-   shard 0; it still needs genuinely independent qualification jobs or reduced
-   repeated setup. Advance the required aggregate and exact postmerge job-set
-   contract together, with the original negative proofs intact. Never claim
-   a pytest-only speedup closes this serial qualification cost.
-6. **Retain H1 diagnosis at its existing owner.** The earlier native refusal is
-   before model command/reservation, but its admission snapshot was discarded
-   and the positive fixture did not prove settlement. A bounded
-   allowlisted admission-reason/scalar diagnostic is now published at
-   the existing H1 reporter: 96 synthetic cases pass. The new required shard 2
-   passed, binding a fresh invocation only.
-   Do not change admission thresholds, positive assertions, settlement rules or
-   mount generic Git diagnostics into its deliberately Git-less container.
-   This source repair cannot retroactively clear the original hold.
+1. **Consume the current source before changing it again.** Published e673 composes protected 20e17, the cold compiler repair, exact historical observer cohorts and three qualification lanes. Required42419148121 and RWE42419148128 are the natural consumers. Establish actual tested merge/tree and complete per-module outcomes before accepting current-source correctness or performance.
+2. **Keep the current fixed-capacity partition.** Six canonical outer pytest jobs have four independent serial child interpreters, exact once-only module coverage, private diagnostics and terminal receipts. Do not nest another four xdist workers inside them. The separate guarded native qualification keeps its existing four-worker command.
+3. **Keep all three mandatory qualification lanes in the required graph.** Core owns Paper/Studio/compile/shell/unittest-prelude/capsule/Brain; Fabric owns the complete Fabric block; native owns the intact guarded pytest block. Each pays setup and queue. All commands remain present exactly once. The aggregate requires all three successes on full scope and all three skips on fast scope.
+4. **Use the exact twelve-job postmerge contract.** Scope, fast, six pytest jobs, three source qualifications and aggregate must match exact source/actor/workflow/attempt/freshness and mandatory-step ownership. Missing, duplicate, wrong-job, stale, unknown or old10/11-job proof falls back to full selected pytest. This implementation has791 passing local contract tests; hosted qualification is pending.
+5. **Continue measured hot-unit reduction.** Trend's construction/copy isolation and17/16/11 partition, capacity's immutable Git seed plus fresh per-case copies, and current observer identity are already implemented. Consume their native phase receipts; choose the next above90s unit from actual composed-source data. Never cache a security, admission, transport or crash-replay verdict.
+6. **Preserve original effect and release holds.** The new bounded H1 diagnostic and fresh successful invocations do not recover the old ATT1/process-settlement receipt. Gateway/initializer release conditions remain separate. The current source work does not install, enroll or activate runtime components.
 
-The rejected fixture-template experiment from the historical ledger remains
-DO_NOT_REDO: it produced no whole-module improvement. The current immutable
-producer and synthetic-holdout experiments are distinct, explicitly measured
-construction work. No Git/security/admission outcome is memoized.
+The cold repair moves three AST-identical pure helper functions to the existing pure entry owner and makes one identical default-root resolution lazy. It preserves updater CLI bootstraps, security joins and canonical symlink behavior. Final composition passes all 15 cold/adoption and122 original purity tests; it does not weaken the cold guard.
 
 ### Macro
 
-Keep `ci_pr_scope.py`, `run_ci_pack.py`, `ci_semantic_proof.py`, the
-`ci-plan → ci-pack → ci-gate` workflow and `merge_on_green.py`.
+Keep the existing semantic planner, catalog, dependency inference, pack runner, proof producer, gate and MOG controller.
 
-1. **Deliver the qualified original-source integration.** #10658's
-   current-main composition at `9f3fe48a` preserves accepted `c4844c22` and the
-   `press-account-claim-consumer` owner. Its natural native run completed all 97
-   selected jobs / 290 steps successfully. Retain that exact source proof when
-   publishing the narrow test-only ownership correction; new-head required
-   checks still belong to the normal controller. The sparse local import check
-   alone never proved the sealed sector-cycles renderer/manifest path.
-2. **Compose split and fresh-interpreter scheduling once.** Keep #10788's exact
-   120-file union and sibling ownership; apply the existing two-worker
-   helper inside each sibling. Each file runs once in a fresh interpreter, with
-   at most two files running concurrently. This isolates Python process/import
-   state; the helper shares the working directory and environment and does not
-   itself isolate filesystem paths or ports.
-   Keep helper selection paths in every affected closure and test all three
-   invocations. The local composition exposed one concrete missing helper input
-   in `ci-control-plane-contracts`; add that single path and requalify the affected
-   planner/fragment checks. The shared-xdist experiment remains failed evidence.
-3. **Expose real command units and settlement.** In the existing command owner,
-   keep execution deadline, bounded cleanup and confirmed terminal settlement
-   distinct. An already-expired execution deadline must not eliminate cleanup's
-   observation budget; an attempted kill is not a descendant-disposal receipt.
-   Unknown settlement continues to withhold dependent work. This source design
-   does not settle the original invocation or authorize its fixed-path replay.
-   The International job currently combines browser
-   installation, canonical-main acquisition, 442 builder/template tests, a
-   199-case DOM command, table filtering, IM13 Python/browser and IM14
-   Python/browser proof under one deadline. Represent separable units through
-   the incumbent manifest with their closure and ordering contracts. Preserve
-   frozen-main preparation and workspace restoration boundaries. Concurrent
-   mutable commands in the same checkout are not a safe shortcut.
-4. **Reduce measured repeated construction.** The foundation browser file's
-   18 tests account for 276.891s of the completed 277.456s DOM command.
-   Its helper renders HTML via synchronous Python and launches/closes Chromium
-   per call. After the original settlement boundary clears, attribute render,
-   launch, navigation and assertion time. Qualify immutable rendered-variant
-   reuse if it helps; keep the no-payload, stub, ordinary and states variants
-   distinct and preserve fresh browser/context isolation. IM13 already caches
-   its own three variants, providing an existing design precedent.
-5. **Keep placement honest.** Published measured weights are FIF-B 1,707,
-   International 852, ontology 350, government-revenue candidate 436 and
-   BioCatalyst 308 seconds. FIF-A/C 537/538 are provisional; the completed
-   current FIF-C command is 1,213.133s, so its next calibration must reflect
-   current evidence. Distinguish installation, checkout, canonical-base
-   acquisition, candidate execution and exact-base replay.
-6. **Consume narrowed-pack compaction naturally.** #10752 is additive only for a
-   genuinely narrowed active selection whose maximum modeled weight does not
-   exceed the legacy partition. Full, baseline, shadow/off and global-invalidating
-   work retains its named packs. Prove the real planner-to-consumer path after
-   publication, including exactly-once logical coverage and failure propagation.
-7. **Finish existing freshness/admission work.** Preserve #10674's uncertainty and
-   the #10745 → #10735 source order. Manifest-scoped proof can survive irrelevant
-   changes only through the incumbent identity/freshness contract. Command,
-   dependency, environment and policy changes invalidate it. Main admission
-   remains OFF until its existing producer/consumer/fairness/cutover acceptance.
+1. **Deliver the proven FIF composition through existing controls after #10764 merges.** The [existing sequencing ruling](https://github.com/mastermindx-market-intelligence/macro/pull/10788#issuecomment-6674602501) preserves the freshness-before-manifest order to avoid invalidating the armed backlog. #10764 remains open at 99c6f46e with MOG/merge-blocked; no old-author approval ritual is added. #10788's 44/37/39 siblings use #10658's incumbent fresh-interpreter helper, two files at a time within each sibling. Native proof conserves all 120 module starts and completions,4,253 passes/one skip, B's P2/G-pack/Node steps and the complete 321-job/694-step gate. The local missing control-plane helper dependency was fixed and qualified before publication.
+2. **Reduce the actual largest remaining command.** The completed run's pack 6 validate/run step is2,742s. Attribute its individual commands before proposing another split. Retain source ordering, semantic IDs, original inputs, cleanup, exact-base replay and all selected work. Existing duration weights are placement inputs, not runtime promises.
+3. **Finish the mandatory contract-analysis path.** #8094 performs full manifest validation before limiting one inference census to curated jobs. It leaves the ordinary planner and five other census classes unchanged. Current-source composition is published; the original semantic/data hold and explicit long-benchmark refusal remain. Code-owner success does not mean the separately retained data-health assertions passed.
+4. **Implement W4 materialization under #6351.** Use the detailed full-default contract below; selection scopes alone are not execution closures. Do not duplicate #10803's finite provided-action history helper or the accepted object-cache design.
+5. **Preserve command settlement and replay.** An expired execution allowance must not remove cleanup's observation allowance. Attempted kill is not descendant settlement. Fresh International proof completes all current commands, including IM14 browser10-pass/zero-skip, but cannot settle the older fixed-path invocation.
+6. **Consume narrowed compaction and freshness naturally.** #10752 keeps full/baseline/off/shadow/global-invalidating behavior. Preserve existing MOG enrollment, queue limits and proof freshness. Main admission stays OFF until its own producer/consumer/fairness/cutover acceptance. #10674's original unknown custody is not a reason to abandon independent source work.
 
-Batch compatible definition changes at legitimate source boundaries to limit
-needless global proof churn. A new candidate's proof cannot retrospectively settle
-a timed-out original invocation.
+#### Contract-analysis decomposition
+
+The completed767.4s command already runs candidate/base work concurrently. Reported stages are closure478/439.2s, probes153.2/131.6s, skip census39.2/39.8s and trigger audit70.2/71.2s. #8094 targets only part of the first stage; existing AST caches are already present.
+
+Even an idealized removal of that entire first stage leaves roughly 405s including the observed checkout. This is explanatory arithmetic from one run, not a measured floor or benchmark claim. After the original permitted natural consumer is consumed, any next source change must identify its exact preserved finding set and current owner. Do not substitute a hosted benchmark for the refused long benchmark.
+
+#### W4: verified execution materialization
+
+**Owner:** existing W-SELFHOSTED-BRIDGE / #6351, with W3 already closed. #6505's P3B-B merged onAugust27; an Agent OS sentence calling it next is stale. Correct that existing owner record at the appropriate source boundary, rather than create a parallel programme.
+
+**Why current scope metadata is insufficient:** catalog paths and exclusive scopes decide selection. Exclusive scope can suppress fallback inference; wildcard/initializer coverage has separate census rules; direct-read inference omits some data-marked inputs. A tracked-path inventory proves existence, not bytes. None establishes that an executing pack may safely omit every other file.
+
+**Minimal contract and algorithm:**
+
+- Add a strictly validated optional materialization declaration to the existing catalog; default every unenrolled job to full.
+- The existing dependency owner compiles a deterministic execution closure: command/test/helper inputs, transitive first-party imports, package initializers, pytest configuration/conftests/plugins, runner/bootstrap, templates/assets/configuration/goldens/data and declared glob membership.
+- Resolve every member against the exact tested Git tree with canonical path, mode and object ID. Bind contract version and member digest inside the incumbent authoritative plan and execution-contract digest.
+- Any unresolved dynamic import, subprocess dependency, traversal, unsupported language/command/tree entry or unclassified runtime input selects full before execution. Exclusive scope does not suppress that result.
+- For each pack already selected by the current planner, materialize bootstrap union all qualified job closures. If any assigned job requires full, the pack stays full. Do not change eligibility, weights, assignment or pack count to manufacture a favorable closure.
+- Full packs retain current unfiltered depth-one checkout. Closed packs acquire and verify every required object offline before unchanged tests start. A malformed/wrong-SHA/incomplete published profile refuses; it must not silently widen after execution starts. Bounded object count is not a byte bound.
+- Preserve the same pack union through workspace restoration. Restore tracked members, remove untracked/generated contamination and reverify HEAD/profile. Git repair respects that union or refuses.
+- Validate the whole catalog, including unselected jobs, with the existing exact-tree inventory context. Missing unselected bytes must not weaken existing manifest validation.
+- Leave history-dependent consumers full initially. Preserve #10803's exact-SHA finite ancestry behavior and holds.
+- Keep exact-base failure replay full and independently pinned to the base's own runner/catalog. Never reuse the candidate closure as the base closure.
+
+**Compatibility order:** implement full-default producer/consumer semantics first, including the existing trusted main-owned executor and control-bundle contract; only then opt in a named job. Candidate source cannot demand an unsupported materialization profile from a protected consumer. Unsupported versions refuse. This infrastructure stage earns no speed claim.
+
+**First qualification candidate:** earnings-economic-dossier, the sole logical job in completed #10788 pack 2, with 2,740 passes/176 skips and one fixed pytest command. It is not yet proved closed. Establish the complete closure before enrollment; retain full if any dependency remains uncertain. Compare exact collected case identities with multiplicity, phases/outcomes and all 176 existing skip reasons. Preserve commands, dependencies, semantic IDs and job membership. Inject failure to prove full exact-base replay and normal settlement behavior. If future packing places it with an unqualified job, that whole pack remains full.
+
+**Decisive negatives:** opaque/dynamic/exclusive-hidden dependency retains full; omitted initializer/conftest/plugin/template/fixture cannot become an accepted new skip; wrong tree/OID/mode/path escape/duplicate/digest refuses; invalid unselected job still fails; modified tracked or generated/sparse-config contamination is cleared or refused; wrong ancestry and UNKNOWN replay remain unchanged; hosted and trusted consumers agree.
+
+**Existing files:** catalog, ci_scope_dependencies.py, run_ci_pack.py, ci.yml, trusted-ci-executor.yml and their existing pack/workflow/execution-profile contracts. The accepted read-only shared Git object cache can reduce origin acquisition; W4 can additionally reduce worktree writes for qualified packs. Neither replaces the other, and neither alone establishes five-minute delivery.
 
 ### Terminal
 
-Keep `ci_e2e_scope.py`, `playwright.config.ts`, `globalSetup.ts`,
-`fixtureWarmup.cjs`, visual-evidence producers/consumers and the existing required
-contexts: Quote Hub tests, Terminal typecheck + tests, and Ingest + signal-layer tests.
+Keep current scope, Playwright configuration, fixture warmup/readiness, evidence writers/readers and the three stable required contexts.
 
-1. **Preserve accepted scope and journeys.** Consume the accepted docs, responsive
-   selector and merge-group deduplication behavior. The independent context-entry
-   repair and six actual EN/ZH captures remain source-bound evidence. Report
-   reported skips separately until their reasons are audited.
-2. **Qualify fixture startup before browser work.** A single strict
-   `/api/flow?f=prophet_idx` probe qualified in all fourteen native invocations requires direct 200,
-   fixture provenance and a complete valid object with the existing schema/plans
-   shape, allowing empty plans. One deadline covers headers and body, within
-   the existing 25s client allowance; no retry or timeout increase.
-   It runs after the unchanged 14-route warmup in the same helper used by
-   Playwright and PL6 capture. Failure reports a finite classification without
-   payloads. This distinguishes failure to qualify startup from a later request failure during the browser journey.
-   It does not establish why the historical native requests stalled.
-3. **Honor the held topology owner.** #1223 already contains 7/5/5-plus-serial
-   placement, trace-on-first-retry, explicit zero-retry trace retention,
-   per-attempt timing and Node discovery. Reconcile the original effect before
-   publication. Use independent startup/source work without duplicating it.
-4. **Optimize the whole unit/capture branch.** Historical capture and Vitest
-   steps were 544s and 285s; the latest observed steps are 425s and 227.56s.
-   These are observations from different source runs. Browser-shard tuning
-   leaves that separate path.
-   Reuse same-candidate immutable capture outputs through current consumers.
-   Select fewer journeys only after proving the affected-journey contract.
-   Preserve historical evidence hashes; recapture through the legitimate
-   producer/selection path when a current source binding changes.
-5. **Retain dev mode until compiled fixture identity is coherent.** The protected
-   application has development-only auth/preview seams. A compiled experiment
-   needs the existing Supabase/Macro authorities with isolated test data and
-   a deliberately nondeployable fixture artifact. Do not widen production auth
-   bypasses to make tests pass. First qualify an original-journey canary, then
-   the complete matrix, including cold build/distribution and browser identity.
-6. **Qualify capacity through #1306.** Its hosted defaults, serial opt-ins and
-   stable aggregate are preserved and the native hosted matrix passed. Before activation,
-   demonstrate restricted runner-group trust, separate no-sudo identities/JIT
-   credentials, fresh homes and ephemeral drain, process visibility and
-   login/timer escape checks, realistic concurrent demand, and rollback.
-   The historical Default-group canary is not that fleet proof.
+1. **Retain accepted readiness and scope.** #1338 merged after integrated qualification; #1320/#1324/#1297/#1334 remain accepted. The strict startup probe retains its direct200, fixture provenance, complete schema, one deadline and existing14-route warmup. Do not reopen these slices or claim they explain every later request stall.
+2. **Finish #1341's natural delivery.** It reuses the validated writeComposition return instead of immediately rereading the same composition. All50 selections,24 PL6/30 VI records, two operations, canonical bytes and downstream reader guards remain. Native unit and records-mode consumers pass; full browser/integrated outcome remains separate. The removed later producer-only snapshot has an explicit temporal difference; no atomicity claim is made.
+3. **Implement Ticker first-load consolidation.** Existing prepare installs isolation/routes without the redundant initial document; existing presentation setup performs the first intended-language document, then all later reloads and visible appearance actions remain. Install case-specific routes before that first document. Preserve21 project cases,14 enabled/seven expected skips,12 presentation cells, CN/HK original headlines, held Apple→MSFT progress and recovery's exactly-one additional snapshot/no-navigation assertion.
+4. **Prove74→57 actual documents.** Source counts are13→12 for matrix,6→4 unavailable,15→12 recovery,2→1 grouped,2→1 held-response,3→3 editorial,33→24 CN/HK. Observe main-frame document requests from before first navigation; use the same runtime/fixture/workers for timing attribution. First Chinese language, later language changes, light-specimen cleanup and later symbol transitions must all remain valid. Seventeen fewer documents does not imply a percentage runtime improvement.
+5. **Partition independent unit work from capture-dependent imports.** The direct PL6/VI consumers call selectedComposition at module import; Options loads its manifest at import. Their collection/import must occur in a fresh process only after capture selects the composition. Independent unit work may form another existing-workflow branch. Preserve exact file/case union in both records mode and the legitimate merge-group legacy path, and propagate either partition's failure. Account for additional setup/queue; same-runner overlap has no demonstrated benefit.
+6. **Qualify capture runtime isolation before parallel launch.** PL6 and VI use different ports but the same default .next checkout state, different dev-server environments, and PL6's owned server supplies Options capture. Simple Promise.all or shared-server substitution is unqualified. PL6 also has a module-global immutablePng, so concurrent surface calls can race byte association.
+7. **If separate packet jobs are pursued, preserve the present evidence contract.** One complete PL6 job and one complete VI job can still produce exactly two operations. Preserve24/30 execution records,20+30 selected cases, exact run/attempt IDs, source/profile provenance and Options under PL6. Transfer completed immutable records through a verified artifact/materialization boundary; never transplant live writer filesystem custody or strip identities. Compose only after both complete and validate. Per-locale/project packet sharding is a different contract and is not a drop-in change.
+8. **Keep compiled fixtures and fleet activation as separately qualified stages.** Development auth/preview seams cannot be broadened into production bypasses. A compiled nondeployable fixture needs coherent existing authority/data contracts and cold build/distribution costs. #1306 owns restricted-runner trust, isolation, capacity and rollback; its hosted proof is not fleet activation. #1223 owns held topology/traces/Node discovery; do not duplicate it.
 
-The prior local trace-on/off/on sample (31.722 / about 8.6 / about 16.6s) is an
-unmatched small observation. The trace policy is already owned by #1223, and
-neither that sample nor one fast local browser pass earns hosted p95 credit.
+An idealized overlap of the entire observed307s npm-test phase would still leave650s capture plus approximately 150s other unit work before deferred consumers or new overhead. Unit partitioning is useful intermediate work, not completion. The final plan must reduce capture work or qualify faster isolated runtime as well as address browser task size.
 
 ## Common evidence contract and reuse boundaries
 
@@ -547,7 +428,7 @@ These IDs extend the existing Phase 4 CI work, and are editorial source nodes on
 | P4.L2 | Finish existing parallelism/pack/fast-scope implementations | Original custody and current source | No duplicate PR; actual exact-head coverage and runtime measurements |
 | P4.L3 | Terminal browser build/setup critical-path slice | Current workflow/config and no overlapping writer | Same user journeys against immutable candidate; focused failures stay red; real hosted canary |
 | P4.L4 | Remove hot Mastermind test/setup overhead | Current measured heavy modules; L2 compatibility | No cached security outcomes; unchanged assertions; Linux proof |
-| P4.L5 | Macro duration calibration and split/compact reconciliation | Existing logical-job owner and L2 | Every selected job exactly once, current weight evidence, bounded maximum pack duration |
+| P4.L5 | Macro split/compact reconciliation, contract-analysis and W4 execution materialization | Existing logical-job/#6351 owners and L2 | Exact selected jobs/cases, full-default compatibility, current weights, bounded acquisition/materialization/execution |
 | P4.L6 | Trusted task-result reuse pilot in incumbent planner | Input contract + deterministic hermetic task | Shadow equivalence first; tamper/environment/dependency changes miss; no false green |
 | P4.L7 | Qualified runner economics and execution capacity | Full isolation/trust/capacity canary | Whole-matrix benefit, no starvation of Fabric, rollback through same owner |
 | P4.L8 | Natural-cohort acceptance and closed migration | Previous slices | SLO distribution, unchanged coverage, failure/freshness behavior, recoverable rollback |
@@ -559,220 +440,64 @@ from this plan. Source edits and qualified ordinary PR publication are in scope.
 
 ## Current evidence frontier
 
-### Mastermind: completed controlled pair and published repairs
+### Mastermind: current source and exact qualification layers
 
-The immutable [controlled-pair artifact](CI_RWE_CONTROLLED_PAIR_20261107.json)
-contains all twelve artifact identities/digests, environment/lock bindings,
-six-shard timings, every child return and exact comparison totals.
+[#2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) publishes e6737ba03a254310e5eddb28dbe0839713b72694, tree e0363dfd2aa864d6719a79533f763df188749c20, including protected 20e17. Natural required42419148121 and RWE42419148128 were queued at 22:07:59. No required/RWE run existed on the preceding conflicted2b36 head; only CodeQL completed.
 
-Both runs use source `d26440aac2c45b960d7175836121b885d94f9301`,
-environment `58de61f3d39fc214`, CPython 3.12.16 and 78 packages with freeze digest
-`185d3127c6dabf1a98442541ddcf9732ea3d0551ac4e2973bd9717d7b8f5b247`.
-The Linux lock is `fa122bfe79054625f0f094eea13ec9668f54c36f5fdd6f7146b0c1f6dd08c29a`;
-the vendored Macro pin is `256c757b3c4f0ec759571c29a30a71387d0a18f8`.
-All pip checks pass and degraded lists are empty.
+| Source slice | Qualified result | Limit |
+| --- | --- | --- |
+| Cold compiler repair2b36 | 800 passed, one unchanged actual-root-only skip; three fresh-interpreter cold-map regressions and two canonical-root cases; isolated CLI usage exit64 | Nonroot Darwin proof; native consumer still owed |
+| 0d protected composition5fd5617 | 271 passed, zero failure/error/skip; seven whole owner files plus pure initializer selector | No H1 positive invocation or runtime activation |
+| Three lanes1793685 | 791 passed, zero failure/error/skip; strict workflow, actual aggregate shell, cancellation, step ownership and exact12-job proof | Local contracts, not hosted timing |
+| Final20e17 compositione673 | 15 cold/adoption +122 original purity passed, zero failure/error/skip; only accepted registry keyword changes entry AST; all 9 lane postimages unchanged | Earlier counts remain bound to their own source identities |
 
-| Outer shard | Modules | Serial gate seconds | Four-process gate seconds | Parallel result |
-| --- | ---: | ---: | ---: | --- |
-| 0 | 413 | 1,545.65 | 691.18 | Pass |
-| 1 | 364 | 1,868.49 | 834.84 | Pass |
-| 2 | 355 | 1,214.90 | 355.16 | Pass |
-| 3 | 391 | 1,934.55 | 719.63 | Fail |
-| 4 | 388 | 1,382.71 | 480.17 | Pass |
-| 5 | 423 | 1,736.71 | 412.57 | Fail |
+The final composition preserves accepted v3/v4 privacy requirements and exact identity-review rows. Those frozen token/source records do not create an independent formal approval requirement or grant runtime authority.
 
-All 2,334 module companions are complete. Both sides collect, invoke and finish
-70,693 cases with zero deselection, duplicate companions, malformed receipts,
-incomplete modules or collection errors. Collection and finished digests match
-for every module. Outcome hashes match for 2,332 modules; two differ.
-All 24 reported parallel pytest children returned: 22 exit zero and two exit one.
-This is child-return evidence, not an assertion about every operating-system descendant.
+The completed ce38 required/RWE pair uses actual merge4a204499613a95610ebbc8a9d3e2ca1bf2c1871d, tree 310bf3219477781b249524886f5d51ca3cdf8298 and paired Macro256c757b. Both have2,358 complete unique module companions and71,571 collected=invoked=finished cases, zero recorder errors/deselection and exact identity/count parity. Outcomes match for2,357 modules; the cold compiler guard differs. Required fails in 15m58; RWE succeeds in 33m15. All24 children return. Six environment receipts bind lock fa122bfe..., environment 58de61f3d39fc214, CPython 3.12.16, pip-check success and zero degraded records.
 
-The failed cases were the Hermes diagnostic-privacy cross-variant fixture and
-the installed preproof grandparent-acceptance case. The former observed a disappearing
-Git maintenance lock during recursive chmod. The latter compared all nine stat
-fields for an ordinary ancestor's initial guard, inconsistent with its existing
-later five-field custody check. The historical remover and precise volatile field
-are not retained, so neither is invented as an observed cause.
+The earlier frozen [d264 controlled-pair artifact](CI_RWE_CONTROLLED_PAIR_20261107.json), [Trend partition mapping](CI_TREND_PARTITION_PROOF_20261107.json) and [ACL diagnostic](CI_GATEWAY_ACL_BRACKET_DIAGNOSTIC_20261107.md) remain immutable evidence. The parallel d264 trial failed outcome parity; it is not an accepted speedup. The current H1/Gateway/initializer holds remain.
 
-Published repair commit `9e36bab664078f20bdd4115466ad4b23f98a4a86`:
+### Macro: complete current native composition
 
-- Disables automatic Git maintenance/GC only in the synthetic Hermes fixture's
-  own Git command arguments; no global Git configuration or weakened traversal.
-- Uses the existing five-field identity for ordinary non-exact directory ancestors.
-  Exact directories and files retain the nine-field check. Descriptor, no-follow,
-  type, promotion, alias, absence and namespace contracts are preserved.
-- Adds 22 deterministic regressions: four tolerated volatile ancestor changes,
-  five refused custody changes, twelve exact-directory/file negative cases and
-  one ancestor-to-exact promotion rejection.
-- Refreshes only the existing reviewed file's exact digest after checking that the
-  three reviewed identity tokens and their owning ASTs remain unchanged.
-- Passes all 425 tests across the four owning files in 101.458s. Original source
-  fails the four intended baseline regressions and passes the other eighteen.
+**#10788:** [42412023592](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42412023592) succeeds at 21:41:48,63m22 after creation. Actual tested merge 1aadfe404d99f456a8adae2b0541541231f68b07 has base 74873cdaf3c8a3f305ddcac732975f815a7e87fa and candidate 5e7a585fee0650ee53f6727b229322a9f015c5d6; actual Git tree f0ae64ff479683310f6e99c212a994c3d31a43ee. The semantic field named tested_tree_sha contains the merge commit, not that tree.
 
-The earlier three published commits preserve the locally qualified fixture,
-diagnostic and partition results: Trend 44 passes with identical original outcome
-digest; capacity 18 passes plus an independent copy-isolation case; admission
-diagnostics 96 passes; Trend partition 44 passes plus 138 selector checks.
-The [partition artifact](CI_TREND_PARTITION_PROOF_20261107.json) records all 44
-case mappings and all 42 original function ASTs. Its capture-time unpublished
-status is historical; the source is now published in #2065.
+All321 eligible logical jobs are selected and pass; all 694 semantic steps pass, failure signatures are null and infrastructure findings are empty. Plan digest 26926098d468f3ed59b0cce9a5d8086f21131e394ad51830fa0d89b9ca05e3ab; evidence digestf83861a98d792b630016c986ad49df4c7fb1130dc5d956b525931598778c5dca. Plan artifact 13588999643 ZIP 19c77e02...; final artifact 13591374164 ZIP 6213f973....
 
-Fresh required [42407487042](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42407487042)
-tests merge `11e2913a306de7c5a3ea8b1a825a9d4dbd235505`, tree
-`077ce3382c63666931192c7d46159f5896c3bae0`, with parents protected
-`5abd2017f4ae4a69dddce4ff4f0aa4cb5246a402` and candidate `9e36bab6`.
-It has a successful 7m04s source-qualification job and successful shard 2 at this
-milestone. Shards 4/5 expose a predecessor fixture hash mismatch before provider
-execution; shard 4 also has one installed-ASGI assertion failure. These are new
-native observations under diagnosis, not suppressed flakes or proof that the
-earlier repairs failed. RWE [42407487040](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42407487040)
-and the remaining required jobs must be consumed fully before another publication
-that would cancel their source-bound observation.
+FIF44/37/39 source lists match120 distinct starts and120 successful summaries exactly. A:1,368 passed/629.906s; B:1,169 passed/820.212s; C:1,716 passed/one skip/765.374s. All B P2/G-pack/Node companions pass. These are module-launch and terminal-result proofs, not a collected-node identity claim. Fresh International work passes all commands, including10 IM14 browser passes with no skip; original run 42390957332's whole-descendant settlement remains unknown.
 
-The old H1 invocation remains held at run `42394477066`, job `128468846887`:
-ATT-1 receipt absent, rc75, timeout false, primary admission refusal and unknown
-settlement. The new bounded diagnostic does not retroactively recover its snapshot.
-The earlier [ACL bracket diagnostic](CI_GATEWAY_ACL_BRACKET_DIAGNOSTIC_20261107.md)
-also does not clear the Gateway or initializer release holds.
+**#10658:** current dc90 [42408989367](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42408989367) succeeds in 47m11 with 97 jobs/290 steps. Actual tested merge 9842603411317571aa2ec81fb3eb9c05f17533cf, base 35f6c48f361894d360505b7223260195bd073814; semantic digestae341eae79e684145ff1afbb4a9082b6263cffd16d5fdb86feac55d290824d90. All120 launches and4,253 passes/one skip are observed; unsplit kernel2,020.853s. Existing MOG is retained.
 
-### Macro: native consumers and original-carrier composition
+**#10752:** prior complete proof319 jobs/691 steps and existing MOG enrollment are retained. Freshness and admission remain under the incumbent controller. Earlier full refresh caps are not permission to manually bypass them; the later truncated list does not establish a new per-PR disposition.
 
-**#10752:** native [42397007951](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42397007951)
-passes all 319 logical jobs / 691 steps with no infrastructure classifications.
-Semantic evidence digest:
-`51b2ca3feeabca24b7cbba23044362c135890f1552159fcbcafeb2a46130ba46`.
-The semantic producer's field named `tested_tree_sha` contains
-`64807eebec39ac507473f8760d0ba7d0706b3632`; do not relabel that object as a Git
-tree without checking its type. Recorded base is
-`2ac8eef3ca975b1045949b40c6244c5f4b209a1a`.
+**#8094:** current 372935 keeps full validation before curated-only inference, accepted current-main semantic owners and original data_gate assertions. The22:04 snapshot has successful plan, contract-delta and seven packs; five packs run and the final gate does not yet exist. Draft/unarmed and semantic/data hold remain. The original 686-pass/three-UNKNOWN record is not relabeled green; long benchmark/Fabric denial remains fenced.
 
-Enrollment was one MOG label mutation after native clean eligibility and the
-post-body-update authority check settled. Head remains `5e23be9c`, open with
-`merge-on-green`; no native-auto route was used for Macro. Existing catalog changes
-make fresh proof necessary. The inactive native-queue pilot check is not a binding
-main-branch gate under the inspected controller. No stale review is represented
-as a new-head formal approval.
+**Materialization owner:** protected Agent OS still assigns W4 to#6351; W3 closed. #10803 remains open at 1c7ed6e4 with its existing finite history helper and holds. #6505 is already merged as4b9c9ece8593a2483997432e25f233bfe7af8779. The new closure contract is a proposed implementation under that existing owner, not a claim of present qualification.
 
-**#10658:** native [42400346906](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42400346906)
-passes 97 jobs / 290 steps, semantic digest
-`7421bec880b414557f2901a03f8a2bd22278bbf2080b13e62ce4236929192999`,
-recorded base `e404167e0472a7150721192479d54ab1d8c37535` and tested source
-`67239e31dce3a3ef73007e461e4035f7871fd76e`.
-The native FIF pack log observes all 120 unique file launches between
-18:40:43.467 and 19:11:37.863 UTC: 1,854.396s for that kernel group.
-P2/G-pack/Node companions run afterward. A fresh Python interpreter per file
-does not imply a fresh filesystem or private environment.
+### Terminal: accepted readiness and new capture consumer
 
-The only follow-up correction narrows the imported shared-worker prohibition to
-the owning FIF job. Complete owning shape file: 20 passes, zero skips/failures/errors,
-6.486s, postimage blob `cebec6b9903c2dcfaa2dc487cf32587d86c384bb`.
-Runtime/helper/catalog bytes are unchanged. It is now published as commit
-`dc90e19d8b2764a8a5592cf5f2d0f15849403cb8`, tree
-`915bdeed661969c291ffcb333afe3013de0a5d54`, with exact remote readback.
-The existing controller labels are preserved; this is not another admission attempt.
+[#1338](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1338) merged at 20:05:38 as69c3893169a991b15fe7934b53122d55fd4eaaec, with the exact qualified tree 69c7ae0e0a160fdb4401e0bbac8dda5a0701a3b3. Integrated42407566693 succeeds with six passing jobs and two intentional deduplication skips. Its unit reports20,420 passes/50 skips/three todo; capture 698s, Vitest 408.45s. Prior full PR proof retains 4,693 browser cases:3,690 pass/999 skip/four flaky/zero final failure and all 14 startup probes. Do not count intentional deduplication skips as missing owed matrix work.
 
-**#10788:** local main-integration commit
-`50e1994190c8d78de17f738dea6bc8c3dfde17ac`, tree
-`ab3565411b202a696f5ae9e9a45d385ab005718e`, has parents remote
-`4281c1886f52a93913f6eec85f9f4407fd738fb6` and accepted main
-`07c55fb9e2c60dde232b6ad8b436fb2239cfd9ad`. All non-feature tracked paths match
-that accepted main. Press ownership, curated scopes and new packing ceilings remain.
+[#1341](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1341) at 05a567b8b79df517ff1c6ff87e6247badad75e07 has one existing auto/MOG enrollment at 21:28:13. Its successful unit in 42414479074 tests merge 3fe618a630bd1ace2f9e1635c376d3e7cded7eca, tree e8e9bcaacc18c500eea244e66854e685a7fd9d39. Typecheck and48 Node contracts pass; capture selects records mode and PL6/VI/Options consumers pass. Vitest:20,424 passed/50 skipped/three todo,1,158 passed files/six skipped. Native artifact 13591860933 contains128 files/4,956,051 bytes with digest 347678fddb2ab84ef80caa54bae157b08e783741d64224bdd114e79647f3530d. The full browser/final aggregate was pending at the recorded snapshot; no rearm.
 
-The incumbent helper is exact blob
-`ae7c3feaa88d8200a3941398c159a2fc4eff1c6a`. A/B/C retain 44/37/39 ordered
-manifest targets, 120 unique paths in total, and the same other steps/dependencies.
-Each has 1,140 raw closure entries / 1,136 unique paths. Four duplicate paths
-already existed and are preserved. Scheduling submission order follows the
-incumbent helper's weights; it is not claimed identical to manifest order.
+Local capture qualification had48 passing contracts,24/30 actual records,50 selected cases and all five consumer assertions passing; a single removed extra read cost12.933s locally. Native Linux/Node 20 and local Darwin/Node 26 are different profiles. No causal hosted saving is inferred.
 
-The first complete eight-file qualification is retained as 570 passed,
-one failed and two existing sparse-mockup skips, plus ten subtests; fragments
-passed. The failure correctly identifies a missing helper path in the exclusive
-`ci-control-plane-contracts` owner. The repair adds only that path (108 → 109
-unique entries) and narrows the worker assertion to the three FIF IDs.
-Current repaired candidate blobs are:
-
-| Path | Git blob |
-| --- | --- |
-| `.github/ci/legacy-jobs.yml` | `d9a0d4cd062c6f52368e044265eb9a73237b6122` |
-| `tests/test_ci_pack.py` | `ea929b53f7f80ef5c5073b8c2b5efeb2b0914793` |
-| `tests/test_fif_publication_workflow_shape.py` | `c017d4e3fdd461cbfb0f37bc545f53e1cee73c25` |
-| `scripts/ci/run_fif_kernel_suites.py` | `ae7c3feaa88d8200a3941398c159a2fc4eff1c6a` |
-
-The final catalog intentionally changes four job bodies relative to the local
-main integration: three FIF runtime definitions and one control-plane dependency
-declaration. The remaining 390 job definitions are unchanged. The corrected
-catalog/shape proof is a pending new receipt, not a relabeling of the failed invocation.
-
-Original International run `42390957332` remains separate: eleven packs passed,
-one composite command exhausted its 1,200s deadline, and nine subsequent steps
-were withheld. The 320-job / 692-step record is 682 passed / 10 unknown.
-IM14's final browser command had only about 86s left after earlier work.
-No calibration-caused assertion failure is established. Attempted process-group
-SIGKILL and zero-time remaining join did not provide whole-descendant settlement.
-
-### Terminal: readiness qualified and admitted; runtime remains long
-
-Readiness run [42399940917](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42399940917)
-tested merge `f4860ea24fd9351a5deada94d53046af381a7bc5`, tree
-`69c7ae0e0a160fdb4401e0bbac8dda5a0701a3b3`, with parents protected
-`f8c845b94d6b799b6ca294328859bd086bf8b64f` and candidate
-`92c5b806b4168f1cd011d25044e3355aa32011e9`.
-
-All nineteen jobs and twelve browser jobs pass. Fourteen browser invocations
-all qualify the fixture before `Running`, with probes between 152 and 632ms.
-The complete inventory is 4,693 selected: 3,690 passed, 999 skipped, four flaky
-and zero final failures. The previous incomplete desktop-5 consumer completes
-280 passes / 22 skips. Unit results are 20,420 passed / 50 skipped / three todo;
-Vitest is 227.56s and source-capture validation is 425s.
-Native Node is 20.20.2; local Darwin/Node26 observations remain separate.
-
-The longest tablet job is 54m05s, including a 53m16s browser command.
-The overall workflow is about 59m15s. Readiness therefore removes one identified
-failure mode and improves attribution; it is not a five-minute runtime result.
-The four flaky outcomes remain reported and must not disappear from reliability
-acceptance. Reported skips are not automatically audited exclusions.
-
-Native admission used Terminal's documented MOG label plus one head-leased
-auto-squash call. Confirmed queue entry:
-`MQE_lQDOTOzwKM8AAAABNhlBz84ABTs-zgPOXLw`.
-The PR is open and the native queue result is pending at this milestone.
-REST `auto_merge=null` does not justify a second enqueue.
-
-Separate #1306 hosted qualification [42397250070](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42397250070)
-tested merge `9798d310ea90c3805a8d973dfb8ed2f8bd025ae6` for candidate
-`418f44dd8302954892ff194b4dc12477288699c9`.
-All twelve browser jobs pass on hosted ubuntu-latest:
-4,693 selected = 3,693 pass / 999 skip / one flaky. This is source/default-route
-qualification, not restricted-fleet activation or whole-matrix capacity proof.
-
-A read-only hotspot review identifies a bounded future Ticker News first-load
-consolidation. Source operation counts suggest 74 → 57 explicit document loads
-across desktop/tablet/mobile while preserving all later presentation resets.
-That is an unimplemented hypothesis, not runtime savings. It requires qualified
-source independence, all 21 project cases (14 enabled / seven expected skips),
-original recovery/symbol/presentation journeys and actual document-count proof.
-Do not reopen the exhausted #1223 lookup or duplicate its held implementation.
+Ticker owner blobs at tested 3fe618 and protectedd839 match: ticker-news.spec.ts ef060d04..., presentationControls.ts5823f758..., watchlistStore.tsf910cca4.... They do not overlap #1223's published changed paths. First-load consolidation remains an implementation/proof task; the architecture does not claim the74→57 count was executed.
 
 ### Continuity, authority and scope
 
-The current architecture carrier remains #2191. Accepted continuity #10825 and
-#10827 are not edited after merge; fresh #10841 carries the same existing wave.
-The master law pin remains `66780ab7e3e9fdbfd40713bb5791fb1888529f7c`.
-The parent direct-integration exception applies to consumed/blocked Fabric roots;
-no new root, watcher or silent native implementation labor was created.
-Native agents provided C3 read-only judgments. Their judgments are not GitHub
-approvals or substitutes for native consumer evidence.
+The accepted master architecture is accb4a6b/#2191; its source branch is retired. Macro Agent OS#10841 at 528eb8e updates only existing W-ACCELERATION, validates2,237 records with zero errors and195 existing warnings, and retains its original MOG enrollment. Its21:36 note precedes these newest milestones and must be advanced on that same owner with exact readback.
+
+Web review waiver applies; actual protected/CODEOWNERS/security/release rules remain. Eligible paid labor roots are exhausted/blocked; recorded attended-parent source integration remains permitted. Native children supply bounded read-only judgment, not implementation labor. No Slack/email transport, fleet activation, denied action replay or source-unknown publication is implied.
 
 ## Held effects and exact next controls
 
 | Hold | Preserved original identity | Required next evidence |
 | --- | --- | --- |
 | Terminal #1223 create-commit | Original operation `mastermind-queue-clearance-20261104-c1`; tree `8a95165da4779cbbee961f6fc903de02afd1e27f`; parents `e34862900a09bfbcf124397ffe0db02a4f509a49` and `3d02d79a2d7c49dcd157976f09d720851f40906f`; actor MastermindX1 / 318945197; original remote disconnect | Original service invocation/commit-object receipt. Earlier bounded object reconciliation is exhausted. Unchanged refs do not prove no commit object exists. |
+| Macro #10788 delivery sequence | [Existing ruling](https://github.com/mastermindx-market-intelligence/macro/pull/10788#issuecomment-6674602501): #10764 protected-merged before arming the FIF manifest change | #10788 native checks pass, but #10764 remains open at 99c6f46e with MOG/merge-blocked. Advance its original carrier; then reconcile and enroll #10788 once. This does not block independent source work or require a historical named reviewer. |
 | Macro #10674 | Original C4 proof-preparation process26751 under root github-pr-sweep-2028-c4, with an unbound original publisher-effect disposition; existing #10745 → #10735 dependency order | Original tool-session/action binding is not established. The bounded lookup is closed; the existing Source OS recovery-interface commission has no qualified installed return. Reconcile original custody, terminal/quiescence and publisher disposition before forward action. Do not relabel the process as an identified GitHub mutation or repeat endpoint/account/archive searches. |
-| Mastermind earlier H1 positive fixture | Run42394477066/job128468846887, ATT-1; receipt absent, rc75, REMOTE_SUB_ADMISSION_REFUSED; fixture settlement unknown | Original owned settlement evidence or legitimate source-owner resolution. Docker --rm/tmpfs and absent diagnostic upload do not prove a surviving recovery namespace. |
-| Macro International timeout | Run42390957332/job128458803087; original command group and fixed dossier paths | Original descendant/whole-tree settlement or disposal evidence. Attempted process-group kill and generic Actions cleanup are insufficient; no workspace restoration/base replay was done. |
+| Mastermind earlier H1 positive fixture | Run42394477066/job 128468846887, ATT-1; receipt absent, rc75, REMOTE_SUB_ADMISSION_REFUSED; fixture settlement unknown | Original owned settlement evidence or legitimate source-owner resolution. Docker --rm/tmpfs and absent diagnostic upload do not prove a surviving recovery namespace. |
+| Macro International timeout | Run42390957332/job 128458803087; original command group and fixed dossier paths | Original descendant/whole-tree settlement or disposal evidence. Attempted process-group kill and generic Actions cleanup are insufficient; no workspace restoration/base replay was done. |
 | Mastermind earlier release holds | Gateway release HOLD6704040875; initializer four-process qualification failure; actuator journal cause unproved | Preserve their existing accepted conditions; local fixture or ACL tests do not release them. |
 | Repository-rule visibility | Prior Macro/Terminal protection reads returned403 | Rule visibility through those connections is unavailable. This does not establish that an unspecified merge/release operation requires an administrator. Preserve actual rules and do not replay the denied reads through another account or carrier. |
 | Terminal fleet action | The previously attempted Terminal administrative action returned403 | Its exact external control remains unavailable through that connection. Obtain the specific authorized control for any required fleet activation; do not replay the denied action or infer that source publication is blocked. |
@@ -784,53 +509,17 @@ No CI run alone is described as a durable autonomous worker.
 
 ## Ordered next execution and acceptance
 
-1. **Deliver qualified slices through existing controls.** Consume Terminal #1338's
-   integrated native queue result and Macro #10752's complete freshness-controller
-   disposition. Consume #10658's naturally triggered scope-only correction checks on its original
-   branch. Do not re-arm an already admitted effect or use native auto-merge for Macro.
-2. **Finish current-source correctness.** Consume all #2065 required/RWE results
-   at 9e36, identify exact tested source, and repair the concrete predecessor-hash
-   and installed-ASGI failures through their actual owners. Preserve the complete
-   failed d264 pair and all original holds. Do not rerun unchanged failures.
-3. **Finish the composed FIF source slice.** Qualify the corrected #10788
-   catalog/shape inputs against the existing planner/fragment and closure guards,
-   then commit on the original workspace. Preserve 44/37/39 ownership and
-   120-file coverage. Adjudicate fresh execution independence before publication
-   that invokes the held International path; never replay the old fixed-path command.
-4. **Close the largest graph constraints.** Decompose independently safe Macro
-   command units through the current manifest, reduce measured browser fixture
-   construction, continue Mastermind hot-unit work and shorten its independent
-   source-qualification branch. Preserve original journeys and negative assertions.
-   Recalibrate only from actual composed-source timings.
-5. **Advance held original effects through their existing recovery programme.**
-   #10674 needs the qualified installed original-binding interface; #1223 needs
-   its original invocation/commit receipt. Their bounded searches are exhausted.
-   Continue independent work without inventing new carriers or waiting for old
-   authors to approve routine source work.
-6. **Qualify capacity and reuse.** Use #1306's existing restricted-runner owner
-   and the named Mastermind postmerge reuse consumer below. Prove cold setup,
-   trust/isolation, whole-matrix capacity, fallback and rollback before activation.
-7. **Accept the complete natural path.** Demonstrate the budget from eligible
-   revision through required verdict and separately protected merge. Use at least
-   thirty successive eligible observations per populated class, with cold/warm mix,
-   first-attempt reliability, failures, cancellations, unfinished work, selected
-   coverage, freshness and compute cost. A fast successful subset does not close
-   this migration.
+1. **Consume the published Mastermind three-lane consumer.** Establish actual source identity,12-job contract, full outcomes and timings; preserve its current run while independent work advances. Diagnose only concrete new failures. Do not repeat accepted271/791/137 local cohorts without a changed risk or required gate.
+2. **Deliver proven Macro/Terminal slices through incumbent controls.** Advance the existing #10764 prerequisite, then reconcile #10788's exact head/checks/holds for one MOG enrollment after a protected-merge receipt. Its complete native result does not supersede that sequencing. #10658/#10752 retain existing MOG. #1341 retains its one native admission. Do not bulk-arm, manually refresh, duplicate queue effects or equate green with released acceptance.
+3. **Implement and prove Ticker first-load reduction.** One incumbent test owner, all original journeys, actual document counts, matched runtime settings. Do not change #1223's held topology/traces/discovery.
+4. **Implement Macro W4 contract with full defaults.** Use#6351's existing source/admission sequence. Preserve#10803. Coordinate authoritative plan, pack restoration and protected trusted consumer before enrollment; qualify earnings-economic-dossier's complete closure and exact outcomes. Source infrastructure alone is not a speed result.
+5. **Reduce the remaining mandatory branches.** Attribute Macro's2,742s tail and contract-analysis stages; partition Terminal independent unit collection from capture-dependent readers, then qualify capture isolation/work reduction; choose Mastermind's next actual above90s unit. Retain original inputs, assertions, selection and negative failures.
+6. **Qualify capacity and reuse.** Use#1306's restricted-runner owner and Mastermind's exact-source postmerge pilot. Include cold setup, trust/isolation, total demand, queue/aggregate delay and rollback. The denied administrative action remains an exact control boundary.
+7. **Resolve original held effects through existing owners.** #10674 needs its qualified installed original-binding interface; #1223 needs its original invocation/commit receipt; old H1/International settlement and Gateway/initializer holds retain their actual conditions. Exhausted searches are not repeated and safe source work continues elsewhere.
+8. **Accept the complete natural path.** At least30 successive eligible observations per populated risk class; final source→required verdict and separately eligible source→protected merge; cold/warm mix, retries/failures/cancellations/unfinished work, selected coverage, freshness and compute cost. Reach interim full≤600s then full p95≤300s, ordinary p95≤180s and docs p95≤90s without false green or reduced journeys.
 
-**Named reuse pilot:** existing Mastermind `ci_postmerge_proof` on the exact tested
-merge SHA followed by its protected push. Qualify the current ten-job contract,
-or deliberately advance it with the eleven-job source-qualification design.
-Wrong source/actor/workflow/attempt, stale proof, missing/duplicate jobs or steps,
-and unknown results must run full selected pytest work. Source qualifications
-still execute. Broader cross-revision reuse needs a separately named logical task,
-transitive input closure, trusted producer and conservative-miss proof.
+**Named reuse pilot:** incumbent Mastermind ci_postmerge_proof binds the exact tested merge SHA to its protected push using the current **twelve-job, three-qualification-lane contract**. Wrong source/actor/workflow/attempt, stale proof, missing/duplicate/wrong-job steps or unknown results run full selected pytest. Source qualifications still execute. Broader cross-revision reuse needs a named logical task, complete transitive inputs, trusted producer and conservative-miss qualification.
 
-**Durable ownership:** GitHub owns source/PR/CI/evidence; Agent OS owns the existing
-WS-CI-MERGE-CONTROL-PLANE continuity. Update those at material milestones with
-exact readback. Executive OS remains the runtime/admission authority; Linear and
-Slack are projections/transport. No new workstream, publication plane, queue,
-scheduler or watcher is part of this plan.
+**Durable ownership:** GitHub owns source/PR/CI/evidence; Agent OS owns existing WS-CI-MERGE-CONTROL-PLANE continuity; Executive OS owns runtime/admission. Linear and Slack remain projections/transport. No second lifecycle, state, publication, materialization programme, queue, scheduler or watcher is introduced.
 
-Completion requires the original product journeys, truthful input/source bindings,
-complete consequential validation, natural cohort targets, and recoverable rollback
-across all three repositories. Current lifecycle: **MORE_WORK_EXISTS**.
+Completion requires truthful source/input bindings, useful original product journeys, complete consequential validation, natural cohort targets and recoverable rollback across all three repositories. Current lifecycle: **MORE_WORK_EXISTS**.
