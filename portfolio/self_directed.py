@@ -594,7 +594,13 @@ def _stockdata_price(ticker: str) -> Optional[float]:
     if sym is None:
         return None
     try:
-        p = (_STOCKDATA_DIR / f"{sym}.json").resolve()
+        # basename is CodeQL's modeled sanitizer for user-steered paths; after the allowlist it
+        # is provably a no-op (sym cannot contain separators), but it severs the taint flow so
+        # the sink is verifiably clean rather than clean-by-argument.
+        base = os.path.basename(sym)
+        if base != sym:
+            return None
+        p = (_STOCKDATA_DIR / f"{base}.json").resolve()
         # Defence in depth on top of the allowlist: the resolved path must still sit directly in
         # the stockdata dir. Unreachable while the allowlist holds, but cheap and explicit.
         if p.parent != _STOCKDATA_DIR.resolve():
