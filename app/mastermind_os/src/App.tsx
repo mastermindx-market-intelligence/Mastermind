@@ -1,3 +1,4 @@
+import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
@@ -180,6 +181,7 @@ import {
   type WorkDocument,
 } from "./work";
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
+import { nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
@@ -3659,6 +3661,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     }
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision, launchHandoff]);
+  const partialNativeAuth = native && authState
+    ? nativePartialAuthPresentation(authState, locale) : null;
   // Presentation reuses the incumbent explicit auth action and its guards.
   const authenticationControl = authState ? (
                 <button
@@ -5037,6 +5041,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
+  const todayCatalogueFrame = useRef({active, index, epoch: programIndexEpoch});
+  todayCatalogueFrame.current = {active, index, epoch: programIndexEpoch};
+  const currentTodayCatalogue = () => todayCatalogueFrame.current.active === "Today" &&
+    todayCatalogueFrame.current.index === index && todayCatalogueFrame.current.epoch === programIndexEpoch &&
+    currentProgramsRead();
   const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
     const host = window.MastermindMissionHost, selected = projectJourney.selection;
     try {
@@ -5311,6 +5320,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     </>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
+      currentCatalogue={{value: index, current: currentTodayCatalogue}}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return;
+        const cards = index.programs.filter(card => card.workRef === workRef);
+        if (cards.length !== 1) return;
+        const card = cards[0];
+        // Reuse current-catalogue navigation; only its actual singleton root
+        // may enter Mission. A rootless card opens project details instead.
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return;
+        }
+        setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+        setProjectTab("More"); setActive("Projects");
+      }}
       composer={commandPanel}
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
@@ -6039,8 +6062,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <div ref={preferencesPane}>{preferencesControl}</div>
           {authState ? (
             <div className="nav-account">
-              <small>{copy.authStatus[authState.status]}</small>
-              {authState.reason && authState.status !== "unconfigured" ? (
+              <small>{partialNativeAuth?.label ?? copy.authStatus[authState.status]}</small>
+              {partialNativeAuth ? <p className="muted">{partialNativeAuth.description}</p>
+                : authState.reason && authState.status !== "unconfigured" ? (
                 <p className="muted">
                   {authState.reason === "POPUP_BLOCKED"
                     ? copy.allowPopup
@@ -6055,6 +6079,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 </p>
               ) : null}
               {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
+              {native && <NativeAuthorizationContinuationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale}/>}
             </div>
           ) : null}
         </div>
