@@ -13,6 +13,7 @@ This map points to the editable designs and current continuation sections. All c
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I/M `22CM-0` / `22SU-0` explain the historical source/calculation in EN dark and ZH light; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
+| Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
@@ -901,3 +902,37 @@ Root read the incumbent source at Terminal `f0af84bbd6c28c2f6477bd8ffc0319039790
 Current family selection dispatches its default page through `onPage`; local view selection dispatches its page key. The design must not promise restoration of a family's last-used local view without an existing owner-backed implementation. Close/scrim/Escape handling belongs to ResearchWorkspaceNav and its family trigger. The older native family descriptions include broader proposed views, so their existence is not treated as evidence that all are current routes.
 
 A new native reference row **`22U6-0`** in the owned D07 continuation map identifies the existing chooser and the local/global distinction. No competing family chooser, route grammar or navigation owner was added. Full integration and any shared-shell qualification remain separate from this source-backed reuse decision.
+
+
+## Company family chooser:44px targets preserve the existing composition
+
+The existing mobile family chooser **`5ML-0` / `5Q1-0`** on [Company navigation p9](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1) had two concrete native target-size gaps. Close's actual wrapper **`5Q9-0`** was28×28; its50px shared header was not a close-only target. Lab group **`5QX-0`** comprised24px of text with no44px action area; its62px footer also contained a separate dismissal hint and could not be counted wholesale as the Lab target.
+
+The repair adds two explicitly named containers while retaining all original nodes:
+
+| Purpose | New target | Preserved content and geometry |
+| --- | --- | --- |
+| Close Company pages | **`22UE-0`**,44×44 | Original28px visual `5Q9-0` and glyph `5QA-0` remain centered inside it. Existing50px header absorbs the extra width through its spacer. |
+| Open Lab | **`22UH-0`**,44px high, minimum44px wide, fitted to its contents | Original Lab group `5QX-0` and text nodes `5QY-0` / `5QZ-0` remain intact. The separate hint `5R1-0` stays outside this target. |
+
+The390×844 board,390×408 sheet,50px header,270px family grid and62px footer retain their dimensions. All family labels, proposed descriptions, colors, fonts, imagery, selected Intelligence state and backdrop remain. This does not accept the older broader family descriptions as current routes.
+
+Root read the F03 D07 registry at branch `design/f03-paper-directory-20261102-c2`, path `research/design_candidates/production_design_20261102/f03/assignments/D07.md`, blob **`dd00868465914af840a1109c427041bcb16a0f80`**. It identifies p9 and5ML as **candidate_unqualified** and separately identifies the Returns hold at pQ/`1B5H-0`. No exact overlapping hold appeared in the inspected registry/native target. The existing reference is preserved; this bounded repair makes no foundation or candidate-acceptance claim.
+
+### Reconciled construction and proof
+
+The first two new empty containers imported as native **Rectangles**, which cannot contain children. The first reparent response was observed and included two per-node errors; only the separate Lab-container ordering move applied. Fresh JSX showed the original controls unmoved and the empty containers adjacent. This was a known node-type/partial-intent result, not a permission denial or uncertain write.
+
+The newly owned empty Rectangles were replaced with child-capable **Frames**, and the materially changed reparent operation succeeded for both original controls. Final child readback confirms **22UE →5Q9** and **22UH →5QX**. The first mutation was not replayed. The session helper now surfaces per-node errors even when the outer response is APPLIED_RESPONSE_OBSERVED, so an outer receipt alone cannot hide a partial result.
+
+Root reviewed the corrected full-screen render and38,232-character JSX export. A structural preservation check unwraps only the two new containers and reproduces the entire original37,763-character JSX modulo whitespace. Every original ID, text, style and subtree is preserved; the only new native nodes are **22UE-0 /22UH-0**. Target dimensions, ancestry and unchanged surrounding heights read back correctly. The original28px close visual now sits within its44px interaction container.
+
+The owned D07 review-map row **`22U8-0`** names both targets and explicitly requires binding the whole intended area. Its rendered readback is complete. `company-family-controls-finish-01` finished only these two containers and that note. This is native target geometry, not runtime hit testing, focus-cycle proof or semantic-button acceptance; the incumbent navigation owner must bind the container, accessible name and dismissal/navigation behavior.
+
+## Heatmap recovery audit: current distinctions retained
+
+A bounded C3 reasoning audit of [Heatmap saved views/recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-O-1) and [mobile comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-N-1) found no justified new mutation. Root independently read the saved-view list **`UDE-0`** and its implementation qualification **`UFB-0`**.
+
+The list clearly separates a WDC request with an unknown save outcome from an earlier confirmed MU group, despite their shared illustrative name. Checking reads the original request without submitting another save. The live-filter entry says matches are reevaluated on opening and no background alerts start. Its qualification explicitly identifies saved records/request states as illustrative and leaves heatmap save types/original-request recovery to the existing persistence owner.
+
+The nearby R7 MU pending/unknown/confirmed/rejected specimens are a separate consistent example. No inspected native binding routed WDC to MU. Creating another WDC detail board solely because only the MU example is illustrated would not fix a demonstrated error. Previously repaired percentage-point coverage, failed-refresh/zero-match distinctions and account boundaries are retained and excluded from this phase's authored changes. No heatmap node, account, request or saved view was mutated.
