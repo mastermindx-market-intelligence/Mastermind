@@ -23,8 +23,14 @@ def validate_reply_event_host_config(value):
     if value["armed"] is False:
         if set(value) != {"armed"}: raise ValueError("disarmed event host accepts no custody inputs")
         return None
-    if set(value) != {"armed","mcp_config_path","storage_key_path","storage_key_id"}:
+    default_fields={"armed","mcp_config_path","storage_key_path","storage_key_id"}
+    extras=set(value)-default_fields
+    if extras not in (set(), {"dot_canary_enabled"}):
         raise ValueError("explicit receiver and storage custody inputs required")
+    if not default_fields <= set(value):
+        raise ValueError("original receiver custody inputs required")
+    if "dot_canary_enabled" in value and type(value["dot_canary_enabled"]) is not bool:
+        raise ValueError("canary selection must be an explicit boolean")
     for key in ("mcp_config_path","storage_key_path"):
         if type(value[key]) is not str or not Path(value[key]).is_absolute() or os.path.normpath(value[key]) != value[key]:
             raise ValueError("explicit absolute host custody path required")
@@ -72,4 +78,28 @@ def build_installed_reply_event_host(runtime, value, *, release_sha, peer_uid,
     codex = RuntimeCodexTargetProjector(fabric,owner_configured=native_owner_configured)
     kwargs = {} if service_call is None else {"service_call":service_call}
     returns = RuntimeSessionReturn(runtime,fabric=fabric,codex=codex,socket_path=Path(dialogue_socket_path),**kwargs)
-    return RuntimeReplyEventHost(returns,cipher,policies,clock=lambda:int(time.time()),enabled=True)
+    # The original installed host stays byte-for-byte behavior compatible when
+    # the additional canary is absent or disabled. An explicit host opt-in alone
+    # grants no channel/account authority: the *same sealed MCP document*
+    # must independently hold Chris's current scoped canary enrollment.
+    canary_provider=None
+    if config.get("dot_canary_enabled") is True:
+        import json
+        from ops.executive_os.executive_mcp_entry import require_sealed_path, validate_document
+        from .dot_canary_policy_selection import (
+            InstalledDotCanaryPolicyProvider, validate_dot_canary_settings,
+        )
+        document=Path(config["mcp_config_path"])
+        require_sealed_path(document)
+        installed=validate_document(json.loads(document.read_text(encoding="utf-8")))
+        if installed["release_sha"] != release_sha or installed["service_uid"] != peer_uid:
+            raise ValueError("Executive MCP canary release binding unavailable")
+        if validate_dot_canary_settings(installed) is None:
+            raise ValueError("Executive MCP canary not enrolled")
+        canary_provider=InstalledDotCanaryPolicyProvider(
+            document,release_sha=release_sha,peer_uid=peer_uid,
+        )
+    return RuntimeReplyEventHost(
+        returns,cipher,policies,clock=lambda:int(time.time()),enabled=True,
+        canary_policy_provider=canary_provider,
+    )

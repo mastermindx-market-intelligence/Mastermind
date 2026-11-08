@@ -53,8 +53,8 @@ def test_purchased_subscription_profiles_are_not_eligible_for_unattended_product
     for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"):
         profile = get_profile(profile_id)
         assert profile.usage_policy["supported_harness_required"] is True
-        assert profile.usage_policy["interactive_only"] is True
-        assert profile.usage_policy["unattended_background_allowed"] is False
+        assert profile.usage_policy["interactive_only"] is (profile_id != "byteplus-coding-plan-personal")
+        assert profile.usage_policy["unattended_background_allowed"] is (profile_id == "byteplus-coding-plan-personal")
         assert profile.usage_policy["production_backend_allowed"] is False
 
 
@@ -391,15 +391,15 @@ def test_closed_model_entry_and_empty_metadata_are_accepted():
 
 
 
-def test_byteplus_rejects_payg_endpoint_and_preserves_attended_policy():
+def test_byteplus_rejects_payg_endpoint_and_preserves_supported_coding_tool_scope():
     reviewed = _catalog()
     row = reviewed["profiles"]["byteplus-coding-plan-personal"]
     assert row["quota_profile"]["tier"] is None
     assert row["supported_tool_only"] is True
     assert row["usage_policy"]["single_user_only"] is True
     assert row["usage_policy"]["supported_harness_required"] is True
-    assert row["usage_policy"]["interactive_only"] is True
-    assert row["usage_policy"]["unattended_background_allowed"] is False
+    assert row["usage_policy"]["interactive_only"] is False
+    assert row["usage_policy"]["unattended_background_allowed"] is True
     assert row["usage_policy"]["production_backend_allowed"] is False
     for wrong_url in (
         "https://ark.ap-southeast.bytepluses.com/api/v3",

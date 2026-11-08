@@ -517,6 +517,134 @@ def read_successor(bundle):
     return plan, payloads
 
 
+# Frozen, read-only recovery of ONE previously completed historical native
+# successor after its ORIGINAL bootstrap *artifact* was pruned. The native
+# selection store still retains the original bootstrap/upgrade/successor
+# receipts. This is NOT a replacement for read_successor on a new installation,
+# a bootstrap reconstruction, a generation selection, or a publishing path.
+# Every accepted byte below is a pre-observed, immutable original owner record.
+RETAINED_STATUS_PLAN_DIGEST = "77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7"
+RETAINED_STATUS_PROOF_SHA256 = {
+    "successor": {
+        "PLAN.json": "ab4c95241229115b8e2788e27f8eea1e7f7ffd8de90e84eb52a1082d8fea69ca",
+        "native_generation.py": "43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b",
+        "pool.bridge": "bc0b3559392a07f3d4f7109455765c14dbc4dc946f6cb5a788e547ae179dbf0f",
+        "task.bridge": "4fe675e145bbba6935c520d2cbe725c372acc0f41bd593bd6200d5543dc8137f",
+    },
+    "prior": {
+        "PLAN.json": "705599cdfc17658433bbe475117957cefaffa7006199ae92ca319511db26047f",
+        "native_generation.py": "d044c24940df13d24ff6241f0da9cec3dc24d90dd60604a08c82e0ad8613586c",
+        "pool.bridge": "8533800b5abf8334a1cf6cc081322f16799ac5ef89e4deeea577f3a8217d8d1b",
+        "task.bridge": "d8f64831e3d99f45ffd0650fffefa3a64ff0da8df11baa1aaebfafbbdffdea13",
+    },
+    "receipts": {
+        ".launcher-successor-v1.json": "8f3fef59415bb42872dc13451d9b5f179206b5ba437ad1c20769d1eeed25f3d6",
+        ".paired-launcher-upgrade.json": "fd16b7f62ab292d551fb326cc7a0934b2ddef95b762b00ba677d60744e6f1f8f",
+        "77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7.successor.json":
+            "68c671258fde01289e4a141ecb540841350fb0c063b570b145c069d06e1a9af2",
+        "b15d3ba1568ab03e2e038f0e2996a7116eecdacda68836acc3ad595f3d212485.upgrade.json":
+            "87fff9ed353d6cd2978ee9786cfbafe69fb3d1388921d6c57561923e33de3957",
+        "9b66429ef3255460a69c5e76450851e9c24e573acbe1f7670af27dfe513fae5e.phase1.json":
+            "66068e045fa3ffd2957358715e682e0145348c2cd278b9367209d2a1e028416f",
+    },
+}
+
+
+def read_retained_successor_after_bootstrap_prune(bundle):
+    """Read one byte-pinned COMPLETED selection after its bootstrap was pruned.
+
+    Admitted callers are native-pin status and the closed chatgpt1 gateway
+    formatter's artifact check. This is not native apply or reconcile. The
+    deleted historical bootstrap is never synthesized. Any unknown chain,
+    foreign byte, incomplete transaction or invalid selected generation refuses.
+    Callers must separately prove the enrolled account's original pin and actual
+    current/native selected state. This helper never writes a file or a pointer.
+    """
+    def fixed_files(directory, expected, *, exact=True):
+        generation.require(directory, stat.S_ISDIR, stat.S_IRWXU)
+        if exact and {p.name for p in directory.iterdir()} != set(expected):
+            raise ValueError("retained successor artifact set changed")
+        raw = {}
+        for name, digest in expected.items():
+            candidate = directory / name
+            generation.require(candidate, stat.S_ISREG, 0o600)
+            observed = generation.regular_bytes(candidate, 65536)
+            if generation.digest(observed) != digest:
+                raise ValueError("retained successor evidence changed")
+            raw[name] = observed
+        return raw
+
+    bundle = _successor_directory(bundle)
+    frozen = fixed_files(bundle, RETAINED_STATUS_PROOF_SHA256["successor"])
+    plan = generation.unique_json(frozen["PLAN.json"])
+    if (type(plan) is not dict or set(plan) != _SUCCESSOR_PLAN_FIELDS
+            or plan["schema"] != SUCCESSOR_SCHEMA
+            or plan["digest"] != RETAINED_STATUS_PLAN_DIGEST
+            or generation.digest(generation.canonical(
+                {k: v for k, v in plan.items() if k != "digest"})) != plan["digest"]):
+        raise ValueError("unqualified retained successor plan")
+
+    prior_dir = _successor_directory(plan["prior_upgrade_bundle"])
+    predecessor = fixed_files(prior_dir, RETAINED_STATUS_PROOF_SHA256["prior"])
+    prior = generation.unique_json(predecessor["PLAN.json"])
+    if (type(prior) is not dict or prior.get("schema") != UPGRADE_SCHEMA
+            or prior.get("digest") != plan["prior_upgrade_digest"]
+            or prior.get("bootstrap_digest") != plan["bootstrap_digest"]
+            or prior.get("to_launcher") != plan["from_launcher"]
+            or prior.get("store") != plan["store"]
+            or generation.digest(generation.canonical(
+                {k: v for k, v in prior.items() if k != "digest"})) != prior["digest"]):
+        raise ValueError("retained successor predecessor changed")
+
+    original = Path(prior["original_bundle"])
+    if (not original.is_absolute() or os.path.lexists(original)
+            or original.parent.resolve(strict=True) != original.parent):
+        # Original present but malformed? Use the ORIGINAL strict verifier.
+        # Original missing at a new/foreign location? The fixed plan hash refuses.
+        raise ValueError("strict original bootstrap verifier required")
+    generation.require(original.parent, stat.S_ISDIR, stat.S_IRWXU)
+    store = Path(plan["store"])
+    generation.require(store, stat.S_ISDIR, stat.S_IRWXU)
+    receipts_dir = store / "bootstrap"
+    evidence = fixed_files(
+        receipts_dir, RETAINED_STATUS_PROOF_SHA256["receipts"], exact=False)
+    decoded = {key: generation.unique_json(raw) for key, raw in evidence.items()}
+    phase = decoded[plan["bootstrap_digest"] + ".phase1.json"]
+    upgrade = decoded[prior["digest"] + ".upgrade.json"]
+    successor = decoded[plan["digest"] + ".successor.json"]
+    if (phase.get("schema") != SCHEMA or phase.get("phase") != 1
+            or phase.get("plan_digest") != plan["bootstrap_digest"]
+            or upgrade.get("schema") != UPGRADE_SCHEMA
+            or upgrade.get("plan_digest") != prior["digest"]
+            or upgrade.get("bootstrap_digest") != plan["bootstrap_digest"]
+            or successor.get("schema") != SUCCESSOR_SCHEMA
+            or successor.get("plan_digest") != plan["digest"]
+            or successor.get("prior_upgrade_digest") != prior["digest"]
+            or successor.get("bootstrap_digest") != plan["bootstrap_digest"]
+            or successor.get("previous_selection") != plan["expected_selection"]
+            or successor.get("selection") != {
+                "schema": generation.POINTER_SCHEMA,
+                "generation": plan["target_generation"],
+                "previous": plan["expected_selection"]["generation"],
+                "sequence": plan["expected_selection"]["sequence"] + 1,
+            }):
+        raise ValueError("retained successor receipts disagree")
+    if any(os.path.lexists(receipts_dir / (plan["bootstrap_digest"] + suffix))
+           for suffix in (".rollback.json", ".phase2.json")):
+        raise ValueError("retained historical epoch changed")
+    for identity in (
+        phase["initial_generation"],
+        prior["expected_selection"]["generation"],
+        prior["target_generation"],
+        plan["expected_selection"]["generation"],
+        plan["target_generation"],
+    ):
+        generation.verify(store, identity)
+    _upgrade_entries(plan, complete=True)
+    _require_successor_launcher(
+        plan, {name: raw for name, raw in frozen.items() if name != "PLAN.json"})
+    return plan, {name: raw for name, raw in frozen.items() if name != "PLAN.json"}
+
 
 def _require_successor_launcher(plan, payloads):
     launcher = Path(plan["store"]) / "launchers" / (plan["to_launcher"] + ".py")

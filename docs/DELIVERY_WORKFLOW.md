@@ -71,6 +71,21 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
+**Default is one-pass delivery, not a ceremony.** The assigned session implements,
+self-checks the diff, runs available affected tests, opens one Ready PR, requests
+native protected auto-merge once and consumes the resulting merge receipt. Do not
+serialize extra review/approval/handoff rounds, repeated status sweeps, checkpoint
+comments per command or an external publisher just to finish ordinary work.
+Pending CI is an automated release dependency, not a new human assignment.
+
+**Fast queue policy:** verified inert changes get source checks, ordinary code gets
+focused executable tests, and privileged/financial/security/CI or unqualified
+changes get full canonical CI. The protected `test` check stays mandatory, and
+protected-main pushes still run the full suite. Real-world browser/installed proof
+is required when a change affects that surface, not for inert docs. Preserve
+actual protected rules, explicit HOLDs, live writers, denied or uncertain effects;
+these are exceptional barriers, not default workflow steps.
+
 ### One qualification, normal protected release
 
 Ordinary reversible FAST/STANDARD changes use the same session: implement, self-check
@@ -201,14 +216,22 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
    application. For a required deployment, resolve this operation's actual merge commit from
-   GitHub; the newest default-branch commit may belong to another operation:
+   GitHub using the accepted `pr_number`; the newest default-branch commit may belong
+   to another operation:
 
    ```bash
-   git fetch origin master
-   merge_sha="$(gh pr view --json mergeCommit --jq '.mergeCommit.oid')"
-   test -n "$merge_sha" && test "$merge_sha" != null
-   ./scripts/deploy_from_git.sh "$merge_sha"
+   merge_sha="$(gh pr view "${pr_number:?set the accepted PR number}" \
+     --repo mastermindx-market-intelligence/Mastermind \
+     --json mergeCommit --jq '.mergeCommit.oid')" &&
+     [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]] &&
+     ./scripts/deploy_from_git.sh "$merge_sha"
    ```
+
+   Missing, malformed or unreadable merge evidence blocks deployment. The unchanged
+   wrapper fetches and refuses a receipt that is no longer current `origin/master`.
+   Reconcile the new release identity and its authorization; never substitute the
+   moving branch tip for this PR's receipt. Merge acceptance does not itself
+   authorize deployment.
 
 The deploy wrapper archives `origin/master` into a temporary clean release
 directory. Local uncommitted files cannot enter the release. The VPS deploy

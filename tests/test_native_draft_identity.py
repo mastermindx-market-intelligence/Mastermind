@@ -112,16 +112,25 @@ def test_real_registered_outer_to_signed_owner_is_zero_selector_and_non_effectfu
         PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES,
         PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES,
         PRE_PROJECT_EXECUTION_POST_ROUTES, PROJECT_EXECUTION_POST_ROUTES,
+        PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES,
+        PRE_COMPANY_PRIORITIES_POST_ROUTES,
     )
-    # This native identity addition was GET-only. Later SEND, BYOK and project
-    # routes do not change the exact retained before/after profile of that cut.
+    # This native identity addition was GET-only. Later SEND, BYOK, project
+    # and direct-native routes preserve the exact before/after profile of that cut.
     assert PRE_NATIVE_SESSION_SEND_GET_ROUTES == PRE_NATIVE_DRAFT_GET_ROUTES + (ROUTE,)
     assert PRE_NATIVE_SESSION_SEND_POST_ROUTES == PRE_NATIVE_DRAFT_POST_ROUTES
     assert PRE_BYOK_ROLES_GET_ROUTES == PRE_NATIVE_SESSION_SEND_GET_ROUTES
     assert PRE_BYOK_ROLES_POST_ROUTES == PRE_NATIVE_SESSION_SEND_POST_ROUTES + ('/os/executive/session/send',)
     assert GET_ROUTES == PRE_BYOK_ROLES_GET_ROUTES + ('/workspace/byok/roles/current',)
     assert PRE_PROJECT_EXECUTION_POST_ROUTES == PRE_BYOK_ROLES_POST_ROUTES
-    assert POST_ROUTES == PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
+    assert PRE_DIRECT_NATIVE_POST_ROUTES == PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
+    assert PRE_COMPANY_PRIORITIES_POST_ROUTES == PRE_DIRECT_NATIVE_POST_ROUTES + (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert POST_ROUTES == PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
+    assert (GET_ROUTES, PRE_COMPANY_PRIORITIES_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert ROUTE in GET_ROUTES and ROUTE not in POST_ROUTES
     assert (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES) in TRANSITION_ROUTE_PROFILES

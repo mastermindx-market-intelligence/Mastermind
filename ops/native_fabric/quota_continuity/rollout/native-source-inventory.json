@@ -168,9 +168,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 109297,
+      "bytes": 112142,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+      "sha256": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -264,21 +264,21 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 15118,
+      "bytes": 15414,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+      "sha256": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
-      "bytes": 45033,
+      "bytes": 45142,
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "sha256": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+      "sha256": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
       "source": "candidate/host_pull_backend.py"
     },
     "ext/host_pull_daemon.sh": {
-      "bytes": 84466,
+      "bytes": 90935,
       "installed_preimage_sha256": null,
-      "sha256": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+      "sha256": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
       "source": "candidate/host_pull_daemon.sh"
     },
     "ext/host_pull_launchd.plist.template": {
@@ -294,15 +294,15 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 91552,
+      "bytes": 92393,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d",
+      "sha256": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 142839,
+      "bytes": 152653,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+      "sha256": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -426,9 +426,9 @@
       "source": "candidate/original_advertised_artifact.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 94249,
+      "bytes": 103052,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
+      "sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
@@ -606,9 +606,9 @@
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 61402,
+      "bytes": 61447,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
+      "sha256": "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {

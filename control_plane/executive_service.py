@@ -120,7 +120,7 @@ from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
     TerminalReturnError,
     TerminalReturnProjectionError,
-    reduce_terminal_return,
+    reduce_terminal_return, selected_child_result_capsule,
 )
 from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.operator_harness_contract import AttemptExecutionMode
@@ -2052,6 +2052,84 @@ CEO_APP_READ_TOOLS_BY_SCHEMA = {
 }
 
 
+#: The closed private App-to-Control selected-child discriminator.
+#:
+#: The integration owner holds the same literal in
+#: ``integrations/hermes_delegate/schema.py`` because the core never imports
+#: that package. ``tests/test_hermes_selected_child_ingress.py`` keeps the two
+#: byte-identical.
+SELECTED_CHILD_FRAME_SCHEMA = "mastermind.ceo_ingress.selected_child.v1"
+_SELECTED_CHILD_FRAME_KEYS = frozenset({
+    "schema", "request", "target_digest", "principal", "principal_context",
+    "capability_profile_digest",
+})
+_SELECTED_CHILD_REQUEST_KEYS = frozenset({"action", "command"})
+_SELECTED_CHILD_ACTIONS = frozenset({"selected_child_submit", "selected_child_status"})
+_SELECTED_CHILD_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+#: The exact reviewed frozen target type. The core never imports the
+#: integration package, so the type is proven by its qualified identity and
+#: its exact frozen field set.
+_SELECTED_CHILD_TARGET_MODULE = "integrations.hermes_delegate.executive"
+_SELECTED_CHILD_TARGET_NAME = "ExecutiveSelectedChildTarget"
+
+
+def _exact_selected_child_target(value: Any) -> bool:
+    """Recognize only the reviewed frozen selected-child target."""
+
+    target_type = type(value)
+    fields = getattr(target_type, "__dataclass_fields__", None)
+    return (
+        getattr(target_type, "__module__", None) == _SELECTED_CHILD_TARGET_MODULE
+        and getattr(target_type, "__qualname__", None) == _SELECTED_CHILD_TARGET_NAME
+        and type(fields) is dict
+        and set(fields) == {"work_ref", "children", "currentness_guard"}
+    )
+
+
+def _selected_child_frame(parsed: Any) -> dict[str, Any]:
+    """Validate one closed private selected-child frame.
+
+    The frame's authority fields are never trusted here: the Control
+    re-proves the principal, the admission context and the capability
+    profile against its own installed host facts.
+    """
+
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    from control_plane.coo_principal_host import FACT_PRINCIPAL_KEYS
+
+    if type(parsed) is not dict or set(parsed) != _SELECTED_CHILD_FRAME_KEYS:
+        raise ValueError("selected-child frame is not the closed shape")
+    if parsed["schema"] != SELECTED_CHILD_FRAME_SCHEMA:
+        raise ValueError("selected-child frame has a foreign discriminator")
+    request = parsed["request"]
+    if type(request) is not dict or set(request) != _SELECTED_CHILD_REQUEST_KEYS:
+        raise ValueError("selected-child request is not the closed shape")
+    if (type(request["action"]) is not str
+            or request["action"] not in _SELECTED_CHILD_ACTIONS):
+        raise ValueError("selected-child action is not admitted")
+    if type(request["command"]) is not str or not request["command"]:
+        raise ValueError("selected-child command is not canonical")
+    for key in ("target_digest", "capability_profile_digest"):
+        value = parsed[key]
+        if type(value) is not str or _SELECTED_CHILD_DIGEST_RE.fullmatch(value) is None:
+            raise ValueError("selected-child digest is invalid")
+    principal = parsed["principal"]
+    if (type(principal) is not dict or set(principal) != FACT_PRINCIPAL_KEYS
+            or type(principal["scopes"]) is not list or not 1 <= len(principal["scopes"]) <= 16
+            or any(type(scope) is not str or not 1 <= len(scope) <= 96 for scope in principal["scopes"])
+            or principal["scopes"] != sorted(set(principal["scopes"]))
+            or any(type(principal[key]) is not str or not 1 <= len(principal[key]) <= 256
+                   for key in FACT_PRINCIPAL_KEYS - {"scopes"})):
+        raise ValueError("selected-child principal is invalid")
+    context = parsed["principal_context"]
+    if type(context) is not dict or set(context) != {
+            "work_ref", "principal_binding_digest", "mission_authority_ref",
+            "authority_generation_digest"}:
+        raise ValueError("selected-child context is invalid")
+    PrincipalAdmissionContext(**context)
+    return request
+
+
 @dataclasses.dataclass(frozen=True)
 class CeoIngressAppBinding:
     """Host-owned capability for one App peer on the existing ingress.
@@ -2084,6 +2162,9 @@ class CeoIngressAppBinding:
     # Fixed optional App-peer owner; old positional/default construction stays unchanged.
     fresh_conversation_provider_factory: Callable[[Runtime], Any] | None = None
     project_conversation_read_provider_factory: Callable[[Runtime], Any] | None = None
+    # The trusted host's frozen selected-child target. It defaults to unbound:
+    # the Control never selects or derives a child on its own.
+    selected_child_target: Any | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -2122,6 +2203,9 @@ class CeoIngressAppBinding:
         if (self.principal_dialogue_provider_factory is not None
                 and not callable(self.principal_dialogue_provider_factory)):
             raise ValueError("principal dialogue requires a host provider")
+        if (self.selected_child_target is not None
+                and not _exact_selected_child_target(self.selected_child_target)):
+            raise ValueError("selected child requires the exact frozen target")
 
 
 class CompanyConsultationHostProtocol(Protocol):
@@ -5516,7 +5600,7 @@ class ExecutiveControlService:
                     # failure cannot manufacture a NOT_DISPATCHED receipt.
                     response = workspace_error("source_unavailable", 503)
                 await self._send_ceo_ingress_response(writer, response,
-                    response_ceiling=source_operation_wire.MAX_RESPONSE_BYTES)
+                    response_ceiling=source_operation_wire.operation_response_limit(parsed.get("operation")))
                 return
             if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
                 if not app_peer:
@@ -5749,7 +5833,7 @@ class ExecutiveControlService:
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
@@ -5817,7 +5901,7 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
                         return
-                elif parsed.get("schema") == knowledge_wire.FRAME_SCHEMA:
+                elif parsed.get("schema") in {knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                     ceiling = knowledge_wire.MAX_RESPONSE_BYTES
                     try:
                         knowledge_wire.validate_frame(parsed)
@@ -6353,6 +6437,61 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from common import coo_agentos_context_contract as context_wire
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
+                    return
+                try:
+                    parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
+                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    validator(parsed)
+                    factory = app_binding.principal_facts_factory
+                    runtime = self._require_runtime()
+                    arms = (app_binding.armed, app_binding.principal_admission_armed)
+                    def require_context_host_current():
+                        if (self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "AWAITING_CANARY"}
+                                or self._ceo_ingress_app_binding is not app_binding
+                                or app_binding.principal_facts_factory is not factory
+                                or (app_binding.armed, app_binding.principal_admission_armed) != arms
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid or reader.at_eof()
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError("COO context source changed")
+                        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+                        if type(self._namespace_custody) is not ServiceRuntimeNamespaceCustody:
+                            raise ValueError("COO context Runtime namespace unavailable")
+                        self._namespace_custody.bound_runtime(runtime)
+                    require_context_host_current()
+                    provider = factory(runtime)
+                    if type(provider) is not CooHostProvider or provider.workspace.runtime is not runtime:
+                        raise ValueError("COO context owner unavailable")
+                    source, workspace, context_reader = provider.source, provider.workspace, provider.agentos_context_reader
+                    data_binding = workspace._canonical_project_data
+                    require_context_host_current()
+                    from control_plane.workspace_owned_task import await_owned
+                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
+                    require_context_host_current()
+                    if (provider.source is not source or provider.workspace is not workspace
+                            or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
+                            or workspace._canonical_project_data is not data_binding):
+                        raise ValueError("COO context owner changed")
+                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator(result, expected_context=parsed["principal_context"],
+                        capability_profile_digest=parsed["capability_profile_digest"],
+                        **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))
+                    response = {"ok": True, "result": result}
+                    context_wire.encode(response, limit=context_wire.MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503),
+                        response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                return
             if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")
@@ -6394,6 +6533,22 @@ class ExecutiveControlService:
                     # No ordinary refusal can prove that a committed admission
                     # or launch did not happen. Retain the original pointer.
                     return
+                return
+            is_selected_child_frame = (
+                isinstance(parsed, Mapping)
+                and parsed.get("schema") == SELECTED_CHILD_FRAME_SCHEMA
+            )
+            if is_selected_child_frame:
+                # A closed private selected-child frame runs before the
+                # catch-all App-peer schema refusal.
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied",
+                        "selected-child frame is not authorized for this peer",
+                    )
+                    return
+                await self._handle_selected_child_frame(
+                    writer, parsed, app_binding=app_binding)
                 return
             principal_frame = (
                 isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
@@ -6502,6 +6657,190 @@ class ExecutiveControlService:
                 pass
             if task is not None:
                 self._ceo_ingress_tasks.discard(task)
+
+    async def _handle_selected_child_frame(
+        self,
+        writer: asyncio.StreamWriter,
+        parsed: Mapping[str, Any],
+        *,
+        app_binding: CeoIngressAppBinding,
+    ) -> None:
+        """Admit one private selected-child frame on the existing ingress.
+
+        The Control independently re-proves the App peer, the unchanged App
+        binding, the exact frozen target and its material digest, the current
+        Runtime, the exact host provider, and the principal's actual row,
+        fact and authority. The frame's own authority fields are never
+        trusted: they are compared with the host facts, not accepted.
+
+        The common read/currentness guard is separate from the fresh
+        admission guard. An already claimed original command stays readable
+        in the incumbent reconciliation posture; only a fresh claim demands
+        the current admission, arming and READY posture.
+        """
+
+        from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+        from control_plane.coo_principal_host import CooHostProvider
+        from control_plane.coo_principal_mandate import project_coo_principal_mandate
+        from control_plane.workspace_owned_task import await_owned
+
+        try:
+            request = _selected_child_frame(parsed)
+        except (TypeError, ValueError):
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "selected-child frame is invalid"
+            )
+            return
+        command = request["command"]
+        action = request["action"]
+        target = app_binding.selected_child_target
+        if not _exact_selected_child_target(target):
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child target is unavailable",
+            )
+            return
+
+        def require_current():
+            # The common read/currentness guard. It never demands an open
+            # new-effect mandate, so an already claimed original command
+            # stays readable in the legitimate reconciliation posture.
+            if (app_binding is not self._ceo_ingress_app_binding
+                    or self._closing or not self._ceo_ingress_ready
+                    or app_binding.selected_child_target is not target
+                    or writer.is_closing()):
+                raise ValueError("selected-child request is no longer current")
+            target.require_current()
+            if target.material_digest() != parsed["target_digest"]:
+                raise ValueError("selected-child target changed")
+
+        def require_fresh_request():
+            # The fresh admission guard. It adds the current admission
+            # arming and the READY service posture on top of the common
+            # guard. The repaired C17 composition invokes it at the fresh
+            # canonical claim boundary only.
+            require_current()
+            if (not app_binding.principal_admission_armed
+                    or self._service_state != "READY"):
+                raise ValueError("selected-child admission is unavailable")
+
+        try:
+            require_current()
+            child = target.child_for(command)
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child target is unavailable",
+            )
+            return
+        if child is None:
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "selected-child command is not frozen"
+            )
+            return
+        runtime = self._require_runtime()
+        factory = app_binding.principal_facts_factory
+        if not callable(factory):
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        try:
+            provider = factory(runtime)
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        if type(provider) is not CooHostProvider:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        source = provider.source
+        workspace = provider.workspace
+        frame_context = PrincipalAdmissionContext(**parsed["principal_context"])
+
+        def require_read_current():
+            # Read authority is independent of fresh READY/arming/mandate
+            # gates. Re-prove the same owner, source and principal around
+            # the Workspace read, including after an awaited observation.
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            before = source.for_principal(parsed["principal"], target.work_ref)
+            row, fact, authority = before
+            actual_context = PrincipalAdmissionContext(
+                row["work_ref"], fact.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest,
+            )
+            projection = project_coo_principal_mandate(
+                principal=fact, authority=authority,
+                mission_workspace=workspace.read_mission_for_work_ref(target.work_ref),
+            )
+            if (actual_context != frame_context
+                    or authority.work_ref != target.work_ref
+                    or authority.capability_profile_digest != parsed["capability_profile_digest"]
+                    or projection["mission"]["work_ref"] != target.work_ref
+                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or source.for_principal(parsed["principal"], target.work_ref) != before):
+                raise ValueError("selected-child principal is not current")
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            return actual_context, authority
+
+        try:
+            actual_context, authority = require_read_current()
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "authority_refused",
+                "the selected-child principal is not current",
+            )
+            return
+        try:
+            composition = target.new_composition(
+                service=self, runtime=runtime, loop=asyncio.get_running_loop(),
+                authority=provider, context=actual_context,
+                capability_profile_digest=authority.capability_profile_digest,
+                receiving_request_guard=require_fresh_request,
+            )
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        try:
+            # The existing mutation/task ownership keeps the original command
+            # on its original carrier if this private connection drops.
+            if action == "selected_child_submit":
+                result = await await_owned(asyncio.create_task(
+                    composition.submit_async(command)))
+            else:
+                result = await await_owned(asyncio.create_task(
+                    composition.status_async(command)))
+            # Never disclose an original observation through a moved owner
+            # or revoked principal. A post-await refusal is not a no-effect
+            # receipt, even when this request was a replay.
+            require_read_current()
+            result = {**result, "target_digest": target.material_digest()}
+        except Exception:
+            # The original owner may already hold an effect. A refusal here
+            # is never read as proof that no effect happened.
+            await self._send_ceo_ingress_error(
+                writer, "internal_error",
+                "the selected-child observation failed",
+            )
+            return
+        await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
 
     @staticmethod
     def _request(request: Any) -> tuple[str, dict[str, Any]]:
@@ -8456,6 +8795,12 @@ class ExecutiveControlService:
             body["session_ref"] = candidate.session_ref
             body["result_envelope_digest"] = candidate.result_envelope_digest
             body["terminal_evidence_digest"] = candidate.terminal_evidence_digest
+            capsule = selected_child_result_capsule(candidate, command_id=command_id)
+            if capsule is not None:
+                body["result_capsule"] = capsule
+            else:
+                # Completion remains true; omitted text is not a complete synopsis.
+                body["reason"] = "EXECUTIVE_RESULT_CONTENT_TOO_LARGE"
             return body
         if attempt.status is AttemptStatus.FAILED:
             body["state"] = "FAILED"

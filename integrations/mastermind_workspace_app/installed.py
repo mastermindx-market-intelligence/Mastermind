@@ -58,6 +58,7 @@ class CeoIngressWorkspaceClient:
         # ceiling selection happens BEFORE the socket is opened so a misrouted
         # result frame can never widen into the larger Mission ceiling.
         from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
+        from common import coo_agentos_context_contract as context_wire
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
         from common.workspace_control_room_read_contract import (
             FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
@@ -75,7 +76,15 @@ class CeoIngressWorkspaceClient:
         from common import workspace_resource_capacity_contract as capacity_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
-        if isinstance(frame, dict) and frame.get("schema") == byok_wire.FRAME_SCHEMA:
+        discovery_context = type(frame) is dict and frame.get("schema") == context_wire.DISCOVERY_FRAME_SCHEMA
+        current_context = discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
+        context_read = current_context or type(frame) is dict and frame.get("schema") == context_wire.FRAME_SCHEMA
+        if context_read:
+            validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+            validator(frame)
+            ceiling = context_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == byok_wire.FRAME_SCHEMA:
             byok_wire.validate_frame(frame)
             ceiling = byok_wire.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") in {archive_wire.FRAME_SCHEMA, archive_wire.PAGE_FRAME_SCHEMA}:
@@ -87,8 +96,8 @@ class CeoIngressWorkspaceClient:
             ceiling = direction_wire.MAX_RESPONSE_BYTES
         elif type(frame) is dict and frame.get("schema") == source_wire.FRAME_SCHEMA:
             frame = source_wire.validate_frame(frame)
-            ceiling = source_wire.MAX_RESPONSE_BYTES
-            timeout = self.timeout_seconds if frame["operation"] == "read" else self.action_timeout_seconds
+            ceiling = source_wire.operation_response_limit(frame["operation"])
+            timeout = self.timeout_seconds if frame["operation"] in {"read", "read_original"} else self.action_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == instructions_wire.FRAME_SCHEMA:
             instructions_wire.validate_frame(frame)
             ceiling = instructions_wire.MAX_RESPONSE_BYTES
@@ -103,7 +112,7 @@ class CeoIngressWorkspaceClient:
             session_wire.validate_frame(frame)
             ceiling = session_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
-        elif isinstance(frame, dict) and frame.get("schema") == knowledge_wire.FRAME_SCHEMA:
+        elif isinstance(frame, dict) and frame.get("schema") in {knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
             knowledge_wire.validate_frame(frame)
             ceiling = knowledge_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
@@ -170,20 +179,34 @@ class CeoIngressWorkspaceClient:
                 raw = await reader.readuntil(b"\n")
                 if len(raw) > ceiling:
                     raise ValueError("source_unavailable")
-                value = json.loads(raw)
+                value = context_wire.decode(raw, limit=ceiling) if context_read else json.loads(raw)
                 if type(value) is not dict:
                     raise ValueError("source_unavailable")
                 if value.get("ok") is True:
                     if set(value) != {"ok", "result"} or type(value["result"]) is not dict:
                         raise ValueError("source_unavailable")
+                    if context_read:
+                        validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
+                        validator(value["result"], expected_context=frame["principal_context"],
+                            capability_profile_digest=frame["capability_profile_digest"],
+                            **({"expected_workspace_principal": frame["workspace_principal"]} if current_context else {}))
                 elif (value.get("ok") is not False or set(value) != {"ok", "status", "error"}
                       or type(value["status"]) is not int or value["status"] not in (400, 403, 404, 503)
                       or type(value["error"]) is not dict or set(value["error"]) != {"code", "message"}):
                     raise ValueError("source_unavailable")
                 return value
             finally:
-                writer.close()
-                await writer.wait_closed()
+                if context_read:
+                    # Keep cleanup finite even after the read budget expires;
+                    # no retry, new connection, or compiler deadline renewal.
+                    try:
+                        writer.close()
+                        await asyncio.wait_for(writer.wait_closed(), timeout=min(1.0, timeout))
+                    except Exception:
+                        pass
+                else:
+                    writer.close()
+                    await writer.wait_closed()
         try:
             return await asyncio.wait_for(exchange(), timeout)
         except Exception:

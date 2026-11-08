@@ -19051,6 +19051,27 @@ class AttemptRegistry:
             _recheck_selected_child_admission(expected)
         return claimed
 
+    def validate_fresh_launch_claim(self, job_id: str, lease: AttemptLease) -> None:
+        """Recheck the original fresh claim immediately before adapter START.
+
+        This is a read of the existing lease owner, not permission to replay,
+        reacquire or resume a CLAIMED operation. Heartbeat extensions remain
+        valid; cancellation, expiry, replacement and a rotated fence do not.
+        """
+        if (type(lease) is not AttemptLease or lease.attempt.job_id != job_id
+                or lease.attempt.status is not AttemptStatus.CLAIMED):
+            raise StateConflict("fresh launch requires its original CLAIMED lease")
+        with self.store.read() as connection:
+            row = self._leased_row(
+                connection, attempt_id=lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token, timestamp=self.store.now_ms(),
+                statuses={AttemptStatus.CLAIMED},
+            )
+            if any(row[field] != getattr(lease.attempt, field) for field in (
+                    "job_id", "worker_id", "quota_class", "lease_owner")):
+                raise StateConflict("fresh launch lost its original claim identity")
+
     def _validate_exact_target_launch(
         self, target: ExactWorkerClaimTarget, lease: AttemptLease,
     ) -> None:
@@ -26561,6 +26582,22 @@ class BoundedAdmittedPlanSnapshot:
 
 
 @dataclasses.dataclass(frozen=True)
+class BoundedSelectedChildCapture:
+    """One bounded selection that freezes a host's chosen children.
+
+    It carries the SAME canonical admitted plan the plan reader returns,
+    plus the exact frozen coordinates of the chosen children: their
+    ExecutiveChildSelection fields and the initial intended Attempt
+    ordinal. The ordinal is read ONCE here; it is never recomputed from a
+    later ``attempt_count`` and no replacement child is ever selected.
+    """
+
+    plan: BoundedAdmittedPlanSnapshot
+    children: tuple[dict[str, Any], ...]
+    observation_source_identity: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class BoundedProductAcceptanceSubject:
     """Current live programme scope and two canonical terminal results.
 
@@ -27238,8 +27275,15 @@ def _read_admitted_plan_bounded(
     vm_guard: _RuntimeReadProgressGuard,
     *,
     root_job_id: str,
-) -> BoundedAdmittedPlanSnapshot:
-    """Revalidate one exact admission with one shared loader and VM budget."""
+    child_job_ids: tuple[str, ...] | None = None,
+) -> BoundedAdmittedPlanSnapshot | BoundedSelectedChildCapture:
+    """Revalidate one exact admission with one shared loader and VM budget.
+
+    With ``child_job_ids`` the SAME selection also freezes the chosen
+    children: it reuses this loader, this VM budget and this one-selection
+    allowance, so the admitted plan and the chosen children are always one
+    coherent observation.
+    """
 
     root_token = _bounded_acquisition_identifier(root_job_id, name="root")
     acquisition._require_open()
@@ -27265,18 +27309,95 @@ def _read_admitted_plan_bounded(
         # Preserve canonical branch selection, uniqueness and all seal/grant/
         # policy checks. Active failure never falls back to completed history.
         admission, plan = _validated_plan_admission(loader, root_row)
-        return BoundedAdmittedPlanSnapshot(
+        snapshot = BoundedAdmittedPlanSnapshot(
             root_job_id=root_token,
             root_metadata=root_metadata,
             admission=json.loads(_json_dumps(admission)),
             plan=json.loads(_json_dumps(plan)),
         )
+        if child_job_ids is None:
+            return snapshot
+        children = _capture_selected_children(
+            loader, root_row, admission, plan, root_token, child_job_ids)
+        return BoundedSelectedChildCapture(plan=snapshot, children=children)
     except sqlite3.OperationalError as exc:
         if vm_guard.tripped:
             raise RuntimeRoleResultOverBudget() from exc
         raise
     finally:
         vm_guard.deactivate()
+
+
+def _capture_selected_children(
+    loader: _BoundedRoleResultLoader,
+    root_row: sqlite3.Row,
+    admission: dict[str, Any],
+    plan_body: dict[str, Any],
+    root_token: str,
+    child_job_ids: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    """Freeze the exact chosen children from one admitted plan.
+
+    The current work-or-repair lineage is re-derived by the incumbent
+    dispatch-lineage owner, so a foreign, superseded or off-plan child is a
+    refusal. The Attempt ordinal is read ONCE, here, as the intended next
+    Attempt of this child; nothing else recomputes it.
+    """
+
+    if type(child_job_ids) is not tuple or not 1 <= len(child_job_ids) <= 16:
+        raise StateConflict("selected child capture set is not bounded")
+    chosen = _bounded_acquisition_identifiers(child_job_ids, name="child")
+    current = _current_orchestration_tree_material_for_dispatch(
+        loader, root_row, admission, plan_body)
+    by_step = {str(item["plan_step_id"]): item for item in current}
+    captured: list[dict[str, Any]] = []
+    for job_token in chosen:
+        row = loader.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job_token,)
+        ).fetchone()
+        if row is None:
+            raise StateConflict("selected child is not an admitted Job")
+        if (row["root_job_id"] != root_token or row["parent_job_id"] != root_token
+                or int(row["depth"]) != 1):
+            raise StateConflict("selected child is outside the chosen root")
+        if row["orchestration_role"] not in {"work", "repair"}:
+            raise StateConflict("selected child role is unsupported")
+        if (row["plan_attempt_id"] != admission["plan_attempt_id"]
+                or row["plan_digest"] != admission["plan_digest"]):
+            raise StateConflict("selected child is not on the admitted plan")
+        step_id = str(row["plan_step_id"])
+        step = by_step.get(step_id)
+        if step is None or step["current_job_id"] != job_token:
+            raise StateConflict("selected child is superseded")
+        repair_round = int(row["repair_round"])
+        if repair_round not in {0, 1, 2}:
+            raise StateConflict("selected child repair round is unsupported")
+        attempt_count = int(row["attempt_count"])
+        ordinal = attempt_count + 1
+        if ordinal < 1:
+            raise StateConflict("selected child Attempt ordinal is invalid")
+        current_attempt_id = row["current_attempt_id"]
+        if current_attempt_id is not None:
+            attempt = loader.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (current_attempt_id,)
+            ).fetchone()
+            if (attempt is None or attempt["job_id"] != job_token
+                    or int(attempt["attempt_number"]) != attempt_count):
+                raise StateConflict("selected child current Attempt is unverified")
+        captured.append({
+            "command_id": (
+                f"coo-cycle:{root_token}:dispatch:{job_token}:attempt:{ordinal}"),
+            "attempt_ordinal": ordinal,
+            "root_job_id": root_token,
+            "parent_job_id": root_token,
+            "job_id": job_token,
+            "plan_attempt_id": admission["plan_attempt_id"],
+            "plan_digest": admission["plan_digest"],
+            "plan_step_id": step_id,
+            "repair_round": repair_round,
+            "expected_current_attempt_id": current_attempt_id,
+        })
+    return tuple(captured)
 
 
 # Retained OHF candidate reads reuse the EXISTING one-selection Runtime owner,
@@ -27487,7 +27608,7 @@ class BoundedRuntimeReadObservation:
             _digest, _request_key, _validate_payload,
         )
         from control_plane.native_continuation import (
-            HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request_event,
+            HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request_event,
             _hermes_root_event,
         )
 
@@ -27503,7 +27624,7 @@ class BoundedRuntimeReadObservation:
             raise RuntimeReadUnavailable("original request unavailable")
         value = event.payload
         schema = value.get("schema") if type(value) is dict else None
-        if schema == HERMES_REQUEST_SCHEMA:
+        if schema in HERMES_REQUEST_SCHEMAS:
             # The native Secretary request has no Dialogue, Attempt or worker
             # carrier. Its principal filter is required and is applied before
             # any root read; the bounded UNIQUE root join is unchanged.
@@ -27536,7 +27657,7 @@ class BoundedRuntimeReadObservation:
         if root_row is None:
             raise RuntimeReadUnavailable("original root disappeared")
         root = _event_from_row(root_row)
-        if schema == HERMES_REQUEST_SCHEMA:
+        if schema in HERMES_REQUEST_SCHEMAS:
             _hermes_root_event(root, value["binding"])
         if (root.event_id != value["root_event_id"]
                 or _digest(root.to_dict()) != value["root_event_sha256"]):
@@ -27586,7 +27707,7 @@ class BoundedRuntimeReadObservation:
         self._select()
         try:
             from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMA, hermes_continuation_commit_evidence,
+                HERMES_REQUEST_SCHEMAS, hermes_continuation_commit_evidence,
             )
 
             loader = _BoundedRoleResultLoader(self._connection)
@@ -27626,7 +27747,7 @@ class BoundedRuntimeReadObservation:
                     row = loader.execute("SELECT * FROM events WHERE command_id=?",
                                          (prefix + event.aggregate_id,)).fetchone()
                     indexed.append(None if row is None else _event_from_row(row))
-                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
                     # The native Secretary aggregate carries its own commit
                     # fact; the pure helper proves the aggregate Event and the
                     # independent global command index agree.
@@ -27677,14 +27798,14 @@ class BoundedRuntimeReadObservation:
                 _validate_current_target_worker_quota,
                 job_id_from_operation_key,
             )
-            from control_plane.native_continuation import HERMES_REQUEST_SCHEMA
+            from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
 
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
                 event, value = self._load_session_original_request_bounded(
                     loader, read_ref, original_principals)
-                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
                     # A native Secretary request has no Attempt, worker or
                     # harness writer. Refuse before every live-writer query
                     # instead of synthesizing a legacy writer tuple.
@@ -27797,7 +27918,7 @@ class BoundedRuntimeReadObservation:
                 _digest, _request_key, _validate_payload,
             )
             from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request,
+                HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request,
                 validate_hermes_continuation_request_event, _hermes_root_event,
             )
 
@@ -27857,7 +27978,7 @@ class BoundedRuntimeReadObservation:
                     event = _event_from_row(row)
                     value = event.payload
                     schema = value.get("schema") if type(value) is dict else None
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         # The native Secretary request carries no Dialogue
                         # context, Attempt or worker. Its own closed payload
                         # law supplies the scope the filters below apply.
@@ -27893,7 +28014,7 @@ class BoundedRuntimeReadObservation:
                             not in original_principals):
                         continue
                     # Foreign work/principal scope never triggers a root read.
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         try:
                             validate_hermes_continuation_request_event(
                                 event, original_principals=original_principals)
@@ -27912,7 +28033,7 @@ class BoundedRuntimeReadObservation:
                     if root_row is None:
                         raise RuntimeReadUnavailable("original root disappeared")
                     root = _event_from_row(root_row)
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         _hermes_root_event(root, value["binding"])
                     if (root.event_id != value["root_event_id"]
                             or _digest(root.to_dict()) != value["root_event_sha256"]):
@@ -28081,6 +28202,29 @@ class BoundedRuntimeReadObservation:
         try:
             result = _read_admitted_plan_bounded(
                 self._acquisition, self._vm_progress, root_job_id=root_job_id
+            )
+            return dataclasses.replace(
+                result, observation_source_identity=self._identity
+            )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_selected_child_target_bounded(
+        self, root_job_id: str, *, child_job_ids: tuple[str, ...]
+    ) -> BoundedSelectedChildCapture:
+        """Select the admitted plan AND the host's chosen children at once.
+
+        This is the ONE coherent observation a trusted host's capture needs:
+        the same one-selection allowance, the same fixed shared budgets and
+        the same close receipt as the admitted-plan reader. It dispatches no
+        Job, mutates no Runtime row and creates no request identity.
+        """
+        self._select()
+        try:
+            result = _read_admitted_plan_bounded(
+                self._acquisition, self._vm_progress, root_job_id=root_job_id,
+                child_job_ids=child_job_ids,
             )
             return dataclasses.replace(
                 result, observation_source_identity=self._identity

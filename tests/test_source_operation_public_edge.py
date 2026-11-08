@@ -162,8 +162,8 @@ def test_legacy_five_branch_mcp_transition():
     inner = _inner_of(final)
     assert len(inner) == 6
     assert inner[2] == transition._source_branch(RELAY, "group_0")
-    assert inner[3]["match"][0]["path"] == [edge.MCP_METADATA_ROUTE]
-    assert inner[4]["match"][0]["path"] == list(edge.MCP_ROUTES)
+    assert inner[3]["match"][0]["path"] == list(edge.COMPLETE_MCP_METADATA_ROUTES)
+    assert inner[4]["match"][0]["path"] == list(edge.COMPLETE_MCP_ROUTES)
     assert inner[4]["handle"][0] == _body(edge.MCP_MAX_BODY)
     assert inner[4]["handle"][1] == _proxy(RELAY, "127.0.0.1")
     assert inner[5] == {"handle": [{"handler": "static_response", "abort": True}]}
@@ -187,7 +187,12 @@ def test_current_six_branch_idempotent_transition():
     get_paths = sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
     observed = _fullconfig(_inner(RELAY, get_paths, list(edge.POST_ROUTES), source=True, mcp=True))
     final = _final(observed, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
-    assert transition._canonical(final) == transition._canonical(observed)
+    # The observed CEO-only public-MCP pair is upgraded to the complete pair;
+    # the complete pair is then idempotent.
+    assert transition._canonical(final) != transition._canonical(observed)
+    assert transition._canonical(
+        _final(final, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
+    ) == transition._canonical(final)
     staged = _final(_fullconfig(_inner(RELAY, list(edge.SOURCE_CONTEXT_GET_ROUTES) + list(CURRENT_ROUTES),
                                        list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES))))
     again = _final(staged, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
@@ -235,10 +240,18 @@ def test_get_route_coherence():
     # The old final POST tail stays exact on its complete predecessor; the
     # planning and conversation route groups extend POST_ROUTES after it.
     assert edge.PRE_JOURNEY_POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ('/workspace/instruction-admission/pause',)
-    assert edge.POST_ROUTES == (edge.PRE_JOURNEY_POST_ROUTES + edge.PROJECT_PLANNING_POST_ROUTES
+    assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == (edge.PRE_JOURNEY_POST_ROUTES + edge.PROJECT_PLANNING_POST_ROUTES
                                 + edge.PROJECT_CONVERSATION_READ_POST_ROUTES
                                 + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',)
                                 + edge.PROJECT_EXECUTION_POST_ROUTES)
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + (
+        "/os/executive/company-priorities",
+    )
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in profiles
     assert not set(edge.SOURCE_POST_ROUTES) & set(edge.POST_ROUTES)
     template = edge._TEMPLATE.read_text(encoding="utf-8")
     get_line = "path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__"
@@ -333,7 +346,8 @@ def test_stage_receipt_and_exclusive_creation():
         assert routes["get"] == sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
         assert routes["post"] == list(edge.POST_ROUTES)
         assert routes["source_post"] == list(edge.SOURCE_POST_ROUTES)
-        assert receipt["mcp"] == {"get": [edge.MCP_METADATA_ROUTE], "post": list(edge.MCP_ROUTES)}
+        assert receipt["mcp"] == {"get": list(edge.COMPLETE_MCP_METADATA_ROUTES),
+                                  "post": list(edge.COMPLETE_MCP_ROUTES)}
         assert receipt["installed"] is False
         assert receipt["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
         # Exclusive creation stays visible as FileExistsError, never a replace.

@@ -34,6 +34,15 @@ from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+# Stable browser-safe failure code. Raw provider/SDK exceptions remain internal for
+# classification and telemetry but must never be streamed to the user surface.
+CHAT_ERROR_CODE = "advisor_chat_unavailable"
+CHAT_ERROR_MESSAGE = "Mastermind AI is temporarily unavailable. Please retry."
+
+
+def public_chat_error_event() -> dict[str, str]:
+    """Return the stable, browser-safe chat failure envelope."""
+    return {"type": "error", "code": CHAT_ERROR_CODE, "error": CHAT_ERROR_MESSAGE}
 
 # Headless reasoning must never open a permission prompt. Keep this adapter-level
 # invariant independent of user/project Claude settings and config drift.
@@ -468,6 +477,15 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
 _SDK_TERMINAL_ERROR = "sdk_terminal_error"
 
 
+class _SDKTerminalAfterToolUse(Exception):
+    """Carry an owned terminal outcome and its original iterator exception."""
+
+    def __init__(self, result: dict, original_exception: Exception):
+        super().__init__(_SDK_TERMINAL_ERROR)
+        self.result = result
+        self.original_exception = original_exception
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -710,6 +728,24 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except _SDKTerminalAfterToolUse as _terminal:
+                # The handler already saw tool use and an error terminal before
+                # its iterator raised. Preserve that owned outcome; exception
+                # prose cannot authorize replay of the potentially applied turn.
+                result = _terminal.result
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "raised", _terminal.original_exception,
+                        )
+                    except BaseException:
+                        # A diagnostic failure cannot replace the owned terminal.
+                        pass
+                used_key_id = _key_id
+                # Evidence-only attachment, not the condition for this fence.
+                result["provider_failure_evidence"] = dict(_failure_box)
+                break
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
                 if not _sdk_call_finished:
@@ -1061,7 +1097,23 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         except Exception:
             pass
     _observe_sdk_diagnostic(_diagnostic, query_entered=True)
-    async for msg in _sdk_query(prompt=prompt, options=opts):
+    _sdk_stream = aiter(_sdk_query(prompt=prompt, options=opts))
+    _terminal_iterator_exception = None
+    while True:
+        try:
+            msg = await anext(_sdk_stream)
+        except StopAsyncIteration:
+            break
+        except ProviderStartRefused:
+            raise
+        except Exception as exc:
+            # These are existing handler-owned operational fields, independent
+            # of failure_out. No tool use or no failed terminal keeps the legacy
+            # exception path. Handler/observer errors are outside this catch.
+            if not (terminal_error and used):
+                raise
+            _terminal_iterator_exception = exc
+            break
         try:
             if hasattr(msg, "result"):                         # ResultMessage
                 # Preserve an explicit error even if a later terminal says success.
@@ -1175,11 +1227,14 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text) and not terminal_error, "text": text,
-            "model": mdl, "role": role, "armed": arm,
-            "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk",
-            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    result = {"ok": bool(text) and not terminal_error, "text": text,
+              "model": mdl, "role": role, "armed": arm,
+              "tools_used": used, "cost_usd": cost, "session_id": sid,
+              "usage": _as_dict(usage), "backend": "sdk",
+              **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    if _terminal_iterator_exception is not None:
+        raise _SDKTerminalAfterToolUse(result, _terminal_iterator_exception) from _terminal_iterator_exception
+    return result
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
@@ -1319,7 +1374,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         yield {"type": "error", "error": "claude CLI not installed (npm i -g @anthropic-ai/claude-code)"}
         return
 
-    from brain import bot_mcp
+    from brain import bot_mcp, cognition_mcp
     rc = _cfg().get("reasoning", {})
     mdl = resolve_model(role)
 
@@ -1338,7 +1393,9 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
 
     opts = _Options(
         model=mdl,
-        allowed_tools=bot_mcp.armed_allowed_tools(),
+        allowed_tools=list(dict.fromkeys(
+            [*bot_mcp.armed_allowed_tools(), *cognition_mcp.allowed_tools()]
+        )),
         add_dirs=_abs_dirs(rc.get("add_dirs", [])),
         cwd=str(_ROOT),
         max_turns=max_turns or rc.get("research_max_turns", 16),
@@ -1346,7 +1403,10 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         env=_subscription_env(_stream_env_name),
         setting_sources=["project"],
     )
-    opts.mcp_servers = {bot_mcp.SERVER_NAME: bot_mcp.build_server()}
+    opts.mcp_servers = {
+        bot_mcp.SERVER_NAME: bot_mcp.build_server(),
+        cognition_mcp.SERVER_NAME: cognition_mcp.build_server(),
+    }
     if resume:
         opts.resume = resume
     if append_system:
@@ -1437,7 +1497,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception as e:                                      # surface, don't crash the stream
         _stream_error = repr(e)[:600]
         _error_buffer = _stream_error
-        yield {"type": "error", "error": repr(e)[:300]}
+        yield public_chat_error_event()
 
     # Post-stream key-failure detection — mark_cooling so the NEXT turn rotates.
     # Always scan the TRUNCATED buffer: the final chunk can push it past 600 chars

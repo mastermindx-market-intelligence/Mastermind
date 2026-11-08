@@ -172,7 +172,7 @@
         "frontend_visual",
         "adversarial_review"
       ],
-      "implementation_state": "SPEC_ONLY",
+      "implementation_state": "BUILT_NOT_PROVEN",
       "autonomous_allowed": false,
       "activation_gates": [
         "adapter_implemented",

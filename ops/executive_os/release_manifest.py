@@ -274,18 +274,41 @@ def _hermes_restart(value: Any) -> int | float:
     return int(number) if number.is_integer() else number
 
 
-def _hermes_native_gateway(value: Any) -> dict[str, Any]:
+def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
+                           _defer_consumer: bool = False) -> dict[str, Any]:
+    # This bootstrap owner must remain stdlib-only until its held source loader
+    # is installed. The runtime contract is checked against these closed values.
+    if type(role) is not str or role not in HERMES_ROLES or type(_defer_consumer) is not bool:
+        raise ReleaseManifestError("Hermes native role is invalid")
+    enrollment_schema = {
+        "mmsecretary": "mastermind.hermes_secretary_session_enrollment/v1",
+        "mmmeta": "mastermind.hermes_meta_session_enrollment/v1",
+    }[role]
     keys = {"schema", "python", "startup", "vendor_root", "import_roots", "dependency_inventory"}
     if type(value) is not dict:
         raise ReleaseManifestError("Hermes native installation is invalid")
+    derivation = value.get("vendor_derivation")
+    if "vendor_derivation" in value:
+        keys = keys | {"vendor_derivation"}
+        if (type(derivation) is not dict
+                or set(derivation) != {"kind", "base_sha", "patch_sha256", "source_root"}
+                or derivation["base_sha"] != "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+                or (derivation["kind"], derivation["patch_sha256"]) not in (
+                    ("computer_env_guard", "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"),
+                    ("diagnostic_privacy", "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"),
+                    ("workspace_oauth_privacy", "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"))):
+            raise ReleaseManifestError("Hermes vendor derivation is invalid")
+        derivation = dict(derivation, source_root=_safe_installation_path(derivation["source_root"]))
     version = value.get("schema")
     enrollment = None
-    if version == "mastermind.hermes_native_gateway_installation/v2":
+    consumer = None
+    if version in ("mastermind.hermes_native_gateway_installation/v2",
+                   "mastermind.hermes_native_gateway_installation/v3"):
         keys = keys | {"session_enrollment"}
         enrollment = value.get("session_enrollment")
         if (type(enrollment) is not dict
                 or set(enrollment) != {"schema", "request_id"}
-                or enrollment.get("schema") != "mastermind.hermes_secretary_session_enrollment/v1"):
+                or enrollment.get("schema") != enrollment_schema):
             raise ReleaseManifestError("Hermes session enrollment is invalid")
         request_id = enrollment["request_id"]
         if (type(request_id) is not str or not 1 <= len(request_id) <= 256
@@ -295,6 +318,40 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
             request_id.encode("utf-8", "strict")
         except UnicodeError:
             raise ReleaseManifestError("Hermes enrollment request identity is invalid") from None
+        if version == "mastermind.hermes_native_gateway_installation/v3":
+            # The optional qualified consumer. It is a closed, non-secret
+            # document: the frozen target material, the mission joins, the
+            # approved MCP/public client metadata, the installed enrollment
+            # identity and the sealed plugin package. A credential, a bearer
+            # template or a client secret cannot be carried by it.
+            keys = keys | {"executive_consumer"}
+            consumer = value.get("executive_consumer")
+            if type(consumer) is not dict:
+                raise ReleaseManifestError("Hermes executive consumer is invalid")
+            # A structural bootstrap snapshot is opaque, detached and bounded
+            # by the complete installation limit. It is never a qualified
+            # publication until the same semantic owner runs under held imports.
+            consumer = _closed_json(_canonical(consumer))
+            # Context v2 imports these native memory bodies. Require the fixed
+            # privacy repair even during deferred bootstrap qualification; the
+            # held owner separately verifies its full tree and installed receipt.
+            if (consumer.get("schema") == "mastermind.hermes_native_executive_consumer/v2"
+                    and (derivation is None or derivation["kind"] != "diagnostic_privacy")):
+                raise ReleaseManifestError("Hermes context requires diagnostic privacy derivation")
+            if (consumer.get("schema") in {"mastermind.hermes_native_executive_consumer/v3", "mastermind.hermes_native_executive_consumer/v4"}
+                    and (derivation is None or derivation["kind"] != "workspace_oauth_privacy")):
+                raise ReleaseManifestError("Hermes current context requires Workspace OAuth privacy derivation")
+            if not _defer_consumer:
+                try:
+                    from integrations.hermes_harness.native_executive_consumer import (
+                        validate_consumer_publication,
+                    )
+                    consumer = validate_consumer_publication(consumer)
+                    if (consumer["session"]["request_id"] != enrollment["request_id"]
+                            or consumer["session"]["role"] != role):
+                        raise ValueError("consumer enrollment identity differs")
+                except Exception:
+                    raise ReleaseManifestError("Hermes executive consumer is invalid") from None
     elif version != "mastermind.hermes_native_gateway_installation/v1":
         raise ReleaseManifestError("Hermes native installation is invalid")
     if set(value) != keys:
@@ -320,14 +377,22 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
     inventory_path = _safe_installation_path(inventory["path"])
     if any(_within(inventory_path, root) for root in roots):
         raise ReleaseManifestError("Hermes native inventory is inside its own closure")
+    if derivation is not None and (
+        any(_within(derivation["source_root"], root) or _within(root, derivation["source_root"])
+            for root in roots) or _within(inventory_path, derivation["source_root"])
+    ):
+        raise ReleaseManifestError("Hermes vendor derivation paths overlap")
     return {"schema": value["schema"], "python": binary, "startup": startup,
             "vendor_root": vendor, "import_roots": roots,
             "dependency_inventory": {"path": inventory_path, "sha256": inventory["sha256"],
                                      "size": inventory["size"]},
-            **({"session_enrollment": dict(enrollment)} if enrollment is not None else {})}
+            **({"session_enrollment": dict(enrollment)} if enrollment is not None else {}),
+            **({"vendor_derivation": derivation} if derivation is not None else {}),
+            **({"executive_consumer": json.loads(json.dumps(consumer))}
+               if consumer is not None else {})}
 
 
-def _hermes_roles(value: Any) -> list[dict[str, Any]]:
+def _hermes_roles(value: Any, *, _defer_consumer: bool = False) -> list[dict[str, Any]]:
     if type(value) is not list or len(value) != len(HERMES_ROLES):
         raise ReleaseManifestError("Hermes runtime roles are invalid")
     rows: list[dict[str, Any]] = []
@@ -341,10 +406,12 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
             raise ReleaseManifestError("Hermes runtime role row is invalid")
         if row["role"] != role:
             raise ReleaseManifestError("Hermes runtime role order is invalid")
-        native = (_hermes_native_gateway(row["native_gateway"])
+        native = (_hermes_native_gateway(row["native_gateway"], role=role,
+                                         _defer_consumer=_defer_consumer)
                   if "native_gateway" in row else None)
-        if native is not None and "session_enrollment" in native and role != "mmsecretary":
-            raise ReleaseManifestError("Hermes session enrollment requires Secretary")
+        if (not _defer_consumer and native is not None and "executive_consumer" in native
+                and native["executive_consumer"]["session"]["role"] != role):
+            raise ReleaseManifestError("Hermes executive consumer role differs")
         uid, gid = row["uid"], row["gid"]
         if type(uid) is not int or not 1 <= uid <= 2 ** 31 - 1:
             raise ReleaseManifestError("Hermes runtime role uid is invalid")
@@ -368,7 +435,7 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def validate_hermes_runtime_installation(value: Any) -> dict[str, Any]:
+def validate_hermes_runtime_installation(value: Any, *, _defer_consumer: bool = False) -> dict[str, Any]:
     """Validate one closed installation input and return its detached form.
 
     The returned document is canonical: integral restart bounds are
@@ -376,6 +443,8 @@ def validate_hermes_runtime_installation(value: Any) -> dict[str, Any]:
     no credential, provider, model, environment, command, unit path,
     implementation label or release root is accepted.
     """
+    if type(_defer_consumer) is not bool:
+        raise ReleaseManifestError("Hermes bootstrap selection is invalid")
     if type(value) is not dict or set(value) != HERMES_RUNTIME_KEYS:
         raise ReleaseManifestError("Hermes runtime installation is invalid")
     if value["schema"] != HERMES_RUNTIME_SCHEMA:
@@ -393,7 +462,7 @@ def validate_hermes_runtime_installation(value: Any) -> dict[str, Any]:
         "bootstrap_python": bootstrap,
         "launch_python": launch,
         "startup": startup,
-        "roles": _hermes_roles(value["roles"]),
+        "roles": _hermes_roles(value["roles"], _defer_consumer=_defer_consumer),
     }
     if len(_canonical(document)) > _MAX_HERMES_DOCUMENT:
         raise ReleaseManifestError("Hermes runtime installation exceeds its byte budget")
@@ -597,7 +666,7 @@ class _HeldReleaseSources:
             self.hermes_runtime: dict[str, Any] | None = None
             if "hermes_runtime" in document:
                 self.hermes_runtime = validate_hermes_runtime_installation(
-                    document["hermes_runtime"])
+                    document["hermes_runtime"], _defer_consumer=True)
             self.check()
         except BaseException:
             self.close()
@@ -679,7 +748,7 @@ class _HeldReleaseSources:
         self.check()
         return self._manifest_sha256
 
-    def hermes_runtime_input(self) -> dict[str, Any] | None:
+    def hermes_runtime_input(self, *, _defer_consumer: bool = False) -> dict[str, Any] | None:
         """The detached, checked approved installation input.
 
         An absent member is ``None``; a malformed member already refused
@@ -688,7 +757,7 @@ class _HeldReleaseSources:
         self.check()
         if self.hermes_runtime is None:
             return None
-        return validate_hermes_runtime_installation(self.hermes_runtime)
+        return validate_hermes_runtime_installation(self.hermes_runtime, _defer_consumer=_defer_consumer)
 
     def check(self) -> None:
         if self.closed:
@@ -794,6 +863,18 @@ def _held_release_imports(owner: _HeldReleaseSources):
             raise ReleaseManifestError("held release import ownership changed")
 
 
+def _qualify_held_hermes_runtime(owner, finder, candidate):
+    """Qualify the exact staged bytes through the existing held source loader."""
+    if not isinstance(finder, _ReleaseSourceFinder) or finder.owner is not owner:
+        raise ReleaseManifestError("Hermes source qualification requires its held importer")
+    finder.check()
+    qualified = validate_hermes_runtime_installation(candidate)
+    if _canonical(qualified) != _canonical(candidate):
+        raise ReleaseManifestError("Hermes installation changed during semantic qualification")
+    finder.check()
+    return qualified
+
+
 def linux_release_root() -> Path:
     """The fixed Linux release root that holds the exact-SHA installed releases."""
     return _LINUX_RELEASES
@@ -896,6 +977,10 @@ class _NativeGatewayLaunch:
         self.launcher_bytes = owner.source("integrations/hermes_runtime/native/hermes")
         self.adapter_bytes = owner.source("integrations/hermes_runtime/native_gateway_entry.py")
         self._births = {}
+        self.derivation = None
+        if "vendor_derivation" in self.recipe:
+            from ops.executive_os.native_gateway_sources import verify_vendor_derivation
+            self.derivation = verify_vendor_derivation(owner, self.recipe, _linux_source_acl)
 
     def check(self):
         self.finder.check()
@@ -935,8 +1020,17 @@ class _NativeGatewayLaunch:
                 or receipt.get("native_adapter_sha256") != hashlib.sha256(self.adapter_bytes).hexdigest()
                 or receipt.get("profile_sha256") != profile_sha256(dump_profile(profile))
                 or receipt.get("upstream_attested") is not True
+                or receipt.get("native_vendor_derivation") != self.derivation
                 or receipt.get("sha") != profile.sha or receipt.get("role") != profile.role):
             raise RuntimeRefusal("NATIVE_GATEWAY_RECEIPT_MISMATCH")
+        consumer = self.recipe.get("executive_consumer")
+        if consumer is not None:
+            # Qualify physical custody through the original held release.
+            # The role-home receipt's digest is only an equality witness.
+            from integrations.hermes_harness.native_executive_consumer import held_plugin_package_digest
+            if (receipt.get("native_consumer_plugin_sha256") != consumer["plugin"]["digest"]
+                    or held_plugin_package_digest(self.owner) != consumer["plugin"]["digest"]):
+                raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_UNPROVEN")
         self.check()
 
     def argv(self, profile, hermes_bin, *, tools=False):
@@ -968,7 +1062,7 @@ class _NativeGatewayLaunch:
 
 def _hermes_runtime(argv: list[str]) -> int:
     if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe", "native-gateway",
-                                    "enroll-secretary-session"}
+                                    "enroll-secretary-session", "enroll-meta-session"}
             or not _HERMES_EARLY_NO_SITE or not _hermes_recipe_is_qualified()
             or any(name not in sys.modules or sys.modules[name] is not None
                    for name in _HERMES_SITE_NAMES)):
@@ -983,7 +1077,7 @@ def _hermes_runtime(argv: list[str]) -> int:
     closure = None
     try:
         owner.source("ops/executive_os/release_manifest.py")
-        installation = owner.hermes_runtime_input()
+        installation = owner.hermes_runtime_input(_defer_consumer=True)
         if installation is None:
             raise ReleaseManifestError("Hermes installation input is absent")
         label = os.environ.get("MM_HERMES_IMPLEMENTATION_SHA")
@@ -1002,18 +1096,30 @@ def _hermes_runtime(argv: list[str]) -> int:
             native = row.get("native_gateway")
         if child_entry and native is None:
             raise ReleaseManifestError("Hermes native installation input is absent")
-        # No site initialization or ambient import root. The manifest-selected
-        # roots are verified before any native/third-party import. Establish
-        # them before the incumbent source finder takes its path snapshot.
-        if native is not None:
-            # Pinned native startup puts its already selected project root at
-            # index zero. Establish that exact order before the finder freezes
-            # it, so native startup cannot broaden/reorder the qualified path.
-            sys.path[:] = [native["vendor_root"], *original_paths, *native["import_roots"][1:]]
+        # Qualify publications and dependency bytes while only the original
+        # isolated stdlib paths are visible. Unqualified vendor paths must not
+        # supply an ordinary import used by either qualification owner.
         with _held_release_imports(owner) as finder:
+            installation = _qualify_held_hermes_runtime(owner, finder, installation)
+            if row is not None:
+                row = next(item for item in installation["roles"] if item["role"] == row["role"])
+                native = row.get("native_gateway")
             if native is not None:
                 from ops.executive_os.native_gateway_sources import NativeSourceClosure
                 closure = NativeSourceClosure(owner, native, _linux_source_acl)
+                closure.check()
+            finder.check()
+        # The same held source owner and closure survive this finite import
+        # scope. A fresh finder freezes the one selected native path recipe;
+        # neither finder's path-drift protection is relaxed or refreshed.
+        if native is not None:
+            owner.check()
+            closure.check()
+            sys.path[:] = [native["vendor_root"], *original_paths, *native["import_roots"][1:]]
+        with _held_release_imports(owner) as finder:
+            finder.check()
+            if closure is not None:
+                closure.check()
             factory = importlib.import_module(_CUSTODY_ROOT.replace("/", ".") + ".paid_initializer")
             with ExitStack() as contexts:
                 execution = installation
@@ -1085,13 +1191,14 @@ def _prepare_hermes_dependencies(argv: list[str]) -> int:
     raw = args.hermes_runtime_json.encode("utf-8")
     if not 0 < len(raw) <= _MAX_CLI_ARGUMENT:
         raise ReleaseManifestError("Hermes installation argument is invalid")
-    expected = validate_hermes_runtime_installation(_closed_json(raw))
+    expected = validate_hermes_runtime_installation(_closed_json(raw), _defer_consumer=True)
     if args.root.name != args.commit_sha:
         raise ReleaseManifestError("native dependency release differs")
     owner = _HeldReleaseSources(args.root)
     try:
         document = _closed_json(owner.read(args.root / MANIFEST_NAME, _MAX_SOURCE))
-        if document["tree_sha"] != args.tree_sha or owner.hermes_runtime_input() != expected:
+        retained = owner.hermes_runtime_input(_defer_consumer=True)
+        if document["tree_sha"] != args.tree_sha or retained != expected:
             raise ReleaseManifestError("native dependency installation differs")
         selected = {}
         for row in expected["roles"]:
@@ -1099,7 +1206,8 @@ def _prepare_hermes_dependencies(argv: list[str]) -> int:
             if native is None:
                 continue
             path = native["dependency_inventory"]["path"]
-            selection = (native["import_roots"], native["dependency_inventory"])
+            selection = (native["import_roots"], native["dependency_inventory"],
+                         native.get("vendor_derivation"))
             if path in selected and selected[path][0] != selection:
                 raise ReleaseManifestError("native dependency inventory selection conflicts")
             selected[path] = (selection, native)
@@ -1107,9 +1215,18 @@ def _prepare_hermes_dependencies(argv: list[str]) -> int:
             raise ReleaseManifestError("native dependency input is absent")
         # Load only immutable first-party code through its existing owner.
         # No native package, model, credential or runtime unit is entered.
-        with _held_release_imports(owner):
+        with _held_release_imports(owner) as finder:
+            qualified = _qualify_held_hermes_runtime(owner, finder, retained)
+            expected = _qualify_held_hermes_runtime(owner, finder, expected)
+            if qualified != expected:
+                raise ReleaseManifestError("native dependency installation differs")
+            # selected contains only structurally qualified path recipes whose
+            # complete documents now passed the same semantic/source boundary.
             from ops.executive_os.native_gateway_sources import prepare_inventory
             for _, native in selected.values():
+                if "vendor_derivation" in native:
+                    from ops.executive_os.native_gateway_sources import prepare_vendor_derivation
+                    prepare_vendor_derivation(owner, native, _linux_source_acl)
                 prepare_inventory(owner, native, _linux_source_acl)
         owner.check()
     finally:

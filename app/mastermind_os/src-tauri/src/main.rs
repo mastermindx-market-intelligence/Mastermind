@@ -70,8 +70,32 @@ fn dispatch_auth_callback(app: tauri::AppHandle, url: url::Url) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn reopen_main_window(app: &tauri::AppHandle) -> Result<(), &'static str> {
+    use tauri::Manager;
+
+    // Closing the macOS window can leave the existing application alive. Reopen
+    // its one configured window without rebuilding app state or restarting auth.
+    let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => {
+            let config = app.config().app.windows.iter()
+                .find(|config| config.label == "main")
+                .ok_or("MAIN_WINDOW_CONFIG_UNAVAILABLE")?;
+            tauri::WebviewWindowBuilder::from_config(app, config)
+                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?
+                .build()
+                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?
+        }
+    };
+    window.show().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    window.unminimize().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    window.set_focus().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    Ok(())
+}
+
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
         .plugin(tauri_plugin_opener::init())
@@ -102,11 +126,14 @@ fn main() {
             terminal_session::read_terminal_sharing_requests,
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
+            auth::hermes_native::hermes_native,
             auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
             auth::read_byok_roles,
+            auth::control_room_read::read_control_room_state,
+            auth::company_priorities::read_company_priorities,
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
@@ -164,8 +191,17 @@ fn main() {
             auth::executive_session_references,
             auth::executive_project_session_references
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("tauri runtime error");
+    app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+            if let Err(code) = reopen_main_window(_app) {
+                // Only a fixed local window error is logged, never callback data.
+                eprintln!("Mastermind OS: {code}");
+            }
+        }
+    });
 }
 
 #[cfg(test)]

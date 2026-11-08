@@ -587,14 +587,25 @@ def _c1_fleet_git_failure_postpin_start(svc, account, roots, plan, raw, current,
 
 
 @contextmanager
-def selected_applied_context(svc, account, roots, *, operation="status"):
+def selected_applied_context(svc, account, roots, *, operation="status",
+                             retained_proof_purpose=None):
     """Share the incumbent selected-pin proof without replaying its operation.
 
     An apply caller holds the same native publication lock until its own
     enclosing gateway transaction exits. No pin record or native selection is
     changed here; read_transaction remains the only retained-record verifier.
+
+    ``retained_proof_purpose`` is the one closed chatgpt1 gateway-formatter
+    artifact check. It is not a native operation. Generic apply stays strict.
     """
-    if operation not in {"status", "apply"}:
+    closed_purpose = getattr(svc, "C1_GATEWAY_RETAINED_PROOF_PURPOSE", None)
+    closed_account = getattr(svc, "C1_GIT_FAILURE_COMPAT_ACCOUNT", None)
+    if retained_proof_purpose is not None:
+        if (retained_proof_purpose != closed_purpose
+                or account != closed_account
+                or operation not in {"preview", "apply"}):
+            fail("INPUT_REFUSED")
+    elif operation not in {"status", "apply"}:
         fail("INPUT_REFUSED")
     path = roots["state"] / "native-pool-pin"
     directory(svc, path)
@@ -610,6 +621,7 @@ def selected_applied_context(svc, account, roots, *, operation="status"):
             "successor_plan_sha256": p["successor_digest"],
             "expected_plan_sha256": plan_sha(svc, p),
             "operation": operation,
+            "retained_proof_purpose": retained_proof_purpose or "",
         })()
     except KeyError:
         fail("RETAINED_PLAN_REFUSED")

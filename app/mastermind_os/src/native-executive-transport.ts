@@ -3,12 +3,8 @@ import {projectConversationArguments} from './conversations/project-conversation
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
-  decodeSessionContext,
   normalizeExecutiveSessionSelection,
   sessionSelectionWire,
-  sessionTargetKind,
-  type ExecutiveSessionSelection,
-  type ExecutiveSessionTransport,
 } from "./orchestration/executive-session-command-port";
 import {sessionSendArguments} from "./orchestration/session-send-arguments";
 import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
@@ -32,21 +28,6 @@ const WORK = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 const OPERATION = /^session-continue-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
-/** Keep the Secretary native context READ-only; never
- * rewrite identity, selection or native source. Only a fully qualified backend
- * context can be projected, and its capability is reduced, not invented. */
-function nativeReadContextOnly(raw: unknown, selected: ExecutiveSessionSelection): unknown {
-  if (sessionTargetKind(selected) !== "hermes_secretary" ||
-      !decodeSessionContext(raw, selected)) return raw;
-  const envelope = raw as Record<string, unknown>;
-  const data = envelope.data as Record<string, unknown>;
-  const capability = data.capabilities as Record<string, unknown>;
-  return {
-    ...envelope,
-    data: { ...data, capabilities: { ...capability, send: false } },
-  };
-}
-
 /** Private native auth epoch; no token/claims enter the webview, no arbitrary native command. */
 export async function createNativeExecutiveTransport(invoke: Invoke, listen: Listen) {
   let nativeGeneration = -1, epoch = 0, available = false;
@@ -101,7 +82,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     }
   })();
 
-  function call(command: "executive_context" | "executive_submit" | "executive_status" |
+  function call(command: "read_company_priorities" | "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
     "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
@@ -143,6 +124,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     diagnostics,
     context: (signal) => call("executive_context", signal),
+    companyPriorities: (signal) => call("read_company_priorities", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
     projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
@@ -194,8 +176,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // History and qualified Fabric continuations reuse the same native bearer
-  // owner and epoch. Secretary SEND remains unavailable on this native route.
+  // History and qualified Fabric/Secretary continuations reuse the same
+  // native bearer owner, fixed SEND command and auth epoch.
   // The independent executive_submit F2 review remains unchanged.
   const sessionTransport: ProjectConversationHistoryTransport = {
     projectConversations: {request: (operation,arguments_,signal) => {
@@ -213,11 +195,10 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     context: async (selection, signal) => {
       const normalized = normalizeExecutiveSessionSelection(selection);
       if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
-      // Preserve the accepted Fabric context and its fixed SEND command.
-      // The separately selected Secretary path remains READ-only here.
-      return nativeReadContextOnly(await call("executive_session_context", signal, {
+      // The Session owner validates the returned target and capability.
+      return call("executive_session_context", signal, {
         selection: sessionSelectionWire(normalized),
-      }), normalized);
+      });
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)
       ? call("executive_session_reply", signal, { operationKey: args.operation_key })

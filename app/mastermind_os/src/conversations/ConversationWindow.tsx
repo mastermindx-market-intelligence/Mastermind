@@ -125,7 +125,7 @@ function QualifiedReplyCard({ value, onCommitted, locale }: {
       onCommitted?.(value);
     }
   }, [value, onCommitted]);
-  const native = qualifiedAnswerVariant(value.answer) === "hermes_secretary";
+  const native = qualifiedAnswerVariant(value.answer) !== "fabric_attempt";
   const nextStep = native ? null : value.answer.nextStep;
   const successful = native
     ? (value.answer as { readonly successful: boolean }).successful

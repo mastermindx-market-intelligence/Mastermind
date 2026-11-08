@@ -100,9 +100,9 @@ const COMMITTED_ACTIONS = new Set(["POSTED", "RECOVERED", "DUPLICATE"]);
 /** Closed installed attention state; it is not worker/result evidence. */
 const ATTENTION_VALUES = new Set(["UNAVAILABLE", "EFFECT_UNKNOWN"]);
 
-const TARGET_REF_RE = /^(?:fabric_attempt|hermes_secretary):[0-9a-f]{64}$/;
+const TARGET_REF_RE = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 const FABRIC_TARGET_REF_RE = /^fabric_attempt:[0-9a-f]{64}$/;
-const HERMES_TARGET_REF_RE = /^hermes_secretary:[0-9a-f]{64}$/;
+const HERMES_TARGET_REF_RE = /^(?:hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 const GENERATION_RE = /^[0-9a-f]{24}$/;
 const OPERATION_KEY_RE = /^session-continue-[0-9a-f]{64}$/;
 /** Protected os_transport.principal_scope returns SHA-256.hexdigest(); opaque to this consumer. */
@@ -123,10 +123,11 @@ const PAYLOAD_KEYS = new Set([
 // ── Closed session selection vocabulary ───────────────────────────────────────
 
 /** The closed canonical target kinds of the selected-session surface. */
-export type ExecutiveSessionTargetKind = "fabric_attempt" | "hermes_secretary";
+export type ExecutiveSessionTargetKind = "fabric_attempt" | "hermes_secretary" | "hermes_meta";
 export const EXECUTIVE_SESSION_TARGET_KINDS: readonly ExecutiveSessionTargetKind[] = [
   "fabric_attempt",
   "hermes_secretary",
+  "hermes_meta",
 ];
 
 /**
@@ -218,6 +219,24 @@ export function normalizeExecutiveSessionSelection(
 
 export const HERMES_RESULT_SCHEMA =
   "mastermind.session_bridge.hermes_secretary_result.v1";
+export const HERMES_META_RESULT_SCHEMA =
+  "mastermind.session_bridge.hermes_meta_result.v1";
+export type HermesNativeTargetKind = "hermes_secretary" | "hermes_meta";
+/** Closed producer domains. The result schema and target must select one family. */
+const HERMES_FAMILIES = Object.freeze({
+  hermes_secretary: Object.freeze({
+    resultSchema: HERMES_RESULT_SCHEMA,
+    operationSchema: "mastermind.session_bridge.hermes_secretary_operation.v1",
+  }),
+  hermes_meta: Object.freeze({
+    resultSchema: HERMES_META_RESULT_SCHEMA,
+    operationSchema: "mastermind.session_bridge.hermes_meta_operation.v1",
+  }),
+});
+function hermesTargetKind(targetRef: string): HermesNativeTargetKind | null {
+  if (!HERMES_TARGET_REF_RE.test(targetRef)) return null;
+  return targetRef.startsWith("hermes_meta:") ? "hermes_meta" : "hermes_secretary";
+}
 const HERMES_RESULT_KEYS = [
   "schema", "target_ref", "operation_key", "read_ref", "request_ref",
   "request_revision", "native_input_sha256", "commit_started", "native_status",
@@ -265,6 +284,12 @@ export interface HermesSecretaryPublicResult {
   readonly successful: boolean | null;
   readonly parent_consumed: false;
 }
+
+/** Meta has the same closed fields and its own literal producer schema. */
+export interface HermesMetaPublicResult extends Omit<HermesSecretaryPublicResult, "schema"> {
+  readonly schema: typeof HERMES_META_RESULT_SCHEMA;
+}
+export type HermesNativePublicResult = HermesSecretaryPublicResult | HermesMetaPublicResult;
 
 /**
  * The byte length of one JSON document as the producer's canonical ASCII
@@ -322,10 +347,10 @@ export async function hermesOperationKeyBound(
   targetRef: string,
   operationKey: string,
 ): Promise<boolean> {
-  if (!HERMES_TARGET_REF_RE.test(targetRef)) return false;
-  if (!OPERATION_KEY_RE.test(operationKey)) return false;
+  const kind = hermesTargetKind(targetRef);
+  if (kind === null || !OPERATION_KEY_RE.test(operationKey)) return false;
   const material =
-    '{"schema":"mastermind.session_bridge.hermes_secretary_operation.v1","target_ref":"' +
+    '{"schema":"' + HERMES_FAMILIES[kind].operationSchema + '","target_ref":"' +
     targetRef + '"}';
   const hex = await sha256Hex(material);
   if (hex === null) return false;
@@ -383,9 +408,10 @@ function validNativeAnswer(value: unknown): value is string {
  */
 export async function decodeHermesPublicResult(
   raw: unknown,
-): Promise<HermesSecretaryPublicResult | null> {
+): Promise<HermesNativePublicResult | null> {
   if (!isPlainObject(raw) || !exactKeys(raw, HERMES_RESULT_KEYS)) return null;
-  if (raw.schema !== HERMES_RESULT_SCHEMA) return null;
+  const schema = raw.schema;
+  if (schema !== HERMES_RESULT_SCHEMA && schema !== HERMES_META_RESULT_SCHEMA) return null;
   const targetRef = raw.target_ref;
   const operationKey = raw.operation_key;
   const readRef = raw.read_ref;
@@ -400,7 +426,9 @@ export async function decodeHermesPublicResult(
     : rawAdmission;
   const answer = raw.answer;
   const successful = raw.successful;
-  if (typeof targetRef !== "string" || !HERMES_TARGET_REF_RE.test(targetRef)) return null;
+  if (typeof targetRef !== "string") return null;
+  const kind = hermesTargetKind(targetRef);
+  if (kind === null || HERMES_FAMILIES[kind].resultSchema !== schema) return null;
   if (typeof operationKey !== "string" || !OPERATION_KEY_RE.test(operationKey)) return null;
   if (typeof readRef !== "string" || typeof requestRef !== "string") return null;
   if (typeof requestRevision !== "string" || !SHA256_HEX_RE.test(requestRevision)) return null;
@@ -428,8 +456,8 @@ export async function decodeHermesPublicResult(
   }
   // Capture and measure the complete validated frame before asynchronous
   // hashing. Callers cannot change the admitted shape or budget during await.
-  const frame: HermesSecretaryPublicResult = Object.freeze({
-    schema: HERMES_RESULT_SCHEMA,
+  const frame: HermesNativePublicResult = Object.freeze({
+    schema,
     target_ref: targetRef,
     operation_key: operationKey,
     read_ref: readRef,
@@ -437,7 +465,7 @@ export async function decodeHermesPublicResult(
     request_revision: requestRevision,
     native_input_sha256: nativeInput,
     commit_started: commitStarted,
-    native_status: status as HermesSecretaryPublicResult["native_status"],
+    native_status: status as HermesNativePublicResult["native_status"],
     admission: admission === null
       ? null
       : Object.freeze({ ...admission } as HermesSecretaryAdmission),
@@ -451,7 +479,7 @@ export async function decodeHermesPublicResult(
   return frame;
 }
 
-function hermesEnvelopeEffect(result: HermesSecretaryPublicResult): string {
+function hermesEnvelopeEffect(result: HermesNativePublicResult): string {
   if (!result.commit_started) return "NONE";
   return result.native_status === "ADMITTED" || result.native_status === "OBSERVED"
     ? "CONTINUATION_COMMITTED" : "UNKNOWN";
@@ -799,32 +827,35 @@ export interface QualifiedHermesSessionAnswer {
   readonly nextStep: null;
 }
 
-export type QualifiedSessionAnswerValue = QualifiedSessionAnswer | QualifiedHermesSessionAnswer;
+export interface QualifiedMetaSessionAnswer extends Omit<QualifiedHermesSessionAnswer, "kind"> {
+  readonly kind: "hermes_meta";
+}
+export type QualifiedSessionAnswerValue =
+  | QualifiedSessionAnswer | QualifiedHermesSessionAnswer | QualifiedMetaSessionAnswer;
 
 /** The variant of one qualified answer, for equality and presentation. */
 export function qualifiedAnswerVariant(
   answer: QualifiedSessionAnswerValue,
-): "fabric_attempt" | "hermes_secretary" {
-  return (answer as QualifiedHermesSessionAnswer).kind === "hermes_secretary"
-    ? "hermes_secretary"
-    : "fabric_attempt";
+): ExecutiveSessionTargetKind {
+  const kind = (answer as { readonly kind?: unknown }).kind;
+  return kind === "hermes_secretary" || kind === "hermes_meta" ? kind : "fabric_attempt";
 }
 
 export interface QualifiedSessionAnswerRead {
   readonly receipt: EffectReceipt;
   readonly answer: QualifiedSessionAnswerValue | null;
-  /** The validated native public result of a Secretary original operation. */
-  readonly nativeResult?: HermesSecretaryPublicResult | null;
+  /** The validated native public result of a native original operation. */
+  readonly nativeResult?: HermesNativePublicResult | null;
 }
 
 /**
- * The one qualified SEND result: the closed receipt and, for a Secretary
+ * The one qualified SEND result: the closed receipt and, for a native
  * target, the validated native public result that carries the actual phase.
  * The receipt never carries the producer's own reason.
  */
 export interface QualifiedSessionDispatch {
   readonly receipt: EffectReceipt;
-  readonly nativeResult: HermesSecretaryPublicResult | null;
+  readonly nativeResult: HermesNativePublicResult | null;
 }
 
 export interface ExecutiveSessionTransport {
@@ -1340,7 +1371,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
   ): Promise<{
     receipt: EffectReceipt;
     answer: QualifiedSessionAnswerValue | null;
-    nativeResult: HermesSecretaryPublicResult | null;
+    nativeResult: HermesNativePublicResult | null;
   }> {
     const envelope = decodeEnvelope(raw, "reply");
     if (!envelope) {
@@ -1442,7 +1473,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
   ): Promise<{
     receipt: EffectReceipt;
     answer: QualifiedSessionAnswerValue | null;
-    nativeResult: HermesSecretaryPublicResult | null;
+    nativeResult: HermesNativePublicResult | null;
   }> {
     const effect = envelope.effect;
     const nativeResult = await decodeHermesPublicResult(envelope.data);
@@ -1468,7 +1499,8 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     return {
       receipt: this._receipt(pointer, "accepted", "ACCEPTED"),
       answer: Object.freeze({
-        kind: "hermes_secretary" as const,
+        kind: nativeResult.schema === HERMES_META_RESULT_SCHEMA
+          ? "hermes_meta" as const : "hermes_secretary" as const,
         text: nativeResult.answer,
         successful: nativeResult.successful,
         readRef: nativeResult.read_ref,
@@ -1592,7 +1624,7 @@ export function createExecutiveSessionBinding(
     const kind = sessionTargetKind(selected);
     if (kind === null) return;
     // The incumbent fabric selection keeps its exact pair shape; only an
-    // explicit Secretary target carries the extra closed key.
+    // explicit native target carries the extra closed key.
     const selection = Object.freeze(
       kind === "fabric_attempt"
         ? { workRef: selected.workRef, rootJobId: selected.rootJobId }

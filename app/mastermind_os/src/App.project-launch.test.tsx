@@ -14,7 +14,7 @@ import {intentIdForOperationKey} from "./orchestration/operation-key";
 import type {OrchestratorCommandBinding} from "./orchestration/host-command-bindings";
 import type {OperationPointer,PendingPointerStore} from "./orchestration/operation-controller";
 
-vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn().mockResolvedValue({
+vi.mock("@tauri-apps/api/core",()=>({isTauri:()=>false,invoke:vi.fn().mockResolvedValue({
   version:"0.1.0",source_revision:"a".repeat(40),build_identity:"fixture",transport:"UNCONFIGURED",state:"BUILT_NOT_PROVEN"})}));
 const signed:AuthState={status:"signed_in",reason:null,acquisition:true,content:true};
 const preview={schema:"mastermind.project_execution_preview.v1",work_ref:"WS:ONE",
@@ -130,18 +130,20 @@ it("discards a preview when its current project acquisition changes",async()=>{
   expect(f.request.mock.calls.some(c=>c[0]==="submit")).toBe(false);
 });
 
-const draftDetails={handoff:"Retain these acceptance conditions.",paths:"app/source.ts\nREADME.md",tests:"tests/test_source.py"};
+const draftDetails={criteria:"First proof\nSecond proof",handoff:"Retain these acceptance conditions.",paths:"app/source.ts\nREADME.md",tests:"tests/test_source.py"};
 async function editCodeDraft(){
   fireEvent.click(screen.getByRole("button",{name:"Start work"}));
   await screen.findByLabelText("Goal");
   fireEvent.change(screen.getByLabelText("Goal"),{target:{value:"My edited project goal."}});
   fireEvent.change(screen.getByLabelText("Handoff (optional)"),{target:{value:draftDetails.handoff}});
+  fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:draftDetails.criteria}});
   fireEvent.change(screen.getByLabelText("Profile"),{target:{value:"bounded_code_change"}});
   fireEvent.change(screen.getByLabelText("Paths to change"),{target:{value:draftDetails.paths}});
   fireEvent.change(screen.getByLabelText("Pytest targets (optional)"),{target:{value:draftDetails.tests}});
   fireEvent.click(screen.getByRole("checkbox",{name:"Check the diff for whitespace errors"}));
 }
 function expectDraftDetails(){
+  expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe(draftDetails.criteria);
   expect((screen.getByLabelText("Handoff (optional)") as HTMLTextAreaElement).value).toBe(draftDetails.handoff);
   expect((screen.getByLabelText("Paths to change") as HTMLTextAreaElement).value).toBe(draftDetails.paths);
   expect((screen.getByLabelText("Pytest targets (optional)") as HTMLTextAreaElement).value).toBe(draftDetails.tests);
@@ -167,7 +169,7 @@ it("retains edited handoff and build scope across navigation and requalifies the
   fireEvent.click(screen.getByRole("button",{name:"Launch"}));
   await waitFor(()=>expect(f.request.mock.calls.filter(c=>c[0]==="submit")).toHaveLength(1));
   expect(f.request.mock.calls.find(c=>c[0]==="submit")![1]).toMatchObject({
-    objective:"My edited project goal.",handoff_text:draftDetails.handoff,execution_profile:"bounded_code_change",
+    objective:'My edited project goal. [MASTERMIND_ACCEPTANCE_CRITERIA_V1:["First proof","Second proof"]]',handoff_text:draftDetails.handoff,execution_profile:"bounded_code_change",
     execution_binding_sha256:"e".repeat(64),
     allowed_write_paths:["app/source.ts","README.md"],validation:{pytest_targets:[draftDetails.tests],git_diff_check:false},
   });
@@ -191,6 +193,7 @@ it.each(["logout","new principal","discard"] as const)("protects a handoff-only 
   expect(screen.queryByLabelText("Handoff (optional)")).toBeNull();
   expect(screen.queryByDisplayValue(draftDetails.handoff)).toBeNull();
   expect(screen.queryByDisplayValue(draftDetails.paths)).toBeNull();
+  expect(screen.queryByDisplayValue(draftDetails.criteria)).toBeNull();
   expect(f.request.mock.calls.filter(c=>c[0]!=="preview")).toHaveLength(0);
 });
 
@@ -218,6 +221,7 @@ it("consumes accepted project details so the next launch starts with an empty ha
   fireEvent.click(screen.getByRole("button",{name:"Start work"}));
   await screen.findByLabelText("Handoff (optional)");
   expect((screen.getByLabelText("Handoff (optional)") as HTMLTextAreaElement).value).toBe("");
+  expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("");
   expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("research_only");
   expect(screen.queryByLabelText("Paths to change")).toBeNull();
   expect(f.request.mock.calls.filter(c=>c[0]==="submit")).toHaveLength(1);

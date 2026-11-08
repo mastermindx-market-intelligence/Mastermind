@@ -64,3 +64,17 @@ it('preserves the existing rootless catalogue view for an older host without arc
  expect(screen.queryByRole('button',{name:'Archived projects'})).toBeNull();
  expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(0);
 });
+it.each([
+ {host:'native',legacy:false,collection:'Projects'},
+ {host:'legacy',legacy:true,collection:'Your projects, in perspective.'},
+])('returns to the Projects collection from Today View all after a rootless project was opened ($host host)',async({legacy,collection})=>{
+ const e=await setup(false,legacy);
+ fireEvent.click(screen.getByRole('button',{name:'Open project Unarchived rootless project'}));
+ expect(screen.getByRole('heading',{level:1,name:'Unarchived rootless project'})).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Today'}));
+ fireEvent.click(screen.getByRole('button',{name:'View all'}));
+ expect(screen.getByRole('heading',{level:1,name:collection})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Open project Unarchived rootless project'})).toBeTruthy();
+ expect(screen.queryByRole('heading',{level:1,name:'Unarchived rootless project'})).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(0);
+});

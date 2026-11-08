@@ -598,9 +598,21 @@ def _wait_owned_process_with_fuse(
         if not members:
             if proc.poll() is not None:
                 return "completed"
-            raise ProcessCensusError(
-                "process_group_census_empty_while_leader_live"
-            )
+            # A disappearing group and a not-yet-reaped leader are separate
+            # observations. Reap this same owned Popen once, within the original
+            # deadline; a leader that remains live still fails closed.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "timeout"
+            try:
+                proc.wait(timeout=min(0.05, remaining))
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    return "timeout"
+                raise ProcessCensusError(
+                    "process_group_census_empty_while_leader_live"
+                ) from None
+            return "completed"
 
 
 def cleanup_receipt_is_proven(value: Mapping[str, Any]) -> bool:
@@ -1770,7 +1782,6 @@ class LaneLease:
             raise LaneRuntimeConfigError("lane_min_free_disk_out_of_bounds")
         chosen_max = config.max_active if max_active is None else int(max_active)
         chosen_ratio = config.max_load_ratio if load_ratio_limit is None else float(load_ratio_limit)
-        observed_load = float(os.getloadavg()[0] if load1 is None else load1)
         active_dir.mkdir(parents=True, exist_ok=True)
         admission_path = active_dir / ".admission.lock"
         admission_fd = os.open(admission_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -1785,6 +1796,10 @@ class LaneLease:
                     verify_for_admission(policy_here, active_dir)
                 except Exception as exc:
                     raise LaneRuntimeError("routing_policy_admission_refused") from exc
+            # Waiting for admission can outlive the picker's load observation.
+            # Sample live load under the same physical lock as slot admission;
+            # the explicit load1 value remains a deterministic fixture seam.
+            observed_load = float(os.getloadavg()[0] if load1 is None else load1)
             snapshot = evaluate_admission(
                 active_dir,
                 max_active=chosen_max,

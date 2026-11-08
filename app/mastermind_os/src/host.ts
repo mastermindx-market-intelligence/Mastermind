@@ -1,3 +1,4 @@
+import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
@@ -227,6 +228,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
+  readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
@@ -446,7 +448,28 @@ export function bindMissionHost(
       sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
+  const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
+  const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
+  const companySubscribe=companyTransport?.subscribe;
+  const companyCurrent=()=>!!companyTransport && client.executive===companyTransport &&
+    companyTransport.companyPriorities===companyRead && companyTransport.authGeneration===companyGeneration &&
+    companyTransport.available===companyAvailable && companyTransport.subscribe===companySubscribe;
   return {
+    ...(companyTransport && companyRead && companyGeneration && companyAvailable && companySubscribe ? {companyPriorities: {
+      generation: () => companyCurrent() ? companyGeneration.call(companyTransport) : -1,
+      available: () => companyCurrent() && companyAvailable.call(companyTransport),
+      subscribe: (listener:()=>void) => companySubscribe.call(companyTransport,listener),
+      read: async (signal:AbortSignal) => {
+        const generation=companyGeneration.call(companyTransport), started=epoch;
+        const current=()=>!signal.aborted && epoch===started && companyCurrent() && companyGeneration.call(companyTransport)===generation && companyAvailable.call(companyTransport);
+        if(!current())throw new Error("COMPANY_READ_UNAVAILABLE");
+        const raw=await companyRead.call(companyTransport,signal);
+        if(!current())throw new Error("READ_CANCELLED");
+        const value=decodeCompanyPriorities(raw);
+        if(!current())throw new Error("READ_CANCELLED");
+        return value;
+      },
+    }} : {}),
     ...(client.nativeDraftRecovery ? { nativeDraftRecovery: client.nativeDraftRecovery } : {}),
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
@@ -1108,6 +1131,7 @@ export async function createNativeClient(
       | "executive_auth_status"
       | "read_programs"
       | "read_byok_roles"
+      | "read_control_room_state"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -1246,6 +1270,11 @@ export async function createNativeClient(
   ),
     readPrograms: ({ signal }) => read("read_programs", signal),
     readByokRoles: ({ signal }) => read("read_byok_roles", signal),
+    readControlRoomState: ({ signal }) => {
+      if (current.status !== "signed_in" || !current.acquisition)
+        return Promise.reject(new Error("CONTROL_ROOM_READ_UNAUTHORIZED"));
+      return read("read_control_room_state", signal);
+    },
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {

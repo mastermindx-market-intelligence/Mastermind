@@ -1532,7 +1532,9 @@ if [ "$NEED_CLONE" = "1" ]; then
   # Root reads the operator-owned source through Git transport; the local-copy
   # optimization has a distinct ownership boundary. Trust only the validated
   # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Only the qualified source HEAD and its complete ancestry are needed.
+  # Unrelated development branches/tags must not enter this private checkout.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local --single-branch --no-tags "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
@@ -1633,6 +1635,62 @@ if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
 fi
 # --- END admin-checkout-only dispatch ---
 
+# --- BEGIN gateway audit parent provisioning ---
+provision_gateway_audit_parent() {
+  # The normal publisher owns the Studio-identity leaf, not this root-owned
+  # parent. Existing occupants are checked without changing their custody.
+  require_native_no_acl one "$SYSTEM_ROOT" || return 65
+  "$PYTHON_BINARY" -I -S -B - "$SYSTEM_ROOT" <<'MASTERMIND_GATEWAY_AUDIT_PARENT' || return 65
+import os
+import stat
+import sys
+
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def require_directory(info):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise SystemExit("gateway audit parent requires a direct root:wheel directory without group/other write")
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+base = os.open(sys.argv[1], flags)
+try:
+    base_info = os.fstat(base)
+    require_directory(base_info)
+    created = False
+    try:
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    except FileNotFoundError:
+        # Exclusive creation under the held sealed parent; a racing occupant
+        # refuses, and no existing directory is chowned or chmodded.
+        os.mkdir("audit", 0o700, dir_fd=base)
+        created = True
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    audit = os.open("audit", flags, dir_fd=base)
+    try:
+        if identity(os.fstat(audit)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+        if created:
+            os.fchown(audit, 0, 0)
+            os.fchmod(audit, 0o755)
+            os.fsync(audit)
+            os.fsync(base)
+        require_directory(os.fstat(audit))
+        if identity(os.stat("audit", dir_fd=base, follow_symlinks=False)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+    finally:
+        os.close(audit)
+    if identity(os.stat(sys.argv[1], follow_symlinks=False)) != identity(base_info):
+        raise SystemExit("gateway audit base changed during provisioning")
+finally:
+    os.close(base)
+MASTERMIND_GATEWAY_AUDIT_PARENT
+  require_native_no_acl one "$SYSTEM_ROOT/audit" || return 65
+}
+# --- END gateway audit parent provisioning ---
+
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
 # install-owned daemons, including a separately prepared C1 Relay, disabled
@@ -1697,6 +1755,7 @@ wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
 wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 stage_sealed_release || exit 65
+provision_gateway_audit_parent || exit 65
 
 # This remains a substep of the existing serialized installer publication.
 # Same-profile occupants verify exactly; missing/changed occupants are not reset.
@@ -1877,7 +1936,18 @@ defaults = {
 }
 if source:
     source_path = pathlib.Path(source)
-    value = json.loads(source_path.read_text(encoding="utf-8"))
+    def unique_source_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate control config key")
+            result[key] = item
+        return result
+    try:
+        value = json.loads(source_path.read_text(encoding="utf-8"),
+                           object_pairs_hook=unique_source_object)
+    except (ValueError, RecursionError):
+        raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
     if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
@@ -1936,7 +2006,16 @@ if missing or unknown:
         f"control config schema drift; missing={sorted(missing)}, unknown={sorted(unknown)}"
     )
 for key, expected_value in expected.items():
-    if value.get(key) != expected_value:
+    # Python equality aliases booleans/integers and integers/floats, including
+    # nested policy fields. Preserve the Control loader's JSON type boundary
+    # before replacing the config; matching host values must also match types.
+    try:
+        matches = json.dumps(value.get(key), sort_keys=True, allow_nan=False) == (
+            json.dumps(expected_value, sort_keys=True, allow_nan=False)
+        )
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
         raise SystemExit(f"control config {key} differs from the reviewed host policy")
 blocked = re.compile(
     r"(?i)(password|credential|lease[_-]?token|api[_-]?key|access[_-]?token|secret_value)"
@@ -1945,12 +2024,17 @@ for key in value:
     if blocked.search(str(key)):
         raise SystemExit(f"control config contains forbidden secret-bearing key: {key}")
 
+# Validate the complete output before opening even the temporary file.
+# Strict serialization catches both non-finite tokens and exponent overflow;
+# UTF-8 encoding also refuses unpaired surrogates before any destination effect.
+try:
+    encoded = (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False,
+                          allow_nan=False) + "\n").encode("utf-8")
+except (TypeError, ValueError, RecursionError):
+    raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(
-    json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-    encoding="utf-8",
-)
+temporary.write_bytes(encoded)
 os.chmod(temporary, 0o440)
 os.replace(temporary, path)
 PY

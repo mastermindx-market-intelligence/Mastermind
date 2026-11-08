@@ -15,7 +15,7 @@ import type {
 } from "../operation-controller";
 import type {
   ExecutiveSessionTargetKind,
-  HermesSecretaryPublicResult,
+  HermesNativePublicResult,
 } from "../executive-session-command-port";
 
 /**
@@ -77,6 +77,7 @@ const STATIC_ZH: Record<string, string> = {
   "Session target": "会话目标",
   "Fabric session": "Fabric 会话",
   "Hermes Secretary": "Hermes 秘书",
+  "Hermes Meta-CEO": "Hermes Meta-CEO",
   "The target kind cannot change while an original operation needs reconciliation.": "原操作待确认期间不能更改目标类型。",
   "Request recorded.": "请求已记录。",
   "Native submission started; outcome unresolved.": "原生提交已开始，结果尚未确认。",
@@ -89,7 +90,8 @@ const STATIC_ZH: Record<string, string> = {
   "Native submission was refused after it started; the original operation remains unresolved.": "原生提交在开始后被拒绝；原操作仍未确认。",
   "The native submission was not submitted after it started; the original operation remains unresolved.": "原生提交在开始后未提交；原操作仍未确认。",
   "The native session became unavailable after the submission started; the original operation remains unresolved.": "原生会话在提交开始后不可用；原操作仍未确认。",
-  "Hermes Secretary is unavailable for the exact selected mission.": "当前项目暂无可用的 Hermes 秘书会话。"
+  "Hermes Secretary is unavailable for the exact selected mission.": "当前项目暂无可用的 Hermes 秘书会话。",
+  "Hermes Meta-CEO is unavailable for the exact selected mission.": "当前项目暂无可用的 Hermes Meta-CEO 会话。"
 };
 function ui(locale: SessionLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
 
@@ -111,7 +113,7 @@ export type SessionNativePhase =
   | "UNAVAILABLE";
 
 export function sessionNativePhase(
-  result: HermesSecretaryPublicResult | null | undefined,
+  result: HermesNativePublicResult | null | undefined,
 ): SessionNativePhase | null {
   if (!result) return null;
   if (!result.commit_started) return "REQUEST_RECORDED";
@@ -161,7 +163,7 @@ export interface SelectedSessionContinuationProps {
   /** A pending or retained original operation forbids changing the target. */
   targetKindLocked?: boolean;
   /** The validated native public result of the current original operation. */
-  nativeResult?: HermesSecretaryPublicResult | null;
+  nativeResult?: HermesNativePublicResult | null;
   /** Last closed controller state; null before any dispatch this epoch. */
   status: OperationState | null;
   /** Durable retained pointer for this scope, when discovery/hold found one. */
@@ -322,6 +324,16 @@ export function SelectedSessionContinuation({
             />
             {ui(locale, "Hermes Secretary")}
           </label>
+          <label>
+            <input
+              type="radio"
+              name={`${formId}-target-kind`}
+              value="hermes_meta"
+              checked={targetKind === "hermes_meta"}
+              onChange={() => onTargetKindChange("hermes_meta")}
+            />
+            {ui(locale, "Hermes Meta-CEO")}
+          </label>
           {targetKindLocked ? (
             <p className="muted">
               {ui(locale, "The target kind cannot change while an original operation needs reconciliation.")}
@@ -354,7 +366,9 @@ export function SelectedSessionContinuation({
           <p className="muted">
             {targetKind === "hermes_secretary"
               ? ui(locale, "Hermes Secretary is unavailable for the exact selected mission.")
-              : ui(locale, "Session continuation is unavailable for the exact selected mission.")}
+              : targetKind === "hermes_meta"
+                ? ui(locale, "Hermes Meta-CEO is unavailable for the exact selected mission.")
+                : ui(locale, "Session continuation is unavailable for the exact selected mission.")}
           </p>
           <details className="reason-details">
             <summary>{ui(locale, "Technical details")}</summary>

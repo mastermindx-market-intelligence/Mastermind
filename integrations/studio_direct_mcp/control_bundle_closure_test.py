@@ -6,6 +6,8 @@ invalid successor plan refuses before native selection or ingress observation.
 from __future__ import annotations
 
 import hashlib
+import importlib._bootstrap_external
+import importlib.util
 import json
 import os
 import py_compile
@@ -156,7 +158,18 @@ print("authenticated compiler snapshot")
 
     def test_actual_payload_installs_exact_closed_runtime(self):
         installed = self._install()
+        self.assertEqual(len(bundle.CONTROL_FILES), 13)
+        self.assertEqual(len(bundle.CAPTURED_CONTROL_FILES), 10)
+        self.assertIn("fleet_git_failure_compat.py", bundle.CONTROL_FILES)
+        self.assertIn(
+            "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+            bundle.CONTROL_FILES)
+        self.assertNotEqual(set(bundle.CONTROL_FILES), set(bundle.CAPTURED_CONTROL_FILES))
         self.assertEqual(set(installed["files"]), EXPECTED_FILES)
+        self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
+        import private_service as source_service
+        self.assertEqual(set(source_service.CONTROL_BUNDLE_FILES), set(bundle.CONTROL_FILES))
+        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 13)
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
         self.assertEqual(verified["bundleDigest"], installed["bundleDigest"])
         for name, digest in installed["files"].items():
@@ -555,8 +568,27 @@ print(json.dumps(value))
         self.assertLess(len(malicious), len(original))
         source.write_bytes(malicious + b"#" * (len(original) - len(malicious)))
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-        cache = Path(py_compile.compile(
-            str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP))
+        saved_prefix = sys.pycache_prefix
+        sys.pycache_prefix = None
+        try:
+            cache = Path(importlib.util.cache_from_source(str(source)))
+            self.assertEqual(Path(py_compile.compile(
+                str(source), cfile=str(cache), doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)), cache)
+        finally:
+            sys.pycache_prefix = saved_prefix
+        self.assertIn(sys.implementation.cache_tag, cache.name)
+        self.assertTrue(cache.is_file())
+        loader = importlib.machinery.SourceFileLoader("fixture_private_service", str(source))
+        self.assertEqual(loader.path_stats(str(source))["mtime"], original_stat.st_mtime)
+        raw = cache.read_bytes()
+        self.assertEqual(raw[:4], importlib.util.MAGIC_NUMBER)
+        self.assertEqual(int.from_bytes(raw[4:8], "little"), 0)
+        self.assertEqual(int.from_bytes(raw[8:12], "little"), int(original_stat.st_mtime))
+        self.assertEqual(int.from_bytes(raw[12:16], "little"), len(original))
+        code = loader.get_code("fixture_private_service")
+        self.assertIsInstance(code, type((lambda: None).__code__))
+        self.assertEqual(code.co_filename, str(source))
         source.write_bytes(original)
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
         cache.chmod(0o600)
@@ -603,7 +635,16 @@ print(json.dumps(value))
     def test_installer_removes_prior_bootstrap_caches_under_its_lock(self):
         self._install()
         source = self.control / "private_service.py"
-        py_compile.compile(str(source), doraise=True)
+        saved_prefix = sys.pycache_prefix
+        sys.pycache_prefix = None
+        try:
+            cache_file = Path(importlib.util.cache_from_source(str(source)))
+            self.assertEqual(Path(py_compile.compile(
+                str(source), cfile=str(cache_file), doraise=True)), cache_file)
+        finally:
+            sys.pycache_prefix = saved_prefix
+        self.assertIn(sys.implementation.cache_tag, cache_file.name)
+        self.assertTrue(cache_file.is_file())
         cache = self.control / "__pycache__"
         self.assertTrue(cache.is_dir())
         installed = self._install()

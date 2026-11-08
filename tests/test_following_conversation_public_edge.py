@@ -15,7 +15,13 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
         '/os/executive/session/project-executions', '/os/executive/session/project-execution-read',
     } == set(ROUTES) | {'/os/executive/session/history-context'}
     assert '/os/executive/session/history-context' in _OS_SESSION_EXECUTIVE_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_CONVERSATION_READ_POST_ROUTES + edge.PROJECT_CONVERSATION_READ_POST_ROUTES + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',) + edge.PROJECT_EXECUTION_POST_ROUTES
+    assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_CONVERSATION_READ_POST_ROUTES + edge.PROJECT_CONVERSATION_READ_POST_ROUTES + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',) + edge.PROJECT_EXECUTION_POST_ROUTES
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
     text = edge.render(manifest(), 49152)
     assert 'path ' + ' '.join(edge.POST_ROUTES) + '\n' in text

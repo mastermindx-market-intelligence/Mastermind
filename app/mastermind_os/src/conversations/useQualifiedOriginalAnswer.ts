@@ -51,7 +51,7 @@ function sameAnswer(a: QualifiedConversationReply, pointer: OperationPointer,
   if (a.answer.text !== answer.text) return false;
   if (a.answer.readRef !== answer.readRef) return false;
   if (a.answer.parentConsumed !== false || answer.parentConsumed !== false) return false;
-  if (qualifiedAnswerVariant(answer) === "hermes_secretary") {
+  if (qualifiedAnswerVariant(answer) !== "fabric_attempt") {
     const nativeA = a.answer as { readonly successful: boolean };
     const nativeB = answer as { readonly successful: boolean };
     return nativeA.successful === nativeB.successful;

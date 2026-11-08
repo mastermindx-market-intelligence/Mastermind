@@ -123,6 +123,11 @@ PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'desti
                                                       'source_pins': {'log': 'b1a89114c36ed8133306a4c654e0995ae2799d9bc77fcf64a24d0d7698c3b954',
                                                                       'support': 'fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2'},
                                                       'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
+# Two reviewed historical returns. This adds reader correlation, not producer
+# authentication, a prelaunch record, acceptance, or lease settlement.
+GATEWAY_ORIGINAL_RUNS = frozenset(('fabric-app-native-drivers-j-20261105-01',
+    'fabric-app-application-process-carrier-20261105-01'))
+PLAIN_SCOPES.update({'fabric-app-native-drivers-j-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-native-drivers-j-20261105-01.request.packet', 'packet_sha256': 'a2117a47f6f8325014cd8118d8bd22de8b242a7e6c7b22ff16d4f83b95ed80d0', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '35e3fb7dcd3f4d020df4d405f40aaf18290aac04a5f158b63973924bc48acd6c', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-native-drivers-j-20261105-01-collection-v1'}, 'fabric-app-application-process-carrier-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-application-process-carrier-20261105-01.request.packet', 'packet_sha256': '6cf782cc7ccf1124f39d821a24305f15cd78f5aaabb268b72ec3a2635af9dcdb', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '41071b8c0acd26f6ef050bdf22225a20d46d6ced6b778dbf99633315dc7eeffb', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-application-process-carrier-20261105-01-collection-v1'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
 PLAIN_BINDING_SCHEMA = 'mastermind.fabric_plain_launch_binding.v1'
 PLAIN_BINDING_SCHEMA_V2 = 'mastermind.fabric_plain_launch_binding.v2'
@@ -426,6 +431,11 @@ def retained_artifact_acquisition_pool(events, value, source, contract):
 def load_binding(path, *, run_id, root, parent):
     require_caller(root)
     raw = delivery.local_file(Path(path), 65536)
+    return _validate_binding_bytes(raw, run_id=run_id, root=root, parent=parent)
+
+
+def _validate_binding_bytes(raw, *, run_id, root, parent):
+    """Common evidence validation; entrypoints separately establish authority."""
     value = reader.strict_json(raw)
     fields = {'schema','run_id','root','parent','host','mode','requested_model',
               'cwd','artifact_names','sources'}
@@ -1133,9 +1143,16 @@ class LocalBindingRefused(ValueError):
 
 def collect(path,*,run_id,root,parent,destination):
     try:
-        value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=load_binding(path,run_id=run_id,root=root,parent=parent)
+        bound=load_binding(path,run_id=run_id,root=root,parent=parent)
     except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
         raise LocalBindingRefused(str(error)) from error
+    return _collect_validated(bound, destination=destination,
+        revalidate=lambda: load_binding(path,run_id=run_id,root=root,parent=parent))
+
+
+def _collect_validated(bound, *, destination, revalidate):
+    value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=bound
+    run_id,root,parent=(value[k] for k in ('run_id','root','parent'))
     if run_id in PLAIN_SCOPES and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
         raise ValueError('plain_original_destination_changed')
     request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract}
@@ -1158,7 +1175,7 @@ def collect(path,*,run_id,root,parent,destination):
             delivery.write_exclusive(chain.fd,f'read-response.{index:03d}',response[offset:offset+reader.MAX_FILE])
         verified=validate_response(response,request,value['mode'],original_validator=original_validator)
         def verify_source():
-            current=load_binding(path,run_id=run_id,root=root,parent=parent)
+            current=revalidate()
             if (current[1:4]!=(binding_raw,source,contract) or current[5]!=registry
                     or current[7]!=plain_binding):
                 raise ValueError('original_source_changed_during_collection')
@@ -1212,6 +1229,11 @@ def collect(path,*,run_id,root,parent,destination):
 
 def read_collection(path,*,expected_sha256,run_id,root,parent):
     require_caller(root)
+    return _read_collection_validated(path,expected_sha256=expected_sha256,
+        run_id=run_id,root=root,parent=parent)
+
+
+def _read_collection_validated(path,*,expected_sha256,run_id,root,parent):
     plain = PLAIN_SCOPES.get(run_id)
     if plain is not None and (str(path) != str(Path(plain['destination'])/'receipt.json')
             or root != plain['root'] or parent != plain['parent']):
@@ -1343,6 +1365,115 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
         if len(stdout)!=receipt['stdout_bytes'] or sha(stdout)!=receipt['stdout_sha256']:
             raise ValueError('collection_stdout_integrity')
         chain.verify();return stdout
+
+
+def _gateway_scope(run_id):
+    if type(run_id) is not str or run_id not in GATEWAY_ORIGINAL_RUNS:
+        raise ValueError('gateway_original_scope_refused')
+    return PLAIN_SCOPES[run_id]
+
+
+def _gateway_binding(run_id):
+    plain = _gateway_scope(run_id)
+    retained = Path(plain['packet_path']).parent
+    value = {'schema': BINDING_SCHEMA, 'run_id': run_id,
+        **{key: plain[key] for key in ('root','parent','host','mode','requested_model')},
+        'cwd': '~', 'artifact_names': [], 'sources': {
+            'packet': {'path': plain['packet_path'], 'sha256': plain['packet_sha256']},
+            'log': {'path': str(retained / (run_id + '.log')),
+                    'sha256': plain['source_pins']['log']},
+            'support': {'path': str(retained / (run_id + '.support.json')),
+                        'sha256': plain['source_pins']['support']}}}
+    return _validate_binding_bytes(canonical(value), run_id=run_id,
+        root=plain['root'], parent=plain['parent'])
+
+
+def _gateway_collection_status(run_id):
+    """Read only this destination. Absence or partial evidence permits no retry."""
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    opened = False
+    try:
+        with delivery.DirectoryChain(Path(plain['destination'])) as chain:
+            opened = True
+            try:
+                raw = delivery.read_local_at(chain, 'receipt.json', 65536)
+            except FileNotFoundError:
+                chain.verify()
+                return dict(result, state='UNKNOWN', destination_reserved=True,
+                    reason='original_collection_receipt_missing')
+            receipt = reader.strict_json(raw)
+            if (type(receipt) is not dict or receipt.get('schema') != RECEIPT_SCHEMA
+                    or any(receipt.get(key) != value for key, value in {
+                        'run_id': run_id, 'root': plain['root'], 'parent': plain['parent'],
+                        'host': plain['host'], 'mode': plain['mode']}.items())
+                    or receipt.get('original_operation_mutated') is not False
+                    or receipt.get('state') not in ('COMPLETE', 'PENDING')):
+                raise ValueError('gateway_original_receipt_unqualified')
+            digest = sha(raw)
+            if receipt['state'] == 'COMPLETE':
+                _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+                    expected_sha256=digest, run_id=run_id,
+                    root=plain['root'], parent=plain['parent'])
+            if delivery.read_local_at(chain, 'receipt.json', 65536) != raw:
+                raise ValueError('collection_receipt_changed')
+            chain.verify()
+            return dict(result, state=receipt['state'], destination_reserved=True,
+                receipt_sha256=digest, delivery_verified=receipt['state'] == 'COMPLETE')
+    except FileNotFoundError:
+        if opened:
+            return dict(result, state='UNKNOWN', destination_reserved=True,
+                effect_state='UNKNOWN', reason='original_collection_evidence_missing')
+        return dict(result, state='ABSENT', destination_reserved=False,
+            effect_state='UNKNOWN', reason='destination_absence_is_not_execution_absence')
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            reason='original_collection_evidence_unqualified')
+
+
+def _gateway_original_delivery(action, run_id, receipt_sha256=None):
+    """Fixed internal machine-owner operation, never a public native CLI mode.
+
+    The enrolled private gateway authorizes its invocation. These selectors
+    carry no identity or permission; all original evidence guards are shared
+    with native delivery. Same-UID access is the existing service trust model.
+    """
+    plain = _gateway_scope(run_id)
+    if (action not in ('collect', 'status', 'result')
+            or (action == 'result' and (type(receipt_sha256) is not str
+                                       or not HEX.fullmatch(receipt_sha256)))
+            or (action != 'result' and receipt_sha256 is not None)):
+        raise ValueError('gateway_original_arguments_refused')
+    if action == 'status':
+        return _gateway_collection_status(run_id)
+    if action == 'result':
+        stdout = _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+            expected_sha256=receipt_sha256, run_id=run_id,
+            root=plain['root'], parent=plain['parent'])
+        return {'run_id': run_id, 'state': 'COMPLETE', 'receipt_sha256': receipt_sha256,
+            'stdout_bytes': len(stdout), 'stdout_sha256': sha(stdout),
+            'stdout_base64': base64.b64encode(stdout).decode('ascii'),
+            'acceptance': 'NOT_RECORDED'}
+    observed = _gateway_collection_status(run_id)
+    if observed['state'] != 'ABSENT':
+        return observed
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return {'run_id': run_id, 'state': 'REFUSED', 'retry_authorized': False,
+            'failure_phase': 'original_local_binding',
+            'this_invocation_remote_read_started': False,
+            'reason': 'original_binding_unconfirmed'}
+    try:
+        # Existing reserve_destination is the only persistent effect fence.
+        # A racing caller or a restart cannot re-observe an existing target.
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(_gateway_collection_status(run_id), effect_state='UNKNOWN')
+    return _gateway_collection_status(run_id)
 
 
 def main(argv=None):

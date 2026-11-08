@@ -33,7 +33,10 @@ import {
   canonicalPublicRequest,
   type ProjectFileAddRequest,
   type ProjectPreferenceSetRequest,
+  type ProjectKnowledgeRequest,
 } from './project-knowledge-requests';
+import {DISCOVERY_CORRECTION_ACTION,DISCOVERY_CORRECTION_SCHEMA,discoveryReplacementRef,
+  discoveryCorrectionPreimages,type ProjectDiscoveryCorrectionRequest,type DiscoveryCorrectionPreviewChange} from './project-discovery-correction';
 
 const FILE_REQUEST_SCHEMA='mastermind.project_file_add_request.v1';
 const PREFERENCE_REQUEST_SCHEMA='mastermind.project_preference_set_request.v1';
@@ -61,7 +64,8 @@ export const PROJECT_KNOWLEDGE_PREFERENCE_VALUE_MAX_UTF8_BYTES = 2000;
 /** Closed action vocabulary of the two previewed source operations. */
 export type ProjectKnowledgePreviewAction =
   | typeof PROJECT_KNOWLEDGE_PREVIEW_ACTION_FILE_ADD
-  | typeof PROJECT_KNOWLEDGE_PREVIEW_ACTION_COMMUNICATION_PREFERENCE;
+  | typeof PROJECT_KNOWLEDGE_PREVIEW_ACTION_COMMUNICATION_PREFERENCE
+  | typeof DISCOVERY_CORRECTION_ACTION;
 
 /** Witnessed original terminal input reference (shape-checked only). */
 export interface ProjectKnowledgeOriginalInputReference {
@@ -105,7 +109,8 @@ export interface ProjectKnowledgeCommunicationPreferencePreviewChange {
 /** Closed union over the two previewed change kinds. */
 export type ProjectKnowledgePreviewChange =
   | ProjectKnowledgeFileAddPreviewChange
-  | ProjectKnowledgeCommunicationPreferencePreviewChange;
+  | ProjectKnowledgeCommunicationPreferencePreviewChange
+  | DiscoveryCorrectionPreviewChange;
 
 /** One expected postimage of the previewed operation; preimage may be null. */
 export interface ProjectKnowledgePreviewPostimage {
@@ -234,7 +239,11 @@ interface QualifiedPreferenceSetRequest extends QualifiedRequestBase {
   readonly value: string;
 }
 
-type QualifiedRequest = QualifiedFileAddRequest | QualifiedPreferenceSetRequest;
+interface QualifiedCorrectionRequest extends QualifiedRequestBase {
+  readonly action:typeof DISCOVERY_CORRECTION_ACTION;
+  readonly request:ProjectDiscoveryCorrectionRequest;
+}
+type QualifiedRequest = QualifiedFileAddRequest | QualifiedPreferenceSetRequest | QualifiedCorrectionRequest;
 
 /** Plain record with the Object prototype (or none) only; never exotic. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -504,7 +513,7 @@ function qualifyPreferenceSetRequest(value: unknown): QualifiedPreferenceSetRequ
 function qualifyRequest(value: unknown): QualifiedRequest | null {
   // Reuse the actual accepted request owner; a lookalike request ID/schema,
   // invalid literal text or getter must not become a prepared original.
-  value=JSON.parse(canonicalPublicRequest(value as ProjectFileAddRequest|ProjectPreferenceSetRequest));
+  value=JSON.parse(canonicalPublicRequest(value as ProjectKnowledgeRequest));
   if (!isPlainObject(value)) {
     return null;
   }
@@ -514,6 +523,10 @@ function qualifyRequest(value: unknown): QualifiedRequest | null {
   }
   if (schema === PREFERENCE_REQUEST_SCHEMA) {
     return qualifyPreferenceSetRequest(value);
+  }
+  if (schema === DISCOVERY_CORRECTION_SCHEMA) {
+    const common=requestCommonFields(value);
+    return common?{...common,action:DISCOVERY_CORRECTION_ACTION,request:value as unknown as ProjectDiscoveryCorrectionRequest}:null;
   }
   return null;
 }
@@ -589,8 +602,9 @@ function decodePreferenceChange(
 function decodePostimages(
   value: unknown,
   request: QualifiedRequest,
+  principalScope:string,
 ): ProjectKnowledgePreviewPostimage[] | null {
-  if (!isPlainArray(value) || value.length !== 2) {
+  if (!isPlainArray(value) || value.length !== (request.action===DISCOVERY_CORRECTION_ACTION?3:2)) {
     return null;
   }
   const entries: ProjectKnowledgePreviewPostimage[] = [];
@@ -621,6 +635,10 @@ function decodePostimages(
       content_sha256: contentSha256,
       expected_preimage_sha256: expectedPreimage,
     });
+  }
+  if(request.action===DISCOVERY_CORRECTION_ACTION){
+    const expected=discoveryCorrectionPreimages(request.request,principalScope);
+    return entries.every(entry=>Object.hasOwn(expected,entry.path)&&expected[entry.path]===entry.expected_preimage_sha256)?entries:null;
   }
   const workstreamPath = `${WORKSTREAM_POSTIMAGE_PREFIX}${request.workRefKey}.md`;
   const projectFilePrefix = `${PROJECT_FILE_POSTIMAGE_PREFIX}${request.workRefKey}/`;
@@ -656,7 +674,7 @@ function decodePostimages(
 
 function decodePreparedPreview(
   raw: unknown,
-  expectedRequest: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  expectedRequest: ProjectKnowledgeRequest,
   expectedPublicRequestSha256: string,
 ): ProjectKnowledgePreparedPreview | null {
   const request = qualifyRequest(expectedRequest);
@@ -729,11 +747,13 @@ function decodePreparedPreview(
   const change: ProjectKnowledgePreviewChange | null =
     request.action === PROJECT_KNOWLEDGE_PREVIEW_ACTION_FILE_ADD
       ? decodeFileAddChange(preview['change'], request)
-      : decodePreferenceChange(preview['change'], request);
+      : request.action===DISCOVERY_CORRECTION_ACTION
+        ? decodeCorrectionChange(preview['change'],request,ownerContext['principal_scope'])
+        : decodePreferenceChange(preview['change'], request);
   if (change === null) {
     return null;
   }
-  const postimages = decodePostimages(preview['postimages'], request);
+  const postimages = decodePostimages(preview['postimages'], request,ownerContext['principal_scope']);
   if (postimages === null) {
     return null;
   }
@@ -785,7 +805,7 @@ function decodePreparedPreview(
  */
 export function decodeProjectKnowledgePreview(
   raw: unknown,
-  expectedRequest: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  expectedRequest: ProjectKnowledgeRequest,
   expectedPublicRequestSha256: string,
 ): ProjectKnowledgePreparedPreview | null {
   try {
@@ -793,6 +813,18 @@ export function decodeProjectKnowledgePreview(
   } catch {
     return null;
   }
+}
+
+function decodeCorrectionChange(raw:unknown,qualified:QualifiedCorrectionRequest,scope:string):DiscoveryCorrectionPreviewChange|null {
+  const value=closedRecord(raw,['kind','discovery_ref','replacement_ref','correction_reason','replacement']);
+  const request=qualified.request;
+  if(!value||value.kind!=='DISCOVERY_CORRECTION'||value.discovery_ref!==request.discovery_ref
+    ||value.replacement_ref!==discoveryReplacementRef(request,scope)||value.correction_reason!==request.correction_reason)return null;
+  // The actual public request validator rejects getters, extra fields, invalid
+  // evidence and invalid dates before equality; no unknown object is serialized.
+  if(canonicalPublicRequest({...request,replacement:value.replacement as ProjectDiscoveryCorrectionRequest['replacement']})!==canonicalPublicRequest(request))return null;
+  return {kind:'DISCOVERY_CORRECTION',discovery_ref:request.discovery_ref,replacement_ref:value.replacement_ref as string,
+    correction_reason:request.correction_reason,replacement:request.replacement};
 }
 
 /** Freezes every plain object and array of a freshly built plain value. */

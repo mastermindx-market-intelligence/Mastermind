@@ -111,7 +111,7 @@ def test_native_critical_review_covers_full_canonical_risk_signals():
     assert "the attended CEO-Web all-tier waiver remains" in source
     assert "Do not add a second reviewer, another account or a new review carrier by habit" in source
     kernel = (ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md").read_text(encoding="utf-8")
-    assert "Native CRITICAL tier: one distinct review; Web 5A applies" in kernel
+    assert "Native CRITICAL keeps actual distinct review; Web 5A applies" in kernel
 
 
 def test_historical_web_rationale_cannot_reinstate_a_current_scope_limit():

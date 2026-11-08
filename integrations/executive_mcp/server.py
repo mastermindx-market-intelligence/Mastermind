@@ -66,6 +66,13 @@ from integrations.executive_mcp.schemas import (
     error_envelope,
     validate_tool_arguments,
 )
+from integrations.hermes_delegate.executive import (
+    ExecutiveSelectedChildTarget,
+    SELECTED_CHILD_SCHEMA,
+    selected_child_response,
+    validate_selected_child_ingress_envelope,
+    validate_selected_child_local_envelope,
+)
 
 #: Three fixed POST routes served by the OS Executive transport.  These are
 #: exactly the routes enumerated in the integration continuation; nothing
@@ -622,7 +629,7 @@ class _ExecutivePathFence:
 
     def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
                  os_executive_transport=None, os_session_transport=None, fresh_conversation_transport=None,
-                 project_conversation_transport=None, reconcile_route: bool = True):
+                 project_conversation_transport=None, reconcile_route: bool = True, workspace_metadata_path=None):
         self._app = app
         self._routes = {metadata_path: "GET", "/mcp": "POST"}
         if reconcile_route:
@@ -630,6 +637,9 @@ class _ExecutivePathFence:
         self._query_routes = set()
         self._workspace_routes = set()
         self._public_routes = set()
+        if workspace_metadata_path is not None:
+            self._routes[workspace_metadata_path] = "GET"
+            self._public_routes.add(workspace_metadata_path)
         if workspace_app is not None:
             self._workspace_routes.update((
                 "/workspace/programs/current",
@@ -784,6 +794,7 @@ class AuditedWorkspaceApp:
         if not isinstance(verifier, MastermindTokenVerifier):
             raise TypeError("incumbent A1 verifier required")
         self._app, self._verifier = app, verifier
+        self._context_routing_app = app
         if (authenticator is None)!=(authorize_principal is None):
             raise TypeError('Workspace planning READ must retain both existing owners')
         if authenticator is not None:
@@ -798,6 +809,70 @@ class AuditedWorkspaceApp:
                     or fresh_workspace_config.authorize_principal is not authorize_principal):
                 raise TypeError("same installed Workspace authentication/source owner required")
         self._fresh_workspace_config = fresh_workspace_config
+        self._context_auth_owners = (verifier, authenticator, authorize_principal, fresh_workspace_config,
+            fresh_workspace_config.now if fresh_workspace_config is not None else None,
+            authenticator.policy if authenticator is not None else None,
+            getattr(authorize_principal, "binding_digest", None))
+
+    def _context_auth_current(self):
+        verifier, authenticator, authorize, config, clock, policy, stamp_callback = self._context_auth_owners
+        if (config is None or self._app is not self._context_routing_app or self._verifier is not verifier
+                or self._planning_authenticator is not authenticator or self._planning_authorize is not authorize
+                or self._fresh_workspace_config is not config or config.authenticator is not authenticator
+                or config.authorize_principal is not authorize or config.now is not clock
+                or authenticator.policy is not policy or verifier._authenticator is not authenticator
+                or verifier._validated_composition() != policy
+                or getattr(authorize, "binding_digest", None) is not stamp_callback):
+            raise ValueError("Workspace authentication owner changed")
+        return authenticator, authorize, clock
+
+    def require_context_principal(self, principal, stamp):
+        """Synchronous final fence after the last awaited resource verification."""
+        from common.executive_workspace_contract import permission_stamp
+        authenticator, authorize, clock = self._context_auth_current()
+        now = clock()
+        if (type(now) is not int or not principal.issued_at <= now < principal.expires_at
+                or authorize(principal) is not True or stamp is None
+                or permission_stamp(authorize, principal) != stamp):
+            raise ValueError("Workspace permission changed")
+        self._context_auth_current()
+
+    async def agentos_context_principal(self, token):
+        """Actual audited resource verification plus its current READ receipt.
+
+        Reuses the installed A1/JWT and membership owners. No caller projection
+        or prior identity GET is accepted as authentication for this read.
+        """
+        from common.executive_workspace_contract import permission_stamp
+        from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+        from integrations.mastermind_executive_app.os_transport import _access_matches_principal
+        try:
+            authenticator, authorize, clock = self._context_auth_current()
+            access, _ = await self._verifier.verify_token_with_code(token)
+            self._context_auth_current()
+            if access is None:
+                return None
+            principal = await authenticator.verify_token(token, now=clock())
+            self._context_auth_current()
+            now = clock()
+            if (type(principal) is not VerifiedPrincipal or type(now) is not int
+                    or not principal.issued_at <= now < principal.expires_at
+                    or not _access_matches_principal(access, principal) or authorize(principal) is not True):
+                return None
+            stamp = permission_stamp(authorize, principal)
+            self.require_context_principal(principal, stamp)
+            return (principal, stamp) if stamp is not None else None
+        except Exception:
+            return None
+
+    def metadata_policy(self):
+        from common.executive_workspace_contract import RESOURCE, SCOPE
+        if self._context_auth_owners[0] is not self._verifier:
+            raise ValueError("Workspace verifier changed")
+        policy = self._verifier._validated_composition()
+        if policy is None or policy.resource != RESOURCE or policy.required_scopes != (SCOPE,):
+            raise ValueError("the installed Workspace resource policy is required")
+        return policy
 
     async def project_planning_principal(self,token,*,now):
         """Independently authenticate this resource; no Executive relabeling."""
@@ -828,8 +903,13 @@ class AuditedWorkspaceApp:
         if token is not None and await self._verifier.verify_token(token) is not None:
             await self._app(scope, receive, send)
             return
+        try:
+            policy = self.metadata_policy()
+            challenge = mcp_auth_error_result(policy, AuthError(AuthErrorCode.AUTHORIZATION_MISSING))["_meta"]["mcp/www_authenticate"][0]
+        except Exception:
+            challenge = "Bearer"
         await JSONResponse({"error": "authentication_required"}, status_code=401,
-            headers={"Cache-Control": "no-store", "WWW-Authenticate": "Bearer"})(scope, receive, send)
+            headers={"Cache-Control": "no-store", "WWW-Authenticate": challenge})(scope, receive, send)
 
 
 @asynccontextmanager
@@ -1207,6 +1287,7 @@ def _build_profile_mcp_app(
             ),
             submit_authenticator=os_authenticator,
             clock=configured.clock,
+            company_read_pair=(verifier_pairs[os_pair_index][0], read_authenticators[os_pair_index]),
             commission_preparer=os_commission_preparer,
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
@@ -1544,6 +1625,25 @@ def _build_profile_mcp_app(
         Route(metadata_path, metadata, methods=["GET"]),
         Route("/mcp", authenticated, methods=["POST"]),
     ]
+    workspace_metadata_path = None
+    if type(workspace_app) is AuditedWorkspaceApp:
+        workspace_policy = workspace_app.metadata_policy()
+        metadata_url = urlsplit(workspace_policy.resource_metadata_url)
+        workspace_metadata_path = metadata_url.path
+        resource_path = urlsplit(workspace_policy.resource).path.rstrip("/")
+        permitted_metadata_paths = {resource_path + "/.well-known/oauth-protected-resource",
+                                    "/.well-known/oauth-protected-resource" + resource_path}
+        if (workspace_metadata_path not in permitted_metadata_paths
+                or not workspace_metadata_path.isascii() or metadata_url.query or metadata_url.fragment
+                or workspace_metadata_path == metadata_path):
+            raise ValueError("a distinct installed Workspace resource metadata path is required")
+        async def workspace_metadata(_request):
+            if workspace_app.metadata_policy() != workspace_policy:
+                return JSONResponse({"error": "source_unavailable"}, status_code=503,
+                    headers={"Cache-Control": "no-store"})
+            return JSONResponse(protected_resource_metadata(workspace_policy),
+                headers={"Cache-Control": "no-store"})
+        outer_routes.append(Route(workspace_metadata_path, workspace_metadata, methods=["GET"]))
     # The outer reconcile route forwards a raw bearer to the inner App, which
     # verifies against every variant; the public mode exposes reconciliation
     # only through the MCP tool, never as a second HTTP surface.
@@ -1611,7 +1711,8 @@ def _build_profile_mcp_app(
                                       os_session_transport=os_session_transport_handler,
                                       fresh_conversation_transport=fresh_conversation_handler,
                                       project_conversation_transport=project_conversation_handler,
-                                      reconcile_route=not public_mode))
+                                      reconcile_route=not public_mode,
+                                      workspace_metadata_path=workspace_metadata_path))
     guard.os_transport = os_transport_handler
     guard.os_session_transport = os_session_transport_handler
     guard.fresh_conversation_transport = fresh_conversation_handler
@@ -1879,6 +1980,7 @@ def build_web_ceo_v3_mcp_app(
     session_reply_read_tool=None,
     reply_event_rpc=None,
     session_reply_references_tool=None,
+    session_web_read_tools=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1973,6 +2075,11 @@ def build_web_ceo_v3_mcp_app(
             if client is not os_session_bridge_client:
                 raise TypeError("reference discovery must share the installed Session Bridge client")
         configuration = session_reply_references_tool.extend_host_configuration(configuration)
+    if session_web_read_tools is not None:
+        from integrations.session_bridge.web_observation_tools import WebSessionReadTools
+        if type(session_web_read_tools) is not WebSessionReadTools:
+            raise TypeError("the qualified session Web read tools are required")
+        configuration = session_web_read_tools.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, public_mcp=True, **configuration)
 
 
@@ -2004,17 +2111,22 @@ def build_web_ceo_v3_with_coo_mcp_app(
 
     if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
         raise ValueError("COO and CEO must use the exact same installed Executive settings")
-    _refuse_public_policies(settings, "the Web-CEO v3 COO composition")
+    public_mode = settings.public_policies is not None
+    if coo_settings.public_mcp is not public_mode:
+        raise ValueError("COO must explicitly match the installed public composition")
+    if public_mode and principal_ruling_target is not None:
+        raise ValueError("public COO composition admits only its literal COO route")
     cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
     if cache is None:
         raise ValueError("a shared Executive JWKS authority is required")
     configured = dataclasses.replace(settings, jwks_cache=cache)
     coo_configured = dataclasses.replace(coo_settings, executive=configured)
-    _, metadata_path = _metadata_policy_and_path(configured.policies)
+    metadata_policies = configured.public_policies if public_mode else configured.policies
+    _, metadata_path = _metadata_policy_and_path(metadata_policies)
     if (metadata_path.startswith("/mcp/coo") or (principal_ruling_target is not None
             and metadata_path.startswith("/mcp/principal-ruling"))):
         raise ValueError("metadata route collides with the static COO transport")
-    metadata = protected_resource_metadata(configured.policies.submit)
+    metadata = protected_resource_metadata(metadata_policies.submit)
     metadata["scopes_supported"] = sorted(
         set(metadata["scopes_supported"]) | set(coo_configured.policy.required_scopes)
     )
@@ -2036,9 +2148,9 @@ def build_web_ceo_v3_with_coo_mcp_app(
         os_commission_preparer=os_commission_preparer,
         os_session_bridge_client=os_session_bridge_client,
     )
-    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
-        principal_ruling_target=principal_ruling_target)
-    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
+    coo = _build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
+        principal_ruling_target=principal_ruling_target, workspace_app=workspace_app)
+    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata, public_mcp=public_mode)
 
 
 def build_web_ceo_sessions_mcp_app(
@@ -2251,17 +2363,29 @@ def describe(config: GatewayConfig) -> str:
 
 
 def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
-    """Static COO route for composition in the existing listener; never a daemon."""
+    """Legacy standalone composition retains its primary-resource-only fence."""
+    _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
+    if getattr(settings, "public_mcp", False):
+        raise ValueError("public COO requires the explicit Web-CEO v3 composition")
+    return _build_coo_mcp_app(settings, audit_sink=audit_sink,
+        principal_ruling_target=principal_ruling_target)
+
+
+def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None, workspace_app=None) -> Any:
+    """One COO implementation with fixed, principal-selected catalogues."""
     from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
     from control_plane import ceo_intent
     from integrations.executive_mcp.coo import (
         COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
-        validate_coo_tool_arguments,
+        COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS, COO_DISCOVERY_TOOL_SPECS,
+        validate_coo_tool_arguments, validate_coo_context_tool_arguments,
     )
+    from common import coo_agentos_context_contract as context_wire
+    from common import coo_discovery_contract as discovery_wire
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
+    from integrations.mastermind_workspace_app.contract import principal_frame as workspace_principal_frame
 
-    _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
-    core = create_coo_app(settings, audit_sink=audit_sink)
+    core = create_coo_app(settings, audit_sink=audit_sink, workspace_app=workspace_app)
     inner = BoundedE1App(core)
     oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
         now=settings.executive.clock, audit_sink=audit_sink)
@@ -2282,13 +2406,31 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
 
     server = Server(COO_SERVER_NAME, version=COO_SERVER_VERSION)
     schemes = oauth_security_schemes(settings.policy.required_scopes)
-    tools = tuple(mcp_types.Tool(name=spec.name, description=spec.description,
-        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
-        securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in COO_TOOL_SPECS)
+    def descriptors(specs):
+        return tuple(mcp_types.Tool(name=spec.name, description=spec.description,
+            inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
+            securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in specs)
+    tools = {context_wire.LEGACY_CATALOGUE: descriptors(COO_TOOL_SPECS),
+             context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS),
+             context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS),
+             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS)}
 
     @server.list_tools()
     async def list_tools():
-        return list(tools)
+        if settings.catalogue_provider is None:
+            return list(tools[context_wire.LEGACY_CATALOGUE])
+        core.require_context_current()
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            raise ValueError("unambiguous current authorization required")
+        authenticated = await core._auth(request)
+        if isinstance(authenticated, JSONResponse):
+            raise ValueError("COO catalogue unavailable")
+        catalogue = await core.catalogue(*authenticated)
+        if not await core._same_auth(request, authenticated):
+            raise ValueError("COO catalogue unavailable")
+        core.require_context_current()
+        return list(tools[catalogue])
 
     def error(name, code="backend_unavailable"):
         value = _e1_error(settings.executive, name, code, "COO response is unavailable")
@@ -2296,8 +2438,14 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
         return value
 
     def result(payload, challenge=None):
+        # A valid selected-child envelope carries no top-level ``ok``: its
+        # ``state`` is the outcome. It is a valid answer, not a protocol
+        # error, so it is never marked as one here.
+        is_error = payload.get("ok") is not True
+        if isinstance(payload, dict) and payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA}:
+            is_error = False
         return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
-            text=canonical_json(payload).decode("utf-8"))], isError=payload.get("ok") is not True,
+            text=canonical_json(payload).decode("utf-8"))], isError=is_error,
             _meta={"mcp/www_authenticate": [challenge]} if challenge else None)
 
     @server.call_tool(validate_input=False)
@@ -2306,20 +2454,57 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
         if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
             raise ValueError("unambiguous current authorization required")
         try:
-            validated = validate_coo_tool_arguments(name, arguments)
+            validated = (validate_coo_context_tool_arguments(name, arguments)
+                         if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
+                         else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return result(error(name, exc.code))
+        if name in discovery_wire.TOOLS:
+            from integrations.mastermind_executive_app.coo_discovery import forward_discovery_mcp
+            payload = await forward_discovery_mcp(core, inner, request, name, validated)
+            reply = result(payload)
+            if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - 4096:
+                payload = discovery_wire.result(name, validated,
+                    state="EFFECT_UNKNOWN" if discovery_wire.mutating(name, validated) else "UNAVAILABLE",
+                    reason="ORIGINAL_OUTCOME_UNKNOWN" if discovery_wire.mutating(name, validated) else "SOURCE_UNAVAILABLE")
+                reply = result(payload)
+            return reply
         is_submit = name == "submit_principal_intent"
+        is_selected_child = name == "mmx_delegate"
         has_receipt = is_submit or name == "principal_intent_status"
         request_ref = principal_request_ref(validated) if is_submit else validated.get("request_ref")
         def failed():
             return json.loads(unknown(request_ref).body) if has_receipt else error(name)
+        def selected_child_failed():
+            # The selected-child branch never answers with an E1 envelope.
+            # An unusable answer keeps the original command and reports the
+            # effect as unknown.
+            submitting = validated.get("action") == "selected_child_submit"
+            return selected_child_response(
+                "EFFECT_UNKNOWN" if submitting else "UNAVAILABLE",
+                "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN" if submitting
+                else "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE",
+                command_id=validated.get("command"), live_submit=None)
         challenge = None
+        held_target = getattr(settings, "selected_child_target", None)
+        held_digest = None
         try:
+            if is_selected_child and type(held_target) is ExecutiveSelectedChildTarget:
+                held_digest = held_target.material_digest()
+            headers = {"authorization": request.headers["authorization"]}
+            context_auth = None
+            discovery_context = False
+            if name == context_wire.CURRENT_TOOL:
+                companion = request.headers.getlist("x-mastermind-workspace-authorization")
+                if len(companion) != 1:
+                    return result(error(name, "authority_refused"))
+                headers["x-mastermind-workspace-authorization"] = companion[0]
+                context_auth = await core.current_context_auth(request)
+                discovery_context = await core.catalogue(*context_auth[0], work_ref=validated["work_ref"]) == context_wire.DISCOVERY_CATALOGUE
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
                     base_url="http://127.0.0.1", trust_env=False, follow_redirects=False) as client:
                 response = await client.post("/v1/tools/" + name,
-                    headers={"authorization": request.headers["authorization"]}, json={"arguments": validated})
+                    headers=headers, json={"arguments": validated})
             payload = response.json()
             canonical_json(payload)
             challenge = response.headers.get("www-authenticate")
@@ -2328,7 +2513,46 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
                 and payload["ok"] is False and isinstance(payload["error"], dict)
                 and payload["error"].get("code") in {"invalid_input", "authority_refused", "scope_refused",
                     "authorization_missing", "authorization_malformed", "identity_unverified", "grounding_unavailable"})
-            if not preflight and has_receipt:
+            if is_selected_child:
+                # The inner App's auth/input refusals occur before dispatch.
+                # Use its exact error shape and status mapping, independently
+                # of generic Control errors after a possible frame send.
+                detail = payload.get("error") if type(payload) is dict else None
+                code = detail.get("code") if type(detail) is dict else None
+                preflight = (
+                    type(payload) is dict and set(payload) == {"ok", "error"}
+                    and payload["ok"] is False and type(detail) is dict
+                    and set(detail) == {"code", "message"}
+                    and type(code) is str and type(detail["message"]) is str
+                    and (
+                        (code in {item.value for item in AuthErrorCode}
+                         and response.status_code == (403 if code == "scope_refused" else 401))
+                        or (code == "authority_refused" and response.status_code == 403)
+                        or (code == "invalid_input" and response.status_code in (400, 413))
+                    )
+                )
+            if is_selected_child and not preflight:
+                try:
+                    if response.status_code != 200:
+                        raise ValueError("selected child response status is invalid")
+                    if isinstance(payload, dict) and "target_digest" in payload:
+                        if (type(held_target) is not ExecutiveSelectedChildTarget
+                                or settings.selected_child_target is not held_target):
+                            raise ValueError("selected child target changed")
+                        held_target.require_current()
+                        child = held_target.child_for(validated["command"])
+                        if child is None or held_target.material_digest() != held_digest:
+                            raise ValueError("selected child target changed")
+                        payload = validate_selected_child_ingress_envelope(
+                            payload, command_id=validated["command"],
+                            job_id=child.selection.job_id, target_digest=held_digest)
+                    else:
+                        payload = validate_selected_child_local_envelope(
+                            payload, command_id=validated["command"],
+                            action=validated["action"])
+                except (TypeError, ValueError):
+                    payload = selected_child_failed()
+            elif not preflight and has_receipt:
                 if not _executive_outcome(payload, request_ref, response.status_code):
                     payload = failed()
                 elif payload.get("ok") is True:
@@ -2339,11 +2563,28 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
                         payload = failed()
             elif not preflight and (response.status_code != 200 or not _is_e1_envelope(payload, name, COO_SERVER_VERSION)):
                 payload = failed()
+            elif not preflight and name in (context_wire.TOOL, context_wire.CURRENT_TOOL):
+                data = payload["data"]
+                validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if name == context_wire.CURRENT_TOOL else context_wire.validate_result
+                validator(data, expected_context=data["principal_context"],
+                    capability_profile_digest=data["capability_profile_digest"],
+                    **({"expected_workspace_principal": workspace_principal_frame(context_auth[1][0])}
+                       if name == context_wire.CURRENT_TOOL else {}))
+                if data["principal_context"]["work_ref"] != validated["work_ref"]:
+                    raise ValueError("COO context workstream differs")
+                if name == context_wire.CURRENT_TOOL:
+                    if (data["principal_context"]["principal_binding_digest"] != context_auth[0][1]
+                            or await core.current_context_auth(request) != context_auth):
+                        raise ValueError("COO context authentication changed")
+                    core.require_current_context_auth(*context_auth)
         except Exception:
-            payload = failed()
+            payload = selected_child_failed() if is_selected_child else failed()
         reply = result(payload, challenge)
-        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(failed() if has_receipt else error(name, "output_too_large"))
+        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
+                         else MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096)
+        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > reply_ceiling:
+            reply = result(selected_child_failed() if is_selected_child
+                           else (failed() if has_receipt else error(name, "output_too_large")))
         return reply
 
     manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
@@ -2525,9 +2766,10 @@ class _CooWithPrincipalRuling:
 
 class _ExecutiveWithCoo:
     """Two fixed role routes, one host process and one shared resource document."""
-    def __init__(self, ceo, coo, metadata_path, metadata):
+    def __init__(self, ceo, coo, metadata_path, metadata, *, public_mcp=False):
         self._ceo, self._coo = ceo, coo
         self._metadata_path, self._metadata = metadata_path, metadata
+        self._public_mcp = public_mcp
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -2549,6 +2791,21 @@ class _ExecutiveWithCoo:
             await self._coo(scope, receive, send)
         elif (path == self._metadata_path and scope.get("method") == "GET"
                 and scope.get("raw_path") == self._metadata_path.encode("ascii") and not scope.get("query_string")):
+            if self._public_mcp:
+                # The edge preserves the public Host for metadata, while its
+                # MCP POST branch rewrites Host to the SDK's loopback fence.
+                headers = scope.get("headers", ())
+                valid_headers = type(headers) in (list, tuple) and all(
+                    type(pair) in (list, tuple) and len(pair) == 2
+                    and type(pair[0]) is bytes and type(pair[1]) is bytes
+                    for pair in headers)
+                hosts = [v for k, v in headers if k.lower() == b"host"] if valid_headers else []
+                origins = [v for k, v in headers if k.lower() == b"origin"] if valid_headers else [b"invalid"]
+                if (scope.get("scheme") != "https" or hosts != [b"mcp.mastermind-x.com"]
+                        or len(origins) > 1 or (origins and origins != [b"https://mcp.mastermind-x.com"])):
+                    await JSONResponse({"error": "transport_refused"}, status_code=403,
+                        headers={"Cache-Control": "no-store"})(scope, receive, send)
+                    return
             await JSONResponse(self._metadata, headers={"Cache-Control": "no-store"})(scope, receive, send)
         else:
             await self._ceo(scope, receive, send)

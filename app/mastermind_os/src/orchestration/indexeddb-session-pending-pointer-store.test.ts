@@ -125,20 +125,20 @@ describe("session-exclusive durable namespace", () => {
     await expect(store.reserve("unverified-subject", pointer)).rejects.toThrow(ERR.INVALID_SCOPE);
   });
 
-  it("retains a Secretary pointer in the same slot with the same record shape", async () => {
+  it.each(["hermes_secretary", "hermes_meta"])("retains a %s pointer in the same slot with the same record shape", async (kind) => {
     const factory = new IDBFactory();
     const store = createIndexedDbSessionPendingPointerStore(factory);
-    const secretary: OperationPointer = {
+    const native: OperationPointer = {
       operationKey: "session-continue-" + "5".repeat(64),
       kind: "message",
-      targetKey: "hermes_secretary:" + "6".repeat(64),
+      targetKey: kind + ":" + "6".repeat(64),
     };
-    // One slot per principal: the two kinds share it and never coexist.
-    expect(await store.reserve(scope, secretary)).toEqual({ reserved: true });
-    expect(await store.read(scope)).toEqual(secretary);
-    expect(await store.reserve(scope, pointer)).toEqual({ reserved: false, pointer: secretary });
+    // One slot per principal: all three kinds share it and never coexist.
+    expect(await store.reserve(scope, native)).toEqual({ reserved: true });
+    expect(await store.read(scope)).toEqual(native);
+    expect(await store.reserve(scope, pointer)).toEqual({ reserved: false, pointer: native });
     expect(await store.clearIfEqual(scope, pointer)).toBe(false);
-    expect(await store.clearIfEqual(scope, secretary)).toBe(true);
+    expect(await store.clearIfEqual(scope, native)).toBe(true);
     expect(await store.read(scope)).toBeNull();
     // The database name, version and record shape are unchanged.
     expect(SESSION_POINTER_DB_NAME).toBe("mastermind-os-session-pending-v1");
