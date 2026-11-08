@@ -1,0 +1,27 @@
+{
+  "author": {
+    "name": "Chris Wong",
+    "email": "chriswong6031@gmail.com"
+  },
+  "description": "ChatGPT workflows for direct, owner-governed Hermes teammate messaging, original replies, and Executive OS worker delegation through an already-connected Mastermind MCP app.",
+  "interface": {
+    "capabilities": [],
+    "category": "Other",
+    "defaultPrompt": null,
+    "developerName": "Chris Wong",
+    "displayName": "mastermind-agent-bus",
+    "longDescription": "ChatGPT workflows for direct, owner-governed Hermes teammate messaging, original replies, and Executive OS worker delegation through an already-connected Mastermind MCP app.",
+    "shortDescription": "ChatGPT workflows for direct, owner-governed Hermes teammate messaging, original replies, and Executive OS worker delegation through an already-connected Mastermind MCP app."
+  },
+  "keywords": [
+    "mastermind",
+    "hermes",
+    "agent-dialogue",
+    "mcp",
+    "delegation"
+  ],
+  "name": "mastermind-agent-bus",
+  "repository": "https://github.com/mastermindx-market-intelligence/Mastermind",
+  "skills": "./skills",
+  "version": "0.1.0"
+}
