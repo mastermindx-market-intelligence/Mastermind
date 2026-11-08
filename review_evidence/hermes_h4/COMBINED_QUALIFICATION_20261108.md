@@ -56,15 +56,15 @@ The two native fixtures are separate from the installed checkout. Source hashes 
 - [preparation.json](combined-20261108/preparation.json) — SHA256 `451687c6f723c4a8f827da7a931ed9780d37d9182f4fae211f399af6cb604bac`
 - [source-manifest.json](combined-20261108/source-manifest.json) — SHA256 `ff4c023d6de325329f04e485b19ff839a8f399f927f73a8152527acbc20f1bc5`
 - [gateway-qualification.json](combined-20261108/gateway-qualification.json) — SHA256 `77a00336849f912bbfb5d23f8a2e45e1f8596d9dfd1c31eb70bc679133646885`
-- [gateway-qualification.log](combined-20261108/gateway-qualification.log) — SHA256 `5cb800d49e24bc779ca4a2fa2e0c565847707351e1aa699444664ec0128b2995`
 - [native-regressions.json](combined-20261108/native-regressions.json) — SHA256 `25f0d04c88b7fa5b335c09430de4a23fe6073a59703b1cccf0e93a1c31c3ef76`
-- [native-regressions.log](combined-20261108/native-regressions.log) — SHA256 `0f7565792c1cfc308847a103752604ade608a431b0e40d1526303af5e373283c`
 - [test-environment-build.json](combined-20261108/test-environment-build.json) — SHA256 `e8c38f304bdb2fdf2c93e9218c18e02bc0c5f5c4346822de91bea8ea6ed9cdf9`
 
-## Next executable release work
+Raw test logs remain with the existing local execution artifacts; the structured receipts retain their exact SHA256 identities.
+
+## Release continuation
 
 The original source composer has returned clean local `3ed10ce228a0c6c0da42fdcf80c1b329b6f6cfef`, containing `52cb239` and the repaired security fixture. Its terminal child and exact M2 source locator are recorded in [the original #2175 return](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6715727145); this session independently read back the exact commit/tree/parents and clean worktree.
 
-Current protected source subsequently includes the accepted EVAL and other shared-runtime changes. The returned composition still requires current-source reconciliation, resolution of its recorded publisher-test failure, final-head hosted checks, the existing protected release, actual ordinary enrollment and installation, and native primary/tool/worker result-consumption proof. Preserve selected sequence37/provider116 and original J/C3 effects. This report supersedes the earlier ten-file preflight only for current-source qualification; historical runtime receipts remain intact.
+The current-source reconciliation and publisher qualification are now complete on original [#2175 at a25b047](https://github.com/mastermindx-market-intelligence/Mastermind/commit/a25b04708fcb295f37b577733f592bd4d7d2e6ef). Its protected APP/EVAL join has 559 passing source guards, 14 passing focused repair cases, and 447 passing native/publisher cases with 27 platform skips. Final-head hosted checks, protected release, actual ordinary and secretary enrollment/installation, and native primary/tool/worker result-consumption proof remain. Preserve selected sequence37/provider116 and original J/C3 effects. This report supersedes the earlier ten-file preflight only for current-source qualification; historical runtime receipts remain intact.
 
 Mission state: **active execution; live completion not yet proven**.
