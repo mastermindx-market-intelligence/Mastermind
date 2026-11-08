@@ -1454,8 +1454,8 @@ def test_history_observation_schema_type_is_a_closed_refusal(trial, schema):
             request_observation={})
 
 
-# Scoped refusal intake from the completed da171 APPLICATION composition.
-# The accepted profile/recipe parsers remain unchanged and reject that route.
+# APPLICATION profile support composes with the accepted EVAL refusal contract.
+# Mixed selections must still stop before credentials, source work or publication.
 def test_public_eval_refuses_primary_profile_before_secret_or_source_work(tmp_path, monkeypatch):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
@@ -1486,7 +1486,7 @@ def test_public_eval_refuses_primary_profile_before_secret_or_source_work(tmp_pa
     assert not (tmp_path / "uncreated-units").exists()
 
 
-def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, monkeypatch):
+def test_accepted_primary_profile_refuses_mixed_eval_before_credentials(tmp_path, monkeypatch):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
     from integrations.hermes_runtime import install as installer
@@ -1497,7 +1497,7 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
         secrets_file=tmp_path / "unread-secrets.env"),
         model_provider="mastermind-fabric", native_provider_id=None,
         gateway_backend="native-session-authority")
-    path = tmp_path / "unsupported-profile.yaml"
+    path = tmp_path / "primary-profile.yaml"
     path.write_text(dump_profile(selected))
     monkeypatch.setattr(installer, "load_secrets",
         lambda *a, **kw: pytest.fail("unsupported profile reached credentials"))
@@ -1506,7 +1506,9 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
             systemd_user_dir=tmp_path / "uncreated-units", secrets_file=selected.secrets_file,
             hermes_bin=tmp_path / "unread-launcher", upstream_source=Path(recipe["vendor_root"]),
             native_installation=recipe)
-    assert refused.value.code != "NATIVE_EVAL_INPUTS_UNQUALIFIED"
+    # The APPLICATION composition accepts the primary profile. Its explicit
+    # mixed-EVAL guard must still refuse before any credential or state access.
+    assert refused.value.code == "NATIVE_EVAL_INPUTS_UNQUALIFIED"
     assert not selected.state_dir.exists()
 
 
@@ -1533,7 +1535,9 @@ def test_mixed_eval_release_refuses_before_directory_or_renderer(tmp_path, appli
 
 
 @pytest.mark.parametrize("application_profile,with_primary", [(True, False), (True, True), (False, True)])
-def test_mixed_eval_config_refuses_before_filesystem_read(tmp_path, monkeypatch, application_profile, with_primary):
+@pytest.mark.parametrize("empty_inputs", [False, True])
+def test_mixed_eval_config_refuses_before_filesystem_read(
+        tmp_path, monkeypatch, application_profile, with_primary, empty_inputs):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
     from integrations.hermes_runtime.supervisor import expected_disabled_mcp
@@ -1544,9 +1548,9 @@ def test_mixed_eval_config_refuses_before_filesystem_read(tmp_path, monkeypatch,
     if application_profile:
         selected = replace(selected, model_provider="mastermind-fabric", native_provider_id=None)
     primary = {"schema": "unaccepted-primary-fixture"} if with_primary else None
+    evaluation_inputs = {} if empty_inputs else recipe["evaluation_inputs"]
     with monkeypatch.context() as fence:
         fence.setattr(Path, "exists", lambda *_: pytest.fail("mixed selection inspected config"))
         fence.setattr(Path, "is_symlink", lambda *_: pytest.fail("mixed selection inspected config"))
         with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
-            expected_disabled_mcp(
-                selected, consumer, primary, evaluation_inputs=recipe["evaluation_inputs"])
+            expected_disabled_mcp(selected, consumer, primary, evaluation_inputs=evaluation_inputs)
