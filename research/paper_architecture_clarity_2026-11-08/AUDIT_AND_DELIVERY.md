@@ -2,7 +2,7 @@
 
 ## Applied outcome
 
-The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide, Mastermind AI, News, Policy Monitor and Ontology. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide, Mastermind AI, News, Policy Monitor, Ontology, Risk Radar and Prophet. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
 | Current design entry | Verified continuation improvement |
 |---|---|
@@ -18,6 +18,8 @@ The first verified pass changed **44 artboards across 16 files**. The continuing
 | [News current-report recovery](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0) | EN/ZH read-failure states retain the saved basis and use the existing story-detail request after a settled, eligible failure. |
 | [Policy expanded rate disclosure](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-2-0) | EN/ZH 390px numeric tables expose the existing four horizons, source and date without inventing a current rate or Fed comparison. |
 | [Ontology answer receipts](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) | Readable series/value rows identify independent lookbacks and the QQQ-versus-SPY return difference. |
+| [Risk Radar review map](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) | Source-detail retry requires an existing permitted read owner; unavailable detail retains Back and the opened snapshot. |
+| [Prophet setup studies](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0) | Four desktop/mobile theme variants attribute chart levels to the setup without implying an exact model Plan. |
 
 These are editable Paper improvements with visual/readback evidence. Proposed interactions remain explicitly qualified; source observations are not runtime reproductions or production acceptance. Existing owners, held files and release constraints remain preserved. Detailed deliveries below contain exact node IDs, sources, verification and reconciled effects.
 
@@ -58,9 +60,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Twelve material continuation product areas are verified above. Policy’s expanded numeric disclosure and Ontology’s qualified receipt windows are complete. International’s inspected detail/filter/return/recovery journey and the OS Decision/Evidence path already cover the examined states; they were preserved. Terminal replay retains D08D custody because its editable target is unconfirmed. The Hub’s apparent board-label mismatch is resolved as distinct US and China destinations. Bounded reviews now examine Risk Radar, Prophet and one shared component reference for grounded, disjoint gaps. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Fourteen continuation product areas have verified refinements above. Policy’s expanded numeric disclosure and Ontology’s qualified receipt windows are complete. International’s inspected detail/filter/return/recovery journey and the OS Decision/Evidence path already cover the examined states; they were preserved. Terminal replay retains D08D custody because its editable target is unconfirmed. The Hub’s apparent board-label mismatch is resolved as distinct US and China destinations. The final targeted Risk Radar and Prophet corrections are verified. The shared action reference already covers the inspected pending/disabled/detail-failure distinctions and remains unchanged. All concrete corrections selected in this cross-product audit round are applied and visually checked; held source/implementation work retains its original owners and unmet proof. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
-Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Policy and Ontology refinements are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Risk Radar and Prophet refinements are reconciled and the affected artboards released. A read-only connection interruption was diagnosed and the original direct carrier recovered before those final edits; no mutation moved to another carrier. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -828,3 +830,65 @@ The earlier Buy-Board / Stocks Board terminology question is resolved. Root veri
 Sources: [US Hub template](https://github.com/mastermindx-market-intelligence/Macro/blob/03e4d374026943e9b455811656fe4d5e4d86f71a/templates/intelligence_hub.html.j2), blob `ee55a0e96712dc7c623e21a3c0915c2a078a8abc`; [China Hub template](https://github.com/mastermindx-market-intelligence/Macro/blob/03e4d374026943e9b455811656fe4d5e4d86f71a/templates/china_intel.html.j2), blob `b7045f7abac8e9ac2e095597cc8665bfd7dd569c`. The latter also names China Stocks Board in its market-board links.
 
 No common rename was applied. This proves separate board destinations, not exact-listing deep links or runtime return restoration. The current Paper brief preserves the two product owners. AXON `157-0`, its `AP-0` unavailable state, source-only material and QA canaries remain untouched; no substitute evidence destination was created.
+
+
+## Continuation delivery 12 — Risk Radar retry is conditional on an existing owner
+
+The audited driver/evidence journey already preserves US, 21D, the opened 23 Sep snapshot, scroll and triggering focus. Its native driver buttons, evidence-node retention, horizon keyboard controls, nested Escape and Back behavior are already owned by current [Macro #10739](https://github.com/mastermindx-market-intelligence/Macro/pull/10739), observed Open/Ready at `f74b943da50fe637e565ccb2c945f3f43cb240e4`. Its existing merge-on-green label was preserved.
+
+Root read [risk_radar_workspace.js](https://github.com/mastermindx-market-intelligence/Macro/blob/f74b943da50fe637e565ccb2c945f3f43cb240e4/templates/risk_radar_workspace.js), blob `c8cb8c0f879f6276ad75e986e2d373157a2d07a7`. The missing-detail branch keeps an unavailable explanation. The inspected dispatcher supports horizon, evidence, Back, Previous and Next; it does not supply the Paper source-detail retry action. This is a source observation, not a new live test.
+
+In file `01M38EVF74SJWG1GANN5VP380Z`, [Risk Radar main/evidence page](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0), root updated only the existing builder text `19C-0` on pickup map `10V-0`:
+
+> Keep all 7 drivers and leadership via the primary’s named sections; mobile links retain that depth. Receipt details stay in evidence. Source-detail retry is proposed: enable it only through an existing permitted read owner for the opened snapshot. Otherwise show “Source details unavailable” and keep Back available. Retain values; review new data before replacing the opened snapshot.
+
+The feature requirement remains, with an explicit capability boundary. No fetch endpoint, full refresh, retry owner or second recovery state machine was created. Existing product specimens, all drivers, source-count distinctions and same-context return remain preserved.
+
+The full review-map screenshot was checked. Its fit-content height is now **657px**, leaving **93px** before the next artboard at y750. Text and review footer remain contained. The edit and explicit finish of `10V-0` both returned observed applied responses. Original held/refused Events/China effects were not replayed or changed.
+
+## Continuation delivery 13 — Prophet levels belong to the setup
+
+### Grounded mismatch
+
+The setup chart said **“Lines are the plan’s own levels”**, while the adjacent panel explicitly said no open same-security model record was found. The current candidate treats these as setup fields and model-record relationships separately.
+
+Root read current Draft [Macro #9495](https://github.com/mastermindx-market-intelligence/Macro/pull/9495), head `935ca4d83d5c708109283aaf241a53af7b1863d6`, and [the setup-detail template](https://github.com/mastermindx-market-intelligence/Macro/blob/935ca4d83d5c708109283aaf241a53af7b1863d6/templates/_prophet_setup_detail.html.j2), blob `cb4c25d6a5c0a1a6faa1dda361a6a35ace095e60`.
+
+The Price levels section binds to `entry_signal.buy_zone.low/high`, `entry_signal.stop`, `hold.invalidation` and `entry_signal.chase_above`. Its separate model-record section retains `data-plan-exact="unavailable"`. The Research section already qualifies Market Memory as recomputed history, separate from evidence matched to this setup, and opens it in a new tab while preserving the setup. No new research-return mechanism was needed.
+
+### Four exact caption corrections
+
+File `01M3NT5Y3G5HTJHVR0K5W2MDJM`, [Opportunity studies](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0):
+
+| Variant | Artboard | Corrected caption |
+|---|---|---|
+| Desktop light | `VBF-0` | `VED-0` |
+| Desktop dark | `VHM-0` | `VKQ-0` |
+| Mobile light | `VO1-0` | `VQT-0` |
+| Mobile dark | `VU9-0` | `VXJ-0` |
+
+All four now say:
+
+> Daily closes, Aug 25 to Oct 20. Lines show the setup’s price levels; none is a target.
+
+The chart values, dates, entry zone, entry-method stop, base invalidation and chase boundary were preserved. No Plan, position or relationship was created. The unqualified same-security association and all existing Draft/HOLD boundaries remain intact.
+
+Root verified both mobile counterparts after the earlier advisory read timeout, then visually inspected all four complete timing panels. Desktop captions fit on one line; mobile captions fit cleanly beneath the chart. One four-leaf text edit and the explicit four-artboard finish returned observed applied responses. **ZE5-0 was never targeted.**
+
+## Continuation audit — shared action states already distinguish reads and writes
+
+The bounded F02 review inspected `771-0`, **Actions, disclosure & access variants · Candidate 2**, on [Components](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-4-0). Pending Saving keeps Inspect source available; its copy prevents repeat submission without pretending a disabled appearance is a server lock. Detail-read failure preserves comparison, source and coverage, and its retry cannot resend a save. Browser behavior remains explicitly unexecuted and callbacks remain with the incumbent host.
+
+Root read the exact [F02 system contract](https://github.com/mastermindx-market-intelligence/Macro/blob/3b27c7b9c8382ac8f21161a37b833dd6cb4f4933/research/design_candidates/production_design_20261102/f02/SYSTEM_CONTRACT.md), blob `1310877964805e6e356a6e050472754dae6deb8b`. It already requires distinct pending/disabled/available actions, context-retaining detail errors, readback for uncertain outcomes, draft retention after expiry and separate denied/expired/upstream-unavailable access states.
+
+No duplicate component or new endpoint was added. Candidate.2, the final joint F01/F02 HOLD, G15’s reconciled current-effect absence and the historically unrecovered `9SE-0` / `9SM-0` responses were preserved. The additional `6Q3-0` advisory read timed out; no conclusion depends on its unseen contents.
+
+## Connection recovery and final effect status for this round
+
+Three original-carrier Paper layout/control reads returned **MCP request timed out**; the same-carrier availability inspection then returned **Connection timed out**. These were read-only calls. No pending Risk/Prophet mutation had been sent.
+
+Bounded diagnosis observed the existing Studio gateway alive and its read-only Paper inspection **CONNECTED**. That did not transfer write authority. A subsequent exact-file read through the **original Mastermind Paper carrier** returned **OBSERVED** and a ready target binding. The required Risk layout and all four Prophet targets were then reread successfully on that original carrier before editing.
+
+No service restart, tunnel creation, app replacement, host selection, rebind, process termination or mutation-carrier switch occurred. The connection fault’s root cause remains unproven; its observed recovery is sufficient for the subsequent guarded operations. Every own modifying operation in this round has a reconciled outcome, and all affected artboards were explicitly released.
+
+These deliveries establish editable Paper layouts, precise architecture/feature qualification and source-linked design evidence. They do not establish merged product code, authenticated browser behavior, deployment, trading authority or production acceptance.
