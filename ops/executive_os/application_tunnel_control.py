@@ -1436,9 +1436,10 @@ def _observed_authfile_advance(receipt, intent, bundle, qualification, candidate
             "the settled authfile grant or preserved entries changed")
     for key, patterns in observed.items():
         if key != bundle["auth"]:
-            require(key.partition(":")[0] != purpose.audience
-                    and not _authorizes_app_listener(patterns, role_aliases, purpose=purpose),
-                    "another authfile grant conflicts with the settled owner")
+            require(key.partition(":")[0] != purpose.audience,
+                    "conflicting existing application identity refused")
+            require(not _authorizes_app_listener(patterns, role_aliases, purpose=purpose),
+                    "an existing grant already authorizes the application listener")
     require(before["mode"] == intent["preimage"]["mode"]
             and (before["uid"], before["gid"]) == (intent["preimage"]["uid"], intent["preimage"]["gid"]),
             "server authfile custody differs")

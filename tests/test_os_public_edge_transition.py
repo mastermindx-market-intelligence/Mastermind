@@ -16,6 +16,7 @@ from ops.executive_os.os_public_edge import (
     CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES,
     SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES,
     PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -173,6 +174,7 @@ ADMITTED_ROUTE_PAIRS = (
     (COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
+    (PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -186,7 +188,8 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = paths
     post_paths_of(live)[:] = list(posts)
-    if fixed == GET_ROUTES:
+    has_source = "/workspace/source-operation/operation" in fixed
+    if has_source:
         expect_source_upgrade(inner_of(live))
     before = copy.deepcopy(live)
     planned, prepared, final = transition_values(live)
@@ -198,7 +201,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
-        if fixed != GET_ROUTES:
+        if not has_source:
             expect_source_upgrade(inner_of(expected))
         if with_mcp:
             expect_complete_mcp(inner_of(expected))
@@ -208,7 +211,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
         if with_mcp:
             # The public-MCP branches keep every handler and gain exactly the
             # one COO path in their two fixed path lists.
-            observed = inner_of(before)[3:5] if fixed == GET_ROUTES else inner_of(before)[2:4]
+            observed = inner_of(before)[3:5] if has_source else inner_of(before)[2:4]
             result_branches = inner_of(value)[3:5]
             for seen, result in zip(observed, result_branches):
                 assert result["handle"] == seen["handle"]
@@ -218,7 +221,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
                     list(COMPLETE_MCP_METADATA_ROUTES)
                     if seen["match"][0]["method"] == ["GET"] else list(COMPLETE_MCP_ROUTES))
         else:
-            assert inner_of(value)[4:] == inner_of(before)[3 if fixed == GET_ROUTES else 2:]
+            assert inner_of(value)[4:] == inner_of(before)[3 if has_source else 2:]
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
     assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
 
@@ -227,7 +230,7 @@ INCOMPATIBLE_ROUTE_PAIRS = tuple(
     (fixed, posts)
     for fixed in (LEGACY_GET_ROUTES, INCUMBENT_GET_ROUTES,
                   CONTROL_ROOM_LEGACY_GET_ROUTES, CONTROL_ROOM_GET_ROUTES,
-                  COMPOSED_GET_ROUTES, GET_ROUTES)
+                  COMPOSED_GET_ROUTES, PRE_MODEL_CONFIGURATION_GET_ROUTES, GET_ROUTES)
     for posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_POST_ROUTES,
                   PRE_PROJECT_ADMISSION_POST_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES, POST_ROUTES)
     if (fixed, posts) not in ADMITTED_ROUTE_PAIRS
@@ -237,7 +240,10 @@ INCOMPATIBLE_ROUTE_PAIRS = tuple(
 @pytest.mark.parametrize("fixed,posts", INCOMPATIBLE_ROUTE_PAIRS)
 @pytest.mark.parametrize("with_mcp", [False, True])
 def test_complete_but_incompatible_os_profiles_refuse(fixed, posts, with_mcp):
-    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 27
+    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 32
+    assert hashlib.sha256(json.dumps(
+        INCOMPATIBLE_ROUTE_PAIRS[:27], separators=(",", ":")
+    ).encode()).hexdigest() == "709efed60a98705fbfb651df7a1d4605331f13c1c31114a8510cc271db0a2a5b"
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = sorted(set(fixed) | set(asset_routes(OLD)))
     post_paths_of(live)[:] = list(posts)
