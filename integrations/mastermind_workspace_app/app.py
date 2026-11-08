@@ -1684,6 +1684,7 @@ class _RawPathFence:
     #: Starlette also binds HEAD for GET routes; the exact map refuses it.
     _READ_ROUTES = (
         "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -1814,6 +1815,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def native_authorization_identity_endpoint(request: Request):
+        from .native_authorization_identity import acquisition_identity_current
+        return await acquisition_identity_current(request, config=config)
+
     async def native_draft_identity_endpoint(request: Request):
         from .native_draft_identity import native_draft_identity_current
         return await native_draft_identity_current(request, config=config)
@@ -1923,6 +1928,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route("/workspace/native-draft-identity/current", native_draft_identity_endpoint, methods=["GET"]),
+        Route("/workspace/native-authorization-identity/acquisition/current", native_authorization_identity_endpoint, methods=["GET"]),
         Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),

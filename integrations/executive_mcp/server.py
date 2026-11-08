@@ -596,6 +596,7 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
+    "/workspace/native-authorization-identity/acquisition/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
     "/workspace/resources/models/current",
@@ -691,6 +692,9 @@ class _ExecutivePathFence:
             self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
+            from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+            if supports_native_content_identity(content_app):
+                self._workspace_routes.add("/workspace/native-authorization-identity/content/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
         self._public_routes.update(self._workspace_routes)
         if workspace_app is not None:
@@ -1681,6 +1685,9 @@ def _build_profile_mcp_app(
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
+        from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+        if supports_native_content_identity(content_app):
+            outer_routes.append(Route("/workspace/native-authorization-identity/content/current", content_app, methods=["GET"]))
     if os_app is not None:
         if type(os_app) is not OsStaticApp:
             raise ValueError("fixed OS static owner required")
