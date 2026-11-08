@@ -28,7 +28,7 @@ _spec.loader.exec_module(_helpers)
 
 # Exact current APPLICATION carrier d5df6b2; no historical pins are rewritten.
 PINS = {
-    "candidate/lease_broker.py": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+    "candidate/lease_broker.py": "a4710c15842490f796b7482a63f993d1db6e937e",
     "candidate/go_lease_gateway.py": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
     "candidate/go_shim.py": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
     "tests/test_application_cross_pool_auto.py": "0d70a47906a23176d5eaed71a4575e925a500341",

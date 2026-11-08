@@ -1,5 +1,7 @@
 # H4: qualified APPLICATION and protected native-runtime source join
 
+**Historical source record.** The qualification results and runtime observations below belong to published source `a25b04708fcb295f37b577733f592bd4d7d2e6ef`. Subsequent APPLICATION compositions carry their own receipts.
+
 This source candidate joins the original returned component `3ed10ce228a0c6c0da42fdcf80c1b329b6f6cfef` with protected `fbd8d4d6e32c095ddbe9b1b08c9ff9dcb536c42c` and the path-disjoint accepted H24 commit `3dcbeb8aece334af8b93024ccbbcd05ed0482b90`. It belongs to original APPLICATION release PR #2175. It does not install a release, issue a grant, select a native generation, replay J, or establish live Hermes acceptance.
 
 ## Implemented joins
@@ -19,7 +21,7 @@ This source candidate joins the original returned component `3ed10ce228a0c6c0da4
 | Source and frozen identity guards | **559 passed**, zero failures/errors/skips |
 | Affected native interfaces, installers, EVAL seams and OS assets | 280 executed: 278 passed, two fixture failures preserved below |
 | Focused fixture corrections and mixed-input regressions | **14 passed**, zero failures/errors/skips; both prior failures resolved |
-| Complete ordered nine-module native/publisher cohort in self-contained CPython3.14.7 + PyYAML6.0.3 | **447 passed, 27 platform skips**, zero failures/errors |
+| Complete ordered nine-module native/publisher cohort in self-contained CPython3.14.7 + PyYAML6.0.3 | **447 passed, 27 skipped**, zero failures/errors |
 | Existing H4 actual native patch + eight preserved live edits | **115 gateway tests +28 native regressions passed**, published at [1dae881](https://github.com/mastermindx-market-intelligence/Mastermind/commit/1dae88108545a32e4b25cf454f4f849bedc356ef) |
 
 The initial broad unchanged-EVAL run was deliberately narrowed and retained as incomplete; it is not a passing receipt. The first interface run's old primary-parser expectation was inconsistent with the joined APPLICATION feature. Its corrected test still verifies refusal before secrets/state access. The other failure exposed a non-executable tracked test stub and an order dependency on another test's chmod; the repaired fixture copies the same bytes into its private temporary directory and marks only that copy executable.
@@ -44,3 +46,15 @@ The default manifest reproduces committed bytes. The minimum preserving closure 
 The original component's separate source-intake operation was reconciled as APPLIED and clean, with local=remote `3ed10ce2`. This candidate preserves its real ancestry. Original #2175 is the release carrier; protected CI/CodeQL, queue integration and actual installation remain separate receipts.
 
 The currently installed Executive release `b4a5a8925c6c1412dac67ba296cf65ee81c4d4c8` does not contain the attended issuer/source closure. After legitimate release installation and original-effect reconciliation, H4 still owes both role paths' actual primary reasoning, native read-only tool continuation, delegated Fabric START/terminal/original-parent consumption, and original usage/settlement. These source tests are not live acceptance.
+
+## Retained receipt provenance
+
+Raw JUnit diagnostic bodies are not retained in the current source tree, following `docs/DELIVERY_WORKFLOW.md`. The paired structured JSON summaries remain byte-identical, including their original statuses, counts, skipped cases and text-log digests. Removing the raw XML files does not recast those historical results as a newly enabled or live qualification.
+
+The original XML bytes remain available in the existing source history at `a25b04708fcb295f37b577733f592bd4d7d2e6ef`, with these independent XML digests. The JSON `log_sha256` fields continue to identify their text logs, not these XML files.
+
+| Original receipt | Git blob | XML SHA256 |
+| --- | --- | --- |
+| [root-native-repairs-03.xml](https://github.com/mastermindx-market-intelligence/Mastermind/blob/a25b04708fcb295f37b577733f592bd4d7d2e6ef/review_evidence/hermes_h4/root-source-join-20261108/root-native-repairs-03.xml) | `26a0a0a71e1f30161a42755027728242fe57389b` | `e038a90f0026472d263061b6f7c476f49d4af3c6276b6709cf47b2e6ba5539ad` |
+| [root-publisher-cohort-03.xml](https://github.com/mastermindx-market-intelligence/Mastermind/blob/a25b04708fcb295f37b577733f592bd4d7d2e6ef/review_evidence/hermes_h4/root-source-join-20261108/root-publisher-cohort-03.xml) | `ec6baa3326c6770ad68a75b492ef0da3417684c3` | `2b8bf36bdaf61a3455af4afb05ed3621b1f7bc333ea3f42f0bb53a36939d6fe2` |
+| [root-source-guards-02.xml](https://github.com/mastermindx-market-intelligence/Mastermind/blob/a25b04708fcb295f37b577733f592bd4d7d2e6ef/review_evidence/hermes_h4/root-source-join-20261108/root-source-guards-02.xml) | `a34bfa5c605f3935fc41360abacbc52d08343e99` | `c624f2d325e2253bb7defd2cf8df32d2a0f2cbfbae4a81b3347745ec596b1eef` |
