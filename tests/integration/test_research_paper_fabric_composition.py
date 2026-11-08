@@ -139,6 +139,22 @@ class SavedPaperApplicationTests(unittest.TestCase):
         self.research.assert_not_called()
         self.reason.assert_not_called()
 
+    def test_strict_reader_refuses_partial_evidence_after_original_redigest(self):
+        result = self.redigest()
+        self.assertTrue(result["ok"], result)
+        original = (self.path.read_bytes(), self.note.read_bytes(), R._INDEX.read_bytes())
+        effects = self.counts()
+        damaged = R._PAPERS / "later-unreadable.json"
+        damaged.write_text("{")
+        with self.assertRaises(ValueError):
+            R.latest_for("NVDA", strict=True)
+        self.assertEqual(R.latest_for("NVDA"), result["paper"])
+        self.assertEqual((self.path.read_bytes(), self.note.read_bytes(), R._INDEX.read_bytes()), original)
+        self.assertEqual(self.counts(), effects)
+        self.weather.assert_not_called()
+        self.research.assert_not_called()
+        self.reason.assert_not_called()
+
     def test_prepared_lost_ack_recovers_original_before_any_provider_effect(self):
         actual = R._paper_write
         def save(path, document):

@@ -1686,7 +1686,7 @@ pub struct SourceOperationContextSelection {
 }
 fn source_operation_context_target(selection: &SourceOperationContextSelection) -> Result<Url> {
     if !matches!(selection.action.as_str(), "publish_project_proposal" | "ADOPT_PLAN" | "ACCEPT_DIRECTION"
-        | "add_project_file" | "set_project_communication_preference") {
+        | "add_project_file" | "set_project_communication_preference" | "correct_project_discovery") {
         return Err("SELECTION_INVALID".into());
     }
     if let Some(work) = &selection.work_ref {
@@ -1749,6 +1749,7 @@ fn source_operation_identity(request: &Value) -> Result<(&str, &str, &str)> {
         "ACCEPT_DIRECTION" => "mmos-direction-accept-",
         "add_project_file" => "mmos-project-file-add-",
         "set_project_communication_preference" => "mmos-project-preference-set-",
+        "correct_project_discovery" => "mmos-project-discovery-correct-",
         _ => return Err("REQUEST_INVALID".into()),
     };
     let id = request
@@ -1770,6 +1771,55 @@ fn source_operation_identity(request: &Value) -> Result<(&str, &str, &str)> {
     }
     .validate()?;
     Ok((action, id, work))
+}
+fn source_discovery_ref(value: Option<&str>) -> bool {
+    value.and_then(|s| s.strip_prefix("DSC:")).is_some_and(|key| {
+        (2..=64).contains(&key.len()) && key.split('-').all(|part| !part.is_empty()
+            && part.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()))
+    })
+}
+fn source_correction_text(value: &Value, limit: usize, empty: bool) -> bool {
+    value.as_str().is_some_and(|s| s.len() <= limit && (!s.trim().is_empty() || (empty && s.is_empty()))
+        && !s.chars().any(|c| (c < '\u{20}' && !matches!(c, '\n' | '\r' | '\t')) || ('\u{7f}'..='\u{9f}').contains(&c)))
+}
+fn source_correction_date(value: &Value) -> bool {
+    let Some(s) = value.as_str() else { return false; };
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-'
+        || b.iter().enumerate().any(|(i,c)| i != 4 && i != 7 && !c.is_ascii_digit()) { return false; }
+    let year: u32 = s[..4].parse().unwrap_or(0);
+    let month: usize = s[5..7].parse().unwrap_or(0);
+    let day: u32 = s[8..].parse().unwrap_or(0);
+    let days = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {29} else {28},31,30,31,30,31,31,30,31,30,31];
+    year > 0 && (1..=12).contains(&month) && day > 0 && day <= days[month - 1]
+}
+fn source_discovery_correction_request(value: &Value) -> Result<()> {
+    source_operation_keys(value, &["schema","request_id","work_ref","source_commit","base_revision",
+        "discovery_ref","expected_discovery_revision","correction_reason","replacement"])?;
+    if value["schema"].as_str() != Some("mastermind.project_discovery_correct_request.v1")
+        || !source_operation_hex(value["source_commit"].as_str(),40)
+        || !source_operation_hex(value["base_revision"].as_str(),64)
+        || !source_operation_hex(value["expected_discovery_revision"].as_str(),64)
+        || !source_discovery_ref(value["discovery_ref"].as_str())
+        || !source_correction_text(&value["correction_reason"],2048,false)
+        || serde_json::to_vec(value).map_err(|_| "REQUEST_INVALID")?.len() > 24_576 {
+        return Err("REQUEST_INVALID".into());
+    }
+    let r = &value["replacement"];
+    source_operation_keys(r, &["claim","falsifier","so_what","kind","confidence","verified_at","verified_by","expires","body_utf8","evidence"])?;
+    if ["claim","falsifier","so_what","verified_by"].iter().any(|key| !source_correction_text(&r[*key],2048,false))
+        || !source_correction_text(&r["body_utf8"],8192,true)
+        || !matches!(r["kind"].as_str(),Some("architecture"|"data"|"landmine"|"dead_code"|"constraint"|"runtime"))
+        || !matches!(r["confidence"].as_str(),Some("verified"|"probable"|"suspected"))
+        || !source_correction_date(&r["verified_at"])
+        || (!r["expires"].is_null() && (!source_correction_date(&r["expires"]) || r["expires"].as_str() < r["verified_at"].as_str()))
+        || serde_json::to_vec(r).map_err(|_| "REQUEST_INVALID")?.len() > 16_384 {
+        return Err("REQUEST_INVALID".into());
+    }
+    let evidence = r["evidence"].as_array().ok_or("REQUEST_INVALID")?;
+    if !(1..=8).contains(&evidence.len()) || evidence.iter().enumerate().any(|(i,item)|
+        !source_correction_text(item,1024,false) || evidence[..i].contains(item)) {return Err("REQUEST_INVALID".into());}
+    Ok(())
 }
 fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     let file_prepare = kind == "prepare" && request.get("action").and_then(Value::as_str) == Some("add_project_file");
@@ -1813,6 +1863,7 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
             .get("action")
             .and_then(Value::as_str)
             .ok_or("REQUEST_INVALID")?;
+        if action == "correct_project_discovery" {source_discovery_correction_request(inner)?;}
         let work = inner.get("work_ref").and_then(Value::as_str);
         source_operation_context_target(&SourceOperationContextSelection {
             action: action.to_owned(),
@@ -1824,6 +1875,7 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
             "ACCEPT_DIRECTION" => "mmos-direction-accept-",
             "add_project_file" => "mmos-project-file-add-",
             "set_project_communication_preference" => "mmos-project-preference-set-",
+            "correct_project_discovery" => "mmos-project-discovery-correct-",
             _ => return Err("REQUEST_INVALID".into()),
         };
         if !inner
@@ -1893,7 +1945,14 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
         if !source_operation_hex(Some(id),40) || request.get("schema").and_then(Value::as_str)!=Some("mastermind.workspace_source_operation_lookup.v1") {return Err("REQUEST_INVALID".into());}
     } else if kind == "read" || kind == "reconcile" {
         let (action, _, _) = source_operation_identity(request)?;
-        if matches!(action, "add_project_file" | "set_project_communication_preference") {
+        if action == "correct_project_discovery" {
+            source_operation_keys(request, &["action","request_id","work_ref","source_commit","base_revision","request_sha256","discovery_ref","expected_discovery_revision"])?;
+            if !source_operation_hex(request["source_commit"].as_str(),40)
+                || !source_operation_hex(request["base_revision"].as_str(),64)
+                || !source_operation_hex(request["request_sha256"].as_str(),64)
+                || !source_operation_hex(request["expected_discovery_revision"].as_str(),64)
+                || !source_discovery_ref(request["discovery_ref"].as_str()) {return Err("REQUEST_INVALID".into());}
+        } else if matches!(action, "add_project_file" | "set_project_communication_preference") {
             source_operation_keys(request, &["action", "request_id", "work_ref", "source_commit", "base_revision", "request_sha256", "expected_preference_revision"])?;
             let preference = request.get("expected_preference_revision").ok_or("REQUEST_INVALID")?;
             if !source_operation_hex(request.get("source_commit").and_then(Value::as_str), 40)
@@ -1924,6 +1983,11 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
             .append_pair("action", action)
             .append_pair("request_id", id)
             .append_pair("work_ref", work);
+        if action == "correct_project_discovery" {
+            for field in ["source_commit","base_revision","request_sha256","discovery_ref","expected_discovery_revision"] {
+                url.query_pairs_mut().append_pair(field,request[field].as_str().ok_or("REQUEST_INVALID")?);
+            }
+        }
         if matches!(action, "add_project_file" | "set_project_communication_preference") {
             for field in ["source_commit", "base_revision", "request_sha256", "expected_preference_revision"] {
                 // The fixed HTTP owner decodes only literal null for the
@@ -5013,6 +5077,42 @@ mod project_archive_read_tests {
 #[cfg(test)]
 mod source_operation_transport_tests {
     use super::*;
+    fn correction_owner_fixture() -> Value {
+        serde_json::from_str(include_str!("../../src/fixtures/discovery-correction-owner.json")).unwrap()
+    }
+    #[test]
+    fn discovery_correction_keeps_eight_field_lookup_and_fixed_routes() {
+        let fixture=correction_owner_fixture();let lookup=&fixture["lookup"];
+        let url=source_operation_target("read",lookup).unwrap();
+        assert_eq!(url.path(),"/workspace/source-operation/operation");
+        let pairs:std::collections::HashMap<_,_>=url.query_pairs().into_owned().collect();
+        assert_eq!(pairs.len(),8);assert!(!pairs.contains_key("expected_preference_revision"));
+        assert_eq!(pairs["discovery_ref"],"DSC:ORIGINAL-FINDING");
+        assert_eq!(pairs["expected_discovery_revision"],lookup["expected_discovery_revision"].as_str().unwrap());
+        assert_eq!(source_operation_target("reconcile",lookup).unwrap().path(),"/workspace/source-operation/reconcile");
+        assert!(source_operation_target("advance",lookup).is_err());
+        let prepare=serde_json::json!({"action":"correct_project_discovery","request":fixture["request"]});
+        assert!(source_operation_target("prepare",&prepare).is_ok());
+        assert_eq!(source_operation_body(fixture["preview"].clone(),"prepare",&prepare).unwrap(),fixture["preview"]);
+        assert_eq!(source_operation_body(fixture["source_status"].clone(),"read",lookup).unwrap(),fixture["source_status"]);
+    }
+    #[test]
+    fn discovery_correction_refuses_authority_grafts_and_invalid_evidence() {
+        let fixture=correction_owner_fixture();
+        for (field,value) in [("expected_preference_revision",Value::Null),("principal_scope",serde_json::json!("f".repeat(64))),
+            ("discovery_ref",serde_json::json!("DSC:ORIGINAL-FINDING\n")),
+            ("request_id",serde_json::json!(format!("mmos-project-file-add-{}","a".repeat(40))))] {
+            let mut lookup=fixture["lookup"].clone();lookup[field]=value;
+            assert!(source_operation_target("read",&lookup).is_err(),"{field}");
+            assert!(source_operation_target("reconcile",&lookup).is_err(),"{field}");
+        }
+        for (field,value) in [("verified_at",serde_json::json!("2026-02-29")),("expires",serde_json::json!("2026-11-04")),
+            ("confidence",serde_json::json!("")),("claim",serde_json::json!("中".repeat(683))),
+            ("evidence",serde_json::json!(["same","same"])),("auto_verify",serde_json::json!(true))] {
+            let mut request=fixture["request"].clone();request["replacement"][field]=value;
+            assert!(source_operation_target("prepare",&serde_json::json!({"action":"correct_project_discovery","request":request})).is_err(),"{field}");
+        }
+    }
     fn lookup() -> Value {
         serde_json::json!({"schema":"mastermind.workspace_source_operation_lookup.v1","action":"ADOPT_PLAN","request_id":format!("mmos-project-adopt-{}","a".repeat(40)),"work_ref":"WS:TEST"})
     }

@@ -61,7 +61,8 @@ import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/Know
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
 import { useProjectKnowledgeWorkspace } from "./knowledge/useProjectKnowledgeWorkspace";
 import { ProjectKnowledgeEditor } from "./knowledge/library/ProjectKnowledgeEditor";
-import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./knowledge/library/knowledge-library-contract";
+import {ProjectDiscoveryCorrectionEditor,DiscoveryCorrectionReview} from './knowledge/library/ProjectDiscoveryCorrectionEditor';
+import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext, ProjectDiscoverySource } from "./knowledge/library/knowledge-library-contract";
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
@@ -4847,27 +4848,34 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authGeneration:authRevision,hostGeneration:archiveHostGeneration,canRead:projectReaders.canRead,
     readContext:knowledgePorts.readContext,transport:knowledgePorts.transport,store:commandBinding?.store,
     onSourceObserved:()=>setKnowledgeRefresh(value=>value+1)});
-  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference";
-    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null}|null>(null);
+  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference"|"correction";
+    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null;discovery:ProjectDiscoverySource|null}|null>(null);
   const currentKnowledgeEditor=knowledgeEditor?.scope===knowledgePublication.scope?knowledgeEditor:null;
   hasUnsentUserText.current ||= !!currentKnowledgeEditor;
   useLayoutEffect(()=>{if(knowledgeEditor && !currentKnowledgeEditor)setKnowledgeEditor(null);},[knowledgeEditor,currentKnowledgeEditor]);
   const knowledgeWriteAvailable=!!(commandBinding?.store && knowledgePorts.readContext && knowledgePorts.transport &&
     projectWorkRef && projectReaders.canRead());
-  const openKnowledgeEditor=(mode:"file"|"preference",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null)=>{
+  const openKnowledgeEditor=(mode:"file"|"preference"|"correction",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null,discovery:ProjectDiscoverySource|null=null)=>{
     if(!knowledgeWriteAvailable || context.workRef!==projectWorkRef ||
       ["submitting","checking","unknown"].includes(knowledgePublication.controller?.getState().status??"idle"))return;
     try {
       knowledgePublication.currentSource(context);
+      if(mode==='correction'&&(!discovery||!knowledgePublication.currentDiscovery(discovery)))return;
       if(!knowledgePublication.startDraft())return;
       const bytes=new Uint8Array(20);globalThis.crypto.getRandomValues(bytes);
       const suffix=Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
-      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,
-        requestId:`mmos-project-${mode==="file"?"file-add":"preference-set"}-${suffix}`});
+      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,discovery,
+        requestId:`mmos-project-${mode==="file"?"file-add":mode==='correction'?'discovery-correct':"preference-set"}-${suffix}`});
     } catch { /* No current source or original identifier means no editor action. */ }
   };
   const knowledgePublicationPanel=<>
-    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==="file"
+    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==='correction'
+      ? currentKnowledgeEditor.discovery&&<ProjectDiscoveryCorrectionEditor key={currentKnowledgeEditor.requestId}
+          source={currentKnowledgeEditor.discovery} requestId={currentKnowledgeEditor.requestId} locale={locale}
+          phase={knowledgePublication.phase} current={knowledgePublication.currentDiscovery}
+          onPrepare={knowledgePublication.prepareCorrection} onClose={()=>setKnowledgeEditor(null)} onCheckOriginal={knowledgePublication.checkOriginal}
+          onInspectOriginal={knowledgePublication.inspectOriginal}/>
+      :currentKnowledgeEditor.mode==="file"
       ? <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="file"
           sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
           authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
@@ -4884,9 +4892,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     {currentKnowledgeEditor && knowledgePublication.phase==="prepared" && knowledgePublication.prepared && <section className="card" aria-label={locale==="zh-CN"?"检查准备好的更改":"Review prepared changes"}>
       <h2>{locale==="zh-CN"?"检查你的更改":"Review your changes"}</h2>
       <p>{locale==="zh-CN"?"尚未发布。确认后才会提交这一次更改。":"Nothing has been published. Publish submits this original change once."}</p>
-      <pre className="visible-text">{"file" in knowledgePublication.prepared.request
+      {knowledgePublication.prepared.request.schema==='mastermind.project_discovery_correct_request.v1'
+        ? currentKnowledgeEditor.discovery&&<><DiscoveryCorrectionReview request={knowledgePublication.prepared.request} source={currentKnowledgeEditor.discovery} locale={locale}/>
+          <details><summary>{locale==='zh-CN'?'更改的来源记录':'Changed source records'}</summary><ul>{knowledgePublication.prepared.response.preview.postimages.map(image=><li key={image.path}>{image.path}</li>)}</ul></details></>
+        :<pre className="visible-text">{"file" in knowledgePublication.prepared.request
         ? `${knowledgePublication.prepared.request.file.display_name}\n${knowledgePublication.prepared.request.file.content_utf8}`
-        : knowledgePublication.prepared.request.value}</pre>
+        : knowledgePublication.prepared.request.value}</pre>}
       <button type="button" disabled={!knowledgePublication.canPublish} onClick={knowledgePublication.publish}>{locale==="zh-CN"?"发布更改":"Publish changes"}</button>
     </section>}
     {knowledgeWriteAvailable && <section className="card" aria-label={locale==="zh-CN"?"原始发布状态":"Original publication status"}>
@@ -5466,6 +5477,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       readActions={knowledgeWriteAvailable?knowledgePublication.readActions:undefined}
       onAddFiles={knowledgeWriteAvailable?context=>openKnowledgeEditor("file",context,null):undefined}
       onEditPreference={knowledgeWriteAvailable?(context,memory)=>openKnowledgeEditor("preference",context,memory):undefined}
+      onCorrectDiscovery={knowledgeWriteAvailable?source=>openKnowledgeEditor('correction',source.sourceContext,null,source):undefined}
       onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/></>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}

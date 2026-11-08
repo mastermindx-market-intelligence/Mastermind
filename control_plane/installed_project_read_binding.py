@@ -18,6 +18,7 @@ _METHODS = {"agentos_context": "read_agentos_context",
             "project_knowledge_catalogue": "read_project_knowledge_catalogue",
             "project_knowledge_memory": "read_project_knowledge_memory",
             "project_knowledge_source": "read_project_knowledge_source",
+            "project_discovery_source": "read_project_discovery_source",
             "project_knowledge_recipe": "read_project_knowledge_recipe",
             "project_creation_recipe": "read_project_creation_recipe"}
 _COORDINATES = ("_source_root", "_macro_root", "_code_root", "_python",
@@ -192,5 +193,21 @@ def read_installed_project_knowledge_source_binding(reader, *, work_ref, source_
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     value = binding.callback(**selected)
     if not _matches(binding, reader=reader, owner=owner, kind="project_knowledge_source"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    return value
+
+
+def read_installed_project_discovery_source_binding(reader, *, work_ref, discovery_ref, expected_source_commit):
+    from common.workspace_project_knowledge_read_contract import selection
+    try:
+        selected = selection(dict(work_ref=work_ref, discovery_ref=discovery_ref,
+            expected_source_commit=expected_source_commit), operation="project_discovery_source")
+    except (TypeError, ValueError):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE") from None
+    binding, owner = reader._installed_reader_binding, reader._installed_context_owner
+    if not _matches(binding, reader=reader, owner=owner, kind="project_discovery_source"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    value = binding.callback(**selected)
+    if not _matches(binding, reader=reader, owner=owner, kind="project_discovery_source"):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     return value

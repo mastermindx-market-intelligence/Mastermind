@@ -29,8 +29,8 @@ REVIEWED_ANCHORS = {
     # and release-time permission checks; a change to any of them invalidates
     # all three status sites without changing the historical Company record.
     "_handle_ceo_ingress_connection": {'node_type': 'AsyncFunctionDef',
- 'source_sha256': '6a104ea9d843d54d80e85d68922dc018d42c7a76cdf8bdd6fb28f7ec0a7901bd',
- 'ast_sha256': 'baa31b823d34e36b4c1dbcc450a4966357d8e39cc72159e2b0e95008a163899e',
+ 'source_sha256': '0c62c1f8cf397f27ae22dcfc2aa6eec92753e63978f50991e882f764a8874ed6',
+ 'ast_sha256': '7d8a2a072164cde3275f7e18f97eb6b96a0d2cdfe31242093daf07b858d036e3',
  'sites': ((('body',
              3,
              'body',
@@ -123,9 +123,19 @@ REVIEWED_ANCHORS = {
 # Company method plus each original Fabric operand/path against protected
 # source. Only whole-source/enclosing-method pins change; no new literal site
 # or scanner exemption is added. This is source review, not host acceptance.
+
+# Discovery correction extends the original authenticated App-peer branch.
+# The Company method and all three Fabric error operands, including their
+# complete AST paths and token spans, remain unchanged. Only the exact whole
+# source and enclosing ingress-method digests change for this composition.
+
 # H5 joins protected779fc3be: exact Company listener and Fabric response subtree
 # remain AST-identical; only the composed full-source and ingress pins change.
 
 # H6 joins current552 and H5 at exact source. The complete original Fabric
 # response subtree and Company listener AST are unchanged; only enclosing
 # source/method identity and mapped positions are requalified.
+
+# EVAL/current-primary composition preserves the complete Company listener and
+# Fabric response subtree. Only enclosing source/AST pins and mapped positions
+# change; the same six literals remain the entire reviewed allowance.

@@ -16,6 +16,7 @@ from scripts.agent_eval.errors import ContractDefect, ContractError
 SCORER_ID = "mastermind.hermes_memory_grounding.v1"
 EXPECTED_SCHEMA = "mastermind.hermes_memory_grounding_expected.v1"
 INPUT_SCHEMA = "mastermind.hermes_memory_grounding_input.v1"
+INPUT_SCHEMA_V2 = "mastermind.hermes_memory_grounding_input.v2"
 SUBMISSION_SCHEMA = "mastermind.hermes_memory_grounding_submission.v1"
 MAX_ARTIFACT_BYTES = 16_384
 DIMENSIONS = tuple(sorted((
@@ -83,9 +84,11 @@ def _fixtures(expected: dict, inputs: dict) -> tuple[dict, dict]:
         "source": contracts.v_artifact_pair, "original_effect": _effect,
         "next_action": _action,
     })
+    source_pairs = type(inputs) is dict and inputs.get("schema") == INPUT_SCHEMA_V2
     fixture = contracts.validate_closed_object(inputs, "$.input", {
-        "schema": contracts.v_enum(frozenset({INPUT_SCHEMA})),
-        "scope": _scope, "authorized_sources": contracts.v_artifact_list,
+        "schema": contracts.v_enum(frozenset({INPUT_SCHEMA, INPUT_SCHEMA_V2})),
+        "scope": _scope,
+        "authorized_sources": contracts.v_source_artifact_list if source_pairs else contracts.v_artifact_list,
         "original_effect": _effect,
     })
     if gold["scope"] != fixture["scope"]:
@@ -225,6 +228,8 @@ def build_scorer_pass(
     if SCORER_ID not in policy["required_scorers"] + policy["optional_scorers"]:
         _reject("$.scenario.scoring_policy", "SCORER_NOT_DECLARED")
     expected_ref, input_ref, output_ref = scenario["expected_contract"], scenario["input_fixture"], run["evidence"]["output"]
+    if output_ref is None:
+        _reject("$.run.evidence.output", "RUN_OUTPUT_UNAVAILABLE")
     refs = sorted([dict(expected_ref), dict(input_ref), dict(output_ref)], key=lambda ref: ref["artifact_ref"])
     contracts.v_artifact_list(refs, "$.input_evidence")
     for raw, ref, path in ((expected_bytes, expected_ref, "$.expected"),
@@ -232,6 +237,8 @@ def build_scorer_pass(
         _bind(raw, ref, path)
     expected, inputs = _parse(expected_bytes, "$.expected"), _parse(input_bytes, "$.input")
     _fixtures(expected, inputs)
+    if inputs["schema"] == INPUT_SCHEMA_V2 and scenario["schema"] != contracts.SCENARIO_SCHEMA_V2:
+        _reject("$.input.schema", "INPUT_SCENARIO_SCHEMA_MISMATCH")
     visible = set(scenario["privacy"]["model_visible_artifact_refs"])
     if expected_ref["artifact_ref"] in visible:
         _reject("$.scenario.privacy", "EXPECTED_CONTRACT_MODEL_VISIBLE")
@@ -255,7 +262,8 @@ def build_scorer_pass(
     for dimension in dimensions:
         dimension["evidence_refs"] = [dict(ref) for ref in refs]
     return scoring.build_scorer_pass_document(
-        run, scorer_pass_id=scorer_pass_id, scorer_id=SCORER_ID, scorer_version="1",
+        run, scorer_pass_id=scorer_pass_id, scorer_id=SCORER_ID,
+        scorer_version="2" if inputs["schema"] == INPUT_SCHEMA_V2 else "1",
         scorer_code_ref=scorer_code_ref, method="DETERMINISTIC",
         dimension_results=dimensions, input_evidence=refs, created_at=created_at,
         supersedes=supersedes,

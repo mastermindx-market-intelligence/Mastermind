@@ -24,6 +24,8 @@ from integrations.hermes_runtime.secrets import Secrets
 from integrations.hermes_runtime import native_session_control as control
 from integrations.hermes_runtime import tcp_sandbox
 
+_PRIMARY_TCP_POLICY = tcp_sandbox.enforce_role_tcp_ports
+
 
 def document(role="mmsecretary"):
     return dict(schema=pub.SCHEMA, role=role, enrollment_request_id="fixture-enrollment",
@@ -150,6 +152,48 @@ def test_application_port_is_connect_only_and_requires_qualified_launch(tmp_path
         tcp_sandbox.enforce_role_tcp_ports(selected)
 
 
+def test_primary_operator_preparation_uses_qualified_connect_policy_once(
+        tmp_path, monkeypatch):
+    from integrations.hermes_runtime.tests.test_operator_native_enrollment import enrollment_command
+    from integrations.hermes_runtime import cli
+
+    # Reuse the original held/native fixture; real profile, primary config,
+    # publication and TCP port selection are retained in this composition.
+    world = enrollment_command.__wrapped__(tmp_path, monkeypatch)(role="mmsecretary")
+    selected = replace(world.profile, model_provider=pub.PROVIDER,
+        model_default=document()["model"], native_provider_id=None,
+        gateway_host=pub.ROLE_RELATIONS["mmsecretary"][3])
+    raw = document()
+    raw.update(principal_id=world.target["principal_id"],
+               enrollment_request_id=world.launch.recipe["session_enrollment"]["request_id"])
+    world.launch.recipe.update(schema="mastermind.hermes_native_gateway_installation/v4",
+                               primary_application=raw, executive_consumer=None)
+    world.path.write_text(dump_profile(selected))
+    world.config.write_text(pub.expected_native_config(selected, raw))
+    def qualify(current, binary=None):
+        assert dump_profile(current) == dump_profile(selected)
+        assert binary is None or binary == world.binary
+        world.state.qualifications += 1
+    world.launch.qualify = qualify
+    calls = []
+    def apply_policy(bind, connect):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        calls.append((bind, connect))
+    # The fixture normally replaces the whole TCP entry. Restore it here and
+    # double only the operating-system policy application.
+    monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", _PRIMARY_TCP_POLICY)
+    monkeypatch.setattr(tcp_sandbox, "apply_tcp_port_policy", apply_policy)
+    actual, home, implementation, connected = cli._prepare_native_operator(
+        world.path, world.binary, expected_role="mmsecretary", native_launch=world.launch)
+    assert dump_profile(actual) == dump_profile(selected)
+    assert home == world.config.parent.resolve()
+    assert calls == [tcp_sandbox.role_tcp_ports(selected, primary_application=raw)]
+    assert pub.APPLICATION_PORT in calls[0][1] and pub.APPLICATION_PORT not in calls[0][0]
+    assert world.state.creations == world.state.inspections == 0
+    assert world.state.qualifications == 2
+
+
 def test_supervisor_application_branch_does_not_resolve_provider_keys(tmp_path, monkeypatch):
     from integrations.hermes_runtime import supervisor
     from integrations.hermes_harness import native_model_credential
@@ -170,6 +214,22 @@ def test_supervisor_application_branch_does_not_resolve_provider_keys(tmp_path, 
     env = runtime._model_child_env()
     assert env[reference] == secret and env["HERMES_STARTUP_WARMUP_TIMEOUT"] == "0"
     assert not any(key.endswith("_API_KEY") for key in env)
+
+
+def test_explicit_application_publication_cannot_downgrade_to_legacy_config(tmp_path):
+    from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+    from integrations.hermes_runtime.hermes_config import render_hermes_config
+
+    legacy = replace(compose_profile("mmmeta", state_dir=tmp_path / "legacy-state",
+        hermes_home=tmp_path / "legacy-home", secrets_file=tmp_path / "unread.env"),
+        native_provider_id=None)
+    native = legacy.hermes_home / "profiles" / legacy.role / "config.yaml"
+    native.parent.mkdir(parents=True)
+    native.write_text(render_hermes_config(legacy))
+    native.chmod(0o600)
+    assert expected_disabled_mcp(legacy) is None
+    with pytest.raises(RuntimeRefusal):
+        expected_disabled_mcp(legacy, primary_application=document("mmmeta"))
 
 
 def _module(monkeypatch, name, **values):

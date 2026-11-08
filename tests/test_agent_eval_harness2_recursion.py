@@ -120,6 +120,35 @@ class FixturePort:
         return self.reflection_mutation(answer) if self.reflection_mutation else answer
 
 
+class SourcePairV3Port(FixturePort):
+    """Synthetic complete receipts; this port grants no native execution."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.sources = [{"artifact_ref": REPO_REF_BASE + "#fixture/" + name,
+                         "digest": sha256_bytes(b"identical fixture source\n")}
+                        for name in ("one.md", "two.md")]
+        fields = {key: copy.deepcopy(value) for key, value in self.scenario.items()
+                  if key not in {"schema", "scenario_digest"}}
+        fields["source_policy"]["allowlist_artifacts"] = sorted(
+            fields["source_policy"]["allowlist_artifacts"] + copy.deepcopy(self.sources),
+            key=lambda row: row["artifact_ref"])
+        fields["privacy"]["model_visible_artifact_refs"] = sorted(
+            set(fields["privacy"]["model_visible_artifact_refs"]) |
+            {row["artifact_ref"] for row in self.sources})
+        self.scenario = contracts.build_scenario(fields, schema=contracts.SCENARIO_SCHEMA_V2)
+
+    def adjust_draft(self, label, draft):
+        draft["schema"] = contracts.RUN_DRAFT_SCHEMA_V3
+        draft["observations"]["observed_sources"] = copy.deepcopy(self.sources)
+        draft["observation_availability"] = {
+            "unavailable": [], "coverage": {
+                key: {"status": "COMPLETE", "reason": None}
+                for key in sorted(contracts.RUN_OBSERVATION_COVERAGE_KEYS)
+            },
+        }
+
+
 def invoke(port, *, mode="agg", k=1, experience=(), limits=None, resolved=None):
     return run_refinement(task=TASK, common_base=BASE, expected_scenario=port.scenario,
         baseline_configuration=port.base_configuration, prior_experience=experience,
@@ -150,6 +179,42 @@ def test_real_local_program_contrast(tmp_path):
     assert port.trials["base1"].output == b"105\n"
     assert result["selected_output"] == b"85\n"
     assert len(list(tmp_path.glob("arithmetic-*.py"))) == 4
+
+
+def test_current_v3_source_pairs_use_original_retained_trials(tmp_path):
+    port = SourcePairV3Port(tmp_path)
+    result = invoke(port)
+    assert result["selected_output"] == b"85\n"
+    assert result["promotion"] == "NONE" and result["automatic_memory_write"] is False
+    assert len(result["retained_native_runs"]) == 4
+    for run_id in result["retained_native_runs"]:
+        run = port.native.resolve_run(run_id)
+        assert run["schema"] == contracts.RUN_SCHEMA_V3
+        assert run["validity"]["status"] == "VALID"
+        assert run["observations"]["observed_sources"] == port.sources
+
+
+@pytest.mark.parametrize("change,reason", [("missing", "NATIVE_TRIAL_INVALID"),
+    ("effect", "NATIVE_EFFECT_REQUIRES_RECONCILIATION")])
+def test_current_v3_unavailable_or_uncertain_trial_stops_the_original_port(tmp_path, change, reason):
+    class RefusedPort(SourcePairV3Port):
+        def adjust_draft(self, label, draft):
+            super().adjust_draft(label, draft)
+            if change == "missing":
+                draft["execution"]["model_served"] = None
+                draft["observation_availability"]["unavailable"] = [
+                    {"path": "execution.model_served", "reason": "NOT_OBSERVED"}]
+            else:
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+    port = RefusedPort(tmp_path)
+    with pytest.raises(Harness2CycleError, match=reason) as error:
+        invoke(port)
+    assert [(call[0], call[1]) for call in port.calls] == [("execute", "base1")]
+    retained = port.trials["base1"].run
+    assert error.value.retained_run_ids == (retained["run_id"],)
+    assert port.native.resolve_run(retained["run_id"]) == retained
+    assert retained["validity"]["status"] != "VALID"
 
 
 def test_parallel_compositions_do_not_inherit_previous_composition(tmp_path):
@@ -205,6 +270,125 @@ def test_effect_unknown_is_retained_and_stops_without_retry(tmp_path):
     assert [call[1] for call in port.calls if call[0] == "execute"] == ["base1", "inv1"]
     assert port.trials["inv1"].run["run_id"] in error.value.retained_run_ids
     assert port.native.resolve_run(port.trials["inv1"].run["run_id"])["validity"]["status"] == "INVALID_EFFECT_UNKNOWN"
+
+
+@pytest.mark.parametrize("stop_label,defect", [
+    ("base1", "effect"), ("base2", "effect"),
+    ("base1", "cleanup"), ("base2", "cleanup"),
+])
+def test_structured_owner_refusal_preserves_retained_original_runs(tmp_path, stop_label, defect):
+    class RefusingPort(FixturePort):
+        def adjust_draft(self, label, draft):
+            if label != stop_label:
+                return
+            if defect == "effect":
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+            else:
+                draft["cleanup"] = {"status": "UNPROVEN", "proof": None}
+
+        def execute(self, task, label, files):
+            trial = super().execute(task, label, files)
+            if label == stop_label:
+                self.retained_before_error = {
+                    key: copy.deepcopy(value.run) for key, value in self.trials.items()
+                }
+                original_ids = tuple(value.run["run_id"] for value in self.trials.values())
+                code = ("NATIVE_EFFECT_REQUIRES_RECONCILIATION" if defect == "effect"
+                        else "NATIVE_TRIAL_INVALID")
+                # Original-owner refs may repeat an already observed baseline.
+                self.owner_error = Harness2CycleError(code, original_ids[::-1] + original_ids)
+                raise self.owner_error
+            return trial
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError) as caught:
+        invoke(port, k=2)
+    expected_ids = tuple(run["run_id"] for run in port.retained_before_error.values())
+    assert caught.value.code == port.owner_error.code
+    assert caught.value.retained_run_ids == expected_ids
+    assert caught.value.__cause__ is port.owner_error
+    expected_labels = ["base1"] if stop_label == "base1" else ["base1", "base2"]
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", label) for label in expected_labels
+    ]
+    assert not port.contexts and not port.selected_views
+    for run in port.retained_before_error.values():
+        assert port.native.resolve_run(run["run_id"]) == run
+    refused = port.retained_before_error[stop_label]
+    assert refused["validity"]["status"] == (
+        "INVALID_EFFECT_UNKNOWN" if defect == "effect" else "INVALID_CLEANUP"
+    )
+
+
+@pytest.mark.parametrize("bad", [
+    "none", "list", "text", "iterator", "tuple_subclass", "oversize",
+    "mixed_before", "mixed_after", "invalid_only",
+])
+def test_structured_owner_refusal_rejects_malformed_recovery_ids(tmp_path, bad):
+    class MustNotIterate:
+        def __iter__(self):
+            raise AssertionError("wrong-type recovery envelope was iterated")
+
+    class TupleSubclass(tuple):
+        def __iter__(self):
+            raise AssertionError("tuple subclass recovery envelope was iterated")
+
+    class RefusingPort(FixturePort):
+        def adjust_draft(self, label, draft):
+            if label == "base2":
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+
+        def execute(self, task, label, files):
+            trial = super().execute(task, label, files)
+            if label == "base2":
+                run_id = trial.run["run_id"]
+                supplied = {
+                    "none": None, "list": [run_id], "text": run_id,
+                    "iterator": MustNotIterate(), "tuple_subclass": TupleSubclass((run_id,)),
+                    "oversize": (run_id,) * 129,
+                    "mixed_before": ([], run_id), "mixed_after": (run_id, []),
+                    "invalid_only": (True, "not-a-run-id", []),
+                }[bad]
+                self.retained_before_error = copy.deepcopy(trial.run)
+                self.owner_error = Harness2CycleError("NATIVE_EFFECT_REQUIRES_RECONCILIATION",
+                                                     supplied)
+                raise self.owner_error
+            return trial
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError) as caught:
+        invoke(port, k=2)
+    expected = (port.trials["base1"].run["run_id"],)
+    if bad.startswith("mixed_"):
+        expected += (port.trials["base2"].run["run_id"],)
+    assert caught.value.code == "OWNER_RETAINED_RUN_IDS_INVALID"
+    assert caught.value.retained_run_ids == expected
+    assert caught.value.__cause__ is port.owner_error
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", "base1"), ("execute", "base2"),
+    ]
+    assert not port.contexts and not port.selected_views
+    assert port.native.resolve_run(port.retained_before_error["run_id"]) == port.retained_before_error
+    assert port.retained_before_error["validity"]["status"] == "INVALID_EFFECT_UNKNOWN"
+
+
+def test_structured_owner_refusal_without_recovery_ids_invents_none(tmp_path):
+    class RefusingPort(FixturePort):
+        def execute(self, task, label, files):
+            if label == "base2":
+                self.calls.append(("execute", label))
+                raise Harness2CycleError("ORIGINAL_OWNER_UNAVAILABLE")
+            return super().execute(task, label, files)
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError, match="ORIGINAL_OWNER_UNAVAILABLE") as caught:
+        invoke(port, k=2)
+    assert caught.value.retained_run_ids == (port.trials["base1"].run["run_id"],)
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", "base1"), ("execute", "base2"),
+    ]
 
 
 def test_ambiguous_owner_call_is_not_replayed(tmp_path):
