@@ -365,7 +365,7 @@ def _scope_language(path: str) -> str:
     # Pinned donor archives are still Python source for this identity audit.
     # Parse their strings/aliases exactly as executable .py postimages; this
     # does not exempt them from changed-source or literal-identity checking.
-    if suffix == ".py" or path.lower().endswith(".py.source"):
+    if suffix == ".py" or path.lower().endswith((".py.source", ".py.preimage")):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -1873,7 +1873,7 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
     )
 
 
-@pytest.mark.parametrize("suffix", [".py", ".py.source"])
+@pytest.mark.parametrize("suffix", [".py", ".py.source", ".py.preimage"])
 def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
     path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
     prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
@@ -1883,6 +1883,32 @@ def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
     for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
         source = prose + executable
         assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
+
+
+def test_d8_retained_provider_preimage_keeps_python_scope_and_identity_guards():
+    path = (
+        "ops/native_fabric/quota_continuity/source/"
+        "provider-application-codex_provider_realm.py.preimage"
+    )
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "07367ea8db85df09414a7668af8c3c2cfc9fae705a457816071da8177b232623"
+    )
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == []
+    for extra in ("peer_uid = 471\n", "value = 471\npeer_uid = value\n"):
+        changed = source + "\n" + extra
+        assert "471" in _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+        )
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, source),
+            source_postimages={path: source.replace("512 * 1024", "513 * 1024", 1)},
+        )
 
 
 _D8_PR1572_CSS = "\n".join([
