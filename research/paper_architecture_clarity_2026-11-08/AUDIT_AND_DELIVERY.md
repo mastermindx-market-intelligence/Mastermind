@@ -407,3 +407,53 @@ Root read the actual candidate `safeReturn`, `refreshJourney` and `restoreCompan
 Inventory update: the bounded current Paper resource census returned 39 resources. It now includes a separately authored Migration Directory and a Recovery Only copy; the original MASTERMIND PAGES file explicitly says READ ONLY / MIGRATION PENDING. None of those migration, recovery or adapter canary surfaces were mutated by this writer. F02’s newly observed `9VK-0` Signal Ink motion contract was likewise preserved; our two interaction rows are disjoint.
 
 Next active audit frontier: Expectation chart-to-table continuity and Options watch/review continuation, using current incumbent source/candidate owners before selecting additional edits.
+
+
+## Continuation delivery 4 — Expectation values and selection recovery
+
+### Implemented in Paper
+
+File `01M5EX8RTPR7YEZD2A144XED2S` now contains four editable expanded-values studies, with separate full capture timestamps and estimated-period end dates:
+
+| Variant | Expanded-values node | Failed-selection node | Empty-series node | Current Build artboard |
+|---|---|---|---|---|
+| EN dark desktop | `40F-0` | `45Z-0` | `46V-0` | `3UR-0` |
+| ZH dark desktop | `40L-0` | `467-0` | `470-0` | `3VF-0` |
+| EN dark mobile | `40R-0` | `46F-0` | `475-0` | `3UX-0` |
+| ZH light mobile | `40X-0` | `46N-0` | `47A-0` | `3V3-0` |
+
+Current destination: [02 · Build · States + implementation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0). The selected state containers retain their stable IDs `QN-0`, `1SF-0`, `37R-0`, and `3SF-0`.
+
+Each study is explicitly **synthetic test data / proposed refinement**. Desktop shows aligned columns; mobile uses labeled capture records without horizontal squeezing. Disclosure controls have an accurate expanded-state label, and narrow Retry/Hide controls use a 44px minimum height. Unknown units remain unknown. Null fields remain em dashes with “not available in this capture; not zero.” Neither the empty series nor the failed read shows fabricated zero values.
+
+The fixtures use AAA / EPS / Current Q (`0q`) from [the existing test builder](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/tests/test_build_expectation_surface.py), blob `17f4b59ec98883cfaeb7953a755b63ff30a55357`. The three captures are displayed newest first:
+
+| Captured UTC | Period ends | Average | Median | Low | High | Analysts |
+|---|---|---:|---:|---:|---:|---:|
+| 2026-01-03 00:00:00 | 2026-12-31 | 101.00 | 100.50 | 98.00 | 105.00 | 12 |
+| 2026-01-02 00:00:00 | 2026-12-31 | 102.00 | — | — | — | — |
+| 2026-01-01 00:00:00 | 2026-12-31 | 100.00 | — | — | — | — |
+
+This is a specimen projection, not a new application schema or market assertion. Existing MU illustrations, values and dates were preserved. The actual frozen MU `series.EPS["+1y"]` at Macro `f034710e6bf0c554f8011b1251f8ba1e88621d64` does not substantiate that earlier illustrative board’s capture pair, values or USD unit. It was not substituted into the design. Two captures sharing a calendar date in that source also support distinguishing full collection time from a date-only label.
+
+### Behavior contract
+
+New shared-state cards and desktop acceptance notes `47F-0` / `47J-0` bind the chart and values to the existing loader/view owners:
+
+- One loaded security, metric, horizon and source generation drives both representations.
+- A changed security retires prior results from the current view. A failed refresh of the **same** context may retain clearly labeled last successful values and their original clock.
+- Failed reads, successfully empty series, and captures containing null fields remain distinct. Null-valued captures retain their dates and available metadata.
+- Retry applies only to the still-current requested context. Obsolete responses cannot repaint a newer selection.
+- Async updates preserve deliberate focus. The disclosure keeps its focus and accurate expanded state. Any horizon fallback updates controls and caption together.
+- Capture time and estimated-period end remain separate; missing units are never inferred.
+- The four previous “exact markup the builder emits” captions were qualified as design references with proposed refinements.
+
+The [current template](https://github.com/mastermindx-market-intelligence/macro/blob/f034710e6bf0c554f8011b1251f8ba1e88621d64/templates/expectation_surface.html.j2), blob `51d99c9ac76557e2dce356a53231416f5fe84a44`, already has a six-column numeric disclosure sourced from the same `cur.pts`. It uses date-only “Session,” omits `period_end`, and formats EPS/revenue values. Its error handler replaces `es-view-body` while `es-num` is outside that container; its empty-series table has no equivalent explanation. These are **source-observed gaps/risks**, not newly reproduced live browser failures. No source implementation or runtime fix is claimed by this Paper increment.
+
+### Concurrent structure and verification
+
+Fresh final inspection found an independently authored Start / Study / Build separation. The state containers had moved intact to the four fit-content Build artboards above. Root preserved that structure, its source-check/motion guidance and all unrelated nodes, re-bound final verification to the actual current parents, and did not resize or re-home them.
+
+Root inspected all four expanded-table screenshots, all four failed-selection screenshots, both narrow empty-series screenshots, and all four complete current Build artboards. Values, labels and full clocks match the synthetic fixture; narrow layouts wrap legibly; additions are contained without clipping. The exact six mobile row writes whose streamed output was interrupted were reconciled from original-target reads and the original stored successful responses; none was replayed or duplicated. All own mutation responses are observed; all four actual Build artboards were explicitly released.
+
+Next active unit: the D08C Options assessment target must remain explicit and stable when new firing receipts arrive, using the existing research revision owner and C07 save/readback contract. Standalone R1 capacity/read-only custody and native Plan #804 holds remain unchanged.
