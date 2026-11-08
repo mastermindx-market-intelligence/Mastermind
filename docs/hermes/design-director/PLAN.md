@@ -53,3 +53,9 @@ All original acceptance obligations remain: current Paper/Hermes inspection; cur
 Principal directly owns architecture, integration and acceptance (`PRINCIPAL_JUDGMENT`, `LOWER_TOTAL_OVERHEAD` for connected-source composition). Bounded paid Fabric work will be considered under actual admission. Native reasoning children, if used, receive only distinct architectural/adversarial judgments; they are not substitute labor. WHY NOT FABLE: no separate scarce principal seat is needed for this bounded architecture and implementation leadership.
 
 Next critical action: inspect representative real Paper pages/screenshots and current Hermes skill/plugin/source interfaces; settle permitted session route with primary sources; implement the smallest complete brief→completion→critique→handoff consumer path.
+
+
+## 2026-11-08 implementation milestone
+
+Portable native skill, four-image AI-curated corpus, source-grounded briefs, exact evidence/coverage validator, critique/continuation/handoff helpers and focused tests implemented. Actual isolated Paper refinement G4P-0 on Sector file 01M6FAXA774QT1VRDMAG7DFQ2W succeeded; original DSJ-0 unchanged. Responsive/accessibility proof remains absent, and formal handoff is withheld. EVIDENCE.md preserves exact capability limits and all remaining original acceptance. Source release/install and independent qualification continue; this milestone is not DONE_WHEN.
+
