@@ -332,3 +332,21 @@ The principal retains every Paper mutation. Bounded native helpers provide read-
 Current procedure remains protected Mastermind 5c3d3885234358aefb97ecdbc59be0864df14f8b, freshly confirmed unchanged. Prior PR2302 remains open/Ready at 0862eeef75f4948d0e832a67bbfcdbb72f8a7ac9 with the same source writer. No new branch or lifecycle is created. The earlier branch-protection read denial remains fenced; source release is independent of continued design work.
 
 Working acceptance: advance the next real task from entry through evidence/action, its unavailable/loading/error states and contextual return; verify the changed layouts and exact contracts; save material deltas with readback and continue to the next safe useful phase. Paper design, implemented code and production behavior remain separately evidenced.
+
+
+## Continuation delivery 1 — Sector responsive hierarchy and rendering
+
+The continued Chairman assignment remains active. This is a verified design increment, not a runtime or release claim.
+
+- Exact Paper file `01M6FAXA774QT1VRDMAG7DFQ2W`, page `p-4-0`; owned targets `EAG-0`, `EQJ-0`, `FB7-0`, `FO0-0`. Preserved the separate `G4P-0` review canary.
+- Fixed literal escaped span markup in Technology cell `EPM-0` to “网络安全 +2.5% · 保护利润”, retaining the original value and stance.
+- Chinese desktop now presents its concise answer and ranked table before the complete evidence ledger. New section `GM6-0` contains existing ranking basis `EDZ-0`, counts `EE2-0`, and ledger `EEM-0`; all were moved by identity, not recreated. New inspect card `GMI-0` and 44px evidence jump `GMS-0` name the destination.
+- Chinese mobile now reaches controls `EV4-0` and eleven cards `EVL-0` before the long method preamble. Existing ranking `ET6-0`, counts `ETA-0`, and ledger `ETV-0` moved into `GMA-0` after the card/return section. New 44px jump `GML-0` points to that section.
+- Desktop comparison dossier row `FKT-0` now follows table header `FI0-0`; mobile dossier actions `FXB-0` now follow the price/cycle disagreement and precede long metric cards `FU4-0`.
+- Compare disclosures `FDW-0` / `FPW-0` now distinguish 30 Oct 2026 close from the 27 Jul 2026 historical tape. Route strings `FEE-0` / `FQB-0` became human-readable link labels; the existing moving-view contract remains.
+- Same-carrier observations: all mutations returned `APPLIED_RESPONSE_OBSERVED`; screenshots of full `EAG-0`, answer `ESV-0`, evidence `GMA-0`, full `FB7-0`, and comparison stack `FS4-0` were rendered and inspected. Root verified table legibility, absence of escaped markup, unclipped Chinese copy, and action placement. Explicit owned-target finish call completed.
+- Data invariants: original 11-sector cards/table, breadth/coverage denominators, ranking basis, source clocks, price/cycle distinctions and unavailable states were retained by reparenting. No model values, stance decisions, data fixture or live claims were changed by this writer.
+- Concurrent-change observation: child’s earlier desktop compare screenshot had muted 14%/17% model figures; root’s later screenshot has “Model unavailable” and dashes. Root did not change those fields. Mobile still showed muted figures at that observation. Preserve the independent desktop change; do not overwrite either model treatment merely for visual parity. Source qualification and current target ownership are required before any follow-up in those fields.
+- Paper read transport was intermittent during the early continuation. No modifying call was in flight. Bounded same-carrier reads later succeeded when narrowed and serialized; no restart, replacement tunnel, fallback Paper writer or unknown-effect replay occurred.
+
+Next active design units: explicit selected-bar → AI handoff, Scripts destination fidelity, GMI contextual issuer return, and two precise shared interaction-contract additions. Existing save/recovery work and held AXON destination remain preserved.
