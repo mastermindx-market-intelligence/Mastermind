@@ -12,7 +12,7 @@ This map points to the editable designs and current continuation sections. All c
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
-| Company Financials | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly is explicit while the selected annual value, period and evidence remain intact. |
+| Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; Study I `22CM-0` explains the historical result, earlier guidance, calculation and exact source return. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
@@ -761,3 +761,45 @@ The fixture's full path is `research/design_candidates/production_design_2026110
 Root refreshed exact target children/captions before mutation, verified both complete1008px compositions after the change, and compared both full evidence-column JSX subtrees with their pre-edit versions: they are unchanged. Coverage text,48px status treatment and each selected Revenue value read back correctly. `company-quarterly-clarity-finish-01` finished only C/D. Existing shared-shell, cadence, history, browser and review qualifications remain open.
 
 F03 discovery identified the primary Macro breadth reference as oversized MASTERMIND PAGES `01M2WGNCX9475G79JRKJTCM08P/p-13-1`; that file remains read-only under its prior data-loss warning. This Company correction used the existing independently editable Terminal page.
+
+
+## Company historical comparison: source and calculation companion
+
+A new **D07 provisional Study I · 320 EN dark · Historical source & calculation**, native **`22CM-0`**, is available on [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0). It occupies x6306/y0, 80px beyond Study H, with320px width and288px content. The fit-content study is approximately1204px tall; it represents scrollable content rather than a complete844px application viewport. Existing A–H and R3 compositions are preserved.
+
+The prior source buttons lacked a dedicated historical-source destination. Study I makes the actual, the earlier same-quarter guidance and the derived comparison inspectable. It also provides a44px Close control, two48px publisher-release actions and a48px named **Return to Revenue · Q2 FY2026** action.
+
+### Published inputs and derived quantities
+
+Root independently searched and opened the two issuer releases. No company financial data was changed:
+
+| Item | Published evidence / calculation | Native representation |
+| --- | --- | --- |
+| Q2 FY2026 reported revenue | [NVIDIA Q2 FY2026 release](https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2026), published27 August2025; quarter ended27 July2025; revenue46,743 USD million. | 46.743 USD bn; original million-unit value and division by1,000 remain visible. Publisher action `22D6-0`. |
+| Prior guidance for that Q2 | [NVIDIA Q1 FY2026 release](https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-first-quarter-fiscal-2026), published28 May2025; Q2 outlook45.0 USD bn ±2%. | 45.000 USD bn midpoint is display normalization; the published45.0±2% precision remains visible. The screen explicitly says the Q1 document contains this Q2 outlook. Publisher action `22DG-0`. |
+| Guidance range |45,000 USD million ×0.98 /1.02 =44,100 /45,900 million. | **Derived range44.10–45.90 USD bn**. |
+| Above prior midpoint |(46,743−45,000)÷45,000×100 =3.873333…%. | Formula panel `22DI-0`; displayed **+3.9% above prior guidance midpoint**. No analyst-consensus comparison. |
+| Following-quarter outlook |The August release separately gives Q3 FY2026 outlook54.0 USD bn ±2%. | Subordinate **Separate outlook · Q3 FY2026** section. It is excluded from the Q2 formula. |
+
+The companion retains **Analyst consensus unavailable** and **Retained source copy unavailable**. Public issuer URLs establish source-page access, not an application's retained bytes, acquisition time, observed vintage, revision identity or rights receipt. No retrieval date is supplied for this view. No current event, new fiscal period, trading interpretation or reported-value adjustment is inferred.
+
+### Existing source contract and exact return
+
+The immutable D07 source pin remains Macro `da8df94d647f06b34e5a7a743f147980e627e854`, under `research/design_candidates/production_design_20261102/d07/`:
+
+- `paper/task-study/README.md`, blob `9cdd40259c41d62692395854ea90da0aabb74546`: the historical guidance source destination was an explicit composition gap; the task studies remain provisional.
+- `SEMANTIC_TASKS.md`, blob `4c36fc6c34f19b1d1d0c388e6af27a8821ceb6f1`, S12: dated Q2 reported/prior-guidance comparator, separately unavailable consensus, explicit historical selection and **OWNER_BINDING_REQUIRED** for production.
+- `ANALYSIS.md`, blob `dedeb3b04452a249b5d3417d40decc529e41ab36`: match listing/issuer, metric, period, currency, units, basis and source identity; retain typed absence and historical selection.
+- `CONTINUATION.md`, blob `9ff8dbb98dc941849421a352c0d723adab7076b6`: retained source/foundation/review qualifications are preserved. The companion is a content study, with no final shared-shell composition or release claim.
+
+Close `22CS-0` and Return `22DV-0` must use the actual invoking historical Source control. Known origins are A `1NI9-0`, B `1NIW-0`, F `1NPU-0` and G `1NRL-0`; R3 contains distinct invokers `1CVJ-0` / `1CWY-0`. A320px rendering alone does not change the origin from B to A. Synthetic Financials Study E's FY2025 return `1NR5-0` is a different scope and is not reused.
+
+The implementation must retain the admitted listing, Revenue, Q2 FY2026, reported USD basis, prior-guidance comparator, locale/theme, historical receipt and applicable scroll state. Conditional focus may return only to the still-connected, visible, valid invoking control while dismissal owns focus. If the context changed, retire stale interaction through the incumbent Company owner; do not carry the old comparator into a replacement event or silently open the current event. A missing opener uses the current valid Expectations heading/recovery state. Opening an external release preserves the selected historical comparison; failed external access must not substitute a newer release. A viewport change retains the same evidence and origin without creating a second inspector.
+
+### Verification and concurrent work
+
+Root observed all47 newly composed nodes, reviewed the complete rendered320px board and read back13,305 characters of native JSX. The source values, period/date labels, derived range, formula, missing retained copy, separate Q3 outlook and named return read back correctly. Close is44px and all three full-width actions are48px. Exact integer-million arithmetic reproduces the range and3.9% rounding. Fresh original A JSX is unchanged. The final page inventory contains10 boards and token hash `55dd37b7` remains unchanged.
+
+Fresh inventory also exposed another writer's **PROPOSED · Historical benchmark chooser · EN/ZH**, root `21ZR-0` on `p-1C-0`, and build-reference root `20K2-0` on `p-1B-0`. A bounded read established that the six chooser/availability panes are disjoint from this source companion. Those concurrent boards are preserved and excluded from authored results.
+
+The stable operations `company-historical-source-duplicate-01`, `company-historical-source-compose-01`, `company-historical-source-name-01` and scoped `company-historical-source-finish-01` all returned **APPLIED_RESPONSE_OBSERVED** through the existing C3 carrier. The temporary duplicate was replaced only within the newly owned target. Native JSX does not retain the submitted `href` attributes, so the publisher links above are the builder mapping; the Paper actions are visual intent, not functioning navigation proof. Scroll, keyboard/touch, external-link handling, conditional focus and source-owner binding remain actual implementation proof obligations.
