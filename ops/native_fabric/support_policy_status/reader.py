@@ -231,6 +231,26 @@ def observe(request):
             os.close(lock_fd)
 
 
+def configured_support_policy_observation_root(host, entry):
+    """Resolve only the existing registry owner's fixed observation path.
+
+    The host-global dispatch root retains its original meaning. Validate it
+    first even when an observation root exists; malformed or conflicting
+    configuration must not become a fallback or broaden dispatch eligibility.
+    Both spellings use the incumbent closed physical-root validator.
+    """
+    configured = delivery.configured_remote_lane_root(host, entry)
+    if 'support_policy_observation_root' not in entry:
+        return configured
+    observation = delivery.configured_remote_lane_root(host, {
+        'ssh_alias': entry.get('ssh_alias'),
+        'physical_lane_root': entry['support_policy_observation_root'],
+    })
+    require(configured is None or configured == observation,
+            'fixed_remote_roots_conflict')
+    return observation
+
+
 def original_request(run_id, root, parent, *, owner_ext=None):
     """Join original prelaunch metadata, not launch/result/lease authority.
 
@@ -268,7 +288,7 @@ def original_request(run_id, root, parent, *, owner_ext=None):
             'original_route_unqualified')
     registry = host_pick.load_registry()
     entry = registry.get(route['HOST'])
-    binding = delivery.configured_remote_lane_root(route['HOST'], entry)
+    binding = configured_support_policy_observation_root(route['HOST'], entry)
     require(binding is not None, 'fixed_remote_root_unconfigured')
     delivery.validate_remote_lane_root(binding)
     # The incumbent support_meta producer retains ONLY the flat file map;

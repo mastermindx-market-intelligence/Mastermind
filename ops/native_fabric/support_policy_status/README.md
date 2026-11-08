@@ -23,3 +23,31 @@ This component is not a replacement native116 cohort. The eventual normal source
 Disposable owned local fixtures cover comparisons, locked/unknown/exempt entries, lock and directory replacements, final-layout policy drift, identity/source/registry withdrawal, privacy and no mutation, actual adapter once-only dispatch, and the generated isolated reader with a genuine existing parser. Fixtures are synthetic operation/host metadata and exercise no network, provider, live admission store or host. XML counts and failed setup history are retained in the source return; component proof is not installed behavior or current host classification.
 
 The original manual `.support.json` is the flat file-hash map emitted by `remote_sub_helpers.support_meta`; its digest is computed separately by the incumbent `support_bundle._canon_manifest`. The reader accepts only an exact fixed SOURCE_GENERATIONS map and rejects wrapped release envelopes, mixed forms, extra/unsafe keys and malformed/duplicate hashes. Tests execute the actual producer before the reader; no real operation metadata is embedded in Git. The original manifest omits support_bundle itself, so its digest does not establish historical guard-generation identity. That missing historical fact is not fabricated or treated as a fresh read grant.
+
+## Observation-only registry root (prospective source)
+
+The existing host entry may explicitly supply `support_policy_observation_root`
+for this fixed read. It is an absolute physical-root spelling validated by the
+same closed `mastermind.remote_lane_root.v1` validator as `physical_lane_root`;
+no caller argument, environment variable, HOME expansion or publisher response
+can supply it. This source adds no registry value or host enrollment.
+
+The reader always validates the host-global `physical_lane_root` first. If the
+observation field is absent, the existing global binding remains compatible.
+If both are present, both must be valid and yield the identical binding. A
+malformed global field, malformed explicit observation field or disagreement
+fails before read intent; there is no fallback. With neither field, the read
+remains unavailable. The original metadata/current selected host entry still
+owns host and SSH alias, and the whole host-entry digest is rejoined before
+transport and after observation. Withdrawal or changes retain the original
+intent and withhold a current report; they never replay a read.
+
+The observation field does not opt the host into configured-root dispatch and
+does not broaden dispatch. The exact ordinary `remote_sub.sh` remains unchanged:
+configured-root Grok/operator shapes still refuse before lease/remote effects,
+even with a valid observation field. Observation-only Grok uses the incumbent
+unconfigured dispatch semantics. Reader eligibility is not worker admission.
+Physical directory ownership/layout, original scope/privacy, source closure,
+noncreating lock read, once-only intent/result and all no-maintenance flags remain
+unchanged. Actual path enrollment and any explicit read require their existing
+principal and runtime authorization after protected source qualification.

@@ -162,3 +162,12 @@ def test_new_support_command_preserves_private_refusal_before_reader(runtime,mon
     assert result==75,('private original crossed new read boundary',result,calls)
     assert calls==[] and metadata_reads==[]
     assert not (r.state/(r.run+'.support-policy-status.intent.json')).exists()
+
+
+# Same genuine producer/owner/adapter proofs consume the fully composed119
+# source, not only the standalone component. Dispatch remains exact selected40.
+from test_support_policy_observation_root import (
+    test_observation_only_grok_actual_producer_adapter_once as test_joined_observation_grok_once,
+    test_observation_binding_reaches_actual_isolated_reader as test_joined_observation_isolated_reader,
+    test_actual_registry_loader_preserves_dispatch_contract as test_joined_observation_dispatch,
+)
