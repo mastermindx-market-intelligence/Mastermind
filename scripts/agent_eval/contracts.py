@@ -33,6 +33,8 @@ SCENARIO_SCHEMA = "mastermind.agent_evaluation_scenario.v1"
 SCENARIO_SCHEMA_V2 = "mastermind.agent_evaluation_scenario.v2"
 SCENARIO_SCHEMAS = frozenset({SCENARIO_SCHEMA, SCENARIO_SCHEMA_V2})
 CONFIGURATION_SCHEMA = "mastermind.agent_evaluation_configuration.v1"
+CONFIGURATION_SCHEMA_V2 = "mastermind.agent_evaluation_configuration.v2"
+CONFIGURATION_SCHEMAS = frozenset({CONFIGURATION_SCHEMA, CONFIGURATION_SCHEMA_V2})
 EXPERIMENT_SCHEMA = "mastermind.agent_evaluation_experiment.v1"
 RUN_SCHEMA = "mastermind.agent_evaluation_run.v1"
 RUN_DRAFT_SCHEMA = "mastermind.agent_evaluation_run_draft.v1"
@@ -40,9 +42,12 @@ RUN_SCHEMA_V2 = "mastermind.agent_evaluation_run.v2"
 RUN_DRAFT_SCHEMA_V2 = "mastermind.agent_evaluation_run_draft.v2"
 RUN_SCHEMA_V3 = "mastermind.agent_evaluation_run.v3"
 RUN_DRAFT_SCHEMA_V3 = "mastermind.agent_evaluation_run_draft.v3"
-RUN_SCHEMAS = frozenset({RUN_SCHEMA, RUN_SCHEMA_V2, RUN_SCHEMA_V3})
-RUN_DRAFT_SCHEMAS = frozenset({RUN_DRAFT_SCHEMA, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
-RUN_AVAILABILITY_SCHEMAS = frozenset({RUN_SCHEMA_V2, RUN_SCHEMA_V3, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
+RUN_SCHEMA_V4 = "mastermind.agent_evaluation_run.v4"
+RUN_DRAFT_SCHEMA_V4 = "mastermind.agent_evaluation_run_draft.v4"
+RUN_CONTROL_SCHEMAS = frozenset({RUN_SCHEMA_V4, RUN_DRAFT_SCHEMA_V4})
+RUN_SCHEMAS = frozenset({RUN_SCHEMA, RUN_SCHEMA_V2, RUN_SCHEMA_V3, RUN_SCHEMA_V4})
+RUN_DRAFT_SCHEMAS = frozenset({RUN_DRAFT_SCHEMA, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3, RUN_DRAFT_SCHEMA_V4})
+RUN_AVAILABILITY_SCHEMAS = frozenset({RUN_SCHEMA_V2, RUN_SCHEMA_V3, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3}) | RUN_CONTROL_SCHEMAS
 
 Validator = Callable[[Any, str], Any]
 
@@ -140,7 +145,11 @@ def v_pos_int(value: Any, path: str) -> int:
 
 def v_enum(allowed: frozenset) -> Validator:
     def validator(value: Any, path: str) -> Any:
-        if value not in allowed:
+        try:
+            matched = value in allowed
+        except TypeError:
+            matched = False
+        if not matched:
             raise ContractError(
                 [ContractDefect(path, "NOT_IN_ENUM", f"value must be one of {sorted(allowed)}")]
             )
@@ -720,6 +729,87 @@ _CONFIGURATION_FIELDS: dict[str, Validator] = {
 }
 
 
+# V2 commits to supplied request controls, never inferred effective defaults.
+# The vector is canonical JSON of the present fields from this closed set.
+EXPLICIT_SAMPLING_SCHEMA = "mastermind.agent_evaluation_explicit_sampling.v1"
+EXPLICIT_SAMPLING_FIELDS = frozenset({
+    "seed", "temperature", "top_p", "top_k", "min_p", "n", "max_tokens",
+    "max_completion_tokens", "frequency_penalty", "presence_penalty",
+    "reasoning_effort", "reasoning", "thinking", "stop", "logit_bias",
+})
+CONTROL_PATHS = frozenset({
+    "execution.reasoning_effort", "randomness.seed", "randomness.sampling_parameters_digest",
+})
+# These are the incumbent stochastic-policy names. V2 makes no deterministic
+# replay claim from an explicit seed or a request-vector digest.
+CONTROL_RNG_POLICIES = frozenset({"PREREGISTERED_REPLICATES", "OBSERVED_UNKNOWN"})
+
+
+def _v_explicit_sampling(value: Any, path: str) -> dict:
+    result = validate_closed_object(value, path, {
+        "schema": v_enum(frozenset({EXPLICIT_SAMPLING_SCHEMA})),
+        "digest": v_digest, "fields": v_sorted_unique_str_list,
+    })
+    if not result["fields"] or not set(result["fields"]).issubset(EXPLICIT_SAMPLING_FIELDS):
+        raise ContractError([ContractDefect(path + ".fields", "EXPLICIT_SAMPLING_FIELDS",
+            "a present explicit vector names a nonempty subset of the versioned field set")])
+    return result
+
+
+def _request_control(validator: Validator) -> Validator:
+    def validate(value: Any, path: str) -> dict:
+        mode = value.get("mode") if isinstance(value, dict) else None
+        fields = {"mode": v_enum(frozenset({"EXPLICIT_REQUEST", "PROVIDER_CONTROLLED"})),
+                  "owner_contract_ref": v_source_ref}
+        if mode == "EXPLICIT_REQUEST":
+            fields["value"] = validator
+        return validate_closed_object(value, path, fields)
+    return validate
+
+
+def _v_execution_v2(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {
+        "execution_surface": v_str, "execution_surface_version": v_str,
+        "provider": v_str, "model_requested": v_str,
+        "reasoning_effort": _request_control(v_enum(_REASONING_EFFORTS)),
+        "auth_realm_class": v_auth_realm_class,
+    })
+
+
+def _v_randomness_v2(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {
+        "seed": _request_control(v_int),
+        "sampling_parameters_digest": _request_control(_v_explicit_sampling),
+        "rng_policy": v_enum(CONTROL_RNG_POLICIES),
+    })
+
+
+_CONFIGURATION_V2_FIELDS = {
+    **_CONFIGURATION_FIELDS, "schema": v_enum(frozenset({CONFIGURATION_SCHEMA_V2})),
+    "execution": _v_execution_v2, "randomness": _v_randomness_v2,
+}
+
+
+def _control_relationship_defects(document: dict, *, requested: bool) -> list[ContractDefect]:
+    sampling = document["randomness"]["sampling_parameters_digest"]
+    seed = document["randomness"]["seed"]
+    effort = document["execution"]["reasoning_effort"]
+    tag, present = ("mode", "EXPLICIT_REQUEST") if requested else ("state", "PRESENT")
+    absent = {"PROVIDER_CONTROLLED"} if requested else {"ABSENT", "UNSUPPORTED"}
+    fields = set(sampling["value"]["fields"]) if sampling[tag] == present else set()
+    conflict = False
+    if sampling[tag] in absent:
+        conflict = seed[tag] == present or effort[tag] == present
+    elif sampling[tag] == present:
+        if requested or seed[tag] != "UNAVAILABLE":
+            conflict = (seed[tag] == present) != ("seed" in fields)
+        if requested or effort[tag] != "UNAVAILABLE":
+            conflict = conflict or (effort[tag] == present and not fields & {"reasoning", "reasoning_effort"})
+            conflict = conflict or ("reasoning_effort" in fields and effort[tag] != present)
+    return [ContractDefect("$.randomness.sampling_parameters_digest", "CONTROL_VECTOR_CONFLICT",
+        "scalar control states contradict the declared explicit request vector")] if conflict else []
+
+
 def _configuration_cross_field_defects(document: dict) -> list[ContractDefect]:
     defects: list[ContractDefect] = []
     authorship = document.get("authorship", {})
@@ -745,8 +835,12 @@ def _configuration_cross_field_defects(document: dict) -> list[ContractDefect]:
 
 def _check_configuration_fields(document: Any, *, require_digest: bool) -> dict:
     optional = frozenset({"configuration_digest"}) if not require_digest else frozenset()
-    validated = validate_closed_object(document, "$", _CONFIGURATION_FIELDS, optional=optional)
+    v2 = isinstance(document, dict) and document.get("schema") == CONFIGURATION_SCHEMA_V2
+    fields = _CONFIGURATION_V2_FIELDS if v2 else _CONFIGURATION_FIELDS
+    validated = validate_closed_object(document, "$", fields, optional=optional)
     cross_defects = _configuration_cross_field_defects(document if isinstance(document, dict) else {})
+    if v2:
+        cross_defects.extend(_control_relationship_defects(document, requested=True))
     if cross_defects:
         raise ContractError(cross_defects)
     if require_digest:
@@ -760,7 +854,7 @@ def validate_configuration_shape(document: Any) -> str:
     return "SHAPE_VALID"
 
 
-def build_configuration(fields: dict) -> dict:
+def build_configuration(fields: dict, *, schema: str = CONFIGURATION_SCHEMA) -> dict:
     """Assemble, validate, and digest a configuration document from field values.
 
     ``fields`` must NOT include ``schema`` or ``configuration_digest``.
@@ -773,7 +867,7 @@ def build_configuration(fields: dict) -> dict:
                 )
             ]
         )
-    document = {"schema": CONFIGURATION_SCHEMA, **fields}
+    document = {"schema": schema, **fields}
     _check_configuration_fields(document, require_digest=False)
     return add_document_digest(document, "configuration_digest")
 
@@ -1456,15 +1550,70 @@ _RUN_V3_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V3})), **_R
 _RUN_V3_FIELDS = {**_RUN_FIELDS, **_RUN_V3_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V3}))}
 
 
+def _observed_control(validator: Validator) -> Validator:
+    def validate(value: Any, path: str) -> dict:
+        state = value.get("state") if isinstance(value, dict) else None
+        fields = {"state": v_enum(frozenset({"PRESENT", "ABSENT", "UNSUPPORTED", "UNAVAILABLE"}))}
+        if isinstance(state, str) and state in {"PRESENT", "ABSENT", "UNSUPPORTED"}:
+            fields.update(owner_contract_ref=v_source_ref, evidence=v_artifact_pair)
+        if state == "PRESENT":
+            fields["value"] = validator
+        return validate_closed_object(value, path, fields)
+    return validate
+
+
+_RUN_V4_EXECUTION_FIELDS = {
+    name: (_observed_control(v_enum(_REASONING_EFFORTS)) if name == "reasoning_effort"
+           else v_optional(validator) if name in RUN_OBSERVATION_NULLABLE_FIELDS["execution"] else validator)
+    for name, validator in _RUN_EXECUTION_FIELDS.items()
+}
+_RUN_V4_RANDOMNESS_FIELDS = {
+    "seed": _observed_control(v_int),
+    "sampling_parameters_digest": _observed_control(_v_explicit_sampling),
+    "rng_policy": v_enum(CONTROL_RNG_POLICIES),
+}
+_RUN_V4_COMMON_FIELDS = {
+    **_RUN_V3_COMMON_FIELDS,
+    "execution": lambda value, path: validate_closed_object(value, path, _RUN_V4_EXECUTION_FIELDS),
+    "randomness": lambda value, path: validate_closed_object(value, path, _RUN_V4_RANDOMNESS_FIELDS),
+}
+_RUN_V4_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V4})), **_RUN_V4_COMMON_FIELDS}
+_RUN_V4_FIELDS = {**_RUN_FIELDS, **_RUN_V4_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V4}))}
+
+
+def _run_control_defects(document: dict) -> list[ContractDefect]:
+    defects = _control_relationship_defects(document, requested=False)
+    trace = document["evidence"]["trace"]
+    complete = document["observation_availability"]["coverage"]["provider_requests"]["status"] == "COMPLETE"
+    for path in sorted(CONTROL_PATHS):
+        group, key = path.split(".")
+        control = document[group][key]
+        if control["state"] == "UNAVAILABLE":
+            continue
+        if trace is None or control["evidence"] != trace:
+            defects.append(ContractDefect("$." + path, "CONTROL_EVIDENCE_UNBOUND",
+                "observed controls must bind the exact retained original request trace"))
+        if not complete:
+            defects.append(ContractDefect("$." + path, "CONTROL_COVERAGE_INCOMPLETE",
+                "a complete original provider-attempt join is required for control observations"))
+    return defects
+
+
 def _run_v2_observation_defects(document: dict) -> list[ContractDefect]:
-    missing = {path for path in RUN_OBSERVATION_PATHS
-               if document[path.split(".")[0]][path.split(".")[1]] is None}
+    v4 = document["schema"] in RUN_CONTROL_SCHEMAS
+    missing = set()
+    for path in RUN_OBSERVATION_PATHS:
+        group, key = path.split(".")
+        value = document[group][key]
+        unavailable = value["state"] == "UNAVAILABLE" if v4 and path in CONTROL_PATHS else value is None
+        if unavailable:
+            missing.add(path)
     availability = document["observation_availability"]
     declared = {item["path"] for item in availability["unavailable"]}
     defects = []
     if declared != missing:
         defects.append(ContractDefect("$.observation_availability.unavailable",
-            "OBSERVATION_UNAVAILABLE_MISMATCH", "one typed reason is required for each null observation and only that observation"))
+            "OBSERVATION_UNAVAILABLE_MISMATCH", "one typed reason is required for each unavailable observation and only that observation"))
     for name, coverage in availability["coverage"].items():
         if (coverage["status"] == "UNOBSERVED" and name in document["observations"]
                 and document["observations"][name]):
@@ -1575,7 +1724,9 @@ def _check_run_fields(document: Any, *, is_draft: bool, require_digest: bool) ->
     field_set = _RUN_DRAFT_FIELDS if is_draft else _RUN_FIELDS
     schema = document.get("schema") if isinstance(document, dict) else None
     has_availability = schema in RUN_AVAILABILITY_SCHEMAS
-    if schema == (RUN_DRAFT_SCHEMA_V3 if is_draft else RUN_SCHEMA_V3):
+    if schema == (RUN_DRAFT_SCHEMA_V4 if is_draft else RUN_SCHEMA_V4):
+        field_set = _RUN_V4_DRAFT_FIELDS if is_draft else _RUN_V4_FIELDS
+    elif schema == (RUN_DRAFT_SCHEMA_V3 if is_draft else RUN_SCHEMA_V3):
         field_set = _RUN_V3_DRAFT_FIELDS if is_draft else _RUN_V3_FIELDS
     elif schema == (RUN_DRAFT_SCHEMA_V2 if is_draft else RUN_SCHEMA_V2):
         field_set = _RUN_V2_DRAFT_FIELDS if is_draft else _RUN_V2_FIELDS
@@ -1584,6 +1735,8 @@ def _check_run_fields(document: Any, *, is_draft: bool, require_digest: bool) ->
     cross_defects = _run_cross_field_defects(document if isinstance(document, dict) else {})
     if has_availability:
         cross_defects.extend(_run_v2_observation_defects(document))
+    if schema in RUN_CONTROL_SCHEMAS:
+        cross_defects.extend(_run_control_defects(document))
     if cross_defects:
         raise ContractError(cross_defects)
     if not is_draft and require_digest:
@@ -1611,10 +1764,12 @@ _SHAPE_VALIDATORS: dict[str, Callable[[Any], str]] = {
     SCENARIO_SCHEMA: validate_scenario_shape,
     SCENARIO_SCHEMA_V2: validate_scenario_shape,
     CONFIGURATION_SCHEMA: validate_configuration_shape,
+    CONFIGURATION_SCHEMA_V2: validate_configuration_shape,
     EXPERIMENT_SCHEMA: validate_experiment_shape,
     RUN_SCHEMA: validate_run_shape,
     RUN_SCHEMA_V2: validate_run_shape,
     RUN_SCHEMA_V3: validate_run_shape,
+    RUN_SCHEMA_V4: validate_run_shape,
 }
 
 

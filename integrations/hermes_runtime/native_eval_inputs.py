@@ -211,6 +211,11 @@ def validate_marker(marker, *, text=None):
             contracts.validate_experiment_shape(marker["experiment"])
     except Exception:
         _refuse()
+    # Core EVAL can retain newer control policies, but this selected native
+    # route still injects a scalar seed and manual effort. Do not accidentally
+    # admit tagged inputs before that original execution boundary is qualified.
+    if marker["configuration"]["schema"] != contracts.CONFIGURATION_SCHEMA:
+        _refuse("NATIVE_EVAL_CONFIGURATION_VERSION_UNQUALIFIED")
     source, identity = marker["source"], marker["input"]
     if (type(source) is not dict or set(source) != {"release", "profile_id", "profile_digest"}
             or type(identity) is not dict or set(identity) != {"principal_id", "session_id", "submission_id", "text_sha256"}):

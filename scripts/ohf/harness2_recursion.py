@@ -102,6 +102,7 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
         contracts.RUN_SCHEMA: contracts.RUN_DRAFT_SCHEMA,
         contracts.RUN_SCHEMA_V2: contracts.RUN_DRAFT_SCHEMA_V2,
         contracts.RUN_SCHEMA_V3: contracts.RUN_DRAFT_SCHEMA_V3,
+        contracts.RUN_SCHEMA_V4: contracts.RUN_DRAFT_SCHEMA_V4,
     }[trial.run["schema"]]
     recomputed = validity.finalize_run_receipt(
         trial.scenario, trial.configuration, trial.experiment, draft,
@@ -112,6 +113,14 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
     _check(recomputed == trial.run, "NATIVE_VALIDITY_DISAGREEMENT")
     _check(trial.run["effect"]["state"] == "NO_EFFECT", "NATIVE_EFFECT_REQUIRES_RECONCILIATION")
     _check(v["status"] == "VALID", "NATIVE_TRIAL_INVALID")
+    if trial.run["schema"] == contracts.RUN_SCHEMA_V4:
+        # Technical integrity is separate from stochastic comparison policy.
+        # This is a frozen preregistration floor, not evidence that the other
+        # replicates ran or that a candidate improved.
+        _check(trial.configuration["randomness"]["rng_policy"] == "PREREGISTERED_REPLICATES"
+               and trial.experiment is not None
+               and trial.experiment["replicates_per_arm_target"] >= 2,
+               "NATIVE_STOCHASTIC_REPLICATES_REQUIRED")
 
 
 def _validate_proposal(value: Proposal, current: dict[str, bytes], allowed: frozenset[str],

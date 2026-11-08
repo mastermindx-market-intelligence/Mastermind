@@ -1518,3 +1518,13 @@ def test_history_observation_schema_type_is_a_closed_refusal(trial, schema):
         inputs.validate_observation(value, marker=marker(trial),
             receipt={"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2},
             request_observation={})
+
+
+
+def test_native_selection_refuses_new_control_schema_before_scalar_route_injection(trial):
+    value = marker(trial)
+    from tests.test_agent_eval_run_v2 import _configuration_v2
+    value["configuration"] = _configuration_v2(value["configuration"])
+    reseal(value)
+    with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_CONFIGURATION_VERSION_UNQUALIFIED"):
+        inputs.validate_marker(value, text=trial.text)

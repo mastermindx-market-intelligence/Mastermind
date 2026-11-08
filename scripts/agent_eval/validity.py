@@ -204,6 +204,17 @@ def source_policy_reason_codes(scenario: dict, observed_sources: list[dict]) -> 
     return reasons
 
 
+def _control_matches(observed: dict, configured: dict) -> bool:
+    # The shape validator binds non-unavailable facts to the exact retained
+    # trace and complete provider-attempt coverage. Source pins remain part
+    # of the frozen control policy; configuration never supplies a fact.
+    if observed["owner_contract_ref"] != configured["owner_contract_ref"]:
+        return False
+    if configured["mode"] == "EXPLICIT_REQUEST":
+        return observed["state"] == "PRESENT" and observed["value"] == configured["value"]
+    return observed["state"] in {"ABSENT", "UNSUPPORTED"}
+
+
 def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_like: dict) -> set[str]:
     reasons: set[str] = set()
     unavailable: set[str] = set()
@@ -226,9 +237,15 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
     if mismatch("execution.model_served", execution["model_served"], config_execution["model_requested"]):
         reasons.add("MODEL_SERVED_MISMATCH")
 
-    field_mismatch = False
+    run_controls = run_like["schema"] in contracts.RUN_CONTROL_SCHEMAS
+    config_controls = configuration["schema"] == contracts.CONFIGURATION_SCHEMA_V2
+    field_mismatch = run_controls != config_controls
     for field in ("execution_surface", "execution_surface_version", "provider", "model_requested", "reasoning_effort", "auth_realm_class"):
-        if mismatch("execution." + field, execution[field], config_execution[field]):
+        path = "execution." + field
+        if run_controls and config_controls and path in contracts.CONTROL_PATHS:
+            if path not in unavailable and not _control_matches(execution[field], config_execution[field]):
+                field_mismatch = True
+        elif mismatch(path, execution[field], config_execution[field]):
             field_mismatch = True
     if run_like["procedure"] != configuration["procedure"]:
         field_mismatch = True
@@ -236,9 +253,14 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
         field_mismatch = True
     if run_like["context"]["retrieval_configuration"] != configuration["context"]["retrieval_configuration"]:
         field_mismatch = True
-    if any(mismatch("randomness." + key, value, configuration["randomness"][key])
-           for key, value in run_like["randomness"].items()):
-        field_mismatch = True
+    for key, value in run_like["randomness"].items():
+        path = "randomness." + key
+        configured = configuration["randomness"].get(key)
+        if run_controls and config_controls and path in contracts.CONTROL_PATHS:
+            if path not in unavailable and not _control_matches(value, configured):
+                field_mismatch = True
+        elif mismatch(path, value, configured):
+            field_mismatch = True
     if run_like["configuration"]["configuration_digest"] != configuration["configuration_digest"]:
         field_mismatch = True
     run_caps = run_like["capabilities"]
@@ -401,7 +423,8 @@ def finalize_run_receipt(
     run_document = {key: value for key, value in draft.items() if key != "schema"}
     run_document["schema"] = {contracts.RUN_DRAFT_SCHEMA: contracts.RUN_SCHEMA,
         contracts.RUN_DRAFT_SCHEMA_V2: contracts.RUN_SCHEMA_V2,
-        contracts.RUN_DRAFT_SCHEMA_V3: contracts.RUN_SCHEMA_V3}[draft["schema"]]
+        contracts.RUN_DRAFT_SCHEMA_V3: contracts.RUN_SCHEMA_V3,
+        contracts.RUN_DRAFT_SCHEMA_V4: contracts.RUN_SCHEMA_V4}[draft["schema"]]
     run_document["validity"] = {
         "status": validity["status"],
         "reason_codes": list(validity["reason_codes"]),

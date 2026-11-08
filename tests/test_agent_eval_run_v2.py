@@ -402,7 +402,8 @@ def test_v3_incomplete_attempt_remains_in_mixed_version_population(tmp_path, mul
     passes = tuple(_score(run) for run in runs)
     for document in (*runs, *passes):
         artifact_store.create(document)
-    assert {row["schema"] for row in artifact_store.enumerate_runs()} == contracts.RUN_SCHEMAS
+    assert {row["schema"] for row in artifact_store.enumerate_runs()} == {
+        contracts.RUN_SCHEMA, contracts.RUN_SCHEMA_V2, contracts.RUN_SCHEMA_V3}
     evidence = _summary(graph, runs, passes, multi=multi)
     assert {row["run_id"] for row in evidence["run_entries"]} == {run["run_id"] for run in runs}
     artifact_store.create(evidence)
@@ -470,3 +471,393 @@ def test_real_cli_finalizes_and_publishes_incomplete_v2_without_retrying_executi
     assert created.returncode == 0, created.stderr
     assert json.loads(created.stdout)["disposition"] == "CREATED"
     assert artifact_store.resolve_run(run["run_id"]) == run
+
+
+# V4 declarations below are synthetic original-owner observations. These tests
+# prove contracts and the real store/finalizer/Trial consumers, not a provider,
+# complete native producer, actual effect audit, or learning efficacy.
+_CONTROL_OWNER = "git:mastermindx-market-intelligence/Mastermind@" + "d" * 40
+_CONTROL_TRACE = {
+    "artifact_ref": _CONTROL_OWNER + "#fixture/original-control-observation.json",
+    "digest": "sha256:" + "b" * 64,
+}
+
+
+def _requested_control(value=None, *, explicit=False):
+    row = {"mode": "EXPLICIT_REQUEST" if explicit else "PROVIDER_CONTROLLED",
+           "owner_contract_ref": _CONTROL_OWNER}
+    if explicit:
+        row["value"] = copy.deepcopy(value)
+    return row
+
+
+def _sampling_fixture(seed=0, effort="low"):
+    from scripts.agent_eval.canonical import digest_value
+    values = {"seed": seed, "reasoning_effort": effort}
+    return {"schema": contracts.EXPLICIT_SAMPLING_SCHEMA,
+            "digest": digest_value(values), "fields": sorted(values)}
+
+
+def _configuration_v2(original, *, explicit=False, rng_policy="PREREGISTERED_REPLICATES"):
+    fields = {key: copy.deepcopy(value) for key, value in original.items()
+              if key not in {"schema", "configuration_digest"}}
+    effort = fields["execution"]["reasoning_effort"]
+    fields["execution"]["reasoning_effort"] = _requested_control(effort, explicit=explicit)
+    fields["randomness"] = {
+        "seed": _requested_control(0, explicit=explicit),
+        "sampling_parameters_digest": _requested_control(_sampling_fixture(effort=effort), explicit=explicit),
+        "rng_policy": rng_policy,
+    }
+    return contracts.build_configuration(fields, schema=contracts.CONFIGURATION_SCHEMA_V2)
+
+
+def _observed_control(state, value=None, *, owner=_CONTROL_OWNER):
+    row = {"state": state}
+    if state != "UNAVAILABLE":
+        row.update(owner_contract_ref=owner, evidence=copy.deepcopy(_CONTROL_TRACE))
+    if state == "PRESENT":
+        row["value"] = copy.deepcopy(value)
+    return row
+
+
+def _control_graph(*, explicit=False, state="ABSENT", rng_policy="PREREGISTERED_REPLICATES", replicates=2,
+                   scenario=None, configuration=None):
+    from scripts.agent_eval.harness2_native import harness_digest, sha256_bytes
+    from tests.test_agent_eval_harness2_recursion import BASE
+    scenario = scenario or build_baseline_scenario()
+    if configuration is None:
+        original = build_baseline_configuration()
+        original["procedure"]["instruction_bundle"]["digest"] = harness_digest(BASE)
+        configuration = _configuration_v2(original, explicit=explicit, rng_policy=rng_policy)
+    other = build_alternate_configuration()
+    experiment = build_two_arm_experiment(scenario, configuration, other)
+    experiment["replicates_per_arm_target"] = replicates
+    experiment["stopping_rule"]["value"] = replicates
+    experiment = add_document_digest(experiment, "experiment_digest")
+    draft = _v2(build_run_draft(scenario, configuration, experiment, arm_id="arm_a", replicate_index=1))
+    draft["schema"] = contracts.RUN_DRAFT_SCHEMA_V4
+    draft["evidence"]["trace"] = copy.deepcopy(_CONTROL_TRACE)
+    draft["evidence"]["output"]["digest"] = sha256_bytes(b"105\n")
+    for path in contracts.CONTROL_PATHS:
+        group, key = path.split(".")
+        configured = configuration[group][key]
+        draft[group][key] = (_observed_control("PRESENT", configured["value"])
+                             if configured["mode"] == "EXPLICIT_REQUEST" else _observed_control(state))
+    return scenario, configuration, other, experiment, draft
+
+
+@pytest.mark.parametrize("state", ["ABSENT", "UNSUPPORTED"])
+def test_v4_observed_omission_uses_original_store_finalizer_and_scorer(tmp_path, state):
+    graph = _control_graph(state=state)
+    run = _finalize(graph)
+    assert run["schema"] == contracts.RUN_SCHEMA_V4
+    assert run["validity"]["status"] == "VALID"
+    assert run["observation_availability"]["unavailable"] == []
+    for path in contracts.CONTROL_PATHS:
+        group, key = path.split(".")
+        assert graph[1][group][key] == _requested_control()
+        assert run[group][key] == _observed_control(state)
+        assert "value" not in run[group][key]
+    native = _store(tmp_path, graph)
+    assert native.resolve_configuration(graph[1]["configuration_id"]) == graph[1]
+    assert native.create(run).disposition is store.WriteDisposition.CREATED
+    assert native.create(run).disposition is store.WriteDisposition.IDEMPOTENT
+    assert native.resolve_run(run["run_id"]) == run
+    checked = verification.verify_run_graph(run, _resolver(graph, run))
+    assert _CONTROL_OWNER in checked.external_content_unverified_refs
+    assert _CONTROL_TRACE["artifact_ref"] in checked.external_content_unverified_refs
+    assert _score(run)["run_digest"] == run["run_digest"]
+    assert contracts.validate_document_shape(graph[1]) == "SHAPE_VALID"
+    with pytest.raises(ContractError, match="DRAFT_SCHEMA_REJECTED"):
+        contracts.validate_document_shape(graph[-1])
+
+
+def test_v4_explicit_zero_is_present_without_a_determinism_claim():
+    graph = _control_graph(explicit=True)
+    run = _finalize(graph)
+    assert run["validity"]["status"] == "VALID"
+    assert run["randomness"]["seed"]["value"] == 0
+    assert run["randomness"]["seed"]["state"] == "PRESENT"
+    assert run["randomness"]["rng_policy"] == "PREREGISTERED_REPLICATES"
+    assert run["randomness"]["sampling_parameters_digest"]["value"]["schema"] == contracts.EXPLICIT_SAMPLING_SCHEMA
+
+
+@pytest.mark.parametrize("path", sorted(contracts.CONTROL_PATHS))
+def test_v4_unavailable_control_remains_invalid_and_is_not_omission(path):
+    graph = _control_graph(explicit=True)
+    group, key = path.split(".")
+    graph[-1][group][key] = {"state": "UNAVAILABLE"}
+    with pytest.raises(ContractError, match="OBSERVATION_UNAVAILABLE_MISMATCH"):
+        contracts.validate_run_draft_shape(graph[-1])
+    graph[-1]["observation_availability"]["unavailable"] = [{"path": path, "reason": "OBSERVATION_CONFLICT"}]
+    run = _finalize(graph)
+    assert run["validity"]["status"] == "INVALID_CONFIGURATION"
+    assert "REQUIRED_OBSERVATION_UNAVAILABLE" in run["validity"]["reason_codes"]
+    assert "CONFIGURATION_FIELD_MISMATCH" not in run["validity"]["reason_codes"]
+
+
+@pytest.mark.parametrize("change", ["absent", "unsupported", "different", "owner", "provider_present", "rng"])
+def test_v4_control_mismatches_use_incumbent_configuration_reason(change):
+    graph = _control_graph(explicit=change != "provider_present")
+    draft = graph[-1]
+    if change in {"absent", "unsupported"}:
+        for path in contracts.CONTROL_PATHS:
+            group, key = path.split(".")
+            draft[group][key] = _observed_control(change.upper())
+    elif change == "different":
+        draft["randomness"]["seed"]["value"] = 1
+        draft["randomness"]["sampling_parameters_digest"]["value"] = _sampling_fixture(seed=1)
+    elif change == "owner":
+        draft["randomness"]["seed"]["owner_contract_ref"] = _CONTROL_OWNER.replace("d" * 40, "e" * 40)
+    elif change == "rng":
+        draft["randomness"]["rng_policy"] = "OBSERVED_UNKNOWN"
+    else:
+        actual = _control_graph(explicit=True)[-1]
+        for path in contracts.CONTROL_PATHS:
+            group, key = path.split(".")
+            draft[group][key] = actual[group][key]
+    run = _finalize(graph)
+    assert run["validity"]["status"] == "INVALID_CONFIGURATION"
+    assert "CONFIGURATION_FIELD_MISMATCH" in run["validity"]["reason_codes"]
+
+
+@pytest.mark.parametrize("change,code", [
+    ("trace", "CONTROL_EVIDENCE_UNBOUND"), ("proof", "CONTROL_EVIDENCE_UNBOUND"),
+    ("coverage", "CONTROL_COVERAGE_INCOMPLETE"), ("vector", "CONTROL_VECTOR_CONFLICT"),
+    ("missing_reason", "OBSERVATION_UNAVAILABLE_MISMATCH"),
+    ("extra_reason", "OBSERVATION_UNAVAILABLE_MISMATCH"),
+])
+def test_v4_incomplete_control_proof_cannot_become_a_known_observation(change, code):
+    draft = _control_graph(explicit=True)[-1]
+    if change == "trace":
+        draft["evidence"]["trace"] = None
+    elif change == "proof":
+        draft["randomness"]["seed"]["evidence"]["digest"] = "sha256:" + "c" * 64
+    elif change == "coverage":
+        draft["observation_availability"]["coverage"]["provider_requests"] = {
+            "status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
+    elif change == "vector":
+        draft["randomness"]["sampling_parameters_digest"] = _observed_control("ABSENT")
+    elif change == "missing_reason":
+        draft["randomness"]["seed"] = {"state": "UNAVAILABLE"}
+    else:
+        draft["observation_availability"]["unavailable"] = [{"path": "randomness.seed", "reason": "NOT_OBSERVED"}]
+    with pytest.raises(ContractError) as error:
+        contracts.validate_run_draft_shape(draft)
+    assert code in {item.code for item in error.value.defects}
+
+
+@pytest.mark.parametrize("bad", [None, {"state": []}, _observed_control("PRESENT", False),
+    {"state": "ABSENT", "value": 0}, {"state": "UNAVAILABLE", "owner_contract_ref": _CONTROL_OWNER}])
+def test_v4_control_union_is_closed_and_typed(bad):
+    draft = _control_graph()[-1]
+    draft["randomness"]["seed"] = bad
+    with pytest.raises(ContractError):
+        contracts.validate_run_draft_shape(draft)
+
+
+@pytest.mark.parametrize("schema", [contracts.RUN_DRAFT_SCHEMA, contracts.RUN_DRAFT_SCHEMA_V2, contracts.RUN_DRAFT_SCHEMA_V3])
+def test_historical_run_schemas_do_not_reinterpret_tagged_controls(schema):
+    draft = _control_graph()[-1]
+    draft["schema"] = schema
+    with pytest.raises(ContractError):
+        contracts.validate_run_draft_shape(draft)
+
+
+def test_configuration_v1_does_not_reinterpret_provider_controlled_values():
+    config = _control_graph()[1]
+    fields = {key: value for key, value in config.items() if key not in {"schema", "configuration_digest"}}
+    with pytest.raises(ContractError):
+        contracts.build_configuration(fields)
+
+
+@pytest.mark.parametrize("new_run", [False, True])
+def test_control_schema_version_pair_mismatch_is_retained_as_invalid(new_run):
+    graph = _control_graph() if new_run else _graph()
+    scenario, config, other, _, draft = graph
+    if new_run:
+        replacement = build_baseline_configuration()
+        replacement["configuration_id"] = config["configuration_id"]
+        config = add_document_digest(replacement, "configuration_digest")
+    else:
+        config = _configuration_v2(config)
+    experiment = build_two_arm_experiment(scenario, config, other)
+    draft["configuration"] = {"configuration_id": config["configuration_id"],
+                              "configuration_digest": config["configuration_digest"]}
+    draft["comparison"]["experiment_id"] = experiment["experiment_id"]
+    run = _finalize((scenario, config, other, experiment, draft))
+    assert "CONFIGURATION_FIELD_MISMATCH" in run["validity"]["reason_codes"]
+
+
+def test_v4_forged_validity_is_recomputed_and_original_receipt_is_immutable(tmp_path):
+    graph = _control_graph(explicit=True)
+    run = _finalize(graph)
+    native = _store(tmp_path, graph)
+    native.create(run)
+    altered = copy.deepcopy(run)
+    altered["randomness"]["seed"]["value"] = 1
+    altered["randomness"]["sampling_parameters_digest"]["value"] = _sampling_fixture(seed=1)
+    altered = add_document_digest(altered, "run_digest")
+    with pytest.raises(VerificationContextError, match="VALIDITY_NOT_RECOMPUTABLE"):
+        verification.verify_run_graph(altered, _resolver(graph, altered))
+    draft = graph[-1]
+    draft["randomness"] = copy.deepcopy(altered["randomness"])
+    corrected = _finalize(graph)
+    with pytest.raises(ArtifactConflictError):
+        native.create(corrected)
+    assert native.resolve_run(run["run_id"]) == run
+
+
+@pytest.mark.parametrize("policy,replicates,eligible", [
+    ("PREREGISTERED_REPLICATES", 2, True), ("PREREGISTERED_REPLICATES", 1, False),
+    ("OBSERVED_UNKNOWN", 2, False),
+])
+def test_v4_harness2_recomputes_trial_and_separates_stochastic_learning_policy(tmp_path, policy, replicates, eligible):
+    from scripts.ohf.harness2_recursion import Harness2CycleError, Trial, _validate_trial
+    from tests.test_agent_eval_harness2_recursion import BASE
+    graph = _control_graph(rng_policy=policy, replicates=replicates)
+    run = _finalize(graph)
+    assert run["validity"]["status"] == "VALID"
+    native = _store(tmp_path, graph)
+    native.create(run)
+    trial = Trial(graph[0], graph[1], graph[3], native.resolve_run(run["run_id"]), b"105\n")
+    if eligible:
+        _validate_trial(trial, BASE)
+    else:
+        with pytest.raises(Harness2CycleError, match="NATIVE_STOCHASTIC_REPLICATES_REQUIRED"):
+            _validate_trial(trial, BASE)
+    assert native.resolve_run(run["run_id"])["validity"]["status"] == "VALID"
+
+
+@pytest.mark.parametrize("change", ["mode", "owner", "rng"])
+def test_v2_control_policy_is_inside_existing_harness2_factor_lock(change):
+    from scripts.agent_eval.harness2_native import configuration_lock
+    graph = _control_graph()
+    before = configuration_lock(graph[-1]["scenario"], graph[1])
+    changed = copy.deepcopy(graph[1])
+    if change == "mode":
+        changed = _control_graph(explicit=True)[1]
+        # Compare only controls, not the fixture's fresh IDs and incidental refs.
+        changed = {**graph[1], "execution": changed["execution"], "randomness": changed["randomness"]}
+    elif change == "owner":
+        changed["randomness"]["seed"]["owner_contract_ref"] = _CONTROL_OWNER.replace("d" * 40, "e" * 40)
+    else:
+        changed["randomness"]["rng_policy"] = "OBSERVED_UNKNOWN"
+    assert configuration_lock(graph[-1]["scenario"], changed) != before
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_v4_incomplete_run_stays_in_mixed_version_population(tmp_path, multi):
+    graph = _control_graph()
+    scenario, _, other, experiment, draft = graph
+    native = _store(tmp_path, graph)
+    _missing(draft, "evidence.output")
+    v4 = _finalize(graph)
+    legacy = []
+    for schema in (contracts.RUN_DRAFT_SCHEMA, contracts.RUN_DRAFT_SCHEMA_V2, contracts.RUN_DRAFT_SCHEMA_V3):
+        prior = build_run_draft(scenario, other, experiment, arm_id="arm_b", replicate_index=1)
+        if schema != contracts.RUN_DRAFT_SCHEMA:
+            prior = _v2(prior)
+            prior["schema"] = schema
+        legacy.append(validity.finalize_run_receipt(scenario, other, experiment, prior, **VALIDATOR))
+    runs = (*legacy, v4)
+    passes = tuple(_score(run) for run in runs)
+    for document in (*runs, *passes):
+        native.create(document)
+    assert {row["schema"] for row in native.enumerate_runs()} == contracts.RUN_SCHEMAS
+    native.create(_summary(graph, runs, passes, multi=multi))
+    with pytest.raises(VerificationContextError, match="EVIDENCE_POPULATION_INCOMPLETE"):
+        native.create(_summary(graph, runs[:-1], passes[:-1], multi=multi))
+
+
+def test_real_cli_finalizes_and_publishes_v4_through_existing_store(tmp_path):
+    graph = _control_graph()
+    native = _store(tmp_path, graph)
+    draft_path, output_path = tmp_path / "draft-v4.json", tmp_path / "receipt-v4.json"
+    draft_path.write_text(json.dumps(graph[-1]), encoding="utf-8")
+    argv = [sys.executable, str(ROOT / "scripts/agent_evaluation.py"), "finalize-run", "--root", str(native.root),
+            "--draft", str(draft_path), "--output", str(output_path)]
+    for key, value in VALIDATOR.items():
+        argv.extend(["--" + key.replace("_", "-"), value])
+    finalized = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert finalized.returncode == 0, finalized.stderr
+    run = json.loads(output_path.read_text())
+    assert run["schema"] == contracts.RUN_SCHEMA_V4 and run["validity"]["status"] == "VALID"
+    created = subprocess.run([sys.executable, str(ROOT / "scripts/agent_evaluation.py"), "create", "--root",
+                              str(native.root), str(output_path)], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert created.returncode == 0, created.stderr
+    assert native.resolve_run(run["run_id"]) == run
+
+
+
+def test_v4_runs_complete_existing_harness2_refinement_without_new_runtime(tmp_path):
+    from scripts.agent_eval.harness2_native import harness_digest, sha256_bytes
+    from scripts.ohf.harness2_recursion import Trial
+    from tests.test_agent_eval_harness2_recursion import FixturePort, invoke
+
+    class ControlPort(FixturePort):
+        """Explicit synthetic owner edge; the real refinement consumer runs."""
+
+        def __init__(self, root):
+            super().__init__(root)
+            self.base_configuration = _configuration_v2(self.base_configuration)
+
+        def execute(self, task, label, files):
+            self.calls.append(("execute", label, copy.deepcopy(files)))
+            cfg = copy.deepcopy(self.base_configuration)
+            cfg["configuration_id"] = "configuration:" + str(uuid4())
+            cfg["procedure"]["instruction_bundle"]["digest"] = harness_digest(files)
+            cfg = add_document_digest(cfg, "configuration_digest")
+            graph = _control_graph(scenario=self.scenario, configuration=cfg)
+            output = b"105\n" if b"if n > 0" in files["scripts/total.py"] else b"85\n"
+            graph[-1]["evidence"]["output"]["digest"] = sha256_bytes(output)
+            run = _finalize(graph)
+            for document in (*graph[:4], run):
+                self.native.create(document)
+            trial = Trial(graph[0], cfg, graph[3], self.native.resolve_run(run["run_id"]), output)
+            self.trials[label] = trial
+            return trial
+
+    port = ControlPort(tmp_path)
+    result = invoke(port)
+    assert result["selected_output"] == b"85\n"
+    assert result["rollout_count"] == 4
+    assert result["promotion"] == "NONE" and result["automatic_memory_write"] is False
+    runs = [port.native.resolve_run(run_id) for run_id in result["retained_native_runs"]]
+    assert len(runs) == 4 and all(run["schema"] == contracts.RUN_SCHEMA_V4 for run in runs)
+    assert all(run["validity"]["status"] == "VALID" for run in runs)
+    assert len({run["run_id"] for run in runs}) == 4
+
+
+
+@pytest.mark.parametrize("change,code", [
+    ("mode", "NOT_IN_ENUM"), ("default_value", "UNKNOWN_FIELD"),
+    ("empty_vector", "EXPLICIT_SAMPLING_FIELDS"), ("unlisted_vector", "EXPLICIT_SAMPLING_FIELDS"),
+    ("determinism", "NOT_IN_ENUM"),
+])
+def test_v2_request_policies_cannot_invent_defaults_or_unqualified_controls(change, code):
+    config = _control_graph(explicit=change in {"empty_vector", "unlisted_vector"})[1]
+    fields = {key: copy.deepcopy(value) for key, value in config.items()
+              if key not in {"schema", "configuration_digest"}}
+    if change == "mode":
+        fields["randomness"]["seed"]["mode"] = "ASSUMED_DEFAULT"
+    elif change == "default_value":
+        fields["randomness"]["seed"]["value"] = 0
+    elif change == "determinism":
+        fields["randomness"]["rng_policy"] = "DETERMINISTIC_SEED"
+    else:
+        fields["randomness"]["sampling_parameters_digest"]["value"]["fields"] = (
+            [] if change == "empty_vector" else ["unlisted_provider_control"])
+    with pytest.raises(ContractError) as error:
+        contracts.build_configuration(fields, schema=contracts.CONFIGURATION_SCHEMA_V2)
+    assert code in {item.code for item in error.value.defects}
+
+
+def test_v2_does_not_implicitly_unlock_the_v1_environment_manifest():
+    from scripts.agent_eval.harness_convergence import verify_configuration_environment_binding
+    from tests.test_agent_eval_harness_convergence import configuration, system_manifest
+    manifest = system_manifest()
+    original = configuration(manifest["manifest_digest"])
+    assert verify_configuration_environment_binding(original, manifest) == "CONFIGURATION_ENVIRONMENT_BINDING_VERIFIED"
+    with pytest.raises(ContractError, match="CONFIGURATION_SCHEMA_MISMATCH"):
+        verify_configuration_environment_binding(_configuration_v2(original), manifest)

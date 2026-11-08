@@ -116,6 +116,10 @@ def _collect_configuration_artifact_refs(document: dict) -> set[str]:
     retrieval = document["context"].get("retrieval_configuration")
     if retrieval:
         refs.add(retrieval["artifact_ref"])
+    if document["schema"] == contracts.CONFIGURATION_SCHEMA_V2:
+        for path in contracts.CONTROL_PATHS:
+            group, key = path.split(".")
+            refs.add(document[group][key]["owner_contract_ref"])
     return refs
 
 
@@ -219,6 +223,13 @@ def collect_run_evidence_refs(document: dict) -> set[str]:
         refs.add(item["artifact_ref"])
     for source in document["observations"]["observed_sources"]:
         refs.add(source["artifact_ref"])
+    if document["schema"] in contracts.RUN_CONTROL_SCHEMAS:
+        for path in contracts.CONTROL_PATHS:
+            group, key = path.split(".")
+            control = document[group][key]
+            if control["state"] != "UNAVAILABLE":
+                refs.add(control["owner_contract_ref"])
+                refs.add(control["evidence"]["artifact_ref"])
     return refs
 
 
