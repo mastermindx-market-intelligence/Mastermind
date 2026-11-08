@@ -1,6 +1,6 @@
 {
   "schema": "PAPER_ACCENT_BEFORE_AFTER_MANIFEST_V1",
-  "changeCount": 1536,
+  "changeCount": 1661,
   "parts": [
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0001.json",
@@ -76,19 +76,44 @@
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0011.json",
       "sha": "4444195a37a3f56983b0fa4b223306465af0f2ae",
       "bytes": 844028,
-      "commit": "c32d5cdef5e6a7e06cb5f6298d26b9406c54a33d",
-      "method": "EXACT_CONTENT_READBACK",
-      "readbackLimitation": null,
+      "reused": true,
       "changeCount": 132
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0012.json",
-      "sha": "58a6394a67c54b7721618073809a97088a96bb18",
-      "bytes": 498636,
-      "commit": "d8bfaf5ccfc320f21c856ca2ddbef7f2e33439eb",
+      "sha": "b413759f7d973e8984816c326684f27adff37143",
+      "bytes": 847525,
+      "commit": "e02de30ad09c376ba699830ec8729f9190d8959d",
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
-      "changeCount": 83
+      "changeCount": 127
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0013.json",
+      "sha": "96918654b3a33cf2f340b1501dce77b5ba271b9a",
+      "bytes": 832603,
+      "commit": "4109182832f4e4cdd4e488fb69b37dbc768eee2f",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
+      "changeCount": 33
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0014.json",
+      "sha": "fc43f4d09e5fbb63820733e76878977ec7df89fd",
+      "bytes": 821849,
+      "commit": "1f93e4c76fefabadcfacbdbe4b21bc16ef69f760",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
+      "changeCount": 33
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0015.json",
+      "sha": "60320636407b764d76cecd48b101c7952c9d8d27",
+      "bytes": 396754,
+      "commit": "62eae56d8d0f90820d3676988d37a12914d3b8d4",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
+      "changeCount": 15
     }
   ],
   "previousFullSnapshot": {
