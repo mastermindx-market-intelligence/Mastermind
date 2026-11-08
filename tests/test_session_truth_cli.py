@@ -239,6 +239,182 @@ def test_literal_fixture_invocation_emits_degraded_json(tmp_path):
     assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" in receipt["admission"]["blocking_codes"]
 
 
+def test_cross_plane_cli_wires_one_existing_receipt_into_cockpit_cards(tmp_path):
+    """The real CLI/gather path renders the R1 consumer without another owner read."""
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, protected, now="2026-08-27T09:00:00Z")
+    argv.remove("--json")
+    argv += ["--cross-plane-json", "--stale-after-seconds", "600"]
+
+    code, stdout, stderr = _run(cli, argv, repo)
+
+    assert code == 0
+    assert stderr == ""
+    view = json.loads(stdout)
+    assert view["schema"] == "mastermind.executive_cross_plane_view.v1"
+    assert view["capability"] == {"read_only": True, "effect": "NONE"}
+    assert view["digest_check"]["state"] == "VERIFIED"
+    assert view["evaluated_at"] == "2026-08-27T09:00:00Z"
+    assert view["stale_after_seconds"] == 600.0
+    assert [card["workstream"] for card in view["cards"]] == ["WS:CHAIRMAN-CONTROL-ROOM"]
+    card = view["cards"][0]
+    assert card["github"]["freshness"] == "STALE"
+    assert card["linear"]["freshness"] == "STALE"
+    assert [row["number"] for row in card["github"]["pull_requests"]] == [169]
+    assert card["github"]["pull_requests"][0]["proof"]["proof_state"] == "open"
+    assert view["execution"]["state"] == "NOT_PROJECTED"
+    assert any(row["source"] == "executive" for row in view["unavailable_sources"])
+
+
+def test_cross_plane_cli_keeps_unknown_freshness_without_window(tmp_path):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, protected)
+    argv.remove("--json")
+    argv.append("--cross-plane-json")
+
+    code, stdout, stderr = _run(cli, argv, repo)
+
+    assert code == 0
+    assert stderr == ""
+    doc = json.loads(stdout)
+    card = doc["cards"][0]
+    assert card["github"]["freshness"] == "UNKNOWN"
+    assert card["linear"]["freshness"] == "UNKNOWN"
+    assert doc["stale_after_seconds"] is None
+    assert doc["capability"]["effect"] == "NONE"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--stale-after-seconds", "10"],
+        ["--cross-plane-json", "--stale-after-seconds", "-1"],
+    ],
+)
+def test_cross_plane_cli_rejects_freshness_arg_misuse_before_acquisition(tmp_path, monkeypatch, extra):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, protected)
+    if "--cross-plane-json" in extra:
+        argv.remove("--json")
+    argv.extend(extra)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("invalid CLI input must not begin owner acquisition")
+
+    monkeypatch.setattr(cli, "collect_agentos", forbidden)
+    code, stdout, stderr = _run(cli, argv, repo)
+    assert code == 2
+    assert stdout == ""
+    assert stderr.startswith("session-truth error:")
+    assert "requires --cross-plane-json" in stderr
+
+
+def test_cross_plane_cli_never_writes_source_trees_or_networks(tmp_path, monkeypatch):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    before_macro = _tree_hashes(macro)
+    before_snapshots = _tree_hashes(snapshots)
+    monkeypatch.setattr(socket, "socket", lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("network forbidden")
+    ))
+    monkeypatch.setattr(socket, "create_connection", lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("network forbidden")
+    ))
+    argv = _argv(snapshots, macro, protected)
+    argv.remove("--json")
+    argv.append("--cross-plane-json")
+
+    code, stdout, stderr = _run(cli, argv, repo)
+
+    assert code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["capability"]["read_only"] is True
+    assert before_macro == _tree_hashes(macro)
+    assert before_snapshots == _tree_hashes(snapshots)
+
+
+
+def test_cross_plane_cli_strict_refuses_bad_receipt_without_success(tmp_path, monkeypatch):
+    """A malformed existing receipt cannot result in an exit-zero rejected card."""
+    cli = _cli()
+    repo, sha = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, sha)
+    argv.remove("--json")
+    argv.append("--cross-plane-json")
+    original = cli.build_receipt
+
+    def malformed(*args, **kwargs):
+        receipt = dict(original(*args, **kwargs))
+        receipt.pop("observations")
+        return receipt
+
+    monkeypatch.setattr(cli, "build_receipt", malformed)
+    code, stdout, stderr = _run(cli, argv, repo)
+    assert code == 2
+    assert stdout == ""
+    assert stderr.startswith("session-truth error: invalid session truth output")
+
+
+def test_cross_plane_cli_mode_exclusivity_precedes_owner_read(
+    tmp_path, monkeypatch, capsys
+):
+    cli = _cli()
+    repo, sha = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, sha)
+    argv.append("--cross-plane-json")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("owner read before argument validation")
+
+    monkeypatch.setattr(cli, "collect_agentos", forbidden)
+    with pytest.raises(SystemExit) as exc:
+        _run(cli, argv, repo)
+    assert exc.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_cross_plane_cli_one_owner_read_without_hidden_clock(tmp_path, monkeypatch):
+    cli = _cli()
+    repo, sha = _skillpack_repo(tmp_path)
+    macro = _macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+    argv = _argv(snapshots, macro, sha, now="2026-08-27T11:11:00Z")
+    argv.remove("--json")
+    argv.append("--cross-plane-json")
+    original = cli.collect_agentos
+    calls = []
+
+    def once(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    def forbidden_clock():
+        raise AssertionError("hidden clock read with explicit --now")
+
+    monkeypatch.setattr(cli, "collect_agentos", once)
+    monkeypatch.setattr(cli, "_utc_now_z", forbidden_clock)
+    code, stdout, stderr = _run(cli, argv, repo)
+    assert code == 0
+    assert stderr == ""
+    assert calls == [1]
+    assert json.loads(stdout)["evaluated_at"] == "2026-08-27T11:11:00Z"
+
+
 def test_plan_literal_protected_sha_is_passed_exactly(tmp_path, monkeypatch):
     cli = _cli()
     macro = _macro_repo(tmp_path)

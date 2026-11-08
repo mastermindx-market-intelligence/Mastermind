@@ -1,0 +1,26 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -1535,6 +1535,23 @@
+             return None
+         base = acct.get("per_account_cap")
+         pname = self.provider_name(pool)
++        if pname in ("byteplus", "experiential"):
++            if self.provider(pool).get("enabled") is not True or acct.get("enabled") is not True:
++                return None
++            if type(base) is not int or not 1 <= base <= 32:
++                return None
++            if pname == "byteplus":
++                import byteplus_coding_plan
++                if not byteplus_coding_plan.account_eligible(acct, now=now):
++                    return None
++                rows = self.provider(pool).get("accounts", [])
++                scopes = [row.get("coding_plan", {}).get("subscription_ref") for row in rows]
++                if len(set(scopes)) != len(scopes):
++                    return None
++            else:
++                from experiential_plan_policy import registered_plan_account
++                if not registered_plan_account(acct, self.provider(pool)):
++                    return None
+         if self.provider(pool).get("capacity_policy") == "host_admitted":
+             # No provider seat count. Configuring both forms fails closed.
+             if pname not in ("grok", "cursor") or base is not None:

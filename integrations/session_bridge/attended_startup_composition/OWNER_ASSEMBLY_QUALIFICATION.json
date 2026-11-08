@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.source_qualification/v1",
+  "observed_at": "2026-10-13T23:51:36.732686+00:00",
+  "base": "784c17a54e6529aa5c271844514be8e0d586adcf",
+  "scope": "fixed attended owner assembly using existing main and owners",
+  "state": "SOURCE_QUALIFIED_UNINSTALLED",
+  "source_sha256": {
+    "integrations/session_bridge/bound_launch_capture/owner_assembly.py": "3cedad979ce4f6e14698ae095546b408ba1cbaaf786500664dfc11acf1816afd",
+    "control_plane/codex_provider_realm.py": "a727900523f9ab3bb357e210eac15cda42bcbe385acd704ac2598fe2c3cb80dd",
+    "tests/test_attended_owner_assembly.py": "4c4cfe5d4703f5aafa7c2d7bb89a3e681c179ef7a02d2257a76e3c365ffd88d4"
+  },
+  "test": {
+    "command": "python3 -m pytest -q tests/test_attended_owner_assembly.py tests/test_subscription_realm_owner.py tests/test_fabric_attended_backend.py tests/test_executive_fabric_bridge_broker.py",
+    "xml": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/ASSEMBLY_FINAL.xml",
+    "sha256": "afaf4f07b27fff10fb3150f00b4d81a1f2a23d0e513344cf1613ecb233374687",
+    "tests": 172,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "review": {
+    "reviewer": "native_activation_adjudication",
+    "verdict": "PASS",
+    "scope": "actual fixed caller, resource joins, unchanged observation, loader remains unread, existing main loop",
+    "limitations": "OS enrollment, root-owned definitions and attestation readers are explicit fixtures; no live host or provider proof"
+  },
+  "paid_input": {
+    "run": "fabric-attended-owner-assembly-build-01a11e90-v1",
+    "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "stdout_sha256": "ceca9d2153d415e55acd8da39e9e815d6c60e544febb6a9b3798f0acc210329a",
+    "stdout_bytes": 3470,
+    "prose_chars": 2596,
+    "prose_limit": 2500,
+    "adjudication": "NOT_ACCEPTED",
+    "reasons": [
+      "returned implementation rejects callable CredentialLoader",
+      "added observation field violates exact START contract",
+      "main config object identity mismatches reload",
+      "constructor fixtures skip or use wrong classes",
+      "prose exceeds bounded contract"
+    ],
+    "replay": false,
+    "accept_command": false,
+    "derivative": "parent repaired source independently qualified; returned draft remains unaccepted"
+  },
+  "remaining": [
+    "R5 implemented/live qualification gate and catalogue source selection",
+    "actual host definition realm binary and credential callable custody",
+    "protected successor release after e1f1391",
+    "real authenticated original-parent finite call and result acceptance"
+  ],
+  "effects": {
+    "service": false,
+    "provider": false,
+    "install": false,
+    "runtime_admission": false,
+    "published_head_changed": false
+  }
+}

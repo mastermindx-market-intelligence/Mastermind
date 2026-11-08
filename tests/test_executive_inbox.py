@@ -746,7 +746,7 @@ def test_3_inbox_never_opens_a_write_transaction(store, frozen_git, monkeypatch)
 # 4. import fence
 # ---------------------------------------------------------------------------
 
-def test_4_module_imports_only_the_runtime_and_the_boot_packet():
+def test_4_module_imports_only_runtime_boot_packet_and_pure_selection_law():
     source = Path(mod.__file__).read_text(encoding="utf-8")
     submodules: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -760,7 +760,7 @@ def test_4_module_imports_only_the_runtime_and_the_boot_packet():
             elif node.module.startswith("control_plane."):
                 submodules.add(node.module.split(".", 1)[1].split(".")[0])
 
-    assert submodules == {"executive_runtime", "ceo_boot_packet"}, sorted(submodules)
+    assert submodules == {"executive_runtime", "ceo_boot_packet", "frontier_selection"}, sorted(submodules)
 
     forbidden = (
         "executive_supervisor",
@@ -1530,6 +1530,36 @@ def test_provenance_schema_is_pinned_to_the_intent_bridge():
 
     assert mod.CEO_INTENT_PROVENANCE_SCHEMA == INTENT_SCHEMA
     assert INTENT_SCHEMA.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
+
+
+def test_service_schema_provenance_is_not_classified_as_ceo_origin(tmp_path):
+    """A durable service-schema stamp is not CEO-origin. Reader UNCHANGED."""
+    from control_plane.ceo_intent import INTENT_SCHEMA_SERVICE
+
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    intent = {
+        "schema": INTENT_SCHEMA_SERVICE,
+        "intent_id": "svc-inbox-not-ceo",
+        "actor": "svc-site-maintenance",
+        "objective": "Audit published site health; do not treat as CEO origin.",
+        "department": "executive-infrastructure",
+        "priority": 3,
+        "grounding": {
+            "mastermind_sha": "1" * 40,
+            "macro_sha": "2" * 40,
+        },
+        "principal_id": "svc-site-maintenance",
+        "task_kind": "research",
+        "execution_contract": {
+            "requested_authorities": ["READ", "RESEARCH"],
+            "authority_level": "A0",
+        },
+    }
+    receipt = submit_intent(runtime, intent)
+    provenance, warning = mod.ceo_intent_provenance(runtime, receipt["job_id"])
+    assert provenance is None
+    assert warning is None
+    assert not INTENT_SCHEMA_SERVICE.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
 
 
 def test_a_versioned_sibling_provenance_is_named_not_silently_dropped(

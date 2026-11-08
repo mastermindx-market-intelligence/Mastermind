@@ -1,0 +1,198 @@
+{
+  "admission_state": "NOT_EVALUATED",
+  "ancestry_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+  "boot_ref": "boot-2222222222222222222222222222222222222222222222222222222222222222",
+  "can_place_work": false,
+  "capability": "OBSERVATION_ONLY",
+  "capacity_pool_ref": "capacity-pool-3333333333333333333333333333333333333333333333333333333333333333",
+  "execution_scope_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+  "host_ref": "host-1111111111111111111111111111111111111111111111111111111111111111",
+  "metrics": {
+    "cpu_some_avg10": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 12340
+    },
+    "cpu_some_avg300": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 1000
+    },
+    "cpu_some_avg60": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 5000
+    },
+    "cpu_some_total": {
+      "null_reason": null,
+      "unit": "microseconds",
+      "value": 123450
+    },
+    "darwin_fseventsd": {
+      "null_reason": "NOT_APPLICABLE",
+      "unit": "not_applicable",
+      "value": null
+    },
+    "darwin_vm_counters": {
+      "null_reason": "NOT_APPLICABLE",
+      "unit": "not_applicable",
+      "value": null
+    },
+    "disk_usable_bytes": {
+      "null_reason": null,
+      "unit": "bytes_unprivileged",
+      "value": 20480000
+    },
+    "effective_cpu_capacity_millicores": {
+      "null_reason": null,
+      "unit": "millicores_ceiling",
+      "value": 1500
+    },
+    "effective_memory_headroom_estimate_bytes": {
+      "null_reason": null,
+      "unit": "bytes_estimate",
+      "value": 1073741824
+    },
+    "host_available_memory_estimate_bytes": {
+      "null_reason": null,
+      "unit": "bytes_estimate",
+      "value": 34359738368
+    },
+    "host_cpu_busy_milli_pct": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 65000
+    },
+    "host_cpu_full_pressure": {
+      "null_reason": "NOT_APPLICABLE",
+      "unit": "not_applicable",
+      "value": null
+    },
+    "host_logical_cpu_count": {
+      "null_reason": null,
+      "unit": "logical_cpus",
+      "value": 24
+    },
+    "host_swap_total_bytes": {
+      "null_reason": null,
+      "unit": "bytes",
+      "value": 8589934592
+    },
+    "host_swap_used_bytes": {
+      "null_reason": null,
+      "unit": "bytes",
+      "value": 2147483648
+    },
+    "host_usable_memory_bytes": {
+      "null_reason": null,
+      "unit": "bytes_usable",
+      "value": 68719476736
+    },
+    "io_full_avg10": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 2000
+    },
+    "io_full_avg300": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 500
+    },
+    "io_full_avg60": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 1000
+    },
+    "io_full_total": {
+      "null_reason": null,
+      "unit": "microseconds",
+      "value": 10000
+    },
+    "io_some_avg10": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 4000
+    },
+    "io_some_avg300": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 1000
+    },
+    "io_some_avg60": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 2000
+    },
+    "io_some_total": {
+      "null_reason": null,
+      "unit": "microseconds",
+      "value": 20000
+    },
+    "memory_full_avg10": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 1000
+    },
+    "memory_full_avg300": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 250
+    },
+    "memory_full_avg60": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 500
+    },
+    "memory_full_total": {
+      "null_reason": null,
+      "unit": "microseconds",
+      "value": 5000
+    },
+    "memory_some_avg10": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 2000
+    },
+    "memory_some_avg300": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 500
+    },
+    "memory_some_avg60": {
+      "null_reason": null,
+      "unit": "milli_percent",
+      "value": 1000
+    },
+    "memory_some_total": {
+      "null_reason": null,
+      "unit": "microseconds",
+      "value": 10000
+    },
+    "pool_total_bytes": {
+      "null_reason": null,
+      "unit": "bytes",
+      "value": 40960000
+    },
+    "pswpin_pages_delta": {
+      "null_reason": null,
+      "unit": "pages_delta",
+      "value": 10
+    },
+    "pswpout_pages_delta": {
+      "null_reason": null,
+      "unit": "pages_delta",
+      "value": 20
+    }
+  },
+  "namespace_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+  "observation_profile": "linux-native-observation/v1",
+  "observed_at_ms": 100000,
+  "platform": "linux",
+  "sample_window_ms": 1000,
+  "schema": "mastermind.native_host_capacity_read/v1",
+  "snapshot_sha256": "da0545edab9f8f6b5a278e1317dffccc795226bbbd554b5821903615aff689dd",
+  "source_generation_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "telemetry_status": "COMPLETE",
+  "total_observation_window_ms": 1000,
+  "unknown_fields": []
+}

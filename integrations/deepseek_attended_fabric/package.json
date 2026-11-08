@@ -1,0 +1,17 @@
+{
+  "name": "@mastermind/deepseek-attended-fabric",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Scoped native DeepSeek ingress to the existing authenticated Fabric owner",
+  "scripts": {
+    "test": "node \"$DSH_SOURCE/node_modules/vitest/vitest.mjs\" run --config vitest.native.config.mts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    "./native": "./native.ts",
+    "./core": "./core.ts"
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "catalogue": {
+    "can_send": false,
+    "coverage": {
+      "limit": 8,
+      "returned": 1,
+      "state": "COMPLETE"
+    },
+    "entries": [
+      {
+        "goal": "Complete the exact project",
+        "kind": "project_execution",
+        "reference": {
+          "principal_scope_sha256": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+          "project_execution_source_sha256": "09c297fab281406e803f079c879e4b8a86769b84f6de34e6309876ef2f97331d",
+          "root_event_id": 8,
+          "root_event_sha256": "69f556e238bf323f241fe0aaad41a3b6f8b5ebaa1ca9e4e2040c79c6beb6a2dc",
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.project_execution_reference.v1",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "root_state": "COMPLETED"
+      }
+    ],
+    "schema": "mastermind.project_execution_references.v1",
+    "state": "AVAILABLE",
+    "work_ref": "WS:NEW-PROJECT"
+  },
+  "completed_read": {
+    "can_send": false,
+    "continuation_mode": "DURABLE",
+    "goal": "Complete the exact project",
+    "kind": "project_execution",
+    "locator": {
+      "attempt_id": "ATT-92a7854e7263464bb890a6020f4acf6d",
+      "job_id": "JOB-001",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:NEW-PROJECT"
+    },
+    "parent_witness": {
+      "attempt_id": "ATT-92a7854e7263464bb890a6020f4acf6d",
+      "input_fingerprint_sha256": "0e101fd648173408b61e09d03b1ef9baf5a23e2f98c5a8f726c9ab06001f5a35",
+      "project_execution_source_sha256": "09c297fab281406e803f079c879e4b8a86769b84f6de34e6309876ef2f97331d",
+      "result_envelope_sha256": "0c357147309da5cca81f14fabfe3d378927866fa8a05f0e601a9b87d8bc95d11",
+      "root_event_id": 8,
+      "root_event_sha256": "69f556e238bf323f241fe0aaad41a3b6f8b5ebaa1ca9e4e2040c79c6beb6a2dc",
+      "root_job_id": "JOB-001",
+      "schema": "mastermind.project_execution_parent.v1",
+      "terminal_receipt_sha256": "ff9bd862f6908dae1fbbc5cf7285062d8561a1343fc0afc098043cc7a50e5418"
+    },
+    "previous_run": null,
+    "reference": {
+      "principal_scope_sha256": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+      "project_execution_source_sha256": "09c297fab281406e803f079c879e4b8a86769b84f6de34e6309876ef2f97331d",
+      "root_event_id": 8,
+      "root_event_sha256": "69f556e238bf323f241fe0aaad41a3b6f8b5ebaa1ca9e4e2040c79c6beb6a2dc",
+      "root_job_id": "JOB-001",
+      "schema": "mastermind.project_execution_reference.v1",
+      "work_ref": "WS:NEW-PROJECT"
+    },
+    "result": {
+      "digest": "0c357147309da5cca81f14fabfe3d378927866fa8a05f0e601a9b87d8bc95d11",
+      "envelope": {
+        "current_state": "complete",
+        "errors": [],
+        "job_id": "JOB-001",
+        "next_actions": [],
+        "role": "aggregation",
+        "role_result": {
+          "aggregate_summary": "Every scoped child returned",
+          "coordinator_job_id": "JOB-001",
+          "evidence_digests": [],
+          "handoff_digest": "e0e3064f12f40375b7142f650d65999e5ebc5fc36c9429750d814e781ec663e7",
+          "plan_attempt_id": "ATT-1d3890a3e995445488adf2f2c5ff8aa2",
+          "plan_digest": "37cea07c5f600956d0fd6fe85683f75eb85194af65c8d6d76bd564863f7402f9",
+          "policy_sha": "0c4a21516e5133a5a2a757ac465be462c760a1fbc05ed572fec8ff73b7006a68",
+          "revisions": [
+            {
+              "current_attempt_id": "ATT-3aae3528d89e45eaab38ee99a075651d",
+              "current_job_id": "JOB-003",
+              "current_result_digest": "34e9cc91a173e03dfa4baefaab9d8c0d3c41d695fb154172e81766b1c62ed70e",
+              "ordinal": 0,
+              "plan_step_id": "STEP-0",
+              "qualifying_review_attempt_id": null,
+              "qualifying_review_job_id": null,
+              "qualifying_review_result_digest": null,
+              "repair_round": 0,
+              "review_required": false
+            }
+          ],
+          "root_job_id": "JOB-001",
+          "schema_version": "mastermind.aggregation_result/v2"
+        },
+        "run_id": "ATT-92a7854e7263464bb890a6020f4acf6d",
+        "schema_version": "mastermind.executive_orchestration_result/v1",
+        "status": "COMPLETED",
+        "summary": "bounded typed fixture result",
+        "validations": [],
+        "worker_id": "codex-01"
+      },
+      "terminal_receipt_sha256": "ff9bd862f6908dae1fbbc5cf7285062d8561a1343fc0afc098043cc7a50e5418"
+    },
+    "schema": "mastermind.project_execution_window.v1",
+    "state": "COMPLETED"
+  },
+  "pending_catalogue": {
+    "can_send": false,
+    "coverage": {
+      "limit": 8,
+      "returned": 1,
+      "state": "COMPLETE"
+    },
+    "entries": [
+      {
+        "goal": "Complete the exact project",
+        "kind": "project_execution",
+        "reference": {
+          "principal_scope_sha256": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+          "project_execution_source_sha256": "09c297fab281406e803f079c879e4b8a86769b84f6de34e6309876ef2f97331d",
+          "root_event_id": 8,
+          "root_event_sha256": "69f556e238bf323f241fe0aaad41a3b6f8b5ebaa1ca9e4e2040c79c6beb6a2dc",
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.project_execution_reference.v1",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "root_state": "QUEUED"
+      }
+    ],
+    "schema": "mastermind.project_execution_references.v1",
+    "state": "AVAILABLE",
+    "work_ref": "WS:NEW-PROJECT"
+  },
+  "pending_read": {
+    "can_send": false,
+    "continuation_mode": "DURABLE",
+    "goal": "Complete the exact project",
+    "kind": "project_execution",
+    "locator": {
+      "attempt_id": null,
+      "job_id": "JOB-001",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:NEW-PROJECT"
+    },
+    "parent_witness": null,
+    "previous_run": null,
+    "reference": {
+      "principal_scope_sha256": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+      "project_execution_source_sha256": "09c297fab281406e803f079c879e4b8a86769b84f6de34e6309876ef2f97331d",
+      "root_event_id": 8,
+      "root_event_sha256": "69f556e238bf323f241fe0aaad41a3b6f8b5ebaa1ca9e4e2040c79c6beb6a2dc",
+      "root_job_id": "JOB-001",
+      "schema": "mastermind.project_execution_reference.v1",
+      "work_ref": "WS:NEW-PROJECT"
+    },
+    "result": null,
+    "schema": "mastermind.project_execution_window.v1",
+    "state": "QUEUED"
+  },
+  "provenance": {
+    "generator": "tests/test_project_execution_conversation_read.py",
+    "installed_runtime_evidence": false,
+    "kind": "INERT_RUNTIME_TEST_FIXTURE",
+    "source": "actual Runtime project factory admission, immutable original input and canonical COO aggregation result with inert physical workers"
+  },
+  "schema": "mastermind.project_execution_history.test_fixture.v1"
+}
