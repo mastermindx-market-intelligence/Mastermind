@@ -277,7 +277,7 @@ def original_request(run_id, root, parent, *, owner_ext=None):
             and 'pools.yaml' in manifest['files']
             and all(type(v) is str and re.fullmatch(r'[0-9a-f]{64}', v)
                     for v in manifest['files'].values()), 'original_support_manifest')
-    desired = delivery.local_file(here / 'pools.yaml', LIMIT)
+    desired = delivery.local_file(here.parent / 'orch/fabric/pools.yaml', LIMIT)
     desired_sha = hashlib.sha256(desired).hexdigest()
     require(desired_sha == manifest['files']['pools.yaml'], 'original_policy_source_unavailable')
     support_digest = hashlib.sha256(artifact_reader.canonical(manifest)).hexdigest()

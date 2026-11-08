@@ -9,7 +9,7 @@
 +        import types
 +        reader_path = Path(__file__).resolve().parent / "support_policy_status.py"
 +        reader_raw = local_file(reader_path, 512 * 1024)
-+        reviewed_reader = "76bc04c889430cbb21efd172e438eeb9a26ce08e134098df4de7bb5c33a56803"
++        reviewed_reader = "fe726a411192290c12e15e67ee7c8a94b3d798c0f37e79c41c924c46d6f78408"
 +        if digest(reader_raw) != reviewed_reader or observer_source_hash != reviewed_reader:
 +            raise ValueError("support_policy_reader_source_unqualified")
 +        fixed_reader = types.ModuleType("support_policy_status_fixed")

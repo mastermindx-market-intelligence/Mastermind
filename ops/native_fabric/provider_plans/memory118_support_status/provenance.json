@@ -1,6 +1,6 @@
 {
   "accepted_memory_count": 118,
-  "actual_conflict_resolution": "Memory main has existing all-original privacy dispatch after parse_args: exact reviewed new parser inserted, new command runs ONLY AFTER unchanged all-original guard. No privacy exception. Delivery transport patch applies exactly.",
+  "actual_conflict_resolution": "Exact reviewed new command runs AFTER unchanged Memory all-original guard; no exception. Native desired policy resolved only incumbent ../orch/fabric via existing owner_path, exact original manifest SHA required.",
   "actual_runtime_observation": "Root native40 d19f5c6a independent of these source fixtures",
   "base_count": 116,
   "base_selection": {
@@ -26,12 +26,12 @@
   "memory_profile_sha256": "a4a02cc7a7342f814e4451698cd417d1336d6582e5748ac638316ef6ffabe299",
   "protected_dependency": "Pending original Memory2229 source release remains distinct; no replacement/native selection",
   "reader_sources": {
-    "artifact_delivery.py": "011818e183ba922f3c68fad0e0613d2f89fbd3bf94da574aa9f35810168219a6",
+    "artifact_delivery.py": "e2ccf06d83f0e0ed72f707392f1d308338e1b26f88a5d1fd61a6f985a3704fbc",
     "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
     "fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
     "lane_runtime.py": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
     "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
-    "support_policy_status.py": "76bc04c889430cbb21efd172e438eeb9a26ce08e134098df4de7bb5c33a56803"
+    "support_policy_status.py": "fe726a411192290c12e15e67ee7c8a94b3d798c0f37e79c41c924c46d6f78408"
   },
   "runtime_effects": false,
   "schema": "mastermind.support_policy_source_union.v1"

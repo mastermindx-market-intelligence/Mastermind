@@ -71,7 +71,9 @@ def runtime(patched_source, monkeypatch):
                 'pools': {'glm': {'models': {'executor': 'fixture'}}, 'grok': {'windows': {'weekly': {'limit': 100, 'remaining_pct': 70}}}}}
             desired = json.dumps(doc, sort_keys=True).encode()
             policy = root / 'orch/fabric/pools.yaml'; policy.write_bytes(desired); policy.chmod(0o600)
-            (ext / 'pools.yaml').write_bytes(desired)
+            source_policy = ext.parent / 'orch/fabric/pools.yaml'
+            source_policy.parent.mkdir(parents=True)
+            source_policy.write_bytes(desired); source_policy.chmod(0o600)
             registry = {'ubuntu0': {'ssh_alias': 'qualified-fixture', 'physical_lane_root': str(root)}}
             monkeypatch.setattr(host, 'load_registry', lambda: copy.deepcopy(registry))
             run, original_root, parent = 'fixture-prelaunch', 'fixture-root', 'fixture-parent'
@@ -191,7 +193,7 @@ def test_prelaunch_owner_join_refuses_foreign_or_unretained_facts(runtime,monkey
         p=r.state/(r.run+'.request-launch.json');value=json.loads(p.read_text());value['request_sha256']='0'*64;p.write_text(json.dumps(value))
     if kind=='manifest':
         p=r.state/(r.run+'.support.json');value=json.loads(p.read_text());value['files']['arbitrary']='0'*64;p.write_text(json.dumps(value))
-    if kind=='policy_source':(r.ext/'pools.yaml').write_bytes(r.desired+b'\n')
+    if kind=='policy_source':(r.ext.parent/'orch/fabric/pools.yaml').write_bytes(r.desired+b'\n')
     if kind=='caller':monkeypatch.setenv('CODEX_THREAD_ID','foreign')
     with pytest.raises(ValueError):r.status.original_request(r.run,root,parent)
 
@@ -365,3 +367,18 @@ def test_nonabsent_comparison_rejects_each_single_null(runtime,comparison,field)
     out[field]=None
     with pytest.raises(ValueError,match='response_comparison'):
         r.status.validate_response(json.dumps(out).encode(),r.request)
+
+
+def test_native_desired_policy_uses_existing_orch_owner_not_ext_shadow(runtime):
+    r=runtime
+    incumbent=r.ext.parent/'orch/fabric/pools.yaml';incumbent.parent.mkdir(parents=True,exist_ok=True)
+    incumbent.write_bytes(r.desired);incumbent.chmod(0o600)
+    assert not (r.ext/'pools.yaml').exists()
+    request,_,_=r.status.original_request(r.run,r.original_root,r.parent)
+    assert request['desired_policy_sha256']==hashlib.sha256(r.desired).hexdigest()
+    # A conflicting ext shadow is not a policy source or fallback.
+    (r.ext/'pools.yaml').write_bytes(b'unqualified shadow')
+    assert r.status.original_request(r.run,r.original_root,r.parent)[0]==request
+    incumbent.write_bytes(r.desired+b'\n')
+    with pytest.raises(ValueError,match='original_policy_source_unavailable'):
+        r.status.original_request(r.run,r.original_root,r.parent)
