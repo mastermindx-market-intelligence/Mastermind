@@ -1,32 +1,27 @@
-# Hermes leadership catalog — extending a closed seat/role set
+# Hermes leadership catalog changes
 
-Use when adding (or changing) a seat in `integrations/hermes_leadership/charters.py` or anything else that enumerates a closed catalog whose members are consumed across code, tests, and prose.
+Use this reference when an authorized source assignment changes the existing leadership catalog. Read its current implementation and tests at the task's immutable source. Catalog metadata is advisory; adding a row does not enroll a native profile, grant authority or prove worker execution.
 
-## The three coupled surfaces
+## Inspect the coupled surfaces
 
-A new charter key is NOT a one-file docs change. All three surfaces must land in the same PR:
+The existing integration joins:
 
-1. **`charters.py`** — append the key to `CHARTER_KEYS` AND a matching row to `_ROWS` (fields: key, title, responsibility role, execution mode, objective, wake triggers, completion evidence, limits, routing guidance). Valid `ResponsibilityIntent` roles: `principal` / `sub_orchestrator` / `operator` / `worker`; modes: `execute` / `coordinate` (`worker` must execute). `charter_for()` appends the reuse-first guidance limit automatically — do not hand-add it.
-2. **`organization.py`** — `_REPORTS_TO[key]` MUST gain the parent line. The seats view does `_REPORTS_TO[key]` for every `CHARTER_KEYS` entry, so a catalog row without a reporting line is a runtime `KeyError` in `organization_context`, not a doc gap.
-3. **`docs/hermes/EXECUTIVE_TEAM_CONTEXT.md`** — prose seat enumeration plus the "*N* existing charter keys" sentence. Unguarded by tests; the only durable defense is the doc-enumeration guard test (below). If it exists at your pin, keep count and names in sync; if it does not yet, treat the doc as a hand-maintained surface and flag the drift.
+- integrations/hermes_leadership/charters.py: charter keys and their rows.
+- integrations/hermes_leadership/organization.py: reporting relationships and the rendered organization context.
+- docs/hermes/EXECUTIVE_TEAM_CONTEXT.md: the human-readable seat enumeration and count.
+- Existing consumer tests that enumerate keys, reporting relations, source truth and serialization limits.
 
-## Constraints to check before writing
+Search one current member across source, tests and prose before editing. Inspect the actual schema, allowed roles/modes, inherited limits and rendering contract rather than copying a dated list. Keep every affected surface in one coherent source change. Do not introduce a parallel catalog or role authority.
 
-- **Byte budget:** `organization_context` renders ALL seats and hard-fails over `MAX_BYTES` (8192). Each serialized seat costs ~130 B; measure current usage before promising seat additions (a temp pytest that renders the view and prints `len(json.dumps(view).encode())` — see fixture rule below). Headroom is a real cap on catalog growth.
-- **Count-asserting test:** the leadership test module asserts the exact key set (dynamically elsewhere, hard-coded here). Grep the test tree for an existing member key (e.g. `grok_adviser`) to find every list that enumerates the set; update the assertion rather than adding a parallel test.
-- **Doc guard:** the durable fix for prose drift is a test asserting the doc's count word equals `len(CHARTER_KEYS)`. Merge-order independent if written against the count sentence only — it stays green at every legitimate intermediate state (each surface-synced head) and red on any drifted tree.
+## Bound and verify the source change
 
-## Procedure
+1. Recover source custody and reuse the original operation. Authorized GitHub-native editing uses immutable preimages and expected-head checks. Actual host-local work uses the installed workspace owner; raw worktree creation is not its substitute.
+2. Update the existing key set, matching row, reporting relation and prose enumeration together. Preserve current inherited limits, advisory status and unobserved-enrollment facts.
+3. Measure the actual rendered context with the incumbent serializer and fixtures. Preserve its MAX_BYTES ceiling; do not rely on an estimated per-seat size, omit rows or raise the cap to conceal an overflow.
+4. Update the relevant existing key/count assertions and run meaningful package consumers. If a prose guard exists, preserve it. If a real documentation drift risk lacks coverage, add only the necessary contract check.
+5. Inspect the complete diff, source hashes and current receiving composition. A stacked child's history and unique work must survive subsequent edits; coordinate actual source changes rather than assuming every child should rebase.
+6. Publish through the original protected-delivery path and independently read back the exact source and eventual merge. Follow the PR/CI reference and governing delivery owner; no direct/admin merge or repeated admission command.
 
-1. `git worktree add -b <branch> <path> origin/master` (lane law: never from the active checkout).
-2. Grep the tree for one existing member key across code, tests, AND docs to enumerate all surfaces first.
-3. Patch all three surfaces + the key-set test; measure the org-view byte budget before/after.
-4. Run every test file that imports the package (grep `hermes_leadership` in `tests/`, `--include=*.py` only — a pyc-inclusive list breaks pytest collection).
-5. Push, `gh pr create --head <branch>`, read back `headRefOid`/`mergeable`.
-6. Admit via `gh pr merge <n> --squash` once checks are green (see merge-queue law in SKILL.md).
+Use the actual test fixtures and their dependency chain. A missing dependency or fixture setup error is not a passing test. Determine whether the candidate changed the declared dependency contract before classifying the failure as environmental. Compare a suspected inherited failure on the appropriate original source in an approved isolated fixture; do not discard or stash another writer's work.
 
-## Pitfalls
-
-- **Stacked siblings:** if another PR stacks on your branch head and you then amend your PR (especially a prose doc line), steer the stacked child to rebase onto your NEW head before it pushes — same-line prose conflicts are the default outcome, and mergeable-state of the child flips CONFLICTING until rebased.
-- **Fixture-chained temp tests:** fixtures defined in another test module (e.g. `mission_body` ← `result_owner`) do NOT auto-resolve — import each into the temp test module's namespace (`from tests.test_workspace_result_service import result_owner`) or setup fails with 'fixture not found'. Never call a fixture function directly; pytest hard-fails it.
-- **Interpreter deps before red-classification:** collection-time `ModuleNotFoundError` (jwt, numpy) is an environment gap, not a code red. Probe interpreters for the needed modules first — CI-mirror venvs under `/tmp` usually carry the full matrix; the system python may not. Only a red that survives on a dep-complete interpreter counts against the change.
+Profile creation, role-memory distribution, selected-runtime changes and live enrollment are separate existing-owner operations. Source acceptance alone authorizes none of them.

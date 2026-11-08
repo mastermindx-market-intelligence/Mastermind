@@ -601,10 +601,10 @@ def test_consolidated_companion_points_at_owners_that_are_mandatory_before_the_a
         assert (ROOT / owner).is_file()
 
 
-# Original parent acceptance budget, not a relaxed ceiling or latency claim.
-# Re-budgeted 2026-11-08 (CEO-seat lane PR, announced in the exec thread): the pack
-# gained a cataloged eighth member (mastermind-x-operations INDEX section); +500 B
-# keeps the budget tight while the >=40%-reduction invariant below still binds.
+# Core seven-file ceiling: +500 bytes for the conditional operations INDEX entry.
+# This explicitly adjusts the navigation budget from 100_000 bytes; it does not
+# add an eighth corpus member or a universal mandatory load. Keep the original
+# 167_799-byte baseline and >=40% reduction invariant below.
 def test_original_compaction_goal_is_met_without_changing_the_baseline() -> None:
     total = _bundle_bytes(_ALL_TARGETS)
     baseline = sum(_PIN_BYTES[rel] for rel in _ALL_TARGETS)

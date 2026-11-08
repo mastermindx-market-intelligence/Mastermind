@@ -140,8 +140,8 @@ persist exact state/next action to existing owners.
 Compact Project boot, not a substitute for loading this Skillpack.
 
 ### `docs/sol_skills/mastermind-x-operations/SKILL.md`
-Mastermind-X org-repo operations canon: bootstrap, standing invariants, delivery
-and merge-queue law. Load before any org-repo work.
+Conditional Hermes integration and delivery guidance; load for that work after
+the governing same-pin owners. Adds no authority or universal load gate.
 
 ## Mandatory universal source-law companions
 
