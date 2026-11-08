@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -25,6 +26,10 @@ COMPONENT = ROOT/'ops/native_fabric/original_directory_custody'
 
 @pytest.fixture
 def wiring(source_stage, tmp_path, monkeypatch):
+    # Explicit disposable analogue of Linux's writable ambient /tmp. The
+    # simulated host owns only the private child trust root, never its parent.
+    ambient = tmp_path/'writable-ambient';ambient.mkdir(mode=0o775);ambient.chmod(0o775)
+    tmp_path = ambient/'owned-test-root';tmp_path.mkdir(mode=0o700)
     stage = tmp_path/'ext'
     shutil.copytree(source_stage, stage)
     patch = COMPONENT/'owner-registration.forward.patch'
@@ -41,6 +46,25 @@ def wiring(source_stage, tmp_path, monkeypatch):
     m = importlib.import_module('original_directory_custody_owner')
     task = importlib.import_module('fabric_task')
     r = m.reader
+    strict_chain = m.delivery.DirectoryChain
+    real_open = os.open
+    class FixtureOS:
+        # Substitute only the declared simulation root. All operations beneath
+        # it use real descriptors and the unchanged incumbent guard predicates.
+        def __getattr__(self,name):return getattr(os,name)
+        def open(self,path,*args,**kwargs):
+            if path=='/' and 'dir_fd' not in kwargs:path=tmp_path
+            return real_open(path,*args,**kwargs)
+    class FixtureChain(strict_chain):
+        def __init__(self,path):
+            try:relative=Path(path).relative_to(tmp_path)
+            except ValueError:raise ValueError('fixture_path_outside_owned_root') from None
+            super().__init__(Path('/')/relative)
+        @property
+        def closed(self):return not self.fds
+    monkeypatch.setattr(m.delivery,'os',FixtureOS())
+    monkeypatch.setattr(m.delivery,'DirectoryChain',FixtureChain)
+    monkeypatch.setattr(m.delivery,'DESTINATION_ROOT',tmp_path)
     entry = {'roles':['lanes'],'ssh_alias':'inert-enrolled-alias','allowed_modes':['glm']}
     (stage/'hosts.json').write_text(json.dumps({r.HOST:entry}))
     metadata = tmp_path/'fixture-metadata';metadata.mkdir()
@@ -51,24 +75,8 @@ def wiring(source_stage, tmp_path, monkeypatch):
     monkeypatch.setattr(m,'METADATA',tuple(pins))
     destination = tmp_path/'diagnostic-action'
     monkeypatch.setattr(m,'DESTINATION',str(destination))
-    real_open = os.open
-    class Chain:
-        def __init__(self):
-            destination.mkdir(mode=0o700)
-            self.fd = real_open(destination,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-            self.closed=False
-        def verify(self):
-            assert not self.closed
-            a=os.stat(destination,follow_symlinks=False);b=os.fstat(self.fd)
-            assert (a.st_dev,a.st_ino,a.st_uid,a.st_mode)==(b.st_dev,b.st_ino,b.st_uid,b.st_mode)
-        def close(self):
-            if not self.closed:os.close(self.fd);self.closed=True
-    def reserve(path):
-        assert path==str(destination)
-        return Chain()
-    # Ancestor/permission rules remain in the incumbent reserve_destination;
-    # fixture isolates its fresh-leaf premise, uses actual O_EXCL/fsync writes.
-    monkeypatch.setattr(m.delivery,'reserve_destination',reserve)
+    # Existing reserve_destination, DirectoryChain methods and O_EXCL/fsync
+    # writers execute unchanged inside the explicit inert owned-root premise.
     account = r.OwnerTransportBinding(r.HOST,entry['ssh_alias'],'1'*64,os.getuid())
     class Permission(m.NativeMetadataPermissionSource):
         def __init__(self):
@@ -122,7 +130,8 @@ pwd.getpwuid=lambda uid:SimpleNamespace(pw_dir='/account/home')
     monkeypatch.setattr(m.delivery,'transport',transport)
     try:
         yield SimpleNamespace(m=m,r=r,task=task,p=p,stage=stage,destination=destination,
-                              pins=pins,calls=calls,after=after,entry=entry,Permission=Permission)
+                              pins=pins,calls=calls,after=after,entry=entry,Permission=Permission,
+                              root=tmp_path,strict_chain=strict_chain,fixture_chain=FixtureChain)
     finally:
         for name in names:
             sys.modules.pop(name,None)
@@ -320,6 +329,25 @@ def test_last_response_read_cannot_publish_after_withdrawal_or_replacement(wirin
     with pytest.raises(w.r.Refused):w.m.run_fixed_metadata_action(owner)
     assert changed and len(w.calls)==1 and owner._chain.closed
     assert (w.destination/'intent.json').exists() and not (w.destination/'observed.json').exists()
+
+
+def test_fixture_root_preserves_real_writable_ancestor_refusal(wiring):
+    w=wiring;unsafe=w.root/'owned-unsafe-ancestor';child=unsafe/'child'
+    child.mkdir(parents=True,mode=0o700);unsafe.chmod(0o775)
+    assert stat.S_IMODE(unsafe.stat().st_mode)==0o775
+    with pytest.raises(ValueError,match='directory_owner_or_mode'):
+        with w.strict_chain(Path('/owned-unsafe-ancestor/child')):pass
+    assert w.p.calls==[] and w.calls==[] and not w.destination.exists()
+    assert stat.S_IMODE(unsafe.stat().st_mode)==0o775
+
+
+def test_fixture_root_never_admits_outside_paths_or_symlink_traversal(wiring):
+    w=wiring
+    with pytest.raises(ValueError,match='fixture_path_outside_owned_root'):
+        w.fixture_chain(w.root.parent)
+    link=w.root/'owned-link';link.symlink_to(w.stage,target_is_directory=True)
+    with pytest.raises(OSError):w.fixture_chain(link)
+    assert w.p.calls==[] and w.calls==[] and not w.destination.exists()
 
 
 def test_forward_patch_preserves_every_existing_factory_and_transport_branch(wiring,source_stage):

@@ -19,7 +19,7 @@
   "owner_wiring": {
     "default": "REFUSE_BEFORE_METADATA_INTENT_TRANSPORT",
     "factory": "fabric_task._original_directory_owner_factory",
-    "focused_tests_sha256": "538987038fd9f39ff49898082e74442dec0d3f8e5733d7fef9e3859fb9de5346",
+    "focused_tests_sha256": "cab37b5532dfac49a77491d140d80fd16b4e21bc3447a928efb2479735031a55",
     "forward_patch_targets": {
       "protected_proposal_base": {
         "inputs": {
