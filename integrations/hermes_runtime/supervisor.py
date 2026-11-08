@@ -742,6 +742,13 @@ class ServiceRuntime:
                 return
             if self._stop.wait(self.profile.restart_sec):
                 return
+    def _expected_disabled_mcp_native(self) -> dict[str, tuple[str, ...]] | None:
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        if primary is not None:
+            return expected_disabled_mcp_with_application(self.profile, self._consumer_publication(), primary_application=primary)
+        return self._expected_disabled_mcp()
+
+
 
 
 def _terminate(proc: subprocess.Popen[bytes]) -> None:
@@ -754,11 +761,6 @@ def _terminate(proc: subprocess.Popen[bytes]) -> None:
         proc.kill()
         proc.wait(timeout=1)
 
-    def _expected_disabled_mcp_native(self) -> dict[str, tuple[str, ...]] | None:
-        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
-        if primary is not None:
-            return expected_disabled_mcp_with_application(self.profile, self._consumer_publication(), primary_application=primary)
-        return self._expected_disabled_mcp()
 
 
 def _reap(proc: subprocess.Popen[bytes]) -> None:
