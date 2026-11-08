@@ -29,7 +29,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     added_bounded={'sub.sh','native_remote.py','fabric_operator_contract.py'}
     s14_forward={'artifact_delivery.py'}
     assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)==historical_four|added_bounded|s14_forward
-    assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a'
+    assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d'
     assert m.GROK47_MERGED_SOURCE_DIGESTS['artifact_delivery.py']=='447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3'
     # Qualify the complete current carrier before viewing its frozen predecessor.
     # The published manifest/inventory retain the actual current bytes.

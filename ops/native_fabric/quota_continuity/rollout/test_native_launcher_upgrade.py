@@ -119,7 +119,7 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify the prospective109 build before restoring any historical bytes."""
+    """Qualify the current107 build before restoring any historical bytes."""
     native = Path(builder.__file__).parent.parent
     manifest_raw = (output / 'native-manifest.json').read_bytes()
     inventory_raw = (output / 'native-source-inventory.json').read_bytes()
@@ -128,7 +128,7 @@ def verify_current_stage(output):
     manifest = json.loads(manifest_raw)
     inventory = json.loads(inventory_raw)
     if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
-            or len(manifest) != 109
+            or len(manifest) != 107
             or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
             or set(inventory['files']) != set(manifest)
             or inventory['native_code_files'] != len(manifest)):
@@ -182,8 +182,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
             removed = set(retained['removed_current_members']) | {
                 'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
                 'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
-                'ext/original_advertised_artifact.py',
-                'ext/fabric_memory_view.py','ext/protected_memory_economic.py'}
+                'ext/original_advertised_artifact.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):

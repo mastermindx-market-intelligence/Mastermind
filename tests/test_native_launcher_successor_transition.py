@@ -60,8 +60,7 @@ def source_owners(tmp_path_factory):
     historical_manifest = retained['manifest']
     added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
                 'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
-                'ext/original_advertised_artifact.py',
-                'ext/fabric_memory_view.py','ext/protected_memory_economic.py'}
+                'ext/original_advertised_artifact.py'}
     assert set(manifest) == set(historical_manifest) | added
     # Remove only the two reviewed S14, two participant and one recovery additions inside this disposable102
     # inverse, after proving each is the actual current staged payload.
