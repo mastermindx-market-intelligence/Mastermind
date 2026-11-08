@@ -122,7 +122,8 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
         data = (native / "candidate" / name).read_bytes()
         assert row == {"source": "candidate/" + name, "bytes": len(data),
                        "sha256": hashlib.sha256(data).hexdigest(),
-                       "composition": inventory["files"]["ext/" + name]["composition"]}
+                       "composition": dict(inventory["files"]["ext/" + name]["composition"],
+                                           inherited=None)}
     after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
     assert after - before == expected_new
     assert before <= after
