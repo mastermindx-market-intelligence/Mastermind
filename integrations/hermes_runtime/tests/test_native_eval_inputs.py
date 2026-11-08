@@ -420,7 +420,7 @@ def history_lifecycle(lifecycle, monkeypatch):
 def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None,
                   after_request=None, history=None, before_builder=None, native_context=False,
                   cached=None, before_history=None, after_history=None, source_platform=None,
-                  api_request_id="eval-request"):
+                  api_request_id="eval-request", route_factory=None):
     l, n = lifecycle, lifecycle.native
     selected = marker(t)
     ref, row, _ = n.claim(admission=admission, generation=generation)
@@ -433,7 +433,7 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             platform=Platform.LOCAL if source_platform is None else source_platform,
             user_id="user", user_id_alt=None, user_name=None, chat_id=ref.session_id,
             chat_name=None, chat_type="private", thread_id=None)
-    route = provider_route()
+    route = provider_route() if route_factory is None else None
     out = {"marker": selected, "row": row}
     def execute():
         turn = l.turn_for(ref, row, cached=cached)
@@ -447,8 +447,9 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             agent._current_turn_id = "turn-A"  # Same logical turn used by the original worker fixture.
             return agent
         turn._ctx.AIAgent = create
-        agent, reused = turn._resolve_turn_agent(route, "api", "original ephemeral", 3, None, {})
-        turn._wire_turn_agent_callbacks(agent, route, None, None, None, False)
+        selected_route = route if route_factory is None else route_factory(turn)
+        agent, reused = turn._resolve_turn_agent(selected_route, "api", "original ephemeral", 3, None, {})
+        turn._wire_turn_agent_callbacks(agent, selected_route, None, None, None, False)
         out.update(agent=agent, reused=reused, scope=observation._current.get(), turn=turn)
         if before_builder:
             before_builder(out)
@@ -1454,8 +1455,8 @@ def test_history_observation_schema_type_is_a_closed_refusal(trial, schema):
             request_observation={})
 
 
-# APPLICATION profile support composes with the accepted EVAL refusal contract.
-# Mixed selections must still stop before credentials, source work or publication.
+# Scoped refusal intake from the completed da171 APPLICATION composition.
+# The accepted profile/recipe parsers remain unchanged and reject that route.
 def test_public_eval_refuses_primary_profile_before_secret_or_source_work(tmp_path, monkeypatch):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
@@ -1486,7 +1487,7 @@ def test_public_eval_refuses_primary_profile_before_secret_or_source_work(tmp_pa
     assert not (tmp_path / "uncreated-units").exists()
 
 
-def test_accepted_primary_profile_refuses_mixed_eval_before_credentials(tmp_path, monkeypatch):
+def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, monkeypatch):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
     from integrations.hermes_runtime import install as installer
@@ -1495,9 +1496,11 @@ def test_accepted_primary_profile_refuses_mixed_eval_before_credentials(tmp_path
     _, recipe, _ = selected_recipe()
     selected = replace(compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
         secrets_file=tmp_path / "unread-secrets.env"),
-        model_provider="mastermind-fabric", native_provider_id=None,
+        model_provider="unaccepted-primary-fixture", native_provider_id=None,
         gateway_backend="native-session-authority")
-    path = tmp_path / "primary-profile.yaml"
+    # Keep this parser-negative fixture unqualified as new primary providers
+    # gain admission. The mixed-EVAL guard has its own explicit fixture above.
+    path = tmp_path / "unsupported-profile.yaml"
     path.write_text(dump_profile(selected))
     monkeypatch.setattr(installer, "load_secrets",
         lambda *a, **kw: pytest.fail("unsupported profile reached credentials"))
@@ -1506,9 +1509,8 @@ def test_accepted_primary_profile_refuses_mixed_eval_before_credentials(tmp_path
             systemd_user_dir=tmp_path / "uncreated-units", secrets_file=selected.secrets_file,
             hermes_bin=tmp_path / "unread-launcher", upstream_source=Path(recipe["vendor_root"]),
             native_installation=recipe)
-    # The APPLICATION composition accepts the primary profile. Its explicit
-    # mixed-EVAL guard must still refuse before any credential or state access.
-    assert refused.value.code == "NATIVE_EVAL_INPUTS_UNQUALIFIED"
+    assert "UNQUALIFIED_MODEL_ROUTE" in refused.value.code.split(",")
+    assert refused.value.code != "NATIVE_EVAL_INPUTS_UNQUALIFIED"
     assert not selected.state_dir.exists()
 
 
@@ -1534,23 +1536,17 @@ def test_mixed_eval_release_refuses_before_directory_or_renderer(tmp_path, appli
     assert not target.exists()
 
 
-@pytest.mark.parametrize("application_profile,with_primary", [(True, False), (True, True), (False, True)])
-@pytest.mark.parametrize("empty_inputs", [False, True])
-def test_mixed_eval_config_refuses_before_filesystem_read(
-        tmp_path, monkeypatch, application_profile, with_primary, empty_inputs):
+def test_mixed_eval_config_refuses_before_filesystem_read(tmp_path, monkeypatch):
     from dataclasses import replace
     from integrations.hermes_harness.stack import compose_profile
     from integrations.hermes_runtime.supervisor import expected_disabled_mcp
 
     _, recipe, consumer = selected_recipe()
-    selected = compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
-        secrets_file=tmp_path / "unread-secrets.env")
-    if application_profile:
-        selected = replace(selected, model_provider="mastermind-fabric", native_provider_id=None)
-    primary = {"schema": "unaccepted-primary-fixture"} if with_primary else None
-    evaluation_inputs = {} if empty_inputs else recipe["evaluation_inputs"]
+    selected = replace(compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
+        secrets_file=tmp_path / "unread-secrets.env"),
+        model_provider="mastermind-fabric", native_provider_id=None)
     with monkeypatch.context() as fence:
         fence.setattr(Path, "exists", lambda *_: pytest.fail("mixed selection inspected config"))
         fence.setattr(Path, "is_symlink", lambda *_: pytest.fail("mixed selection inspected config"))
         with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
-            expected_disabled_mcp(selected, consumer, primary, evaluation_inputs=evaluation_inputs)
+            expected_disabled_mcp(selected, consumer, evaluation_inputs=recipe["evaluation_inputs"])

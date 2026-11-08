@@ -13,21 +13,20 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-import test_provider_plan_auto_routing as auto
+from provider_plan_fixed_parent import materialize_fixed_parent, PARENT_PROFILE
 
 ROOT = Path(__file__).resolve().parents[1]
 HERE = ROOT / "ops/native_fabric/provider_plans"
 META = json.loads((HERE / "router_admission.json").read_text())
-source_stage = auto.source_stage
 
 
 @pytest.fixture(scope="module")
-def pair(source_stage, tmp_path_factory):
-    old = source_stage / "pick.py"
+def pair(tmp_path_factory):
+    parent = materialize_fixed_parent(tmp_path_factory.mktemp("router-parent37") / "source")
+    old = parent / "ext/pick.py"
     assert hashlib.sha256(old.read_bytes()).hexdigest() == META["before"]
-    assert hashlib.sha256((HERE / "profile.json").read_bytes()).hexdigest() == META["parent_profile_sha256"]
-    profile = json.loads((HERE / "profile.json").read_text())
-    parent = source_stage.parent / "composed"
+    assert hashlib.sha256(PARENT_PROFILE.read_bytes()).hexdigest() == META["parent_profile_sha256"]
+    profile = json.loads(PARENT_PROFILE.read_text())
     for rel, digest in profile["files"].items():
         assert hashlib.sha256((parent / rel).read_bytes()).hexdigest() == digest
     output = tmp_path_factory.mktemp("fixed-plan-router") / "source"

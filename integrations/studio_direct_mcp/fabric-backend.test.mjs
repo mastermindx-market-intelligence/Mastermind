@@ -779,15 +779,15 @@ const experientialPreview={state:'PREVIEW_ONLY',reserved:false,selection_recheck
   strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'experiential',
   model:'glm-5.3-uncensored',host:'ubuntu1',mode:'experiential'};
 
-test('experiential pool accepts only the exact uncensored slug with explicit retention opt-in',async()=>{
+test('experiential preserves exact legacy model and requires complete explicit consents',async()=>{
  assert.deepEqual(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.pool.enum,
-  ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
+  ['grok','glm','minimax','bailian','cursor','ocfree','go','byteplus','experiential']);
  for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
    assert.equal(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties[consent].type,'boolean');
  const e=engine(),f=facade(e);
  const noModel={...experientialPinned};delete noModel.model;
  const variant=change=>({...experientialPinned,...change});
- for(const args of [noModel,variant({model:'auto'}),variant({model:'glm-5.3-flash-uncensored'}),
+ for(const args of [variant({model:'auto'}),variant({model:'deepseek-v4.1-flash:free'}),
    variant({model:'GLM-5.3-Uncensored'}),variant({model:'glm-5.3'}),variant({retention_opt_in:false}),
    variant({retention_opt_in:'yes'}),variant({sensitive_data_opt_in:false}),
    variant({sensitive_data_opt_in:'yes'}),variant({code_exposure_opt_in:false}),
@@ -798,7 +798,7 @@ test('experiential pool accepts only the exact uncensored slug with explicit ret
    const out=unwrap(await f.call('fabric_request',args));
    assert.equal(out.error,'INVALID_ARGUMENT');assert.equal(out.retry_allowed,false);
  }
- // No opt-in flags may be supplied for AUTO or another provider.
+ // Partial consents without a response-only AUTO declaration remain invalid.
  for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
    assert.equal(unwrap(await f.call('fabric_request',{...packet,[field]:true})).error,'INVALID_ARGUMENT');
  const missingDisclosure={...experientialPinned};delete missingDisclosure.sensitive_data_opt_in;

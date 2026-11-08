@@ -570,7 +570,7 @@ dispatch_os_gateway() {
 MCP_COMPONENT_ARGV=()
 mcp_component_args() {
   local verb="$1" flag value seen="" sha="" plan="" public=0 helper_verb
-  local child_input="" child_sha=""
+  local child_input="" child_sha="" canary_input="" canary_sha=""
   shift
   while [ "$#" -gt 0 ]; do
     flag="$1"
@@ -587,7 +587,7 @@ mcp_component_args() {
         ;;
       --expected-sha) ;;
       --plan-sha256) [ "$verb" = "apply-mcp-component" ] || return 1 ;;
-      --selected-child-target-input|--selected-child-target-sha256)
+      --selected-child-target-input|--selected-child-target-sha256|--chris-dot-canary-input|--chris-dot-canary-sha256)
         [ "$verb" = "plan-mcp-component" ] || [ "$verb" = "apply-mcp-component" ] || return 1
         ;;
       *) return 1 ;;
@@ -609,6 +609,14 @@ mcp_component_args() {
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         child_sha="$value"
         ;;
+      --chris-dot-canary-input)
+        valid_component_input_path "$value" || return 1
+        canary_input="$value"
+        ;;
+      --chris-dot-canary-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        canary_sha="$value"
+        ;;
       *)
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         plan="$value"
@@ -621,6 +629,11 @@ mcp_component_args() {
   if [ -n "$child_input" ] || [ -n "$child_sha" ]; then
     [ -n "$child_input" ] || return 1
     [ -n "$child_sha" ] || return 1
+  fi
+  # The root-sealed Chris account input and its byte digest are one
+  # selection; no model, caller or helper can supply identity fields in argv.
+  if [ -n "$canary_input" ] || [ -n "$canary_sha" ]; then
+    [ -n "$canary_input" ] && [ -n "$canary_sha" ] || return 1
   fi
   case "$verb" in
     plan-mcp-component) helper_verb="plan" ;;
@@ -636,6 +649,10 @@ mcp_component_args() {
   if [ -n "$child_input" ]; then
     MCP_COMPONENT_ARGV+=(--selected-child-target-input "$child_input")
     MCP_COMPONENT_ARGV+=(--selected-child-target-sha256 "$child_sha")
+  fi
+  if [ -n "$canary_input" ]; then
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-input "$canary_input")
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-sha256 "$canary_sha")
   fi
   GATEWAY_EXPECTED_SHA="$sha"
   return 0

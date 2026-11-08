@@ -215,15 +215,10 @@ def invoke(pool, model, cwd, prompt):
         except (ValueError, AttributeError):
             pass
         if result.returncode != 0:
-            # Only the bridge's closed reason enum; never classify prose.
-            reason = result.stderr.strip().split(":", 1)[0]
-            fields["kind"] = {
-                "GATEWAY_RATE_LIMITED": "rate_limit",
-                "GATEWAY_AUTH_REFUSED": "authentication",
-                "GATEWAY_REQUEST_REFUSED": "invalid_request",
-                "GATEWAY_UPSTREAM_ERROR": "provider_error",
-            }.get(reason, "unknown")
-            fields["transport_reason"] = reason if re.fullmatch(r"[A-Z_]{1,80}", reason) else "UNCLASSIFIED"
+            # The transport owns the closed code/type/status vocabulary.
+            # Preserve it in the original outcome, never classify provider prose.
+            from experiential_transport import transport_refusal_metadata
+            fields.update(transport_refusal_metadata(result.stderr))
     br = lease_broker.default_broker()
     conn = br._conn()
     try:

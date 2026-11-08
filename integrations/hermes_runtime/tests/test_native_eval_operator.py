@@ -335,30 +335,19 @@ def test_outer_runner_loss_after_connected_result_preserves_uncertainty(command,
     assert w.state.calls.count("submit") <= 1 and w.state.calls.count("publish") <= 1
 
 
-@pytest.mark.parametrize("with_primary", [False, True])
-def test_shared_enrollment_attaches_tcp_policy_once_before_asyncio(
-    enrollment_command, monkeypatch, capsys, with_primary,
-):
+def test_shared_enrollment_attaches_tcp_policy_once_before_asyncio(enrollment_command, monkeypatch, capsys):
     import asyncio
-    from tests.test_hermes_primary_application_host import document
-    enforce = tcp_sandbox.enforce_role_tcp_ports
-    world = enrollment_command(
-        role="mmmeta", primary_application=document("mmmeta") if with_primary else None)
+    world = enrollment_command(role="mmmeta")
     calls = []
-    expected_ports = tcp_sandbox.role_tcp_ports(
-        world.profile, primary_application=world.launch.recipe.get("primary_application"))
-
-    def policy(bind_ports, connect_ports):
+    def policy(profile):
+        assert dump_profile(profile) == dump_profile(world.profile)
         with pytest.raises(RuntimeError, match="no running event loop"):
             asyncio.get_running_loop()
-        calls.append((bind_ports, connect_ports))
-
-    # Exercise the real launch-aware qualifier; replace only kernel attachment.
-    monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", enforce)
-    monkeypatch.setattr(tcp_sandbox, "apply_tcp_port_policy", policy)
+        calls.append(profile.role)
+    monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", policy)
     assert cli._enroll_meta_session(world.path, world.binary, native_launch=world.launch) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ENROLLED"
-    assert calls == [expected_ports]
+    assert calls == ["mmmeta"]
     assert world.state.creations == 1 and world.state.qualifications >= 4
 
 
