@@ -52,7 +52,11 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     assert set(before_host) == set(manifest)
     assert {key for key in manifest if before_host[key] != manifest[key]} == set(
         m.HOST_PULL_INTEGRITY_DIGESTS
-    )
+    ) | {"ext/lease_broker.py"}
+    # The current composed inverse carries the separately reviewed broker
+    # quiescence transition alongside exactly the three host members.
+    assert manifest["ext/lease_broker.py"] == m.COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256
+    assert before_host["ext/lease_broker.py"] == m.COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
     historical = m.normalize_application_carrier_base_manifest(before_host)
     assert {key for key in before_host if historical[key] != before_host[key]} == {
         'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS
@@ -60,7 +64,13 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         actual = hashlib.sha256((DRAFT.parent / 'candidate' / name).read_bytes()).hexdigest()
         assert actual == manifest['ext/' + name]
-        assert historical['ext/' + name] == expected
+        if name == 'remote_sub_exec.py':
+            # APPLICATION reverses to the security-composed executor before
+            # the legacy advice-only successor; both are independently pinned.
+            assert expected == m.SPARSE_INDEX_ADVICE_EXECUTOR_SHA256
+            assert historical['ext/' + name] == m.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+        else:
+            assert historical['ext/' + name] == expected
 
 
 def test_generated_manifest_covers_actual_new_entry_and_readiness_graph(tmp_path):

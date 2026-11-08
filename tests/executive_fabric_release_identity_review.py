@@ -795,7 +795,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2', 'sites': ((1717, 26, 31, 'int', '0o700'),)}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6b141c941fac4ebdb8f8f1fa6a48c6ff1d86deb9159e313ce68f460a6998e5c9', 'sites': ((1724, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -1013,4 +1013,12 @@ REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-file
 REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
+}
+
+# Select-option value length bound, not a UID/GID or account identity. Only this
+# complete protocol source and typed literal are reviewed; any byte drift restores
+# ordinary D8 scrutiny. This grants no browser permission or runtime authority.
+REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
+    "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
+    "sites": ((128, 72, 75, "int", "512"),),
 }

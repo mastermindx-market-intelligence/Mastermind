@@ -478,6 +478,10 @@ _CENSUS_SOURCE_KINDS = (
     ("census.css", "extension_census_css"),
     ("census_core.js", "extension_census_core"),
     ("census.js", "extension_census_controller"),
+    ("browser_control.js", "extension_browser_controller"),
+    ("browser_page.js", "extension_browser_page"),
+    ("browser.html", "extension_browser_settings_html"),
+    ("browser_settings.js", "extension_browser_settings"),
 )
 _CENSUS_SOURCE_NAMES = frozenset(name for name, _kind in _CENSUS_SOURCE_KINDS)
 _CENSUS_MAX_FILE_BYTES = 262144
@@ -494,20 +498,24 @@ def _manifest_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
-    """Refuse any layout/identity/permission widening of the CENSUS1 package."""
+    """Qualify the exact 0.3 package; browser grants remain optional in Chrome."""
     import base64
 
     try:
         manifest = json.loads(payload.decode("utf-8"), object_pairs_hook=_manifest_members)
         keys = {"manifest_version", "name", "version", "key", "permissions",
-                "host_permissions", "background", "content_scripts", "action"}
+                "host_permissions", "background", "content_scripts", "action",
+                "optional_permissions", "optional_host_permissions", "options_page"}
         if not isinstance(manifest, dict) or set(manifest) != keys:
             raise ValueError("unsupported_manifest")
         origins = ["https://chat.openai.com/*", "https://chatgpt.com/*"]
         if (type(manifest["manifest_version"]) is not int
                 or manifest["manifest_version"] != 3
                 or manifest["version"] != release.package_version
-                or manifest["permissions"] != ["nativeMessaging", "alarms"]
+                or manifest["permissions"] != ["nativeMessaging", "alarms", "debugger"]
+                or manifest["optional_permissions"] != ["tabs", "scripting"]
+                or manifest["optional_host_permissions"] != ["http://*/*", "https://*/*"]
+                or manifest["options_page"] != "browser.html"
                 or manifest["host_permissions"] != origins
                 or manifest["background"] != {"service_worker": "background.js"}
                 or manifest["content_scripts"] != [{"matches": origins,
@@ -538,7 +546,7 @@ def render_census_extension_bundle(
     source_files: Mapping[str, bytes],
     expected_source_digests: Mapping[str, str],
 ) -> DeploymentBundle:
-    """Render ten complete CENSUS1 artifacts; perform no installation.
+    """Render the complete versioned extension artifacts; perform no installation.
 
     The caller must authenticate the source commit and supply independently
     established asset digests. Matching caller-supplied hashes proves integrity,

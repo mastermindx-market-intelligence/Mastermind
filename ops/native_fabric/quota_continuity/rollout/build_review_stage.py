@@ -1384,7 +1384,7 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
-    manifest = before_host_pull_integrity(before_quota_reset_recovery(manifest))
+    manifest = before_host_pull_integrity(before_sparse_index_advice(before_quota_reset_recovery(manifest)))
     if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
         manifest = before_application_pool_composition(manifest)
     else:
