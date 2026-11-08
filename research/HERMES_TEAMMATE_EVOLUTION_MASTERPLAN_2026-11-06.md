@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §§56–58. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–59. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2546,3 +2546,29 @@ Thirty-nine incumbent v4 discovery/context/native cases passed after the initial
 The new actual issued-compiler/temporary-Git journey caught two connected adapter gaps before publication: the raw HTTP path fence lacked the two v5 names, and the seven-field GET lookup needed the existing parser's literal null representation for expected_preference_revision=None. The path boundary has been extended to exactly the finite tool catalogue; the GET adapter now preserves the original None in retained identity and encodes only that known nullable query field as the existing null literal. No mutation retry or replacement request was introduced. Final journey results remain pending.
 
 Fresh PR2234 readback remains OPEN/Ready at c438, unmerged. Main CI42425902793 is now SUCCESS; runtime42425902801 remains cancelled and unproven. PR2257 at e1a2 has successful qualification42428004335, harness42428004485, proxy42428004278 and OAuth42428004383; main CI42428004264 was running and runtime42428004378 was cancelled. No re-arm, rerun or release-bypass action occurred. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
+
+## 59. Bounded CI budget repair and connected source proof — 2026-11-08
+
+### Confirmed original CI outcomes
+
+The exact GitHub check annotations establish a ten-minute job timeout for both Python 3.12 runtime cancellations: AUTH PR2257 job128570371744 and EVAL PR2234 job128563995217 each report **The job has exceeded the maximum execution time of 10m0s.** The generic cancellation log alone was insufficient; the annotation read now resolves that cause. Their original effects are settled cancellations, not unexplained runtime failures. Python3.13 completed: AUTH8m34 overall/8m14 tests and EVAL9m49 overall/9m26 tests. Python3.12 reached10m15 overall, including cancellation cleanup.
+
+PR2234's original release request has become native queue entry **MQE_lQDOTotz3c8AAAABNi1Bcs4ABAiKzgPPA_0**, observed **AWAITING_CHECKS** at headc43807ba8a816ab81547a5de3d2ae2c917419aa8. autoMergeRequest is now null because the original effect advanced; this is not permission to re-arm. Its queue commit c78802cffc7b83e9d6a40402db2dc6f6c29689f3 runs the existing queue CI. No merge or installed acceptance is claimed.
+
+### Finite independent maintenance authorization before edit
+
+The assigned integration principal authorizes source operation **hermes-runtime-ci-budget-20261108-c3**, sole planned carrier **sol/hermes-runtime-ci-budget-20261108-c3**, from protected **b332c692fc99b8b6aa498764723a0fe49db9a09f**. The exact and only source path is **.github/workflows/hermes-runtime.yml**. Change only jobs.runtime-acceptance.timeout-minutes from10 to20, a bounded CI job budget justified by the two actual timeout annotations and the successful near-limit sibling jobs. Keep the Python matrix, fail-fast=false, dependencies, tests, triggers, permissions and all runtime/native execution budgets unchanged.
+
+This is an independent CI-maintenance operation, not part of the EVAL-owned AUTH contribution. The existing EVAL fences explicitly self-scope to their own program surface; this one-file workflow delta is not applicable to those fences. No NATIVE_EVAL_INTEGRATION_PATHS, forbidden-workflow test, program-surface rule or other authority is widened. Once accepted, compose the protected maintenance source into the original auth carrier normally. No mutation or re-arm of PR2234's existing queue effect is authorized by this maintenance decision.
+
+The protected movement1890f608 -> b332c692 is two commits affecting presentation truth and CI architecture documentation; no governing-law, Hermes, EVAL or this workflow source overlap was found. Reuse the compatible law pin66780. The workflow remains blobe382e5b80d4417f336cd8bd236dba7d07e8a2f8c at the selected base. This authorization precedes its edit/publication; no new maintenance PR or acceptance exists yet.
+
+### V5 qualification progress
+
+The four-case real note/preference journey run (PID17436) passed after the existing nullable-query encoding repair. It exercises prepare, the original seven-field lookup, submit, observed proposal, repeat without duplicate publication, independent temporary-Git integration, source reconciliation and fresh current read, with CODE distinct from DATA. This is source fixture proof, not live publication.
+
+The full in-process App -> retained CooFactsClient -> original CeoIngressWorkspaceClient -> actual ExecutiveControlService handler -> actual provider/compiler -> native decoder path now passes historical v3, v4 and newv5. Five late owner/authority/transport changes and both v5 release-derivation cases also passed in that cohort before a later tool-test assertion failed. The failed workspace-grant assertion expected NOT_DISPATCHED after an original POST had already been attempted. Production correctly retained EFFECT_UNKNOWN; repair the fixture expectation, not the conservative uncertainty boundary.
+
+The exact Company identity-pin update was compared against protected1890: complete Company listener AST and all six original Constant tokens, values, spellings, paths and columns are unchanged. Source SHA256 f9c371d3eca6ab1f3572c66d8eea38e663defb06192e77070ff76f2a56283b06; enclosing ingress AST SHA25627fcfd5595d71bd938b68546b28427e5ed9297099e71d93942c1d1abe6c164f6. Only the authorized source/method pins changed. The interrupted file write was read back successfully before further work.
+
+C3 remains source validation only. Original runtimeC26/Fabric/socket/fleet denials, primary APPLICATION writer,398/409 holds and installed acceptance obligations remain unchanged. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
