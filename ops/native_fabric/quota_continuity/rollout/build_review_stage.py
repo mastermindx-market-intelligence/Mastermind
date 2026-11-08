@@ -5,6 +5,7 @@ This review workspace contains exact installed preimages plus proposed source
 overlays. The resulting bytes must be committed/reviewed/merged before release.
 No directory scan decides what to transport; this fixed list is the inventory.
 """
+import ast
 import argparse
 import hashlib
 import json
@@ -85,6 +86,217 @@ EXTRA_PREIMAGES = {
     "host_pull_probe.template": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
     "pool": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
 }
+
+
+
+# This current four-member source cohort follows the authenticated historical
+# native base. Optional GLM runtime registration remains the separate HTTP pair.
+GLM_CORE_PREIMAGES = {
+    "go_lease_capability.py": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+    "go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+}
+GLM_CORE_DIGESTS = {
+    "go_lease_capability.py": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+    "go_lease_gateway.py": "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193",
+    "lease_broker.py": "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004",
+}
+GLM_BROKER_TRANSITIONS = {
+    "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807":
+        ("lease_broker.py", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b":
+        ("lease_broker_provider.py", "5a672d318d49ae0d0be91c4669bdbca23a9e589e576aeed16531197664c8fdd0"),
+    "79103739c4c46cae3988187aea591aa06209ac1bd38046f49b8699fd93c205d0":
+        ("lease_broker_h2.py", "16526b57fec9e48bad952c930b76644fe8e1578ba9e952fa6847f089258113b7"),
+    "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173":
+        ("lease_broker_provider_h2.py", "470991af25bccc430a6310fb2de5438c6d4f66135f6faf614b405a1ff8c2004c"),
+}
+GLM_CORE_SOURCE_DIRECTORY = "rollout/preimages/glm_application_core_5c3d"
+_GLM_BROKER_NODES = (
+    "Broker._ensure_schema", "Broker.begin_application_turn",
+    "Broker.complete_application_request", "_application_http_recipe",
+    "_application_receipt", "_application_stored_terminal",
+    "_read_application_accounts", "_APPLICATION_HTTP_POOLS")
+
+
+def _glm_core_file(path, expected):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("GLM native core requires an explicit source file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("GLM native core source commitment differs")
+    return raw
+
+
+def _glm_historical_core_source(root, name):
+    if name not in GLM_CORE_PREIMAGES:
+        return Path(root) / "candidate" / name
+    path = Path(root) / GLM_CORE_SOURCE_DIRECTORY / name
+    _glm_core_file(path, GLM_CORE_PREIMAGES[name])
+    return path
+
+
+def before_glm_application_core(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native GLM core manifest invalid")
+    reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
+    marked = any(manifest.get("ext/" + name) == digest
+                 for name, digest in GLM_CORE_DIGESTS.items()) or (
+                 manifest.get("ext/lease_broker.py") in reverse)
+    if not marked:
+        return dict(manifest)
+    if (any(manifest.get("ext/" + name) != digest
+            for name, digest in GLM_CORE_DIGESTS.items() if name != "lease_broker.py") or
+            manifest.get("ext/lease_broker.py") not in reverse):
+        raise ValueError("native GLM core cohort is partial or foreign")
+    previous = dict(manifest)
+    previous.update({"ext/" + name: digest for name, digest in GLM_CORE_PREIMAGES.items()})
+    previous["ext/lease_broker.py"] = reverse[manifest["ext/lease_broker.py"]]
+    return previous
+
+
+def _glm_broker_nodes(raw):
+    tree = ast.parse(raw)
+    nodes = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            nodes[node.name] = node
+        elif isinstance(node, ast.ClassDef) and node.name == "Broker":
+            nodes.update({"Broker." + child.name: child for child in node.body
+                          if isinstance(child, ast.FunctionDef)})
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    nodes[target.id] = node
+    lines = raw.splitlines(keepends=True)
+    def span(node):
+        return (sum(map(len, lines[:node.lineno - 1])) + node.col_offset,
+                sum(map(len, lines[:node.end_lineno - 1])) + node.end_col_offset)
+    return nodes, span, lines
+
+
+def _glm_broker_forward(root, raw):
+    prior = sha(raw)
+    if prior not in GLM_BROKER_TRANSITIONS:
+        raise ValueError("GLM Broker composition parent differs")
+    baseline = _glm_core_file(
+        Path(root) / GLM_CORE_SOURCE_DIRECTORY / "lease_broker.py",
+        GLM_CORE_PREIMAGES["lease_broker.py"])
+    current = _glm_core_file(
+        Path(root) / "candidate/lease_broker.py", GLM_CORE_DIGESTS["lease_broker.py"])
+    old_nodes, old_span, _ = _glm_broker_nodes(baseline)
+    new_nodes, new_span, new_lines = _glm_broker_nodes(current)
+    target_nodes, target_span, _ = _glm_broker_nodes(raw)
+    edits = []
+    for name in _GLM_BROKER_NODES:
+        before = baseline[slice(*old_span(old_nodes[name]))]
+        after = current[slice(*new_span(new_nodes[name]))]
+        start, end = target_span(target_nodes[name])
+        if raw[start:end] != before:
+            raise ValueError("GLM Broker composition would change an incumbent function")
+        edits.append((start, end, after))
+    start = sum(map(len, new_lines[:new_nodes["_application_glm_http_recipe"].lineno - 1]))
+    end = sum(map(len, new_lines[:new_nodes["_application_http_recipe"].lineno - 1]))
+    helpers = current[start:end]
+    if len(helpers) != 2491 or sha(helpers) != "eb5a56ec1f3fcbb8e71725b8152e2dfd4a20afda354d63911e890be6844ebf6d":
+        raise ValueError("GLM Broker helper block differs")
+    insert = target_span(target_nodes["_application_http_recipe"])[0]
+    edits.append((insert, insert, helpers))
+    result = raw
+    for start, end, replacement in sorted(edits, reverse=True):
+        result = result[:start] + replacement + result[end:]
+    if sha(result) != GLM_BROKER_TRANSITIONS[prior][1]:
+        raise ValueError("GLM Broker composed source commitment differs")
+    return result
+
+
+def _glm_core_dependency_bytes(root, name, prior):
+    if name == "lease_broker.py":
+        if prior not in GLM_BROKER_TRANSITIONS:
+            raise ValueError("GLM Broker dependency parent differs")
+        source, _ = GLM_BROKER_TRANSITIONS[prior]
+        raw = _glm_core_file(Path(root) / GLM_CORE_SOURCE_DIRECTORY / source, prior)
+        return _glm_broker_forward(root, raw)
+    if prior != GLM_CORE_PREIMAGES.get(name):
+        raise ValueError("GLM application dependency parent differs")
+    return _glm_core_file(Path(root) / "candidate" / name, GLM_CORE_DIGESTS[name])
+
+
+def go_application_dependencies(root, *, staged_manifest=None):
+    previous = (before_glm_application_core(dict(staged_manifest))
+                if staged_manifest is not None else None)
+    dependencies = _go_application_dependencies_before_glm(root, staged_manifest=previous)
+    if staged_manifest is not None and previous == staged_manifest:
+        return dependencies
+    for name in GO_APPLICATION_DEPENDENCIES:
+        prior = dependencies[name]
+        raw = _glm_core_dependency_bytes(root, name, prior["sha256"])
+        dependencies[name] = {
+            "sha256": sha(raw), "bytes": len(raw),
+            "source": "candidate/" + name,
+            "composition": {
+                "schema": "mastermind.glm-native-core-source.v1",
+                "preimage_sha256": prior["sha256"],
+                "candidate_sha256": GLM_CORE_DIGESTS[name],
+                "inherited": prior.get("composition"),
+            },
+        }
+    return dependencies
+
+
+def go_staged_dependency_hashes(manifest, candidate_hashes):
+    previous = before_glm_application_core(manifest)
+    if previous == manifest:
+        return _go_staged_dependency_hashes_before_glm(manifest, candidate_hashes)
+    old_hashes = dict(candidate_hashes)
+    reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
+    for name in GO_APPLICATION_DEPENDENCIES:
+        if name == "lease_broker.py":
+            if old_hashes.get(name) not in reverse:
+                raise ValueError("GLM Broker candidate dependency differs")
+            old_hashes[name] = reverse[old_hashes[name]]
+        else:
+            if old_hashes.get(name) != GLM_CORE_DIGESTS[name]:
+                raise ValueError("GLM application candidate dependency differs")
+            old_hashes[name] = GLM_CORE_PREIMAGES[name]
+    staged = _go_staged_dependency_hashes_before_glm(previous, old_hashes)
+    staged.update({name: GLM_CORE_DIGESTS[name] for name in GO_APPLICATION_DEPENDENCIES
+                   if name != "lease_broker.py"})
+    staged["lease_broker.py"] = GLM_BROKER_TRANSITIONS[staged["lease_broker.py"]][1]
+    if any(manifest.get("ext/" + name) != digest for name, digest in staged.items()):
+        raise ValueError("GLM native staged dependencies differ from composed source")
+    return staged
+
+
+def compose_glm_application_core(root, output, manifest, files):
+    """Advance one complete admitted source cohort without changing its namespace."""
+    if before_glm_application_core(manifest) != manifest:
+        raise ValueError("native GLM core was already composed")
+    validate_go_base_manifest(
+        manifest, {name: manifest["ext/" + name] for name in GO_APPLICATION_DEPENDENCIES})
+    stage = Path(output) / "native-code-stage"
+    captured = {}
+    for name, prior in GLM_CORE_PREIMAGES.items():
+        relative = "ext/" + name
+        before = _glm_core_file(stage / relative, manifest[relative])
+        if name == "lease_broker.py":
+            raw = _glm_broker_forward(root, before)
+            source = "candidate/" + name
+        else:
+            if sha(before) != prior:
+                raise ValueError("native GLM core parent differs")
+            source = ("candidate/") + name
+            raw = _glm_core_file(Path(root) / source, GLM_CORE_DIGESTS[name])
+        captured[relative] = (raw, source, sha(before))
+    for relative, (raw, source, prior) in captured.items():
+        (stage / relative).write_bytes(raw)
+        manifest[relative] = sha(raw)
+        files[relative] = dict(files[relative], source=source, sha256=sha(raw), bytes=len(raw),
+            composition={"schema": "mastermind.glm-native-core-source.v1",
+                         "preimage_sha256": prior, "candidate_sha256": GLM_CORE_DIGESTS[Path(relative).name]})
+    validate_go_base_manifest(
+        manifest, {name: manifest["ext/" + name] for name in GO_APPLICATION_DEPENDENCIES})
 
 
 def sha(raw):
@@ -525,6 +737,8 @@ def _before_provider_application_without_remote_placement(manifest):
 
 
 def before_provider_application(manifest):
+    if type(manifest) is dict:
+        manifest = before_glm_application_core(manifest)
     if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
         record, _, _ = provider_remote_placement_record()
         if len(manifest) != 116 or _manifest_digest(manifest) != record["application_after_manifest_sha256"]:
@@ -539,10 +753,10 @@ def before_provider_application(manifest):
 def _application_base(manifest):
     return {key: value for key, value in manifest.items()
             if key not in {"ext/native_go_entry.py", "ext/go_application_handler.py"}
-            | HTTP_GENERATION_MEMBERS}
+            | (HTTP_GENERATION_MEMBERS | GLM_HTTP_GENERATION_MEMBERS)}
 
 
-def go_staged_dependency_hashes(manifest, candidate_hashes):
+def _go_staged_dependency_hashes_before_glm(manifest, candidate_hashes):
     """Keep original candidate provenance while binding actual combined bytes."""
     result = dict(candidate_hashes)
     base = _application_base(manifest)
@@ -868,7 +1082,74 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go base closure is not the reviewed protected composition")
 
 
-def application_http_sources(root):
+
+GLM_HTTP_GENERATION_MEMBERS = frozenset({
+    "ext/glm_application_adapter.py",
+    "ext/application_http_realms.v2.json",
+})
+
+
+def _application_glm_source_commit(root, captured):
+    """Bind sealed GLM metadata to the exact committed source bytes."""
+    repo = Path(root).resolve().parents[2]
+    def git(*arguments):
+        result = subprocess.run(["git", "-C", str(repo), *arguments],
+                                capture_output=True, check=False)
+        if result.returncode:
+            raise ValueError("GLM application source commit unavailable")
+        return result.stdout
+    if Path(git("rev-parse", "--show-toplevel").decode().strip()).resolve() != repo:
+        raise ValueError("GLM application source repository differs")
+    commit = git("rev-parse", "HEAD").decode().strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("GLM application source commit invalid")
+    for relative, raw in captured.items():
+        if git("show", commit + ":" + relative) != raw:
+            raise ValueError("GLM application source is not committed: " + relative)
+    return commit
+
+
+def _glm_application_http_sources(root, legacy_sources, *, captured_projection=None, captured_projection_sha256=None):
+    """Capture the optional GLM pair without replacing external glm_shim."""
+    root = Path(root)
+    reader_relative = "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py"
+    reader_raw = legacy_sources["ext/application_http_realm_projection.py"][0]
+    compiler = {"__name__": "_captured_glm_application_projection",
+                "__file__": str(root / "rollout/application_http_realm_projection.py")}
+    exec(compile(reader_raw, compiler["__file__"], "exec"), compiler)
+    repo = root.resolve().parents[2]
+    captured = {}
+    for relative, _, _ in compiler["GLM_INPUT_PINS"]:
+        path = repo / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("GLM application source must be an explicit regular file")
+        captured[relative] = path.read_bytes()
+    if captured_projection is None and captured_projection_sha256 is None:
+        commit = _application_glm_source_commit(root, dict(captured, **{reader_relative: reader_raw}))
+    else:
+        if type(captured_projection) is not bytes or type(captured_projection_sha256) is not str:
+            raise ValueError("captured GLM projection requires bytes and the accepted artifact hash")
+        captured_document = compiler["validate_projection"](
+            captured_projection, expected_sha256=captured_projection_sha256)
+        commit = captured_document.get("glm_source_commit")
+        if type(commit) is not str:
+            raise ValueError("captured GLM projection must be the closed v2 document")
+    legacy_raw = legacy_sources["ext/application_http_realms.v1.json"][0]
+    payload = compiler["compile_glm_projection_bytes"](
+        captured, legacy_projection=legacy_raw, legacy_sha256=sha(legacy_raw),
+        source_commit=commit)
+    if captured_projection is not None and payload != captured_projection:
+        raise ValueError("captured GLM projection differs from the exact current source closure")
+    compiler["validate_projection"](payload, expected_sha256=sha(payload))
+    adapter_source = "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py"
+    return {
+        "ext/glm_application_adapter.py": (captured[adapter_source], adapter_source),
+        "ext/application_http_realms.v2.json": (
+            payload, "generated:rollout/application_http_realm_projection.py#glm-v2"),
+    }
+
+
+def application_http_sources(root, *, include_glm=False, captured_projection=None, captured_projection_sha256=None):
     """Compile immutable metadata from the exact three historical inputs.
 
     Realm and H preimages are explicitly mapped as AST evidence only. New
@@ -896,20 +1177,29 @@ def application_http_sources(root):
         for row in compiler["INPUT_SOURCES"]}
     payload = compiler["compile_projection_bytes"](inputs)
     compiler["validate_projection"](payload, expected_sha256=sha(payload))
-    return {"ext/application_http_transports.py":
+    sources = {"ext/application_http_transports.py":
                 (read(root / "candidate/application_http_transports.py"), "candidate/application_http_transports.py"),
             "ext/application_http_realm_projection.py":
                 (reader_raw, "rollout/application_http_realm_projection.py"),
             "ext/application_http_realms.v1.json":
                 (payload, "generated:rollout/application_http_realm_projection.py")}
+    if not include_glm and (captured_projection is not None or captured_projection_sha256 is not None):
+        raise ValueError("captured GLM projection requires the complete GLM source pair")
+    if type(include_glm) is not bool:
+        raise ValueError("GLM application opt-in must be boolean")
+    if include_glm:
+        sources.update(_glm_application_http_sources(root, sources, captured_projection=captured_projection, captured_projection_sha256=captured_projection_sha256))
+    return sources
 
 
-def compose_application_http_stage(root, output, manifest, files):
+def compose_application_http_stage(root, output, manifest, files, *, include_glm=False):
     """Add one closed metadata/reader/transport group to existing Go ingress."""
+    if set(manifest) & GLM_HTTP_GENERATION_MEMBERS:
+        raise ValueError("application GLM HTTP stage was already composed")
     if (not {"ext/native_go_entry.py", "ext/go_application_handler.py"}.issubset(manifest)
             or HTTP_GENERATION_MEMBERS & set(manifest)):
         raise ValueError("application HTTP requires one unextended Go composition")
-    additions = application_http_sources(root)
+    additions = application_http_sources(root, include_glm=include_glm)
     for relative in additions:
         target = Path(output) / "native-code-stage" / relative
         if target.exists() or target.is_symlink():
@@ -1055,7 +1345,7 @@ def quota_reset_sources(root, *, preserve_provider=False, composed_parent=False)
             preimage = PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES[name]
         elif composed_parent and not preserve_provider and name in QUOTA_RESET_COMPOSED_PREIMAGES:
             preimage = QUOTA_RESET_COMPOSED_PREIMAGES[name]
-        original = _quota_reset_file(root / "candidate" / name, preimage)
+        original = _quota_reset_file((_glm_historical_core_source(root, name) if name in GLM_CORE_PREIMAGES and preimage == GLM_CORE_PREIMAGES[name] else root / "candidate" / name), preimage)
         provider_preimage = None
         if preserve_provider and name in QUOTA_RESET_PATCHES:
             row = provider_record["replacements"]["ext/" + name]
@@ -1095,6 +1385,8 @@ def quota_reset_sources(root, *, preserve_provider=False, composed_parent=False)
 
 def before_quota_reset_recovery(manifest):
     """Reverse only the complete H2 successor of the exact APPLICATION parent."""
+    if type(manifest) is dict:
+        manifest = before_glm_application_core(manifest)
     if type(manifest) is not dict:
         return manifest
     if _has_provider_members(manifest) and any(
@@ -1132,16 +1424,15 @@ def before_quota_reset_recovery(manifest):
     return previous
 
 
-def go_application_dependencies(root, *, staged_manifest=None):
+def _go_application_dependencies_before_glm(root, *, staged_manifest=None):
     """The builder and installer authenticate the same actual dependency bytes."""
     root = Path(root)
     quota = None
     if staged_manifest is not None:
         base = dict(staged_manifest)
         pair = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
-        present_pair, present_http = pair & set(base), HTTP_GENERATION_MEMBERS & set(base)
-        if ((present_pair and present_pair != pair)
-                or (present_http and (present_http != HTTP_GENERATION_MEMBERS or present_pair != pair))):
+        present_pair, present_http = pair & set(base), (HTTP_GENERATION_MEMBERS | GLM_HTTP_GENERATION_MEMBERS) & set(base)
+        if (present_pair and present_pair != pair or (present_http and (present_http not in (HTTP_GENERATION_MEMBERS, HTTP_GENERATION_MEMBERS | GLM_HTTP_GENERATION_MEMBERS) or present_pair != pair))):
             raise ValueError("quota reset Go or HTTP closure incomplete")
         for name in present_pair | present_http:
             del base[name]
@@ -1159,11 +1450,11 @@ def go_application_dependencies(root, *, staged_manifest=None):
             dependencies[name] = {"sha256": sha(raw), "bytes": len(raw),
                                   "source": source, "composition": provenance}
         else:
-            path = root / "candidate" / name
+            path = _glm_historical_core_source(root, name)
             if path.is_symlink() or not path.is_file():
                 raise ValueError("external Go application dependency unavailable")
             raw = path.read_bytes()
-            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw), "source": "candidate/" + name}
+            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw), "source": str(path.relative_to(root))}
     return dependencies
 
 
@@ -1219,6 +1510,8 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
     native stage. C's existing generation/installer must explicitly consume and
     qualify this component before any installed path can change.
     """
+    if staged_manifest is not None and before_glm_application_core(staged_manifest) == staged_manifest:
+        raise ValueError("current Go handler requires the complete application core cohort")
     root, output = Path(root), Path(output)
     if (not isinstance(stable_ext, str) or not Path(stable_ext).is_absolute()
             or ".." in Path(stable_ext).parts):
@@ -1270,6 +1563,8 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
 
 def compose_go_stage(root, output, manifest, files, component):
     """Join only the captured external B handler and the fixed native entry."""
+    if before_glm_application_core(manifest) == manifest:
+        raise ValueError("current Go handler requires the complete application core cohort")
     root, output = Path(root), Path(output)
     staged_dependencies = go_staged_dependency_hashes(manifest,
         {name: row["sha256"] for name, row in component["dependencies"].items()})
@@ -1485,7 +1780,7 @@ def application_carrier_candidate_digests(root):
     # named guard, never silently reselect an historical base.
     observed = {}
     for name in APPLICATION_CARRIER_DIGESTS:
-        source = root / "candidate" / name
+        source = _glm_historical_core_source(root, name)
         observed[name] = (None if source.is_symlink() or not source.is_file()
                           else sha(source.read_bytes()))
         if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
@@ -1511,6 +1806,8 @@ def normalize_application_carrier_base_manifest(manifest):
     The caller's manifest and published generation keep their actual hashes.
     A historical namespace cannot be relabeled as an APPLICATION generation.
     """
+    if type(manifest) is dict:
+        manifest = before_glm_application_core(manifest)
     if type(manifest) is not dict:
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
@@ -1554,7 +1851,11 @@ def main():
     parser.add_argument('--include-quota-reset-recovery', action='store_true',
                         help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
     parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
+    parser.add_argument("--include-application-glm", action="store_true",
+                        help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
     args = parser.parse_args()
+    if args.include_application_glm and not args.include_application_http:
+        parser.error("--include-application-glm requires --include-application-http")
     if args.include_provider_plan_remote_placement and not args.include_provider_plan_application:
         parser.error("--include-provider-plan-remote-placement requires --include-provider-plan-application")
     if args.include_provider_plan_remote_placement and args.include_quota_reset_recovery:
@@ -1573,44 +1874,48 @@ def main():
     files = {}
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
-            # Carrier successors still authenticate their immutable accepted
-            # overlay. Hash the exact regular candidate bytes being staged.
-            if name in GROK47_MERGED_SOURCE_DIGESTS:
-                historical = root.parent / "grok47" / "overlay" / name
-                if (historical.is_symlink() or not historical.is_file()
-                        or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
-                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
-            source = root / "candidate" / name
-            if source.is_symlink() or not source.is_file():
-                raise ValueError("application carrier source is not a regular file: " + name)
+        if name in GLM_CORE_PREIMAGES:
+            source = _glm_historical_core_source(root, name)
             raw = source.read_bytes()
-            if sha(raw) != application_carrier[name]:
-                raise ValueError("application carrier source changed during build")
-        elif name in GROK47_MERGED_SOURCE_DIGESTS:
-            source = root.parent / "grok47" / "overlay" / name
-            if source.is_symlink() or not source.is_file():
-                raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
-            # The staged bytes must be the exact approved source bytes,
-            # not a second unverified read after the digest check.
-            raw = source.read_bytes()
-            if sha(raw) != GROK47_MERGED_SOURCE_DIGESTS[name]:
-                raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
-            if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+        else:
+            if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+                # Carrier successors still authenticate their immutable accepted
+                # overlay. Hash the exact regular candidate bytes being staged.
+                if name in GROK47_MERGED_SOURCE_DIGESTS:
+                    historical = root.parent / "grok47" / "overlay" / name
+                    if (historical.is_symlink() or not historical.is_file()
+                            or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                        raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
                 source = root / "candidate" / name
                 if source.is_symlink() or not source.is_file():
-                    raise ValueError("accepted Grok forward composition mismatch: " + name)
+                    raise ValueError("application carrier source is not a regular file: " + name)
                 raw = source.read_bytes()
-                if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
-                    raise ValueError("accepted Grok forward composition mismatch: " + name)
-        else:
-            choices = (root / "candidate" / name,)
-            if name not in PREIMAGE_ONLY:
-                choices += (root / "source" / name,)
-            source = next((p for p in choices if p.is_file()), None)
-            if source is None or source.is_symlink():
-                raise ValueError("missing explicit regular code dependency: " + name)
-            raw = source.read_bytes()
+                if sha(raw) != application_carrier[name]:
+                    raise ValueError("application carrier source changed during build")
+            elif name in GROK47_MERGED_SOURCE_DIGESTS:
+                source = root.parent / "grok47" / "overlay" / name
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+                # The staged bytes must be the exact approved source bytes,
+                # not a second unverified read after the digest check.
+                raw = source.read_bytes()
+                if sha(raw) != GROK47_MERGED_SOURCE_DIGESTS[name]:
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+                if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+                    source = root / "candidate" / name
+                    if source.is_symlink() or not source.is_file():
+                        raise ValueError("accepted Grok forward composition mismatch: " + name)
+                    raw = source.read_bytes()
+                    if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
+                        raise ValueError("accepted Grok forward composition mismatch: " + name)
+            else:
+                choices = (root / "candidate" / name,)
+                if name not in PREIMAGE_ONLY:
+                    choices += (root / "source" / name,)
+                source = next((p for p in choices if p.is_file()), None)
+                if source is None or source.is_symlink():
+                    raise ValueError("missing explicit regular code dependency: " + name)
+                raw = source.read_bytes()
         preimage = rows.get(name)
         if name in BASE_FILES:
             original = root / "source" / PREIMAGE_ONLY.get(name, name)
@@ -1623,6 +1928,8 @@ def main():
         source_ref = ("../grok47/overlay/" + name if not (application_carrier and name in APPLICATION_CARRIER_DIGESTS) and name in GROK47_MERGED_SOURCE_DIGESTS
                       and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
                       else str(source.relative_to(root)))
+        if name in GLM_CORE_PREIMAGES:
+            source_ref = str(source.relative_to(root))
         files[relative] = {"source": source_ref, "sha256": sha(raw),
                            "installed_preimage_sha256": preimage, "bytes": len(raw)}
     source = root / "candidate/pool_launcher.sh"
@@ -1668,6 +1975,7 @@ def main():
     # quiescence broker successor) that the composed parent closure accepts.
     before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(
         before_provider_application(before_quota_reset_recovery(manifest)))))
+    compose_glm_application_core(root, output, manifest, files)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
@@ -1675,8 +1983,10 @@ def main():
     if args.include_provider_plan_application:
         extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
     if args.include_application_http:
-        compose_application_http_stage(root, output, manifest, files)
+        compose_application_http_stage(root, output, manifest, files, include_glm=args.include_application_glm)
         extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}
+    if args.include_application_glm:
+        extra |= {name.split("/", 1)[1] for name in GLM_HTTP_GENERATION_MEMBERS}
     if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS | extra:
         raise ValueError("unexpected composed native file")
     record = {"qualified_pure_yaml": pure_yaml, "schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),

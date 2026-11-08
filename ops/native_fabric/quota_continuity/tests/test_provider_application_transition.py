@@ -156,30 +156,44 @@ def test_actual_component_preserves_candidate_and_staged_broker(combined_builds,
     inventory = json.loads((output / "native-source-inventory.json").read_bytes())
     record = json.loads((output / "external-go-component/component.json").read_bytes())
     original = json.loads((builds.default / "native-manifest.json").read_bytes())
+    historical_original = builder.before_glm_application_core(original)
     unchanged = dict(manifest)
     base = {k: v for k, v in manifest.items()
             if k not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS}
     assert len(manifest) == count and len(base) == 116
     parent = builder.before_quota_reset_recovery(base)
-    assert builder.before_provider_application(parent) == original
+    assert builder.before_provider_application(parent) == historical_original
     assert manifest == unchanged
     broker = "lease_broker.py"
+    expected_core = {
+        "go_lease_capability.py": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+        "go_lease_gateway.py": "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193",
+        broker: ("470991af25bccc430a6310fb2de5438c6d4f66135f6faf614b405a1ff8c2004c" if extension.startswith("quota_")
+                 else "5a672d318d49ae0d0be91c4669bdbca23a9e589e576aeed16531197664c8fdd0"),
+    }
+    assert {name: manifest["ext/" + name] for name in expected_core} == expected_core
+    assert original["ext/" + broker] == "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"
     assert record["native_stage_dependencies"][broker] == manifest["ext/" + broker]
     if extension.startswith("quota_"):
-        assert builder._manifest_digest(base) == builder.PROVIDER_QUOTA_RESET_MANIFEST_SHA256
+        assert builder._manifest_digest(builder.before_glm_application_core(base)) == builder.PROVIDER_QUOTA_RESET_MANIFEST_SHA256
         assert builder._manifest_digest(parent) == builder.PROVIDER_QUOTA_RESET_PARENT_SHA256
-        assert record["dependencies"][broker]["sha256"] == builder.PROVIDER_QUOTA_RESET_DIGESTS[broker]
+        assert record["dependencies"][broker]["sha256"] == "470991af25bccc430a6310fb2de5438c6d4f66135f6faf614b405a1ff8c2004c"
         for name in builder.QUOTA_RESET_PATCHES:
             row = inventory["files"]["ext/" + name]
-            composition = row["composition"]
+            composition = (record["dependencies"][broker]["composition"]["inherited"]
+                           if name == broker else row["composition"])
             assert composition["preimage_sha256"] == builder.PROVIDER_QUOTA_RESET_PREIMAGES[name]
             assert composition["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
-            assert composition["provider_preimage"]["preimage_sha256"] == original["ext/" + name]
+            assert composition["provider_preimage"]["preimage_sha256"] == historical_original["ext/" + name]
             assert composition["provider_preimage"]["sha256"] == builder.PROVIDER_QUOTA_RESET_PREIMAGES[name]
             assert composition["provider_preimage"]["composition_sha256"] == builder.PROVIDER_APPLICATION_RECORD_SHA256
             assert row["source"] == "candidate/" + name
             assert "composition_preimage_sha256" not in row and "patch_sha256" not in row
-        assert record["dependencies"][broker]["composition"] == inventory["files"]["ext/" + broker]["composition"]
+        expected_outer = {"schema":"mastermind.glm-native-core-source.v1","preimage_sha256":"831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173","candidate_sha256":"b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"}
+        expected_inherited = {"schema":"native-exact-forward-patch.v1","preimage_sha256":"77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b","patch_source":"../grok47/quota_billing/lease_broker.py.patch","patch_sha256":"b4ef4980f85ef0cce64c6843c9c5d0d16abf0459fda8a438b474789d86c6f421","provider_preimage":{"composition_sha256":"7bbe9fbffd0087d7ae5c191a50e8c6f6ce28fae43554a97e4efc0c23bba26584","source":"rollout/provider_application/lease_broker.py.patch","patch_sha256":"1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b","preimage_sha256":"0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807","sha256":"77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b"}}
+        assert inventory["files"]["ext/" + broker]["composition"] == expected_outer
+        assert record["dependencies"][broker]["composition"] == dict(
+            expected_outer, inherited=expected_inherited)
     else:
         assert record["dependencies"][broker]["sha256"] == original["ext/" + broker]
         assert record["dependencies"][broker]["sha256"] != record["native_stage_dependencies"][broker]
@@ -203,7 +217,7 @@ def test_partial_or_mixed_combined_source_refuses(combined_builds, fault):
     base = json.loads((combined_builds.base / "native-manifest.json").read_bytes())
     record, _ = builder.provider_application_record()
     if fault == "broker-preimage":
-        base["ext/lease_broker.py"] = record["replacements"]["ext/lease_broker.py"]["preimage_sha256"]
+        base["ext/lease_broker.py"] = "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"
     elif fault == "missing-addition":
         del base["ext/experiential_transport.py"]
     elif fault == "changed-retained":
@@ -395,7 +409,7 @@ def test_provider_quota_component_authenticates_both_patch_steps(combined_builds
     shutil.copytree(combined_builds.quota_http, output)
     path = output / "external-go-component/component.json"
     record = json.loads(path.read_bytes())
-    record["dependencies"]["lease_broker.py"]["composition"]["provider_preimage"]["sha256"] = \
+    record["dependencies"]["lease_broker.py"]["composition"]["inherited"]["provider_preimage"]["sha256"] = \
         builder.QUOTA_RESET_PREIMAGES["lease_broker.py"]
     path.write_text(json.dumps(record))
     manifest = json.loads((output / "native-manifest.json").read_bytes())
@@ -486,7 +500,7 @@ def test_remote_placement_complete_build_and_real_dependency_bytes(
             if key not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS}
     original = json.loads((builds.default / "native-manifest.json").read_bytes())
     unchanged = dict(base)
-    assert builder.before_provider_application(base) == original
+    assert builder.before_provider_application(base) == builder.before_glm_application_core(original)
     assert base == unchanged
     if extension != "base":
         component = json.loads((output / "external-go-component/component.json").read_bytes())
@@ -536,7 +550,7 @@ def test_remote_placement_original_map_is_checked_before_inverse(remote_placemen
     manifest = json.loads((remote_placement_builds.base / "native-manifest.json").read_bytes())
     legacy, _ = builder.provider_application_record()
     if fault == "broker-preimage":
-        manifest["ext/lease_broker.py"] = legacy["replacements"]["ext/lease_broker.py"]["preimage_sha256"]
+        manifest["ext/lease_broker.py"] = "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"
     elif fault == "missing-addition":
         del manifest["ext/experiential_transport.py"]
     elif fault == "changed-retained":

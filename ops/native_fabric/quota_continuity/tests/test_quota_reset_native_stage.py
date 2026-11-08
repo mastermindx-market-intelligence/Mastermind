@@ -67,21 +67,35 @@ def test_complete_emitted_generation_preserves_exact_parent_and_source_provenanc
     original = dict(before)
     assert builder.before_quota_reset_recovery(before) == parent
     assert before == original
-    assert {name for name in parent if before[name] != parent[name]} == {
+    historical_before = builder.before_glm_application_core(before)
+    expected_core = {
+        "go_lease_capability.py": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+        "go_lease_gateway.py": "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193",
+        "lease_broker.py": "16526b57fec9e48bad952c930b76644fe8e1578ba9e952fa6847f089258113b7",
+    }
+    assert {name: actual["ext/" + name] for name in expected_core} == expected_core
+    assert {name for name in parent if historical_before[name] != parent[name]} == {
         "ext/" + name for name in builder.QUOTA_RESET_DIGESTS}
     for relative, digest in actual.items():
         raw = (output / "native-code-stage" / relative).read_bytes()
         assert builder.sha(raw) == digest == inventory["files"][relative]["sha256"]
         assert len(raw) == inventory["files"][relative]["bytes"]
+    dependencies = json.loads((output / "external-go-component/component.json").read_bytes())
     expected_preimages = {
         **builder.QUOTA_RESET_PREIMAGES, **builder.QUOTA_RESET_COMPOSED_PREIMAGES}
     for name in builder.QUOTA_RESET_PATCHES:
         row = inventory["files"]["ext/" + name]
-        assert row["composition"]["preimage_sha256"] == expected_preimages[name]
-        assert row["composition"]["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
+        composition = (dependencies["dependencies"][name]["composition"]["inherited"]
+                       if name == "lease_broker.py" else row["composition"])
+        assert composition["preimage_sha256"] == expected_preimages[name]
+        assert composition["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
         assert row["source"] == "candidate/" + name
-    dependencies = json.loads((output / "external-go-component/component.json").read_bytes())
-    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == builder.QUOTA_RESET_COMPOSED_DIGESTS["lease_broker.py"]
+    expected_outer = {"schema":"mastermind.glm-native-core-source.v1","preimage_sha256":"79103739c4c46cae3988187aea591aa06209ac1bd38046f49b8699fd93c205d0","candidate_sha256":"b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"}
+    expected_inherited = {"schema":"native-exact-forward-patch.v1","preimage_sha256":"0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807","patch_source":"../grok47/quota_billing/lease_broker.py.patch","patch_sha256":"b4ef4980f85ef0cce64c6843c9c5d0d16abf0459fda8a438b474789d86c6f421"}
+    assert inventory["files"]["ext/lease_broker.py"]["composition"] == expected_outer
+    assert dependencies["dependencies"]["lease_broker.py"]["composition"] == dict(
+        expected_outer, inherited=expected_inherited)
+    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == "16526b57fec9e48bad952c930b76644fe8e1578ba9e952fa6847f089258113b7"
     assert dependencies["native_stage_dependencies"] == {
         name: actual["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
 
