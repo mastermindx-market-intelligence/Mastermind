@@ -21,7 +21,7 @@
  
  const DEFAULT_SESSION_LIST_PAGE_SIZE = 100
  
-@@ -71,7 +74,97 @@
+@@ -71,7 +74,111 @@
    return RequestError.internalError(undefined, detail)
  }
  
@@ -116,15 +116,31 @@
 +  assertCurrent(): true
 +}
 +
++
++export interface NativeReadRequest {
++  readonly schema: 'mastermind.dsh.native_acp_read.v1'
++  readonly sessionId: string
++  readonly association: unknown
++  readonly request: unknown
++}
++export interface NativeReadFacts {
++  readonly agent: Agent
++  readonly requestId: NativePromptClaim['requestId']
++  readonly request: NativeReadRequest
++  readonly requireCurrent: () => void
++}
++
  export interface AcpConfig {
    /** Provider route for created agents. */
    provider?: string
-@@ -81,6 +174,12 @@
+@@ -81,6 +188,14 @@
    sessionListPageSize?: number
    /** Runtime-only transport override; production uses stdio. */
    stream?: Stream
 +  /** Runtime-only trusted owner check. JSON correlation never creates authority. */
 +  nativePromptAdmission?: (facts: NativePromptFacts) => boolean
++  /** Runtime-only finite READ through the original retained connection. */
++  nativeReadAdmission?: (facts: NativeReadFacts, signal: AbortSignal) => Promise<Record<string, unknown>>
 +  /** Runtime-only one-shot assignment admission from the original startup operation. */
 +  nativeModelAdmission?: (facts: NativeModelAssignmentFacts) => NativeModelAssignmentPermit
 +  /** Passive runtime-only facts on the original retained Agent and session. */
@@ -132,13 +148,18 @@
  }
  
  export const Config: Schema<AcpConfig> = Schema.object({
-@@ -104,6 +203,18 @@
+@@ -104,6 +219,23 @@
    const activating = new Set<SessionId>()
    let closed = false
    let imagePromptEnabled = false
 +  const nativePromptAdmission = config.nativePromptAdmission
 +  const nativeModelAdmission = config.nativeModelAdmission
 +  const nativeObservation = config.nativeObservation
++  const nativeReadAdmission = config.nativeReadAdmission
++  if (nativeReadAdmission !== undefined && (typeof nativeReadAdmission !== 'function'
++      || nativePromptAdmission === undefined || nativeObservation === undefined)) {
++    throw invalidParams('native read requires original observation and admission')
++  }
 +  if (nativeModelAdmission !== undefined && (typeof nativeModelAdmission !== 'function' || nativePromptAdmission === undefined)) {
 +    throw invalidParams('native model assignment requires the original trusted admission')
 +  }
@@ -151,7 +172,7 @@
  
    /** Return the bridge-owned record for an agent, rejecting same-id impostors. */
    const ownedRecord = (agent: Parameters<AcpSession['owns']>[0]): AcpSession | undefined => {
-@@ -180,16 +291,24 @@
+@@ -180,16 +312,26 @@
      async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
        // Single-version agent: the spec's "same version if supported, else
        // the latest supported" both resolve to this server's one version.
@@ -170,15 +191,17 @@
 +        ...nativePromptAdmission === undefined ? {} : {
 +          _meta: { mastermindNative: {
 +            schema: nativeObservation === undefined ? 'mastermind.dsh.native_prompt_extension.v1'
-+              : 'mastermind.dsh.native_prompt_extension.v2',
++              : nativeReadAdmission === undefined ? 'mastermind.dsh.native_prompt_extension.v2'
++              : 'mastermind.dsh.native_prompt_extension.v3',
 +            claimMethod: '_mastermind/native_claim', cancelMethod: '_mastermind/native_cancel',
 +            ...nativeObservation === undefined ? {} : { observeMethod: '_mastermind/native_observe' },
++            ...nativeReadAdmission === undefined ? {} : {readMethod: '_mastermind/native_read'},
 +          } },
 +        },
        }
      },
  
-@@ -200,6 +319,9 @@
+@@ -200,6 +342,9 @@
      async newSession(params: NewSessionRequest, signal: AbortSignal): Promise<NewSessionResponse> {
        assertOpen()
        validateWorkspaceParams(params)
@@ -188,7 +211,7 @@
        const sessionId = brandString<SessionId>(randomUUID())
        // No preset composition: the ACP bundle keeps the model-facing rows in
        // the host plane, so this agent reads them from the global layer. A
-@@ -243,6 +365,9 @@
+@@ -243,6 +388,9 @@
      async resumeSession(params: ResumeSessionRequest, signal: AbortSignal): Promise<ResumeSessionResponse> {
        assertOpen()
        validateWorkspaceParams(params)
@@ -198,7 +221,7 @@
        const sessionId = brandString<SessionId>(params.sessionId)
        if (sessions.has(sessionId) || activating.has(sessionId) || ctx.sessions.get(sessionId) !== undefined) {
          throw invalidParams(`session is already active: ${sessionId}`)
-@@ -337,11 +462,52 @@
+@@ -337,11 +485,52 @@
      async setSessionConfigOption(
        params: SetSessionConfigOptionRequest,
        signal: AbortSignal,
@@ -252,7 +275,7 @@
        } catch (error: unknown) {
          if (error instanceof AcpModelConfigError) throw invalidParams(error.message)
          throw error
-@@ -362,13 +528,74 @@
+@@ -362,13 +551,74 @@
        return {}
      },
  
@@ -329,7 +352,7 @@
        sessions.get(brandString<SessionId>(params.sessionId))?.cancel()
        return Promise.resolve()
      },
-@@ -389,9 +616,39 @@
+@@ -389,9 +639,64 @@
      .onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal))
      .onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal))
      .onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params))
@@ -368,13 +391,52 @@
 +      return response
 +    })
 +  }
++
++  if (nativeReadAdmission !== undefined) {
++    app.onRequest('_mastermind/native_read', parseNativeReadRequest, async ({params, signal, requestId}) => {
++      const sessionId = brandString<SessionId>(params.sessionId)
++      const record = requireSession(sessionId), snapshot = record.readSnapshot()
++      const requireCurrent = (): void => {
++        assertOpen(); signal.throwIfAborted()
++        if (sessions.get(sessionId) !== record || config.nativeReadAdmission !== nativeReadAdmission
++            || config.nativePromptAdmission !== nativePromptAdmission || config.nativeObservation !== nativeObservation)
++          throw invalidParams('native read owner changed')
++        snapshot.requireCurrent()
++      }
++      requireCurrent()
++      const request = deepFreeze(JSON.parse(JSON.stringify(params)) as NativeReadRequest)
++      const response = await nativeReadAdmission(Object.freeze({
++        agent: snapshot.agent, requestId, request, requireCurrent,
++      }), signal)
++      requireCurrent()
++      // Keep the exact response identity registered with the existing writer.
++      if (response === null || typeof response !== 'object' || Array.isArray(response))
++        throw invalidParams('native read response is invalid')
++      return response
++    })
++  }
++
    const connection = app.connect(stream)
    const conn: AgentContext = connection.client
  
-@@ -438,6 +695,209 @@
+@@ -438,6 +743,223 @@
    /* v8 ignore stop */
  
    ctx.effect(() => quiesce, 'acp.connection')
++}
++
++
++function parseNativeReadRequest(value: unknown): NativeReadRequest {
++  if (value === null || typeof value !== 'object' || Array.isArray(value)
++      || Object.getPrototypeOf(value) !== Object.prototype
++      || Reflect.ownKeys(value).length !== 4
++      || !['schema', 'sessionId', 'association', 'request'].every(key => Object.hasOwn(value, key)))
++    throw invalidParams('native read envelope is invalid')
++  const record = value as Record<string, unknown>
++  if (record.schema !== 'mastermind.dsh.native_acp_read.v1' || !nativeIdentifier(record.sessionId)
++      || Buffer.byteLength(JSON.stringify(value)) > 16 * 1024)
++    throw invalidParams('native read envelope is invalid')
++  return value as NativeReadRequest
 +}
 +
 +function nativeIdentifier(value: unknown): value is string {
@@ -728,10 +790,28 @@
    resolve: (reason: StopReason) => void
    reject: (error: Error) => void
    messageId: string | undefined
-@@ -189,6 +246,35 @@
+@@ -189,6 +246,53 @@
      return this.agent.session === session
    }
  
++
++  /** Passive exact history owner; immutable cursors own the requested prefix. */
++  readSnapshot(): { readonly agent: Agent; readonly requireCurrent: () => void } {
++    const agent = this.agent, session = agent.session
++    const original = <T extends object>(value: T): T =>
++      (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++    const agents = original(this.ctx.agents), sessions = original(this.ctx.sessions)
++    const requireCurrent = (): void => {
++      if (this.closing !== undefined || this.agent !== agent || agent.session !== session
++          || original(this.ctx.agents) !== agents || original(this.ctx.sessions) !== sessions
++          || this.ctx.agents.get(agent.id) !== agent || this.ctx.sessions.get(session.id) !== session) {
++        throw invalidParams('native read owner changed')
++      }
++    }
++    requireCurrent()
++    return Object.freeze({agent, requireCurrent})
++  }
++
 +  /** Retain the original idle owner while an installed observer awaits facts. */
 +  observationSnapshot(): { readonly facts: NativeObservationFacts; readonly requireCurrent: () => void } {
 +    const agent = this.agent, session = agent.session
@@ -764,7 +844,7 @@
    /**
     * Return the complete standard model configuration state.
     * @param signal - optional request cancellation.
-@@ -206,9 +292,50 @@
+@@ -206,9 +310,50 @@
     * @param signal - optional request cancellation.
     * @returns the complete resulting option state.
     */
@@ -817,7 +897,7 @@
    }
  
    /** Resolve topology state off-chain, then serialize its notification without blocking execution updates. */
-@@ -247,6 +374,7 @@
+@@ -247,6 +392,7 @@
      params: PromptRequest,
      imageEnabled: boolean,
      requestSignal?: AbortSignal,
@@ -825,7 +905,7 @@
    ): Promise<PromptResponse> {
      this.assertActive()
      if (this.inflight !== undefined) throw invalidParams('a prompt is already in flight for this session')
-@@ -254,6 +382,11 @@
+@@ -254,6 +400,11 @@
      const admission = Promise.withResolvers<void>()
      const admissionController = new AbortController()
      const inflight: InflightPrompt = {
@@ -837,7 +917,7 @@
        resolve: completion.resolve,
        reject: completion.reject,
        messageId: undefined,
-@@ -270,7 +403,30 @@
+@@ -270,7 +421,30 @@
        agentError: undefined,
      }
      this.inflight = inflight
@@ -869,7 +949,7 @@
      requestSignal?.addEventListener('abort', onRequestAbort, { once: true })
      /* v8 ignore next -- the SDK dispatches a live signal, then notifies abort through its listener. */
      if (requestSignal?.aborted === true) onRequestAbort()
-@@ -278,6 +434,8 @@
+@@ -278,6 +452,8 @@
        let admissionFailure: unknown
        const promptSelection = this.modelControl.snapshot()
        try {
@@ -878,7 +958,7 @@
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -289,6 +447,8 @@
+@@ -289,6 +465,8 @@
            admissionController.signal,
          )
          admissionController.signal.throwIfAborted()
@@ -887,7 +967,7 @@
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -297,9 +457,11 @@
+@@ -297,9 +475,11 @@
            source: { kind: 'user' },
          })
          inflight.messageId = message.id
@@ -900,7 +980,7 @@
            this.agent.followup(message)
          } catch (error: unknown) {
            inflight.messageQueued = false
-@@ -314,7 +476,7 @@
+@@ -314,7 +494,7 @@
  
        if (inflight.admissionController.signal.aborted) {
          this.settleAfterQuiescence(inflight)
@@ -909,7 +989,7 @@
        }
        if (admissionFailure !== undefined) {
          this.inflight = undefined
-@@ -328,10 +490,37 @@
+@@ -328,10 +508,37 @@
        }
  
        this.settleAfterQuiescence(inflight)
@@ -948,7 +1028,7 @@
    }
  
    /** Cancel the active prompt, or autonomous work when no ACP prompt exists. */
-@@ -347,6 +536,17 @@
+@@ -347,6 +554,17 @@
     * @param event - committed durable event.
     */
    onSessionEvent(session: Session, event: SessionEvent): void {
@@ -966,7 +1046,7 @@
      if (event.type === 'turn/start' && this.inflight?.turn !== undefined) {
        this.inflight.turn = event.data.turn
        this.inflight.endReason = undefined
-@@ -403,7 +603,33 @@
+@@ -403,7 +621,33 @@
     * @param turn - allocated Agent turn.
     */
    onInboxClaimed(message: UserMessage, turn: number): void {
@@ -1001,7 +1081,7 @@
      const selection = this.pendingSelections.get(message.id)
      this.pendingSelections.delete(message.id)
      if (selection !== undefined) this.modelControl.pinTurn(turn, selection)
-@@ -490,7 +716,37 @@
+@@ -490,7 +734,37 @@
      if (this.closing !== undefined) throw invalidParams(`session is closing: ${this.agent.session.id}`)
    }
  
@@ -1040,7 +1120,7 @@
      const inflight = this.inflight
      if (inflight === undefined) return
      const firstCancellation = !inflight.admissionController.signal.aborted
-@@ -501,7 +757,8 @@
+@@ -501,7 +775,8 @@
        inflight.cancellationDone.resolve()
        return
      }
@@ -1050,7 +1130,7 @@
      if (firstCancellation) {
        const done = inflight.cancellationDone
        // Plugin disposal can detach status observers before this activity retires.
-@@ -527,9 +784,18 @@
+@@ -527,9 +802,18 @@
            if (isCancelled()) break
            if (children || !idleAt(idleSeq)) continue
            await this.outputTail

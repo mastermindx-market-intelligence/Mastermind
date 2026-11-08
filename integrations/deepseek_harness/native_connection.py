@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import time
 from importlib.metadata import version
 from pathlib import Path
 import socket
@@ -19,7 +20,7 @@ from control_plane.worker_execution_contract import BinaryAttestation, ProcessIn
 from integrations.acp_worker.process_resource import NativeProcessResource, NativeProcessSettlement
 from integrations.acp_worker.turn import AcpProfile, _model_option, _option_values
 from integrations.deepseek_harness.native_protocol import (
-    EXTENSION_V2, OBSERVATION_REQUEST_SCHEMA, NativeClaim, NativeProtocolError, NativeResult,
+    EXTENSION_V2, EXTENSION_V3, OBSERVATION_REQUEST_SCHEMA, NativeClaim, NativeProtocolError, NativeResult,
     document, integer, native_extension, native_id, native_observation,
     request_id as checked_request_id,
 )
@@ -56,6 +57,22 @@ class _ModelSelection:
     updates: int = 0
     wire_updates: int = 0
 
+
+
+@dataclasses.dataclass
+class _NativeRead:
+    params: dict[str, Any]
+    frozen: bytes
+    require_current: Callable[[], None]
+    deadline: float
+    request_id: str | int | None = None
+    wire: bytes | None = None
+    queued: bool = False
+    written: bool = False
+    send_settled: bool = False
+    write_refused: bool = False
+    retired: bool = False
+    task: asyncio.Task | None = None
 
 
 def _native_update_document(value: Any) -> dict[str, Any]:
@@ -126,10 +143,98 @@ class NativeClient(ProbeClient):
         self.before_send, self.before_write = before_send, before_write
         self.advertised = False
         self.selection: _ModelSelection | None = None
+        self.native_read: _NativeRead | None = None
+        self._native_read_write: _NativeRead | None = None
+
+
+    def reserve_native_read(self, params, require_current):
+        from integrations.deepseek_harness.native_read_port import (
+            canonical, validate_native_read_association, validate_native_read_request, NativeReadUnavailable)
+        if (self.violation or not self.advertised or self.session_id is None
+                or self.native_read is not None or not callable(require_current)
+                or self.current is not None and self.current.result is None):
+            raise NativeReadUnavailable()
+        if (type(params) is not dict or set(params) != {"schema", "sessionId", "association", "request"}
+                or params["schema"] != "mastermind.dsh.native_acp_read.v1"
+                or params["sessionId"] != self.session_id):
+            raise NativeReadUnavailable()
+        association = validate_native_read_association(params["association"])
+        request = validate_native_read_request(params["request"], hashlib.sha256(canonical(association)).hexdigest())
+        if (association["native_session_id"] != self.session_id
+                or request["principal"]["principal_scope"] != association["owner_principal_scope"]
+                or request["read"]["kind"] == "result" and request["read"]["claim"]["sessionId"] != self.session_id):
+            raise NativeReadUnavailable()
+        frozen = canonical(params)
+        held = _NativeRead(json.loads(frozen), frozen, require_current, time.monotonic() + 4.0)
+        self.native_read = held
+        try:
+            self.require_native_read(held)
+        except BaseException:
+            self.native_read = None
+            raise
+        return held
+
+    def require_native_read(self, held):
+        from integrations.deepseek_harness.native_read_port import canonical, NativeReadUnavailable
+        import time
+        guard = held.require_current
+        def exact():
+            if (self.violation or self.native_read is not held or held.retired or time.monotonic() >= held.deadline
+                    or held.require_current is not guard or canonical(held.params) != held.frozen
+                    or held.params["sessionId"] != self.session_id):
+                raise NativeReadUnavailable()
+            principal = held.params["request"]["principal"]
+            if not principal["issued_at"] <= time.time() < principal["expires_at"]:
+                raise NativeReadUnavailable()
+        exact()
+        result = guard()
+        if result is not None:
+            if asyncio.iscoroutine(result):
+                result.close()
+            raise NativeReadUnavailable()
+        exact()
+
+    def check_outgoing_read(self, message, held):
+        """Post-callback exact check before original SDK serialization."""
+        if held is None and message.get("method") != "_mastermind/native_read":
+            return
+        if held is None:
+            self.poison("NATIVE_READ_WIRE_CHANGED")
+            raise NativeProtocolError(self.violation)
+        self.require_native_read(held)
+        if (self.native_read is not held or self._native_read_write is not held
+                or held.wire != (json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8")):
+            self.poison("NATIVE_READ_WIRE_CHANGED")
+            raise NativeProtocolError(self.violation)
+
+    def before_native_read_write(self, data):
+        """No parsing/queue: compare the original SDK's already captured bytes."""
+        held = self._native_read_write
+        if held is None or held.wire != data:
+            return True
+        if held.written or held.write_refused:
+            self.poison("NATIVE_READ_WRITE_REPLAY")
+            raise NativeProtocolError(self.violation)
+        try:
+            self.require_native_read(held)
+        except Exception:
+            # Suppress only these exact unsent READ bytes. The existing sender
+            # settles its own queue item; NativeTransport then reports refusal
+            # to the SDK request owner. No reply or successful read is invented.
+            held.retired = held.write_refused = True
+            return False
+        if self._native_read_write is not held or held.wire != data or held.written or held.write_refused:
+            self.poison("NATIVE_READ_WIRE_CHANGED")
+            raise NativeProtocolError(self.violation)
+        held.written = True
+        return True
+
 
     def begin_native_prompt(self, operation_id: str) -> _Prompt:
         native_id(operation_id)
         if (self.violation or not self.advertised or self.session_id is None or self.turns >= 64
+                or (self.native_read is not None
+                    and not (self.native_read.retired and self.native_read.send_settled))
                 or (self.selection is not None and self.selection.result is None)
                 or (self.current is not None and (self.current.result is None
                     or (self.current.cancel_task is not None and self.current.cancel_status is None)))):
@@ -141,6 +246,20 @@ class NativeClient(ProbeClient):
         return self.current
 
     def admit_frame(self, message: dict[str, Any]) -> None:
+        held = self.native_read
+        if (held is not None and held.request_id is not None and "method" not in message
+                and type(message.get("id")) is type(held.request_id) and message.get("id") == held.request_id):
+            from integrations.deepseek_harness.native_read_port import validate_native_read_response
+            try:
+                # A reply cannot settle an SDK future before its queued request
+                # actually writes. Otherwise that later write could look settled.
+                if not held.written:
+                    raise NativeProtocolError("NATIVE_READ_RESPONSE_BEFORE_WRITE")
+                if "result" in message:
+                    validate_native_read_response(message["result"], held.params["request"])
+            except Exception:
+                self.poison("NATIVE_READ_RESPONSE_REFUSED")
+                raise BoundaryViolation(self.violation) from None
         current = self.current
         if current is not None:
             if current.wire_terminal:
@@ -216,6 +335,21 @@ class NativeClient(ProbeClient):
         return self.selection
 
     def bind_outgoing(self, message: dict[str, Any]) -> None:
+        if message.get("method") == "_mastermind/native_read":
+            from integrations.deepseek_harness.native_read_port import canonical
+            held = self.native_read
+            if (held is None or held.request_id is not None or held.wire is not None
+                    or canonical(message.get("params")) != held.frozen
+                    or set(message) != {"jsonrpc", "id", "method", "params"} or message["jsonrpc"] != "2.0"):
+                self.poison("NATIVE_READ_REPLAY_OR_OWNER_MISMATCH")
+                raise NativeProtocolError(self.violation)
+            self.require_native_read(held)
+            held.request_id = checked_request_id(message["id"])
+            held.wire = (json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8")
+            if len(held.wire) > 64 * 1024:
+                raise NativeProtocolError("NATIVE_READ_WIRE_TOO_LARGE")
+            self._native_read_write = held
+            return held
         if message.get("method") == "session/set_config_option":
             selected, params = self.selection, message.get("params")
             if (self.violation or not self.advertised or self.current is not None or self._active
@@ -326,10 +460,24 @@ class NativeTransport:
         self.transport, self.client = transport, client
 
     async def send(self, message: dict[str, Any]) -> None:
-        self.client.bind_outgoing(message)
+        held_read = self.client.bind_outgoing(message)
         if self.client.before_send is not None:
             self.client.before_send(message.get("method", ""))
-        await self.transport.send(message)
+        self.client.check_outgoing_read(message, held_read)
+        if held_read is not None:
+            held_read.queued = True
+        try:
+            await self.transport.send(message)
+        except BaseException:
+            if held_read is not None:
+                held_read.retired = True
+                self.client.poison("NATIVE_READ_SEND_UNSETTLED")
+            raise
+        if held_read is not None:
+            if held_read.write_refused:
+                from integrations.deepseek_harness.native_read_port import NativeReadUnavailable
+                raise NativeReadUnavailable()
+            held_read.send_settled = True
 
     async def receive(self) -> dict[str, Any] | None:
         return await self.transport.receive()
@@ -344,8 +492,9 @@ class NativeWriteGuard:
     MessageSender owns its existing queue and payloads. No bytes are parsed here.
     The callback must cover all queued writes; there is no cleanup bypass.
     """
-    def __init__(self, writer: Any, require_current: Callable[[], None]):
+    def __init__(self, writer: Any, require_current: Callable[[], None], read_guard=None):
         self.writer, self.require_current = writer, require_current
+        self.read_guard = read_guard
 
     def write(self, data: bytes) -> None:
         outcome = self.require_current()
@@ -353,6 +502,8 @@ class NativeWriteGuard:
             if asyncio.iscoroutine(outcome):
                 outcome.close()
             raise NativeProtocolError("NATIVE_WRITE_GUARD_MUST_BE_SYNCHRONOUS")
+        if self.read_guard is not None and self.read_guard(data) is False:
+            return  # exact finite READ refusal; the original sender stays live
         self.writer.write(data)  # no await between currentness and physical write
 
     def __getattr__(self, name):
@@ -372,6 +523,7 @@ class NativeAcpProcess:
         self.client = client
         self.resource: NativeProcessResource | None = None
         self.connection = self.writer = self.sender_tasks = None
+        self._write_guard: NativeWriteGuard | None = None
         self.provider_session_id: str | None = None
         self.initialization: dict[str, Any] | None = None
         self.native_extension: dict[str, str] | None = None
@@ -427,10 +579,11 @@ class NativeAcpProcess:
             child.close()
             reader, self.writer = await asyncio.open_connection(sock=parent, limit=64*1024)
             self.sender_tasks = TaskSupervisor(source="mastermind-native-acp")
+            self._write_guard = (NativeWriteGuard(self.writer, self.client.before_write, self.client.before_native_read_write)
+                                 if self.client.before_write is not None else None)
             transport = NdjsonTransport(
                 StrictFrameReader(reader, self.client, extension_policy=self.client),
-                MessageSender(NativeWriteGuard(self.writer, self.client.before_write)
-                              if self.client.before_write is not None else self.writer,
+                MessageSender(self._write_guard if self._write_guard is not None else self.writer,
                               self.sender_tasks), receive_timeout=None,
             )
             self.connection = connect_to_agent(self.client, NativeTransport(transport, self.client),
@@ -464,6 +617,66 @@ class NativeAcpProcess:
                 parent.close()
 
 
+
+    async def read_native(self, association, request, *, require_current):
+        from integrations.deepseek_harness.native_read_port import (
+            NativeReadUnavailable, validate_native_read_response)
+        client, connection, resource, session_id = (
+            self.client, self.connection, self.resource, self.provider_session_id)
+        write_guard = self._write_guard
+        read_guard = None if write_guard is None else write_guard.read_guard
+        def current():
+            if (self.client is not client or self.connection is not connection or connection is None
+                    or self.resource is not resource or resource is None
+                    or self.provider_session_id != session_id or client.session_id != session_id
+                    or self._closing is not None or self.native_extension != EXTENSION_V3
+                    or write_guard is None or self._write_guard is not write_guard
+                    or write_guard.writer is not self.writer or write_guard.require_current is not client.before_write
+                    or write_guard.read_guard is not read_guard
+                    or getattr(read_guard, "__self__", None) is not client
+                    or getattr(read_guard, "__func__", None) is not NativeClient.before_native_read_write):
+                raise NativeReadUnavailable()
+            result = require_current()
+            if result is not None:
+                if asyncio.iscoroutine(result):
+                    result.close()
+                raise NativeReadUnavailable()
+            if self.client is not client or self.connection is not connection or self.resource is not resource:
+                raise NativeReadUnavailable()
+        current()
+        held = client.reserve_native_read({
+            "schema": "mastermind.dsh.native_acp_read.v1", "sessionId": session_id,
+            "association": association, "request": request}, current)
+        async def invoke():
+            try:
+                value = await connection.ext_method("mastermind/native_read", held.params)
+                if not held.written or not held.send_settled:
+                    raise NativeReadUnavailable()
+                value = validate_native_read_response(document(value), held.params["request"])
+                client.require_native_read(held)
+                current()
+                return value
+            finally:
+                # A timed-out/cancelled caller never re-arms this slot. Only the
+                # original SDK request settling, with no pending bytes, releases it.
+                if client.native_read is held and (not held.queued or held.written or held.write_refused):
+                    client.native_read = None
+        held.task = self._own(invoke())
+        try:
+            done, _ = await asyncio.wait({held.task}, timeout=4.0)
+            if not done:
+                held.retired = True
+                raise NativeReadUnavailable()
+            value = held.task.result()
+            current()
+            if held.retired or time.monotonic() >= held.deadline:
+                raise NativeReadUnavailable()
+            return value
+        except BaseException:
+            held.retired = True
+            raise
+
+
     async def _select_model(self, selected, *, protocol_profile, model):
         """One setter in the existing materialization coroutine and SDK task set."""
         client, connection, session_id, resource = (
@@ -484,7 +697,7 @@ class NativeAcpProcess:
         if option.get("currentValue") == target:
             self.session_options = selected
             return
-        if self.native_extension != EXTENSION_V2:
+        if self.native_extension not in (EXTENSION_V2, EXTENSION_V3):
             raise NativeProtocolError("NATIVE_MODEL_SELECTION_EXTENSION_REQUIRED")
         selection = client.reserve_model_selection(protocol_profile.model_option_id, target)
         selection.task = self._own(connection.set_config_option(

@@ -662,6 +662,8 @@ class NativeDeepSeekInstallation:
     entrypoint: Path
     source_digest: str
     source_sha: str
+    package_manifest_sha256: str
+    donor_sha: str
     _receipt_path: Path
     _receipt: object = _dataclasses.field(repr=False, compare=False)
     _gid: int = _dataclasses.field(repr=False)
@@ -678,7 +680,9 @@ class NativeDeepSeekInstallation:
         document, _, _ = _observe_deepseek(
             self._receipt_path, Path(self.binary.path), self.release,
             self._gid, self._versions, expected_receipt=receipt, expected_binary=self.binary)
-        if self.source_sha != document["qualification"]["source_sha"]:
+        if (self.source_sha != document["qualification"]["source_sha"]
+                or self.package_manifest_sha256 != document["qualification"]["package_manifest_sha256"]
+                or self.donor_sha != document["package"]["donor_sha"]):
             _fail("native DeepSeek source identity differs from its original receipt")
 
 
@@ -697,7 +701,8 @@ def load_native_deepseek_attestation(receipt_path: Path, *, expected_binary_path
         document, binary, receipt = _observe_deepseek(receipt_path, binary_path, release,
                                                expected_owner_gid, allowed_versions)
         return NativeDeepSeekInstallation(binary, release, release / DSH_ENTRYPOINT,
-            receipt["sha256"], document["qualification"]["source_sha"], receipt_path,
+            receipt["sha256"], document["qualification"]["source_sha"],
+            document["qualification"]["package_manifest_sha256"], document["package"]["donor_sha"], receipt_path,
             _canonical(receipt), expected_owner_gid,
             allowed_versions, _DSH_INSTALLATION_SEAL)
     except (OSError, ProviderRealmError, FilesystemSecurityError, KeyError, TypeError,

@@ -2909,7 +2909,7 @@ def _service_from_config(
                         submit_guard=require_secretary_submit)
 
                 deepseek_session = None
-                if deepseek_native_read_source is not None:
+                if deepseek_native_read_source is not None or native_conversation_composition is not None:
                     from integrations.session_bridge.deepseek_native import DeepSeekNativeSession
 
                     def require_deepseek_read():
@@ -2918,8 +2918,13 @@ def _service_from_config(
                         if service._require_runtime() is not runtime:
                             raise BridgeError("ingress_unavailable", "Executive Runtime changed")
 
-                    deepseek_session = DeepSeekNativeSession(
-                        deepseek_native_read_source, read_guard=require_deepseek_read)
+                    if deepseek_native_read_source is not None:
+                        deepseek_session = DeepSeekNativeSession(
+                            deepseek_native_read_source, read_guard=require_deepseek_read)
+                    else:
+                        from control_plane.native_conversation_read import RetainedNativeReadResolver
+                        deepseek_session = RetainedNativeReadResolver(service, runtime,
+                            native_conversation_composition, require_current=require_deepseek_read)
 
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
@@ -3439,7 +3444,8 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
                 raise ServiceError("native composition cannot rebind Control configuration")
             original_native_composition.require_current()
         native_composition = NativeConversationHostComposition(
-            original_native_composition.registration, require_native_composition_current)
+            original_native_composition.registration, require_native_composition_current,
+            original_native_composition.composition_sha256)
     service = _service_from_config(
         raw,
         native_conversation_composition=native_composition,

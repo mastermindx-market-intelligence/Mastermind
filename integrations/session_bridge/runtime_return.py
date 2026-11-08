@@ -173,7 +173,8 @@ class RuntimeSessionReturn:
             raise TypeError("installed native Secretary owner required")
         self.hermes = hermes
         from .deepseek_native import DeepSeekNativeSession
-        if deepseek is not None and type(deepseek) is not DeepSeekNativeSession:
+        from control_plane.native_conversation_read import RetainedNativeReadResolver
+        if deepseek is not None and type(deepseek) not in (DeepSeekNativeSession, RetainedNativeReadResolver):
             raise TypeError("installed native DeepSeek reader required")
         self.deepseek = deepseek
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
@@ -328,6 +329,33 @@ class RuntimeSessionReturn:
         native = self.deepseek
         if native is None:
             raise BridgeError("backend_unavailable", "installed native history is unavailable")
+        source = native
+        from control_plane.native_conversation_read import RetainedNativeReadResolver
+        if type(source) is RetainedNativeReadResolver:
+            from control_plane.fresh_conversation_admission import read_creation_restriction, NATIVE_SCHEMA
+            from common.fresh_conversation_contract import canonical_digest
+            def ownership():
+                if read_guard is not None:
+                    _guard(read_guard)
+                if self.deepseek is not source or _principal(principal) != identity:
+                    raise BridgeError("binding_unavailable", "original native read owner changed")
+                root = self.runtime.jobs.get_job(args["selection"]["root_job_id"])
+                if root is None:
+                    raise BridgeError("reply_unavailable", "authorized native root is unavailable")
+                material = read_creation_restriction(self.runtime, root)
+                if (material is None or material["schema"] != NATIVE_SCHEMA
+                        or material["work_ref"] != args["selection"]["work_ref"]
+                        or material["principal_scope_sha256"] not in {
+                            canonical_digest(dict(zip(_IDENTITY, value)))
+                            for value in self._original_principals(principal)}):
+                    raise BridgeError("reply_unavailable", "authorized native root is unavailable")
+                return canonical_digest(material)
+            original_owner = ownership()
+            def root_guard():
+                if ownership() != original_owner:
+                    raise BridgeError("binding_unavailable", "original native root changed")
+            native = await source.select(principal, args["selection"], root_guard=root_guard)
+            root_guard()
         binding = native.selected_binding()
         selection = {"work_ref": binding.work_ref, "root_job_id": binding.root_job_id}
         if (args["selection"] != selection
@@ -337,7 +365,7 @@ class RuntimeSessionReturn:
         def evidence():
             if read_guard is not None:
                 _guard(read_guard)
-            if self.deepseek is not native or _principal(principal) != identity:
+            if self.deepseek is not source or _principal(principal) != identity:
                 raise BridgeError("binding_unavailable", "original native read owner changed")
             native.require_binding(binding)
             root = self.runtime.store.unique_root_created_event(binding.root_job_id)

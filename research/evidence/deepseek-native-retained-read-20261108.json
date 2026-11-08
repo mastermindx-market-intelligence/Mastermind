@@ -1,0 +1,341 @@
+{
+  "closed_lanes": [
+    "paid Fabric/VPS explicit denials",
+    "denied installed receipt/config path reads"
+  ],
+  "company_build": {
+    "client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+    "compiled_host_exports": {
+      "./company-peer": {
+        "file": "company-peer.js",
+        "sha256": "26100e77cdfeee7afb493f93f2eb7dec5e0aa594ca8caab5d0ae59ca8161f587"
+      },
+      "./executive-read-port": {
+        "file": "executive-read-port.js",
+        "sha256": "d3f328cec83fa8e189b9227f06be895f38403457063ed7038d43b90660530e1f"
+      }
+    },
+    "manifest_sha256": "d9fe5075e245f4225a86219310fc9ce1f40e20e77551f92d72354eac94ac55a8",
+    "source_sha256": {
+      "src/client/connection.ts": "d914331d4783c8a829f6ae5d34bc13ee8d2980b53d9877ea4d45eee3702186eb",
+      "src/client/index.ts": "ff20e3065c14add6432ea00686dcc5db567bd13a0495a709e89990f5add04567",
+      "src/client/styles.ts": "b3d27b10963634ba74d5544fbf74fed155472b095bd2233a3a7abdd7b02bc479",
+      "src/company-peer.ts": "60bd663c0a501f9ac8f2019f3d2e85f69a9e56226cc85b6c0e42450ffb17e9ea",
+      "src/executive-read-port.ts": "487d0afc0eca4717b6ca8e4a32cc4c513ffc66b859a6440aad713536e769fcfc",
+      "src/index.ts": "1585af52430af853c86d6b8073dc48053020e63bf54966ca9186fb584eaa44b3",
+      "src/native-result-content.ts": "05a5a8b51da3e4c7d7c3a17b16383c177a05ea69c3d736b190e5b6a3ad3f5523",
+      "src/protocol.ts": "2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41"
+    }
+  },
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "entry_guard": {
+    "original_assertions_preserved": true,
+    "source_sha256": "3a8779f5c6851a6cda2a0ca63848854b0b95371a7948808c947c313de49256fd",
+    "unchanged_ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819"
+  },
+  "governing_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "native_acp": {
+    "manifest_sha256": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720",
+    "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d"
+  },
+  "native_host": {
+    "manifest_sha256": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+    "patch_sha256": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597"
+  },
+  "next_action": "Publish this checkpoint, build the same complete candidate, then compose protected master in the existing managed workspace.",
+  "observed_protected_master": "c117c00ac1f038239f81391099b0f8854f597680",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "proof_boundary": {
+    "installed": false,
+    "native_canary_repeated": false,
+    "physical_native_process_started": false,
+    "provider_calls": 0,
+    "public_route_accepted": false,
+    "service_restarted": false,
+    "test_processes": "real SDK socketpairs, actual in-process Agent/Gateway/Session and inert account/model fixtures"
+  },
+  "pull_request": 2177,
+  "recorded_at": "2026-11-08T04:22:29.422623+00:00",
+  "remaining_production_holds": [
+    "protected-head source composition and acceptance",
+    "complete candidate build",
+    "root-custodied native/ACP installation and original realm enrollment",
+    "existing Worker/account/capability admission",
+    "actual original service/public routing",
+    "signed-in packaged provider journey and production acceptance"
+  ],
+  "results": {
+    "acp_passed": 223,
+    "acp_type_diagnostics": 0,
+    "company_optional_fixture_skipped": 1,
+    "company_passed": 32,
+    "compiled_entry_passed": 15,
+    "corrected_d7_passed": 13,
+    "custody_passed": 84,
+    "guard_diagnostic_failed": 1,
+    "guard_diagnostic_passed": 317,
+    "package_passed": 71,
+    "python_passed": 254,
+    "suite_counts_overlap": true,
+    "whitespace_check_exit_code": 0
+  },
+  "runs": {
+    "acp": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.acp-lifecycle.config.mts"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:17:09.415365+00:00",
+      "input_manifest_sha256": "7e60027a0b6c851eb71c839f3bb025833a5ed6e62da1cc316cd17ed904093da7",
+      "inputs_unchanged": true,
+      "log_sha256": "646c6147cfa15b27be55af333ab0288b9dccd32f11f7576f2e9483e661e9bace",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-acp-final-20261108-pro1.json",
+      "receipt_sha256": "8f12bbe43ce1d48c5163548d2185908b8d0a20649a2f2341cf6b0a058d482b93",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:16:48.817549+00:00"
+    },
+    "acp_types": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "check-native-acp.mjs"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:16:46.740739+00:00",
+      "input_manifest_sha256": "7e60027a0b6c851eb71c839f3bb025833a5ed6e62da1cc316cd17ed904093da7",
+      "inputs_unchanged": true,
+      "log_sha256": "3c347b934ed1bfa53b6e76c5c643fd5b2321a01ee6c96636e159f14a7fbe1a0a",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-acp-types-final-20261108-pro1.json",
+      "receipt_sha256": "490ad7d998f098a2975d703682192c5e114a356433735f2ad8f09e941d10b191",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:16:44.907023+00:00"
+    },
+    "company": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.host.config.mts"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T03:51:43.457069+00:00",
+      "input_manifest_sha256": "66207a3f8673dbd94318351571bb9fa1f5679fb74db25ba99313676f1c2ef8eb",
+      "inputs_unchanged": true,
+      "log_sha256": "2d05a9327114099f42124cda5757b5ace75b3b7569a0e4f9208342f32adc1d92",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-company-20261108-pro2.json",
+      "receipt_sha256": "ffb81efa8b1305778d6d0f07e7f045a8ae34b04fdd3ccc15e2d0f0a3ecbd018e",
+      "source_inputs": 7002,
+      "started_at": "2026-11-08T03:51:38.785687+00:00"
+    },
+    "company_build": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "build.mjs",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:12:14.660108+00:00",
+      "input_manifest_sha256": "9c9eb063cc0b5fbaf32f7551e95e36f767028578943501f8c7cf6276c2c913ad",
+      "inputs_unchanged": true,
+      "log_sha256": "5db4ee637324530e3ee938ecf5cdec9bf6187aaae3a9ca9a42cc0b729577eb20",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-company-build-20261108-pro1.json",
+      "receipt_sha256": "4723137843e080faaf3248c2b1e477adf217903358513530567f95022de3ed88",
+      "source_inputs": 7005,
+      "started_at": "2026-11-08T04:12:13.801732+00:00"
+    },
+    "custody": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_retained_read.py",
+        "tests/test_remote_worker_broker_client.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_read_acp.py"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:14:10.463697+00:00",
+      "input_manifest_sha256": "c80d34f01f52848f2c8fc074a6b151b3553fcf25d2b66eb573306765c7787493",
+      "inputs_unchanged": true,
+      "log_sha256": "20f5f27046a7bba4f1632529723920cb0714405e7c436f83ff72626e3a37131b",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-custody-20261108-pro3.json",
+      "receipt_sha256": "aeb7592cd35206c6dd2102940c4678bb8fee87d08b3dd5db950bb42f22a2b613",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:13:02.526277+00:00"
+    },
+    "d7": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_ceo_submit_armed_composition.py",
+        "-k",
+        "d7"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:20:28.660525+00:00",
+      "input_manifest_sha256": "03450ae8a20e4b72d1277003eb9f81fd99274d495a766f6bc61c84c3530e47cf",
+      "inputs_unchanged": true,
+      "log_sha256": "cfc14fd2dc11c362cccf5421245ca5ab0e9d286b54a604a80bd2dd5522f6feb9",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-d7-final-20261108-pro1.json",
+      "receipt_sha256": "134e1614d8b79bcf50d6d49e1886b8d8ff343a89bd2b3ca3a0415c59226cb60f",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:20:24.100742+00:00"
+    },
+    "entry": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:13:31.808493+00:00",
+      "input_manifest_sha256": "c80d34f01f52848f2c8fc074a6b151b3553fcf25d2b66eb573306765c7787493",
+      "inputs_unchanged": true,
+      "log_sha256": "7cb7a6cb6f9fed0f38191c4626afdfb66df21cc773b6dcc540ae1061f0328843",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-entry-20261108-pro4.json",
+      "receipt_sha256": "f3d3e9aae400d9f2bacd86f7ffc0e5d01c535ea78c5226007171222049141eaa",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:13:27.086473+00:00"
+    },
+    "guard_diagnostic": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_ceo_submit_armed_composition.py"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T04:17:55.463768+00:00",
+      "input_manifest_sha256": "7e60027a0b6c851eb71c839f3bb025833a5ed6e62da1cc316cd17ed904093da7",
+      "inputs_unchanged": true,
+      "log_sha256": "cf550059d03f00d18e021066c887e4de6c800bd385b76d6c637cbd225a369047",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-guard-final-20261108-pro1.json",
+      "receipt_sha256": "276f2576060607411eb65ab824c17a1388420e133aa96945273b4b3c3158cfc6",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:16:46.866700+00:00"
+    },
+    "package": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_native_deepseek_attestation.py"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:13:14.870809+00:00",
+      "input_manifest_sha256": "c80d34f01f52848f2c8fc074a6b151b3553fcf25d2b66eb573306765c7787493",
+      "inputs_unchanged": true,
+      "log_sha256": "302c481d0476715670506a6664542c2cdca3bcb6f6be63ec67b5ba0dde493cf4",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-package-20261108-pro3.json",
+      "receipt_sha256": "66c8f0c445e0a051b9dd62d739441336f8983906e69cc09469466bd7a0bdd08c",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:13:02.907564+00:00"
+    },
+    "python": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_protocol.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_tool_updates.py",
+        "tests/test_deepseek_native_read.py",
+        "tests/test_dsh_native_result_content.py",
+        "tests/test_remote_operator_harness_adapter.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_deepseek_attended_export.py"
+      ],
+      "base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:17:10.001960+00:00",
+      "input_manifest_sha256": "7e60027a0b6c851eb71c839f3bb025833a5ed6e62da1cc316cd17ed904093da7",
+      "inputs_unchanged": true,
+      "log_sha256": "61800049e3767cbfe10d57054fbcec188ea2b89ea87dbb0c3cd033e6af66efb2",
+      "receipt_path": "/private/tmp/mmx-dsh-c32-python-final-20261108-pro1.json",
+      "receipt_sha256": "8c2f47adab9cc9d6068d494ae10aec40f126c8598b7a0ef11c78cf03be84a4e3",
+      "source_inputs": 7009,
+      "started_at": "2026-11-08T04:16:43.600872+00:00"
+    }
+  },
+  "schema": "mastermind.dsh_native_retained_read_qualification.v1",
+  "source_base_sha": "0fc07b4f508b6183ae800d7f1a0f2062a7cf7aac",
+  "source_sha256": {
+    "control_plane/executive_fabric_composition.py": "b7fbf3d7c7b5a74ad592b61aa32975ba007fb4c17176c3f3424a3bb62ca75488",
+    "control_plane/executive_worker_broker.py": "4a544b6b2d035f3347993b7995e4c0fda015bb5a96fb9b97a9eb09ac5f0cda13",
+    "control_plane/native_conversation_binding.py": "65bc480bf05a123dae232e8e02a9769fd4a16303689e18f028dfaa84960620b8",
+    "control_plane/native_conversation_read.py": "a76a7734586a45da5d3895d3d5524dbecdeb6ef2bc753dc6858d34dddfefad73",
+    "control_plane/native_provider_attestation.py": "181d91391664d881657f5fc746199639c5af221983c8b64bf8e75de369d5b1f4",
+    "control_plane/remote_attempt_transport.py": "377b3860167d066003e632dfa5dd987871ce6bc06c7a5e0f5f3044f33ee6c10a",
+    "control_plane/remote_operator_harness_adapter.py": "2ea5cccf445c2dae33396d36d4e7993544ec1f8012c5425bc63b33eef100cf1a",
+    "control_plane/remote_worker_broker_client.py": "0cefdbce7fe1dbe587f988f350d717c9b397bbc0f3c6959bb418a68732a58c44",
+    "integrations/deepseek_harness/company_plugin/src/executive-read-port.ts": "487d0afc0eca4717b6ca8e4a32cc4c513ffc66b859a6440aad713536e769fcfc",
+    "integrations/deepseek_harness/native_connection.py": "285b753345662deeba141a822e52b09813d299f7e4252077dfa2e2c56e578daf",
+    "integrations/deepseek_harness/native_protocol.py": "62e52ac106acdc6b7a0e097c7e85bff3f9768fca63facffebf9cb54292973d83",
+    "integrations/deepseek_harness/native_read_port.py": "650b9c6841ac396fab97bad533a1e0ba4df96b8f24970e12f744edeee2a3778d",
+    "integrations/deepseek_harness/native_worker.mjs": "087883b459b87f6742ace82a19df7e2dfe71d0453fe781c513a55d4b7a400c6d",
+    "integrations/deepseek_harness/operator_adapter.py": "96071bc26c1c3369e541685dc9d51d7d2ec93edca38989262ae601d65e4b96fb",
+    "integrations/deepseek_harness/package_attended.py": "551f098bd1a26ef9062e8152c7c51cf023aed1aba4c01a169e5b3d7128a0f2ce",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+    "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720",
+    "integrations/deepseek_harness/runtime_compat/native-worker-entry.test.ts": "6f9367c1ce909ef333f4195f82291b4b8537b735ccdf1f08f14f464408465b7c",
+    "integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts": "766004f277b20d9e9516f170e45fe1bd09ebc9d45734498577c6a516f9b9e658",
+    "integrations/session_bridge/deepseek_native.py": "595262ebc81916e7f604615bae552a6f73e2692e5fd26fbcbcbe7b47b8b75c30",
+    "integrations/session_bridge/runtime_return.py": "c2dfcffe4fe9cb143cace9e1aea0b3d946a8d450af484aa396b01314b4b535fd",
+    "scripts/executive_os_phase1c.py": "3a8779f5c6851a6cda2a0ca63848854b0b95371a7948808c947c313de49256fd",
+    "scripts/executive_os_phase1c_worker.py": "bc07900dc0a66d513567284e4ce5b6b562539fb35a7db45bc857462668491b7d",
+    "tests/test_ceo_submit_armed_composition.py": "572f7416b019ebb8c3c6562ba570312976dec86a09fb5766771cf67c1f435b4d",
+    "tests/test_dsh_native_broker.py": "192b1cbd2180382871f27b94ff45813a75ad05713c6b93217c187bb497997e5c",
+    "tests/test_dsh_native_read_acp.py": "f389e629afc247c90e12843305fc4d13742ca43e5bae409a16a2b2ceadfbc95e",
+    "tests/test_dsh_native_retained_read.py": "d36b25ae69d7935e67c6a5696d62b95d66f27b97da9b4cf2a6e481176da584a2",
+    "tests/test_dsh_native_worker_package.py": "d020d632d795b13bbae05744cd49e49eafc8abf4d131148c072ce1973d61aeda",
+    "tests/test_remote_worker_broker_client.py": "4f341a5da2a0fa08d95d6c554437392618b1119ba32e41c6990d58e737ec97b8"
+  },
+  "source_state": "C32 checkpoint postimages; each test receipt retains its own exact input snapshot"
+}

@@ -317,3 +317,93 @@ def test_timed_out_close_cannot_sweep_a_pending_original_launch(tmp_path, monkey
         assert f.adapter.native.open_calls == 1 and f.adapter.native.prompt_calls == 0
         assert f.sweeper.calls == []
     asyncio.run(exercise())
+
+
+async def ready_read(f):
+    import hashlib
+    import time
+    from integrations.deepseek_harness.native_read_port import canonical, native_read_frame
+    await request(f,"ohf-start",launch_payload(f))
+    native = f.adapter.native
+    native.client.bind_session(native.provider_session_id)
+    observed = dict(schema="mastermind.dsh.native_read_binding.v1",
+        native_session_id=native.provider_session_id,native_package_sha256="3"*64,
+        donor_sha="687f282e8625c6b8d11ff58211a90524be2e4317")
+    f.adapter.binding = replace(f.adapter.binding,observe_read_binding=lambda original:
+        dict(observed) if original is native else pytest.fail("read replaced original process"))
+    selected = dict(schema="mastermind.dsh.native_read_association.v1",work_ref="WS:Original-read",
+        root_job_id="JOB-001",native_session_id=native.provider_session_id,owner_principal_scope="1"*64,
+        composition_sha256="2"*64,native_package_sha256=observed["native_package_sha256"],
+        donor_sha=observed["donor_sha"])
+    frame = native_read_frame(association_sha256=hashlib.sha256(canonical(selected)).hexdigest(),
+        principal_scope="1"*64,issued_at=int(time.time())-1,expires_at=int(time.time())+120,
+        request={"kind":"snapshot"})
+    payload = dict(epoch=to_wire(f.epoch),generation=to_wire(f.generation),association=selected,request=frame)
+    f.read_entered, f.read_release, f.read_guards = asyncio.Event(),asyncio.Event(),[]
+    async def native_read(association,request,*,require_current):
+        require_current(); f.read_guards.append(require_current); f.read_entered.set()
+        await f.read_release.wait(); require_current()
+        return dict(schema="mastermind.dsh.native_read_result.v1",request_id=request["request_id"],
+            association_sha256=request["association_sha256"],status="READ",data={"projections":None,"page":None})
+    native.read_native = native_read
+    return payload,observed
+
+
+@pytest.mark.parametrize("cancel_reader",[False,True])
+def test_original_broker_joins_finite_read_before_same_generation_send(tmp_path,monkeypatch,cancel_reader):
+    async def run():
+        f=await configured(tmp_path,monkeypatch)
+        payload,observed=await ready_read(f)
+        selected=await request(f,"ohf-native-read-binding",{key:payload[key] for key in ("epoch","generation")})
+        assert selected == {"native_read":observed}
+        reading=asyncio.create_task(request(f,"ohf-native-read",payload))
+        await asyncio.wait_for(f.read_entered.wait(),2)
+        state=f.broker._operator_run; original=state.native_read_task
+        assert state.busy and not original.done() and state.native_connection is f.adapter.native
+        with pytest.raises(BrokerStateError):
+            await request(f,"ohf-native-read",payload)
+        if cancel_reader:
+            reading.cancel()
+            with pytest.raises(asyncio.CancelledError): await reading
+            assert state.native_read_task is original and not original.cancelled()
+        sending=asyncio.create_task(request(f,"ohf-begin-turn",begin_payload(f)))
+        await asyncio.sleep(0)
+        assert not sending.done() and f.adapter.native.prompt_calls == 0
+        f.read_release.set()
+        result=await asyncio.wait_for(original,2)
+        assert result["native_read"]["status"] == "READ"
+        if not cancel_reader: assert await reading == result
+        await asyncio.wait_for(sending,2)
+        assert f.broker._operator_run is state and state.native_read_task is None
+        assert f.adapter.native.open_calls == f.adapter.native.prompt_calls == 1
+        assert f.broker._quarantined_reason is None and f.sweeper.calls == []
+        await close(f)
+    asyncio.run(run())
+
+
+def test_late_original_read_cannot_borrow_a_later_broker_busy_slot(tmp_path,monkeypatch):
+    async def run():
+        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable
+        f=await configured(tmp_path,monkeypatch)
+        payload,_=await ready_read(f)
+        original_call=f.adapter._call
+        def short_read(coroutine,*,timeout=120,**kwargs):
+            return original_call(coroutine,timeout=0.01,**kwargs)
+        monkeypatch.setattr(f.adapter,"_call",short_read)
+        result=await request(f,"ohf-native-read",payload)
+        assert result == {"native_read":None}
+        await asyncio.wait_for(f.read_entered.wait(),2)
+        state=f.broker._operator_run
+        assert state.native_read_task is None and not state.busy
+        pending=next(iter(f.adapter.pending_calls))
+        assert not pending.done()
+        state.busy=True
+        try:
+            with pytest.raises(NativeReadUnavailable): f.read_guards[0]()
+            f.read_release.set()
+            with pytest.raises(NativeReadUnavailable): await asyncio.wrap_future(pending)
+        finally: state.busy=False
+        assert f.adapter.native.open_calls == 1 and f.adapter.native.prompt_calls == 0
+        monkeypatch.setattr(f.adapter,"_call",original_call)
+        await close(f)
+    asyncio.run(run())

@@ -969,3 +969,61 @@ Carry bounded binding observation and content READ on the existing authenticated
 Then package/build the native entry through package_attended.py's original owner; qualify the actual original package, installed Worker/quota/host/account and enabled profile/router/binding; complete the signed-in packaged DeepSeek create/history/send/original-answer/logout/reconnect/uncertain-send/Stop/G1-to-G2/tool journey.
 
 C31 has not staged a release, launched a production native service, created a production Session, called the real provider or established installed acceptance. Keep the last canonical backend_unavailable observation and production holds distinct from source tests. Preserve merged #2120/#2134/#2147, Hermes #2180/#2228, Paperclip and #2230. Keep os_assets.py under #2175, exclude #1870, reuse #2210 only with its real original grants. Do not repeat Hermes/C21 canaries, restart active services, repair foreign Git worktrees, or replay unchanged explicit denials. **MORE_WORK_EXISTS; C32 continues in the assigned healthy session.**
+
+## C32 — retained native history and original answer content (2026-11-08 UTC)
+
+C32 completes the source consumer from the existing authenticated SessionBridge
+through the original Runtime root, retained dispatch, RemoteOperatorHarnessAdapter,
+authenticated Worker Broker, NativeOperatorAdapter and original ACP SDK connection
+to the actual native Session/Gateway reader. It does not construct another Agent,
+Session, process, account, sender, queue or retry owner.
+
+The original canonical root/principal, exact supervisor/Runtime, child/Attempt,
+Worker, package/donor, generation, adapter/client and open READY continuation are
+rejoined at each boundary. The passive native reader preserves the original
+claim/terminal/prefix after later turns and provider logout. The actual compiled
+company leaf is exercised through the original ACP, Gateway and Session.
+
+READ expiry/cancellation retires only delivery to that caller. An exact queued,
+unsent read is withheld at the original SDK physical-write boundary, then refused
+through the SDK's existing pending-request cleanup; the sender remains usable.
+An actual write/drain failure remains fatal. A retired, fully sent read retains
+its original SDK future while the next authorized prompt may proceed. An early
+reply before physical write is refused. The broker joins the one incumbent
+finite read before admitting Send/idle and uses exact task identity, so a late
+read cannot borrow a subsequent busy slot. Remote READ has one total deadline
+and no unbounded TLS close wait. Node response authority is checked again at the
+original physical write; late content becomes a same-ID unavailable response.
+
+The existing attended packager now includes the fixed native Worker entry and
+overlay in the same complete application closure. The native qualifier compares
+both files with the same protected source SHA. Carrying those files does not
+enable the Worker profile or change the attended launchd owner.
+
+Exact evidence: [C32 qualification](../../research/evidence/deepseek-native-retained-read-20261108.json).
+The preceding full handoff is preserved in
+[C31 handoff](../../research/evidence/deepseek-native-handoff-c31-20261108.md).
+
+Qualification: 84 custody/retained-reader/transport tests; 254 focused Python
+regressions; 71 package/attestation tests; 223 original ACP tests; 15 compiled
+native-entry consumer tests; 32 company reader tests (one optional fixture skip).
+Suites overlap and must not be added as a unique-test count. ACP typecheck has
+zero diagnostics. The full CEO guard had 317 passes and one stale whole-source
+pin; only that frozen pin/comment was updated after verifying the unchanged
+installed-entry AST, and all 13 D7 positive/negative cases passed. No original
+assertion, path pin, exact-call pin or AST pin was weakened.
+
+Next safe actions remain active: save/push C32, build the complete owned candidate
+with pnpm 11.28.5, then compose current protected master in this same workspace.
+Observed protected master is c117c00ac1f038239f81391099b0f8854f597680; its
+345 changed paths since the verified 2541a68e governing pin include no governing
+procedure change. Original Hermes acceptance and C21 physical canary remain
+DO_NOT_REDO.
+
+Production holds are unchanged: accepted protected-head package qualification,
+root-custodied native/ACP installation, original enrollment/Worker/account grants,
+actual service routing and signed-in packaged/provider journey. This checkpoint
+claims no installation, service start/restart, public-route acceptance, provider
+call or new physical canary. The paid Fabric/VPS and denied installed-path lanes
+are not retried. The prior installed Executive reader observation remains
+backend_unavailable; no later acceptance is inferred from these source tests.

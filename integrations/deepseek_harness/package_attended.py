@@ -181,6 +181,33 @@ def verify_native_session_package(release, config, accepted, source_repo, source
             raise ValueError("Native session package source differs from protected patch")
 
 
+def package_native_worker(release):
+    """Copy the fixed Worker consumer into this same complete app package."""
+    if release.resolve(strict=True) != release:
+        raise ValueError("Native worker release directory redirected")
+    captured = {}
+    for name in ("native_worker.mjs", "native_worker.patch.yml"):
+        source = HERE / name
+        if source.resolve(strict=True) != source or not source.is_file():
+            raise ValueError("Native worker source redirected")
+        raw = source.read_bytes()
+        with (release / name).open("xb") as stream:
+            stream.write(raw)
+        (release / name).chmod(0o644)
+        if source.read_bytes() != raw or (release / name).read_bytes() != raw:
+            raise ValueError("Native worker source changed during packaging")
+        captured[name] = hashlib.sha256(raw).hexdigest()
+    return {
+        "native_worker": {
+            "schema": "mastermind.dsh_native_worker_entry/v1",
+            "entry": "native_worker.mjs", "sha256": captured["native_worker.mjs"],
+            "agent_name": "deepseek-harness-acp", "agent_version": "0.0.1",
+            "model_provider": "deepseek-account",
+        },
+        "native_worker_patch_sha256": captured["native_worker.patch.yml"],
+    }
+
+
 def stage(args):
     donor = exact_path(args.donor)
     release = exact_path(args.release, exists=False)
@@ -244,6 +271,7 @@ def stage(args):
     package_company_scope(release)
     shutil.copy2(donor / "LICENSE", release / "UPSTREAM-LICENSE")
     shutil.copy2(HERE / "launch_attended.mjs", release / "launch_attended.mjs")
+    native_worker = package_native_worker(release)
     for child in ("home", "state/profiles/web", "workspace", "logs"):
         (state / child).mkdir(mode=0o700, parents=True)
     state.chmod(0o700)
@@ -264,6 +292,7 @@ def stage(args):
         "native_session_patch": session_patch,
         "native_owner_access": owner_access,
         "native_acp_patch": acp_patch,
+        **native_worker,
         "native_client_build_sha256": sha(native_build),
         "pnpm_sha256": sha(pnpm),
         "company_patch_sha256": sha(company_patch),
@@ -453,11 +482,18 @@ def qualify_native_worker_package(*, release, source_repo, source_sha):
             or worker["model_provider"] != DSH_MODEL_PROVIDER
             or worker != accepted.get("native_worker")):
         raise ValueError("Fixed native worker entry is not source-qualified")
-    entry = release / DSH_ENTRYPOINT
+    patch_hash = config.get("native_worker_patch_sha256")
+    if (type(patch_hash) is not str or re.fullmatch(r"[0-9a-f]{64}", patch_hash) is None
+            or patch_hash != accepted.get("native_worker_patch_sha256")):
+        raise ValueError("Fixed native worker overlay is not source-qualified")
+    entry, patch = release / DSH_ENTRYPOINT, release / "native_worker.patch.yml"
     expected = subprocess.check_output(["git", "-C", str(source_repo), "show",
         source_sha + ":integrations/deepseek_harness/" + DSH_ENTRYPOINT])
-    if (entry.is_symlink() or entry.read_bytes() != expected
-            or sha(entry) != worker["sha256"]
+    expected_patch = subprocess.check_output(["git", "-C", str(source_repo), "show",
+        source_sha + ":integrations/deepseek_harness/native_worker.patch.yml"])
+    if (entry.resolve(strict=True) != entry or entry.read_bytes() != expected
+            or sha(entry) != worker["sha256"] or patch.resolve(strict=True) != patch
+            or patch.read_bytes() != expected_patch or sha(patch) != patch_hash
             or manifest_path.read_bytes() != raw or inventory_identity(release) != identity):
         raise ValueError("Fixed native worker entry or package changed")
     from ops.executive_os.install_source_policy import validate_acceptance_source

@@ -124,7 +124,8 @@ class DeepSeekNativeReadSource:
 
     def __init__(self, association: DeepSeekNativeAssociation, port: OwnedNativeReadPort,
                  *, require_current: Callable[[], None]):
-        if (type(association) is not DeepSeekNativeAssociation or type(port) is not OwnedNativeReadPort
+        from control_plane.native_conversation_read import RetainedNativeReadPort
+        if (type(association) is not DeepSeekNativeAssociation or type(port) not in (OwnedNativeReadPort, RetainedNativeReadPort)
                 or not callable(require_current) or inspect.iscoroutinefunction(require_current)
                 or inspect.iscoroutinefunction(getattr(require_current, "__call__", None))
                 or port.association_sha256 != association.digest):

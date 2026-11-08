@@ -39,6 +39,8 @@ export default defineConfig({
     {find:"@agentclientprotocol/sdk",replacement:sdkRequire.resolve("@agentclientprotocol/sdk")},
     {find:"mmx-native-acp",replacement:resolve(candidate,"packages/acp/acp/src/index.ts")},
     {find:"mmx-native-acp-session",replacement:resolve(candidate,"packages/acp/acp/src/session.ts")},
+    {find:"mmx-native-test-remote",replacement:resolve(donor,"packages/api/session-controller/tests/test-remote.ts")},
+    {find:"mmx-native-browser-credentials",replacement:resolve(donor,"packages/api/gateway/tests/browser-credentials.ts")},
     ...aliases,
   ]},
   plugins:[{name:"original-native-acp-overlay",enforce:"pre",resolveId(id,importer){

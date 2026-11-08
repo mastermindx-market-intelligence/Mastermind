@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 from dataclasses import dataclass
 import math
 import inspect
@@ -91,6 +92,7 @@ class NativeLaunchBinding:
     require_current_effect: Callable[
         [OperationId, SessionEpochRef, ProcessGenerationRef, str, str | None], None]
     inspector: ProcessInspector | None = None
+    observe_read_binding: Callable[[NativeAcpProcess], dict[str, str]] | None = None
 
     def __post_init__(self):
         if (not isinstance(self.binary, BinaryAttestation) or type(self.argv) is not tuple
@@ -216,6 +218,65 @@ class NativeOperatorAdapter:
         identity = self.native.resource.identity
         return ProcessIdentityObservation(identity.pid, identity.pgid,
                                            identity.process_start_identity, identity.boot_session_id)
+
+
+    def _native_read_owner(self, epoch, generation, before_read):
+        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable
+        native = self._require_generation(generation)
+        if (self.epoch != epoch or self.close_operation is not None or native.resource is None
+                or native.provider_session_id is None or not callable(before_read)
+                or self.current is not None and self.current.result is None):
+            raise NativeReadUnavailable()
+        resource, identity, client = native.resource, native.resource.identity, native.client
+        session_id = native.provider_session_id
+        def current():
+            if (self.native is not native or self.epoch != epoch or self.generation != generation
+                    or self.close_operation is not None or native.resource is not resource
+                    or resource.identity is not identity or not resource.identity_matches()
+                    or native.client is not client or native.provider_session_id != session_id
+                    or client.session_id != session_id or client.violation):
+                raise NativeReadUnavailable()
+            for check in (self.binding.verify_source, before_read):
+                result = check()
+                if result is not None:
+                    if asyncio.iscoroutine(result):
+                        result.close()
+                    raise NativeReadUnavailable()
+            if self.native is not native or native.resource is not resource or native.client is not client:
+                raise NativeReadUnavailable()
+        current()
+        return native, current
+
+    def read_native_binding(self, *, epoch, generation, before_read):
+        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable, validate_native_read_binding
+        native, current = self._native_read_owner(epoch, generation, before_read)
+        observer = self.binding.observe_read_binding
+        if observer is None:
+            raise NativeReadUnavailable()
+        result = validate_native_read_binding(observer(native))
+        current()
+        if result["native_session_id"] != native.provider_session_id:
+            raise NativeReadUnavailable()
+        return result
+
+    def read_native_content(self, *, epoch, generation, association, request, before_read):
+        from integrations.deepseek_harness.native_read_port import (
+            NativeReadUnavailable, validate_native_read_association, validate_native_read_request, canonical)
+        selected = validate_native_read_association(association)
+        frame = validate_native_read_request(request, hashlib.sha256(canonical(selected)).hexdigest())
+        native, current = self._native_read_owner(epoch, generation, before_read)
+        observed = self.read_native_binding(epoch=epoch, generation=generation, before_read=before_read)
+        if any(selected[key] != observed[key] for key in ("native_session_id", "native_package_sha256", "donor_sha")):
+            raise NativeReadUnavailable()
+        try:
+            result = self._call(native.read_native(selected, frame, require_current=current), timeout=6.0)
+        except NativeEffectUnknown:
+            # Keep the original cross-thread future owned. READ is unavailable,
+            # never a modifying unknown effect or permission to replay.
+            raise NativeReadUnavailable() from None
+        current()
+        return result
+
 
     def _before_send(self, method: str) -> None:
         if method not in {"session/new", "session/resume", "session/set_config_option", "session/prompt", "_mastermind/native_cancel"}:

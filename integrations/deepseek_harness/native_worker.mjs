@@ -216,6 +216,7 @@ export function createNativeHostBindings({root,generation,policy,workspace,symbo
   },{global:true,prepend:true});
 
   return Object.freeze({
+    requireNativeReadOwner(agent){requireAgent(agent);},
     bindAcpFiber(fiber){alive();if(acpFiber!==undefined||!fiber)throw refused();acpFiber=fiber;},
     bindServices({requireLoaderCurrent,toolModules}){
       alive();if(owners!==undefined||typeof requireLoaderCurrent!=="function")throw refused();
@@ -349,7 +350,8 @@ export function createNativeLoaderAdmission({root,generation,symbols,app,company
   const source=(name,parentURL)=>{
     current();
     const path=realpathSync(resolvePluginResource(name,parentURL));
-    if(!(path.startsWith(app+sep)||path===companyEntry))throw refused();
+    if(!(path.startsWith(app+sep)||[companyEntry,join(dirname(companyEntry),"company-peer.js"),
+      join(dirname(companyEntry),"executive-read-port.js")].includes(path)))throw refused();
     current();return path;
   };
   const admission=Object.freeze({
@@ -422,6 +424,109 @@ export async function observeLoader(root,{companyEntry,importQualified,symbols,b
     const wanted=name==="read"?"@deepseek-ai/dsh-tool-fs":"@deepseek-ai/dsh-tool-fs-search";
     return held.some(row=>!row.disabled&&row.entry.options.name===wanted&&owner.entry===row.entry);
   }};
+}
+
+
+/** Response custody on the original SDK writer and original socket.
+ * This adds no queue or parser. Expiry substitutes the correlated content-free
+ * reply at physical write rather than closing the Agent's shared connection. */
+export function createNativeReadOutputGuard(socket){
+  const originalWrite=socket.write;
+  if(typeof originalWrite!=="function")throw refused();
+  let pending,active,retired=false,wrapped=false;
+  const check=held=>{
+    if(retired||pending!==held||socket.write!==write)throw refused();
+    const value=held.requireCurrent();
+    if(value!==undefined){if(value instanceof Promise)void value.catch(()=>{});throw refused();}
+    if(retired||pending!==held||socket.write!==write)throw refused();
+  };
+  function write(chunk,...args){
+    const bytes=typeof chunk==="string"?Buffer.from(chunk):Buffer.from(chunk.buffer,chunk.byteOffset,chunk.byteLength);
+    if(active&&bytes.equals(active.bytes)){
+      try{check(active.held);}catch{chunk=active.fallback;}
+    }
+    return originalWrite.call(socket,chunk,...args);
+  }
+  socket.write=write;
+  const finish=held=>{
+    if(pending===held){pending=undefined;held.finish();}
+  };
+  return Object.freeze({
+    register({requestId,response,unavailable,requireCurrent,finish:done}){
+      if(retired||pending||typeof requireCurrent!=="function"||typeof done!=="function"||
+        !(typeof requestId==="string"||Number.isSafeInteger(requestId))||
+        !Object.isFrozen(response)||!Object.isFrozen(unavailable))throw refused();
+      pending=Object.freeze({requestId,response,unavailable,requireCurrent,finish:done});
+    },
+    dispose(){retired=true;},
+    wrap(stream){
+      if(wrapped)throw refused();wrapped=true;
+      const forward=(target,key)=>{const value=Reflect.get(target,key,target);return typeof value==="function"?value.bind(target):value;};
+      return {readable:stream.readable,writable:new Proxy(stream.writable,{
+        get(target,key){
+          if(key!=="getWriter")return forward(target,key);
+          return (...args)=>{
+            const writer=target.getWriter(...args);
+            return new Proxy(writer,{get(owner,property){
+              if(property!=="write")return forward(owner,property);
+              return async message=>{
+                const held=pending;
+                const matched=held&&message&&message.method===undefined&&
+                  typeof message.id===typeof held.requestId&&message.id===held.requestId;
+                if(!matched){
+                  if(held&&message?.result===held.response)throw refused();
+                  return owner.write(message);
+                }
+                if(active)throw refused();
+                let outgoing=message;
+                if(message.result!==undefined){
+                  if(message.result!==held.response&&message.result!==held.unavailable)throw refused();
+                  try{check(held);}catch{outgoing={jsonrpc:"2.0",id:message.id,result:held.unavailable};}
+                  const bytes=Buffer.from(JSON.stringify(outgoing)+"\n");
+                  const fallback=Buffer.from(JSON.stringify({jsonrpc:"2.0",id:message.id,result:held.unavailable})+"\n");
+                  active={held,bytes,fallback};
+                }
+                try{return await owner.write(outgoing);}
+                finally{active=undefined;finish(held);}
+              };
+            }});
+          };
+        },
+      })};
+    },
+  });
+}
+
+export function createNativeReadAdmission({bindings,generation,bridge,executeRead,output,packageSha256}){
+  if(!SHA.test(packageSha256)||typeof executeRead!=="function")throw refused();
+  let busy=false;
+  return async(facts,signal)=>{
+    if(busy)throw refused();
+    busy=true;let registered=false;
+    try{
+      const request=facts.request,selected=request.association,ownerCheck=facts.requireCurrent,agent=facts.agent;
+      if(!plain(selected)||selected.native_session_id!==agent.id||selected.donor_sha!==DONOR||
+        selected.native_package_sha256!==packageSha256||request.sessionId!==agent.id||typeof ownerCheck!=="function")
+        throw refused();
+      const current=()=>{
+        generation.signal.throwIfAborted();signal.throwIfAborted();
+        bindings.requireNativeReadOwner(agent);
+        const value=ownerCheck();
+        if(value!==undefined){if(value instanceof Promise)void value.catch(()=>{});throw refused();}
+        if(facts.agent!==agent||facts.request!==request||facts.requireCurrent!==ownerCheck||
+          request.association!==selected||selected.native_session_id!==agent.id||
+          selected.native_package_sha256!==packageSha256||selected.donor_sha!==DONOR)throw refused();
+        bindings.requireNativeReadOwner(agent);
+      };
+      current();
+      const source=Object.freeze({association:selected,signal:generation.signal,requireCurrent:current});
+      const prepared=await executeRead(bridge,source,request.request,signal,current);
+      output.register({requestId:facts.requestId,response:prepared.response,unavailable:prepared.unavailable,
+        requireCurrent(){current();prepared.requireCurrent();},finish(){busy=false;}});
+      registered=true;
+      return prepared.response;
+    }finally{if(!registered)busy=false;}
+  };
 }
 
 export async function main(){
@@ -516,12 +621,23 @@ export async function main(){
     const loader=await observeLoader(root,{companyEntry,symbols,builtins,importQualified:nativeLoader.importQualified});
     bindings.bindServices({requireLoaderCurrent:loader.requireCurrent,toolModules:loader.toolModules});
     generation.signal.throwIfAborted();
-    await root.plugin({name:"mastermind-native-acp",inject:[...Acp.inject],apply(ctx){
+    const companyParent=pathToFileURL(companyEntry).href;
+    const [{createCompanySessionReadBridge},{executeExecutiveNativeRead,inject:readInject}]=await Promise.all([
+      nativeLoader.importQualified(join(dirname(companyEntry),"company-peer.js"),companyParent),
+      nativeLoader.importQualified(join(dirname(companyEntry),"executive-read-port.js"),companyParent),
+    ]);
+    const packageSha256=await hashFile(join(release,"package-manifest.json"));
+    const output=createNativeReadOutputGuard(socket);
+    await root.plugin({name:"mastermind-native-acp",inject:[...Acp.inject,...readInject],apply(ctx){
       bindings.bindAcpFiber(ctx.fiber);
+      const bridge=createCompanySessionReadBridge(ctx);
+      const nativeReadAdmission=createNativeReadAdmission({bindings,generation,bridge,
+        executeRead:executeExecutiveNativeRead,output,packageSha256});
+      ctx.effect(()=>()=>output.dispose(),"mastermind: retained native READ replies");
       Acp.apply(ctx,{provider:PROVIDER,model:policy.model.model,
-        stream:ndJsonStream(Writable.toWeb(socket),Readable.toWeb(socket)),
+        stream:output.wrap(ndJsonStream(Writable.toWeb(socket),Readable.toWeb(socket))),
         nativePromptAdmission:bindings.nativePromptAdmission,nativeModelAdmission:bindings.nativeModelAdmission,
-        nativeObservation:bindings.nativeObservation});
+        nativeObservation:bindings.nativeObservation,nativeReadAdmission});
     }});
     generation.signal.throwIfAborted();
   }catch(error){

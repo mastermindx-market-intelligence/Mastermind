@@ -462,7 +462,7 @@ class FabricBindingSource:
         def current():
             if self.native_conversation_selection() is not selection:
                 raise FabricCompositionError('Native operator selection was replaced')
-        return NativeConversationHostComposition(selection.registration, current)
+        return NativeConversationHostComposition(selection.registration, current, self.expected_sha256)
 
     def remote_operator_binding(self, host_ref: str, worker_id: str):
         selection = self.native_conversation_selection()

@@ -574,3 +574,45 @@ async def test_capacity_observe_post_write_loss_is_no_effect_and_zero_retry(
         )
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert calls == 1
+
+@pytest.mark.parametrize("operation", ["ohf-native-read-binding","ohf-native-read"])
+async def test_native_read_uses_one_total_budget_and_never_waits_for_ssl_close(paths, monkeypatch, operation):
+    from types import SimpleNamespace
+    client = RemoteWorkerBrokerClient(_binding(paths), IDENTITY, allowed_operations={operation})
+    aborted, waits = [], []
+    class Writer(_Writer):
+        async def drain(self):
+            await asyncio.sleep(0.06)
+        async def wait_closed(self):
+            waits.append(True)
+            await asyncio.Future()
+    writer = Writer()
+    writer.transport = SimpleNamespace(abort=lambda:aborted.append(True))
+    async def opened():
+        await asyncio.sleep(0.06)
+        return _Reader(b""), writer
+    monkeypatch.setattr(client,"_open_connection",opened)
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(TransportError) as raised:
+        await client.request(operation,{},timeout_seconds=0.1)
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert asyncio.get_running_loop().time()-started < 0.25
+    assert writer.closed and aborted == [True] and waits == []
+
+
+async def test_successful_native_read_does_not_wait_for_unbounded_ssl_close(paths,monkeypatch):
+    from types import SimpleNamespace
+    operation = "ohf-native-read-binding"
+    client = RemoteWorkerBrokerClient(_binding(paths),IDENTITY,allowed_operations={operation})
+    request = build_request(IDENTITY,operation,{})
+    writer = _Writer()
+    aborted=[]
+    writer.transport=SimpleNamespace(abort=lambda:aborted.append(True))
+    async def forbidden_close():
+        pytest.fail("finite read waited for TLS close")
+    writer.wait_closed=forbidden_close
+    async def opened():
+        return _Reader(_frame(_response(request,broker_response={"native_read":None}))),writer
+    monkeypatch.setattr(client,"_open_connection",opened)
+    assert await client.request(operation,{},timeout_seconds=0.1) == {"native_read":None}
+    assert writer.closed and aborted == [True]

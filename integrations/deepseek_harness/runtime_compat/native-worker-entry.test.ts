@@ -12,11 +12,19 @@ import SandboxPolicy from "@deepseek-ai/dsh-sandbox-policy";
 import Approval from "@deepseek-ai/dsh-user-approval";
 import Skills from "@deepseek-ai/dsh-skill";
 import * as Acp from "mmx-native-acp";
-import {canonical,nativeConfig,parseExecutionPolicy,createNativeHostBindings} from "../native_worker.mjs";
+import {canonical,nativeConfig,parseExecutionPolicy,createNativeHostBindings,createNativeReadAdmission,createNativeReadOutputGuard} from "../native_worker.mjs";
 import {mkdtemp,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {createHash} from "node:crypto";
+import {Duplex,PassThrough,Readable,Writable} from "node:stream";
+import TypertRegistry from "@deepseek-ai/dsh-typert-registry";
+import TypertGateway from "@deepseek-ai/dsh-api-gateway";
+import * as Connection from "@deepseek-ai/dsh-client-connection";
+import {createSessionTestController} from "mmx-native-test-remote";
+import {provideBrowserCredentials} from "mmx-native-browser-credentials";
+import {createCompanySessionReadBridge} from "../company_plugin/lib/company-peer.js";
+import {executeExecutiveNativeRead,inject as readInject} from "../company_plugin/lib/executive-read-port.js";
 
 const cleanup:(()=>Promise<unknown>)[]=[];
 afterEach(async()=>{while(cleanup.length)await cleanup.pop()!();vi.restoreAllMocks();});
@@ -41,7 +49,7 @@ const text=(value:string):StreamChunk[]=>[
   {type:"block-start",index:0,blockType:"text"},{type:"text-delta",index:0,text:value},
   {type:"block-end",index:0,block:{type:"text",text:value}},{type:"finish",reason:{kind:"stop"}},
 ];
-async function host({tool=false,hang=false,beforeNew,onStream}:{tool?:boolean,hang?:boolean,
+async function host({tool=false,hang=false,read=false,beforeNew,onStream}:{tool?:boolean,hang?:boolean,read?:boolean,
   beforeNew?:(client:any)=>Promise<void>,onStream?:(ctx:Context,options:GenerateOptions)=>Promise<void>}={}){
   const ctx=new Context(),workspace=await mkdtemp(join(tmpdir(),"mmx native entry "));
   const generation=new AbortController(),account={current:true,cache:0,userId:null as string|null},seen:{requests:GenerateOptions[],writes:number,assignments:number,tools:number}=
@@ -87,7 +95,7 @@ async function host({tool=false,hang=false,beforeNew,onStream}:{tool?:boolean,ha
         yield{type:"block-end",index:0,block:{type:"tool-call",id:ToolCallId("original-read"),name:"read",arguments:"{}"}};
         yield{type:"finish",reason:{kind:"tool-calls"}};return;
       }
-      yield*text("Original native answer");
+      yield*text(read?"Native answer "+seen.writes:"Original native answer");
     }
   }
   ctx.llm.registerAdapter(["deepseek-account"],new Inert());
@@ -98,10 +106,29 @@ async function host({tool=false,hang=false,beforeNew,onStream}:{tool?:boolean,ha
   });
   await ctx.plugin(AgentLoop,{agents:[]});
   bindings.bindServices({requireLoaderCurrent:()=>true,toolModules:()=>true});
+  if(read){
+    await ctx.plugin(TypertRegistry);
+    const controllerDependencies = ["agentDefaultModel","attachments","fileUploads","fs","llm","remoteAccess",
+      "sessionProjections","sessionQuery","workspaceRegistry"].filter(name=>ctx.get(name)!==undefined);
+    await ctx.plugin({inject:["sessions","agents","sessionPersistence","typert",...controllerDependencies],apply(inner:Context){
+      createSessionTestController(inner,{defaultModelSelection:()=>({provider:"deepseek-account",model:"deepseek-chat"}),cwd:workspace});
+    }});
+    provideBrowserCredentials(ctx);await ctx.plugin(Connection);await ctx.plugin(TypertGateway);
+  }
   const a=new TransformStream<Uint8Array,Uint8Array>(),b=new TransformStream<Uint8Array,Uint8Array>();
-  await ctx.plugin({name:"native-entry-unit",inject:[...Acp.inject],apply(inner:Context){
+  const toHost=new PassThrough(),fromHost=new PassThrough();
+  const port=Duplex.from({readable:toHost,writable:fromHost}),peer=Duplex.from({readable:fromHost,writable:toHost});
+  port.on("error",()=>{});peer.on("error",()=>{});
+  cleanup.push(async()=>{port.destroy();peer.destroy();});
+  const output=read?createNativeReadOutputGuard(port):undefined;
+  const hostStream=read?output!.wrap(ndJsonStream(Writable.toWeb(port),Readable.toWeb(port))):ndJsonStream(a.writable,b.readable);
+  const clientStream=read?ndJsonStream(Writable.toWeb(peer),Readable.toWeb(peer)):ndJsonStream(b.writable,a.readable);
+  await ctx.plugin({name:"native-entry-unit",inject:[...Acp.inject,...(read?readInject:[])],apply(inner:Context){
     bindings.bindAcpFiber(inner.fiber);
-    Acp.apply(inner,{provider:"deepseek-account",model:"deepseek-chat",stream:ndJsonStream(a.writable,b.readable),
+    const nativeReadAdmission=read?createNativeReadAdmission({bindings,generation,
+      bridge:createCompanySessionReadBridge(inner),executeRead:executeExecutiveNativeRead,output,packageSha256:"3".repeat(64)}):undefined;
+    Acp.apply(inner,{provider:"deepseek-account",model:"deepseek-chat",stream:hostStream,
+      ...(nativeReadAdmission?{nativeReadAdmission}:{}),
       nativePromptAdmission:bindings.nativePromptAdmission,nativeObservation:bindings.nativeObservation,
       nativeModelAdmission:facts=>{seen.assignments++;return bindings.nativeModelAdmission(facts);}});
   }});
@@ -110,9 +137,9 @@ async function host({tool=false,hang=false,beforeNew,onStream}:{tool?:boolean,ha
     .onNotification(methods.client.session.update,({params})=>{updates.push(params);})
     .onRequest(methods.client.session.requestPermission,()=>({outcome:{outcome:"cancelled" as const}}))
     .onNotification("_mastermind/native_claim",(x:any)=>x,({params})=>{claims.push(params);})
-    .connect(ndJsonStream(b.writable,a.readable));
+    .connect(clientStream);
   const client=connection.agent;
-  await client.request(methods.agent.initialize,{protocolVersion:PROTOCOL_VERSION,clientCapabilities:{}});
+  const initialized:any=await client.request(methods.agent.initialize,{protocolVersion:PROTOCOL_VERSION,clientCapabilities:{}});
   if(beforeNew)await beforeNew(client);
   const selected=await client.request(methods.agent.session.new,{cwd:workspace,mcpServers:[]});
   const sessionId=selected.sessionId,agent=ctx.agents.get(SessionId(sessionId))!;
@@ -120,7 +147,7 @@ async function host({tool=false,hang=false,beforeNew,onStream}:{tool?:boolean,ha
   const prompt=(id="original-op",content:any[]=[{type:"text",text:"Original question"}])=>client.request(methods.agent.session.prompt,{
     sessionId,prompt:content,_meta:{mastermindNative:{operationId:id}},
   });
-  return{ctx,workspace,generation,account,seen,bindings,sourceFacts,client,sessionId,agent,selected,observe,prompt,claims,updates};
+  return{ctx,workspace,generation,account,seen,bindings,sourceFacts,client,sessionId,agent,selected,initialized,observe,prompt,claims,updates};
 }
 it("joins the original zero-setter startup, observed account and original answer",async()=>{
   const h=await host();
@@ -215,4 +242,59 @@ it("native wrappers cannot repeat an original tool body with the same execution 
   await h.prompt();
   expect(h.seen.tools).toBe(1);expect(results).toHaveLength(1);expect(results[0].isError).toBe(true);
   expect(h.seen.writes).toBe(2);
+});
+
+it("reads the original claimed answer through the same ACP, Gateway and Session after a later turn and logout",async()=>{
+  const h=await host({read:true});await h.observe();
+  expect(h.initialized._meta.mastermindNative.schema).toBe("mastermind.dsh.native_prompt_extension.v3");
+  const first:any=await h.prompt("first");
+  await h.prompt("second");
+  const terminal=first._meta.mastermindNative;
+  const association={schema:"mastermind.dsh.native_read_association.v1",work_ref:"WS:Original-native",
+    root_job_id:"JOB-001",native_session_id:h.sessionId,owner_principal_scope:"1".repeat(64),
+    composition_sha256:"2".repeat(64),native_package_sha256:"3".repeat(64),
+    donor_sha:"687f282e8625c6b8d11ff58211a90524be2e4317"};
+  const request={schema:"mastermind.dsh.native_read.v1",request_id:"4".repeat(64),
+    association_sha256:hash(association),principal:{principal_scope:"1".repeat(64),
+      issued_at:Math.floor(Date.now()/1000)-1,expires_at:Math.floor(Date.now()/1000)+120},
+    read:{kind:"result",claim:terminal.claim,terminal,offset_bytes:0,expected_sha256:null}};
+  const envelope={schema:"mastermind.dsh.native_acp_read.v1",sessionId:h.sessionId,association,request};
+  const before=h.agent.session.seq;
+  h.account.current=false;
+  const value:any=await h.client.request("_mastermind/native_read",envelope);
+  expect(value.status).toBe("READ");expect(value.data.claim).toEqual(terminal.claim);
+  expect(value.data.state).toBe("CONTENT");
+  const records=Buffer.from(value.data.content.data,"base64").toString();
+  expect(records).toContain("Native answer 1");expect(records).not.toContain("Native answer 2");
+  expect(h.agent.session.seq).toBe(before);expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+  expect(h.seen.writes).toBe(2);
+  await expect(h.prompt("signed-out-send")).rejects.toThrow();
+  await expect(h.client.request("_mastermind/native_read",{
+    ...envelope,association:{...association,native_package_sha256:"9".repeat(64)},
+  })).rejects.toThrow();
+  const again:any=await h.client.request("_mastermind/native_read",envelope);
+  expect(again.data).toEqual(value.data);expect(h.agent.session.seq).toBe(before);
+});
+
+it.each(["expiry","source","shutdown"] as const)("withholds %s after original SDK serialization but before physical response write",async fault=>{
+  const socket=new PassThrough(),writes:Buffer[]=[];
+  socket.on("data",chunk=>writes.push(Buffer.from(chunk)));
+  const output=createNativeReadOutputGuard(socket);
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  let current=true,finished=0;
+  const response=Object.freeze({schema:"mastermind.dsh.native_read_result.v1",request_id:"a".repeat(64),
+    association_sha256:"b".repeat(64),status:"READ",data:{original:"must remain private"}});
+  const unavailable=Object.freeze({...response,status:"UNAVAILABLE",data:null});
+  output.register({requestId:7,response,unavailable,requireCurrent(){if(!current)throw Error("retired");},finish(){finished++;}});
+  const stream=output.wrap(ndJsonStream(new WritableStream({async write(chunk){
+    entered.resolve();await release.promise;socket.write(chunk);
+  }}),new ReadableStream()));
+  const writer=stream.writable.getWriter(),pending=writer.write({jsonrpc:"2.0",id:7,result:response});
+  await entered.promise;
+  if(fault==="shutdown")output.dispose();else current=false;
+  release.resolve();await pending;
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(writes[0].toString())).toEqual({jsonrpc:"2.0",id:7,result:unavailable});
+  expect(finished).toBe(1);
+  await writer.close();await stream.readable.cancel();socket.destroy();
 });

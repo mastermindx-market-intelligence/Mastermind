@@ -1591,6 +1591,8 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
+# Reviewed C32 source also selects the passive reader from the original retained
+# native dispatch. No new process, event loop, sender or conversation owner.
 # Reviewed C19 source adds only nominal native host selection through the existing
 # armed claimed factory, after the original Runtime exists. No event-loop change;
 # the independent AST anchor, exact call and source-node identity remain pinned.
@@ -1615,7 +1617,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'b0517d97cc38675724353928743dceae3c4630b9575533ef5cc5618b4265ce0d'):
+            '3a8779f5c6851a6cda2a0ca63848854b0b95371a7948808c947c313de49256fd'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

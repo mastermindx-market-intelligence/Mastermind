@@ -43,6 +43,7 @@ class NativeConversationHostComposition:
     """Trusted selection of the already registered Worker; no registration effect."""
     registration: NativeConversationRegistration
     current: Callable[[], None]
+    composition_sha256: str | None = None
 
     def __post_init__(self):
         if (type(self.registration) is not NativeConversationRegistration

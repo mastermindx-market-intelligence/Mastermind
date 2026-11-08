@@ -56,6 +56,8 @@ def document(value: Any) -> dict[str, Any]:
 EXTENSION_V2 = {"schema": "mastermind.dsh.native_prompt_extension.v2",
                 "claimMethod": "_mastermind/native_claim", "cancelMethod": "_mastermind/native_cancel",
                 "observeMethod": "_mastermind/native_observe"}
+EXTENSION_V3 = {**EXTENSION_V2, "schema": "mastermind.dsh.native_prompt_extension.v3",
+                "readMethod": "_mastermind/native_read"}
 OBSERVATION_REQUEST_SCHEMA = "mastermind.dsh.native_observation_request.v1"
 OBSERVATION_SCHEMA = "mastermind.dsh.native_observation.v1"
 OBSERVATION_MAX_BYTES = 32 * 1024
@@ -63,7 +65,7 @@ OBSERVATION_MAX_BYTES = 32 * 1024
 
 def native_extension(value: Any) -> dict[str, str]:
     """Accept one complete negotiated version, never v1 with added authority."""
-    if type(value) is not dict or value not in (EXTENSION, EXTENSION_V2):
+    if type(value) is not dict or value not in (EXTENSION, EXTENSION_V2, EXTENSION_V3):
         raise NativeProtocolError("NATIVE_EXTENSION_REFUSED")
     return dict(value)
 

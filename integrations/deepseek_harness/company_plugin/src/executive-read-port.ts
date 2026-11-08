@@ -87,6 +87,104 @@ function frame(value: unknown): value is Frame {
     safe(read.max_messages) && read.max_messages >= 1 && read.max_messages <= 8;
 }
 
+
+export interface PreparedNativeReadReply {
+  readonly response: Readonly<Record<string, unknown>>;
+  readonly unavailable: Readonly<Record<string, unknown>>;
+  requireCurrent(): void;
+}
+
+/** The finite operation shared by the original raw port and retained ACP.
+ * The bridge/policy is composition-owned; only its temporary non-owner Peer
+ * is opened and disposed here. No Agent or Session lifecycle is created. */
+export async function executeExecutiveNativeRead(
+  bridge: ReturnType<typeof createCompanySessionReadBridge>,
+  source: InstalledNativeReadSource, input: unknown, callerSignal: AbortSignal,
+  requireCallerCurrent: () => void,
+): Promise<PreparedNativeReadReply> {
+  association(source.association);
+  if (!(source.signal instanceof AbortSignal) || !(callerSignal instanceof AbortSignal)
+      || typeof source.requireCurrent !== "function" || typeof requireCallerCurrent !== "function"
+      || !frame(input) || Buffer.byteLength(canonical(input)) + 1 > REQUEST_BYTES)
+    throw new TypeError("Exact finite native read required");
+  const request = JSON.parse(canonical(input)) as Frame;
+  const selected = source.association, selectedDigest = hash(selected);
+  const sourceSignal = source.signal, sourceGuard = source.requireCurrent;
+  const deadline = performance.now() + 4000;
+  const finalGuard = (): void => {
+    if (source.association !== selected || source.signal !== sourceSignal
+        || source.requireCurrent !== sourceGuard || hash(selected) !== selectedDigest)
+      throw new Error("Native read source changed");
+    sourceSignal.throwIfAborted(); callerSignal.throwIfAborted();
+    syncGuard(sourceGuard); syncGuard(requireCallerCurrent);
+    const now = Date.now() / 1000;
+    if (request.association_sha256 !== selectedDigest
+        || request.principal.principal_scope !== selected.owner_principal_scope
+        || !(request.principal.issued_at <= now && now < request.principal.expires_at)
+        || performance.now() >= deadline || source.association !== selected
+        || source.requireCurrent !== sourceGuard || hash(selected) !== selectedDigest)
+      throw new Error("Native read invocation is unavailable");
+    sourceSignal.throwIfAborted(); callerSignal.throwIfAborted();
+  };
+  const invocation = new AbortController();
+  const signal = AbortSignal.any([invocation.signal, callerSignal, sourceSignal]);
+  const expiry = setTimeout(() => invocation.abort(),
+    Math.min(4000, Math.max(0, request.principal.expires_at * 1000 - Date.now())));
+  expiry.unref();
+  const requireRead = (): void => { finalGuard(); signal.throwIfAborted(); };
+  let reader: CompanySessionReader | undefined;
+  let status: "READ" | "UNAVAILABLE" | "PAGE_TOO_LARGE" = "UNAVAILABLE";
+  let data: unknown = null;
+  try {
+    requireRead();
+    reader = bridge.open({
+      principalScope: request.principal.principal_scope,
+      authorizationGeneration: request.request_id,
+      workRef: selected.work_ref, sessionId: selected.native_session_id as SessionId,
+      signal, requireCurrent: requireRead,
+    });
+    if (request.read.kind === "snapshot") {
+      const projections = await reader.projections(signal);
+      const page = projections?.kind === "sequenced"
+        ? await reader.page({throughSeq: projections.asOfSeq, maxMessages: 8}, signal) : null;
+      data = {projections, page};
+    } else if (request.read.kind === "result") {
+      data = await readNativeResultContent(reader, request.read, selected.native_session_id, signal, requireRead);
+    } else {
+      const read = request.read;
+      data = {projections: null, page: await reader.page({
+        throughSeq: read.through_seq, maxMessages: read.max_messages,
+        ...(read.before_seq === null ? {} : {beforeSeq: read.before_seq}),
+      }, signal)};
+    }
+    requireRead(); status = "READ";
+  } catch {
+    data = null;
+  } finally {
+    clearTimeout(expiry);
+    invocation.abort();
+    await reader?.dispose();
+  }
+  const envelope = (status: string, data: unknown): Record<string, unknown> => ({
+    schema: RESPONSE, request_id: request.request_id, association_sha256: selectedDigest, status, data,
+  });
+  const unavailable = Object.freeze(envelope("UNAVAILABLE", null));
+  let response = envelope(status, data);
+  if (Buffer.byteLength(JSON.stringify(response)) + 1 > RESPONSE_BYTES)
+    response = envelope("PAGE_TOO_LARGE", null);
+  try { finalGuard(); } catch { response = unavailable; }
+  // No live projections, getters or source objects survive into an SDK queue.
+  const freeze = (value: unknown): void => {
+    if (value && typeof value === "object") {
+      for (const child of Object.values(value)) freeze(child);
+      Object.freeze(value);
+    }
+  };
+  response = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
+  freeze(response);
+  return Object.freeze({response, unavailable, requireCurrent: finalGuard});
+}
+
 /** One port in its existing Cordis fiber. No listener, retry, queue or native
  * session lifecycle is introduced. Concurrent/pipelined requests are refused. */
 export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: InstalledNativeReadSource): {
@@ -137,67 +235,11 @@ export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: Inst
   }
 
   async function answer(request: Frame): Promise<void> {
-    const invocation = new AbortController();
-    const signal = AbortSignal.any([invocation.signal, lifetime.signal, sourceSignal]);
-    const expiry = setTimeout(() => invocation.abort(),
-      Math.min(2**31-1, Math.max(0, request.principal.expires_at * 1000-Date.now())));
-    expiry.unref();
-    const requireRead = (): void => {
-      current(); signal.throwIfAborted();
-      const now = Date.now() / 1000;
-      if (request.association_sha256 !== selectedDigest ||
-          request.principal.principal_scope !== selected.owner_principal_scope ||
-          !(request.principal.issued_at <= now && now < request.principal.expires_at))
-        throw new Error("Native read invocation is unavailable");
-    };
-    let status: "READ" | "UNAVAILABLE" | "PAGE_TOO_LARGE" = "UNAVAILABLE";
-    let data: {projections: unknown; page: unknown} | Awaited<ReturnType<typeof readNativeResultContent>> | null = null;
-    try {
-      requireRead();
-      reader = bridge.open({
-        principalScope: request.principal.principal_scope,
-        // A finite invocation label only; never the frontend authorization epoch.
-        authorizationGeneration: request.request_id,
-        workRef: selected.work_ref, sessionId: selected.native_session_id as SessionId,
-        signal, requireCurrent: requireRead,
-      });
-      if (request.read.kind === "snapshot") {
-        const projections = await reader.projections(signal);
-        const page = projections?.kind === "sequenced"
-          ? await reader.page({throughSeq: projections.asOfSeq, maxMessages: 8}, signal) : null;
-        data = {projections, page};
-      } else if (request.read.kind === "result") {
-        data = await readNativeResultContent(reader, request.read, selected.native_session_id, signal, requireRead);
-      } else {
-        const read = request.read;
-        data = {projections: null, page: await reader.page({
-          throughSeq: read.through_seq, maxMessages: read.max_messages,
-          ...(read.before_seq === null ? {} : {beforeSeq: read.before_seq}),
-        }, signal)};
-      }
-      requireRead();
-      status = "READ";
-    } catch {
-      data = null;
-    } finally {
-      clearTimeout(expiry);
-      invocation.abort();
-      await reader?.dispose();
-      reader = undefined;
-    }
+    const prepared = await executeExecutiveNativeRead(bridge, source, request, lifetime.signal, current);
     current();
-    const response = () => Buffer.from(JSON.stringify({
-      schema: RESPONSE, request_id: request.request_id, association_sha256: selectedDigest, status, data,
-    }) + "\n");
-    let raw = response();
-    if (raw.byteLength > RESPONSE_BYTES) {
-      status = "PAGE_TOO_LARGE"; data = null; raw = response();
-    }
-    // The principal may have expired during disposal/serialization.
-    const now = Date.now() / 1000;
-    if (status === "READ" && !(request.principal.issued_at <= now && now < request.principal.expires_at)) {
-      status = "UNAVAILABLE"; data = null; raw = response();
-    }
+    let value = prepared.response;
+    try { prepared.requireCurrent(); } catch { value = prepared.unavailable; }
+    const raw = Buffer.from(JSON.stringify(value) + "\n");
     current();
     await new Promise<void>((resolve, reject) => {
       const onClosed = (): void => done(new Error("Native read port closed"));
@@ -207,7 +249,10 @@ export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: Inst
       };
       port.once("close", onClosed); port.once("error", done);
       if (port.destroyed) { onClosed(); return; }
-      port.write(raw, done);
+      let output = raw;
+      try { prepared.requireCurrent(); }
+      catch { output = Buffer.from(JSON.stringify(prepared.unavailable) + "\n"); }
+      port.write(output, done);
     });
   }
 

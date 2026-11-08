@@ -96,6 +96,112 @@ def _result_data(value, request):
         raise NativeReadUnavailable()
 
 
+def validate_native_read_association(value: Any) -> dict[str, Any]:
+    """Validate a projection; only the original installed source gives it authority."""
+    from integrations.session_bridge.deepseek_native import DeepSeekNativeAssociation
+    from common.session_bridge_private_contract import BridgeError
+    if type(value) is not dict or set(value) != {
+            "schema", "work_ref", "root_job_id", "native_session_id", "owner_principal_scope",
+            "composition_sha256", "native_package_sha256", "donor_sha"}:
+        raise NativeReadUnavailable()
+    try:
+        fields = {k: v for k, v in value.items() if k != "schema"}
+        selected = DeepSeekNativeAssociation(**fields)
+        if selected.document() != value:
+            raise ValueError()
+        return json.loads(canonical(value))
+    except (TypeError, ValueError, UnicodeError, RecursionError, BridgeError):
+        raise NativeReadUnavailable() from None
+
+
+def validate_native_read_request(value: Any, association_sha256: str) -> dict[str, Any]:
+    """The same bounded finite request on the original raw or ACP carrier."""
+    from integrations.deepseek_harness.native_protocol import NativeClaim, NativeTerminal
+    try:
+        if (type(value) is not dict or set(value) != {
+                "schema", "request_id", "association_sha256", "principal", "read"}
+                or value["schema"] != REQUEST_SCHEMA
+                or type(value["request_id"]) is not str or _SHA.fullmatch(value["request_id"]) is None
+                or value["association_sha256"] != association_sha256
+                or type(association_sha256) is not str or _SHA.fullmatch(association_sha256) is None
+                or len(canonical(value)) + 1 > MAX_REQUEST_BYTES):
+            raise ValueError()
+        principal = value["principal"]
+        if (type(principal) is not dict or set(principal) != {"principal_scope", "issued_at", "expires_at"}
+                or type(principal["principal_scope"]) is not str or _SHA.fullmatch(principal["principal_scope"]) is None
+                or type(principal["issued_at"]) is not int or type(principal["expires_at"]) is not int
+                or not 0 <= principal["issued_at"] < principal["expires_at"] <= 2**53-1):
+            raise ValueError()
+        read = value["read"]
+        if type(read) is not dict:
+            raise ValueError()
+        if read == {"kind": "snapshot"}:
+            pass
+        elif set(read) == {"kind", "through_seq", "before_seq", "max_messages"} and read["kind"] == "page":
+            through, before, count = (read[k] for k in ("through_seq", "before_seq", "max_messages"))
+            if (type(through) is not int or not -1 <= through <= 2**53-1
+                    or before is not None and (type(before) is not int or not 0 <= before <= min(through+1, 2**53-1))
+                    or type(count) is not int or not 1 <= count <= 8):
+                raise ValueError()
+        elif set(read) == {"kind", "claim", "terminal", "offset_bytes", "expected_sha256"} and read["kind"] == "result":
+            claim, terminal = NativeClaim.parse(read["claim"]), NativeTerminal.parse(read["terminal"])
+            offset, digest = read["offset_bytes"], read["expected_sha256"]
+            if (terminal.claim != claim or type(offset) is not int or not 0 <= offset < 4*1024*1024
+                    or digest is not None and (type(digest) is not str or _SHA.fullmatch(digest) is None)
+                    or offset > 0 and digest is None):
+                raise ValueError()
+        else:
+            raise ValueError()
+        return json.loads(canonical(value))
+    except (TypeError, ValueError, UnicodeError, KeyError, RecursionError):
+        raise NativeReadUnavailable() from None
+
+
+def validate_native_read_response(value: Any, request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        if (type(value) is not dict
+                or set(value) != {"schema", "request_id", "association_sha256", "status", "data"}
+                or value["schema"] != RESPONSE_SCHEMA or value["request_id"] != request["request_id"]
+                or value["association_sha256"] != request["association_sha256"]
+                or value["status"] not in ("READ", "PAGE_TOO_LARGE", "UNAVAILABLE")
+                or len(canonical(value)) + 1 > MAX_RESPONSE_BYTES
+                or value["status"] == "READ" and request["read"]["kind"] != "result" and (
+                    type(value["data"]) is not dict or set(value["data"]) != {"projections", "page"})
+                or value["status"] != "READ" and value["data"] is not None):
+            raise NativeReadUnavailable()
+        if value["status"] == "READ" and request["read"]["kind"] == "result":
+            _result_data(value["data"], request["read"])
+        return json.loads(canonical(value))
+    except (TypeError, ValueError, UnicodeError, KeyError, RecursionError):
+        raise NativeReadUnavailable() from None
+
+
+def native_read_frame(*, association_sha256: str, principal_scope: str,
+                      issued_at: int, expires_at: int, request: Mapping[str, Any]) -> dict[str, Any]:
+    return validate_native_read_request({
+        "schema": REQUEST_SCHEMA, "request_id": secrets.token_hex(32),
+        "association_sha256": association_sha256,
+        "principal": {"principal_scope": principal_scope, "issued_at": issued_at, "expires_at": expires_at},
+        "read": dict(request)}, association_sha256)
+
+
+def validate_native_read_binding(value: Any) -> dict[str, str]:
+    from integrations.deepseek_harness.runtime_compat.prepare_native_session import PIN
+    from integrations.deepseek_harness.native_protocol import native_id
+    try:
+        if (type(value) is not dict or set(value) != {
+                "schema", "native_session_id", "native_package_sha256", "donor_sha"}
+                or value["schema"] != "mastermind.dsh.native_read_binding.v1"
+                or value["donor_sha"] != PIN
+                or type(value["native_package_sha256"]) is not str
+                or _SHA.fullmatch(value["native_package_sha256"]) is None):
+            raise ValueError()
+        native_id(value["native_session_id"])
+        return dict(value)
+    except (TypeError, ValueError, KeyError):
+        raise NativeReadUnavailable() from None
+
+
 class OwnedNativeReadPort:
     """Nominal capability for one anonymous endpoint, under its original owner."""
 
@@ -187,17 +293,7 @@ class OwnedNativeReadPort:
                     raise NativeReadUnavailable()
                 value = json.loads(line.decode("utf-8", errors="strict"),
                                    object_pairs_hook=_unique_object, parse_constant=_invalid_number)
-                if (type(value) is not dict
-                        or set(value) != {"schema", "request_id", "association_sha256", "status", "data"}
-                        or value["schema"] != RESPONSE_SCHEMA or value["request_id"] != request_id
-                        or value["association_sha256"] != self._association_sha256
-                        or value["status"] not in ("READ", "PAGE_TOO_LARGE", "UNAVAILABLE")
-                        or (value["status"] == "READ" and request.get("kind") != "result" and (
-                            type(value["data"]) is not dict or set(value["data"]) != {"projections", "page"}))
-                        or (value["status"] != "READ" and value["data"] is not None)):
-                    raise NativeReadUnavailable()
-                if value["status"] == "READ" and request.get("kind") == "result":
-                    _result_data(value["data"], request)
+                value = validate_native_read_response(value, frame)
                 self.require_current()
                 return value
         except BaseException:

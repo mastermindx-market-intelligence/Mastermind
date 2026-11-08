@@ -888,6 +888,17 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
                 workspace=after, supports_subagent_capability_ceiling=facts.supports_subagent_capability_ceiling,
                 unknown_fields=facts.unknown_fields)
 
+        def observe_read_binding(native):
+            require_source()
+            if (adapter is None or adapter.native is not native or native.resource is None
+                    or not native.resource.identity_matches() or adapter.close_operation is not None
+                    or not native.provider_session_id or native.client.session_id != native.provider_session_id):
+                raise WorkerConfigError("original native read process is unavailable")
+            return {"schema": "mastermind.dsh.native_read_binding.v1",
+                    "native_session_id": native.provider_session_id,
+                    "native_package_sha256": installed.package_manifest_sha256,
+                    "donor_sha": installed.donor_sha}
+
         home = os.environ.get("HOME")
         if not home or not Path(home).is_absolute():
             raise WorkerConfigError("native DeepSeek original process home is absent")
@@ -903,7 +914,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
                 DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, auth_method=None,
                 model_option_provider=DSH_MODEL_PROVIDER),
             verify_source=require_source, observe_attestation=observe,
-            require_current_effect=require_effect,
+            require_current_effect=require_effect, observe_read_binding=observe_read_binding,
         )
         # This callback is invoked by the existing broker event loop. The
         # adapter uses that loop and the broker's original synchronous threads.

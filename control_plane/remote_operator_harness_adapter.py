@@ -165,6 +165,48 @@ class RemoteOperatorHarnessAdapter:
         self._turn_evidence: dict[TurnRef, RetainedPlainInputEvidence | None] = {}
         self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
 
+
+    async def _native_read_request(self, operation, payload, *, before_read):
+        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable, canonical
+        if self.result_contract != DSH_NATIVE_RESULT_CONTRACT or not callable(before_read):
+            raise NativeReadUnavailable()
+        client, frozen = self.client, canonical(payload)
+        def current():
+            if self.client is not client or canonical(payload) != frozen:
+                raise NativeReadUnavailable()
+            outcome = before_read()
+            if outcome is not None:
+                import inspect
+                if inspect.iscoroutine(outcome):
+                    outcome.close()
+                raise NativeReadUnavailable()
+            if self.client is not client or canonical(payload) != frozen:
+                raise NativeReadUnavailable()
+        def before_write(actual_operation, actual_payload):
+            if actual_operation != operation or canonical(actual_payload) != frozen:
+                raise NativeReadUnavailable()
+            current()
+        current()
+        value = await client.request(operation, json.loads(frozen), timeout_seconds=6.0, before_write=before_write)
+        current()
+        if type(value) is not dict or set(value) != {"native_read"} or value["native_read"] is None:
+            raise NativeReadUnavailable()
+        return value["native_read"]
+
+    async def read_native_binding(self, *, epoch, generation, before_read):
+        from integrations.deepseek_harness.native_read_port import validate_native_read_binding
+        value = await self._native_read_request("ohf-native-read-binding",
+            {"epoch": to_wire(epoch), "generation": to_wire(generation)}, before_read=before_read)
+        return validate_native_read_binding(value)
+
+    async def read_native_content(self, *, epoch, generation, association, request, before_read):
+        from integrations.deepseek_harness.native_read_port import validate_native_read_response
+        value = await self._native_read_request("ohf-native-read",
+            {"epoch": to_wire(epoch), "generation": to_wire(generation),
+             "association": association, "request": request}, before_read=before_read)
+        return validate_native_read_response(value, request)
+
+
     def bind_fresh_effect_guard(self, guard, *, attempt_id):
         """Trusted local source from the original supervisor; never a wire field."""
         if (self._fresh_effect_guard is not None or not callable(guard)

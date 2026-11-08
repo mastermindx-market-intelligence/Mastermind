@@ -785,6 +785,7 @@ def build_claimed_remote_operator_factory(
             raise RemoteAttemptTransportError("STATE_MOVED")
         operations = {
             "ohf-identity", "ohf-materialization-status", "ohf-native-begin-status", "ohf-begin-turn",
+            "ohf-native-read-binding", "ohf-native-read",
             "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
             "ohf-reconcile", "ohf-reconcile-absence",
         }
@@ -821,6 +822,24 @@ def build_claimed_remote_operator_factory(
                         raise RemoteAttemptTransportError("STATE_MOVED") from None
                     if canonical != generation:
                         raise RemoteAttemptTransportError("STATE_MOVED")
+
+
+                async def read_native_binding(self, *, epoch, generation, before_read):
+                    def guard():
+                        self._assert_generation(epoch, generation)
+                        before_read()
+                        self._assert_generation(epoch, generation)
+                    return await super().read_native_binding(
+                        epoch=epoch, generation=generation, before_read=guard)
+
+                async def read_native_content(self, *, epoch, generation, association, request, before_read):
+                    def guard():
+                        self._assert_generation(epoch, generation)
+                        before_read()
+                        self._assert_generation(epoch, generation)
+                    return await super().read_native_content(epoch=epoch, generation=generation,
+                        association=association, request=request, before_read=guard)
+
 
                 def _bind_initial_generation(self, epoch, generation):
                     self._assert_generation(epoch, generation)

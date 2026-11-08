@@ -185,6 +185,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-identity",
         "ohf-materialization-status",
         "ohf-native-begin-status",
+        "ohf-native-read-binding", "ohf-native-read",
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
@@ -1014,6 +1015,7 @@ class _BrokerOperatorRun:
     collection_interrupt_operation: OperationId | None = None
     collection_task: asyncio.Task[dict[str, Any]] | None = None
     interrupt_task: asyncio.Task[None] | None = None
+    native_read_task: asyncio.Task[dict[str, Any]] | None = None
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -1741,6 +1743,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation in {"ohf-native-read-binding", "ohf-native-read"}:
+            return await self._ohf_native_read(payload, content=operation == "ohf-native-read")
         if operation == "ohf-native-begin-status":
             return await self._ohf_native_begin_status(payload)
         if operation == "ohf-deliver-attention":
@@ -2606,11 +2610,29 @@ class ExecutiveWorkerBroker:
         self._require_current_autonomy()
 
     async def _operator_state(
-        self, generation: ProcessGenerationRef, *, allow_unmaterialized: bool = False
+        self, generation: ProcessGenerationRef, *, allow_unmaterialized: bool = False, join_native_read: bool = True
     ) -> _BrokerOperatorRun:
         async with self._state_lock:
+            original = self._operator_run
+            read = None if original is None else original.native_read_task
+            if (join_native_read and original is not None and original.generation == generation and original.busy
+                    and read is not None and original.interrupt_task is None
+                    and original.pending_begin is None and original.collecting_turn is None):
+                join = read
+            else:
+                join = None
+        if join is not None:
+            # Join this one incumbent finite observation. No queue or new task;
+            # a Send/idle operation cannot fail merely because history is reading.
+            try:
+                async with asyncio.timeout(6.0):
+                    await asyncio.shield(join)
+            except asyncio.TimeoutError:
+                raise BrokerStateError("original native read remains in progress") from None
+        async with self._state_lock:
             state = self._operator_run
-            if state is None or state.generation != generation:
+            if (state is None or state.generation != generation
+                    or join is not None and (state is not original or state.native_read_task is not None)):
                 raise BrokerStateError(
                     "operator generation is not active in this worker broker"
                 )
@@ -2624,6 +2646,74 @@ class ExecutiveWorkerBroker:
     async def _operator_release_busy(self, state: _BrokerOperatorRun) -> None:
         async with self._state_lock:
             state.busy = False
+
+
+    async def _ohf_native_read(self, payload: dict[str, Any], *, content: bool) -> dict[str, Any]:
+        """One finite observation on the original READY run; never constructs an adapter."""
+        from integrations.deepseek_harness.operator_adapter import NativeOperatorAdapter
+        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable
+        expected = {"epoch", "generation"} | ({"association", "request"} if content else set())
+        if set(payload) != expected:
+            raise BrokerProtocolError("native read payload fields are invalid")
+        self._require_current_autonomy()
+        try:
+            epoch = wire_session_epoch_ref(payload["epoch"])
+            generation = wire_process_generation_ref(payload["generation"])
+        except (OperatorHarnessWireError, ValueError) as exc:
+            raise BrokerProtocolError("native read generation is invalid") from exc
+        state = await self._operator_state(generation, join_native_read=False)
+        try:
+            adapter, native = state.adapter, state.native_connection
+            if (type(adapter) is not NativeOperatorAdapter or native is None
+                    or adapter.native is not native or epoch != state.epoch
+                    or state.pending_begin is not None or state.collecting_turn is not None
+                    or state.native_read_task is not None or state.terminal_error is not None
+                    or state.provider_session_id != native.provider_session_id):
+                raise BrokerStateError("original native reader is unavailable")
+            task = None
+            def current():
+                self._require_current_autonomy()
+                if (self._operator_run is not state or state.adapter is not adapter
+                        or state.native_read_task is not task
+                        or state.native_connection is not native or adapter.native is not native
+                        or state.epoch != epoch or state.generation != generation or not state.busy
+                        or state.provider_session_id != native.provider_session_id
+                        or state.materialization_receipt is None or state.pending_begin is not None
+                        or state.collecting_turn is not None or state.interrupt_task is not None
+                        or state.terminal_error is not None):
+                    raise NativeReadUnavailable()
+            current()
+            task = asyncio.create_task(self._native_read_transaction(
+                state, epoch, generation, payload, content, current),
+                name=f"operator-native-read-{generation.process_generation_id}")
+            state.native_read_task = task
+            task.add_done_callback(self._observe_operator_task)
+        except BaseException:
+            await self._operator_release_busy(state)
+            raise
+        # A disconnected reader cannot release busy over original thread/SDK work.
+        return await asyncio.shield(task)
+
+    async def _native_read_transaction(self, state, epoch, generation, payload, content, current):
+        try:
+            current()
+            function = state.adapter.read_native_content if content else state.adapter.read_native_binding
+            kwargs = dict(epoch=epoch, generation=generation, before_read=current)
+            if content:
+                kwargs.update(association=payload["association"], request=payload["request"])
+            value = await self._operator_call("native read", function, **kwargs)
+            current()
+            return {"native_read": value}
+        except Exception:
+            # This observation cannot grant an effect. Source retirement is a
+            # closed unavailable result; original process cleanup remains owned.
+            return {"native_read": None}
+        finally:
+            async with self._state_lock:
+                if state.native_read_task is asyncio.current_task():
+                    state.native_read_task = None
+                    state.busy = False
+
 
     async def _ohf_begin_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_current_autonomy()
@@ -4266,7 +4356,7 @@ class ExecutiveWorkerBroker:
             async with self._state_lock:
                 owned_operator = tuple(task for task in (
                     operator.materialization_task, operator.begin_task,
-                    operator.collection_task, operator.interrupt_task,
+                    operator.collection_task, operator.interrupt_task, operator.native_read_task,
                 ) if task is not None)
             outcomes = await asyncio.gather(
                 *(asyncio.shield(task) for task in owned_operator), return_exceptions=True,
@@ -4615,7 +4705,7 @@ class WorkerBrokerClient:
                     raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 if before_write is not None:
                     try:
-                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn", "ohf-native-read-binding", "ohf-native-read"}
                                 or not callable(before_write)
                                 or before_write(operation, json.loads(encoded)["payload"]) is not None):
                             raise ValueError("invalid local foreground guard")
