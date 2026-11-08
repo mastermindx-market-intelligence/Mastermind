@@ -1,8 +1,8 @@
 # Company HQ Pro Build — finish the organizational workspace
 
-Operation: unified-hq-company-20261108-sol-001  
-Editorial node: O3.A  
-Allowed source: app/mastermind_os/src/living_hq/company/**  
+- **Operation:** unified-hq-company-20261108-sol-001
+- **Editorial node:** O3.A
+- **Allowed source:** app/mastermind_os/src/living_hq/company/**
 Recommended new branch if no existing operation: sol/unified-hq-company-20261108
 
 ## Mission and DONE_WHEN
@@ -29,6 +29,15 @@ Freeze the package revision delivered with this prompt from branch sol/unified-h
 
 The verified app declares React/React DOM 19.3.0, TypeScript 7.0.2, Vite 8.3.0 and Vitest 5.0.1; those declarations do not prove tools are installed in your session. Existing commands from app/mastermind_os are npm run typecheck, npm run build and npx vitest run <scoped paths>. Detect actual executability once and report exact failures.
 
+
+## Compatibility update after first publication
+
+Protected master advanced by two commits to fd32eeb7cb6e1ff2b7e988741bd267b93d5c07ec. A bounded compare found no changes to this package, imported frontend contracts or the loaded Skillpack. The material organization change adds autonomy_ceo under meta_ceo, making ten advisory charter seats. Render source-supplied roles dynamically; do not freeze the older nine-seat count or treat the new charter as an enrolled session. Other added paths are the design-director source package. This does not grant a new runtime identity or require restarting the build census.
+
+## Controlled result-return state
+
+Use the revised package contract, not its first-publication API. Every A–C surface receives required viewState and onViewStateChange in HQSurfaceProps. HQViewState contains query, roleKeys, unmodified owner statuses, and canonical SourceState filters. I retains a separate state object for each surface above Office's unmount boundary, alongside the original Mission/result-return context. Preserve it through a result detour, requalify the target on return, and clear protected state on actual auth/principal/session/binding invalidation. Do not build an accumulating keyed cache, persistence service or parallel navigation store. Collapse/zoom can remain local. An additional return-critical filter requires one shared amendment through I. This API change is published before builder pickup; all fixtures and consumers must use the revised package revision.
+
 ## Shared source, design and access boundaries
 
 Your allowed directory is named below. Shared contracts, organization/**, App.tsx, meta-ceo/MetaCeoOffice.tsx, MissionHost, src-tauri authentication/main, root manifests/lockfiles and app-wide tokens/locales are read-only to component builders. The final integration assignment serializes those writes. Put component-local styles, bilingual copy, tests and clearly labeled synthetic fixtures in your own directory.
@@ -51,9 +60,9 @@ Requested reasoning style is a focused Pro build where eligible. This is not a m
 
 ## Exact inputs, outputs and reuse
 
-Export CompanyHQ from company/index.ts with CompanyHQProps from ../contracts. Input is LivingHQSnapshot, locale, selected, onSelect, onNavigate and optional onRefresh. Read the qualified OfficeProjection and organization observation that D supplies. Do not acquire data or parse raw server objects here.
+Export CompanyHQ from company/index.ts with CompanyHQProps from ../contracts. Input is LivingHQSnapshot, locale, controlled viewState/onViewStateChange, selected, onSelect, onNavigate and optional onRefresh. Read the qualified OfficeProjection and organization observation that D supplies. Do not acquire data or parse raw server objects here.
 
-Use existing OrganizationWorkspace/qualifyOrganization and the #2193 OrganizationMissionView/organization-mission implementation as the semantic baseline. Preserve their currentness, reporting/admission and result-selection boundaries; do not copy a second parser. #2193 is unmerged at this snapshot, so it is a read reference and an I integration dependency, not an assumed installed import.
+Use existing OrganizationWorkspace/qualifyOrganization and the #2193 OrganizationMissionView/organization-mission implementation as the semantic baseline. Preserve their currentness, reporting/admission and result-selection boundaries; do not copy a second parser. #2193 is unmerged at this snapshot, so it is a read reference and an I integration dependency, not an assumed installed import. Its INTEGRATION.md records an external-result unmount that loses local query/row state. Keep the row selection and return-critical search/filter state controlled by the shared props and I's existing parent navigation state; component-only Back/Escape tests cannot prove an external result return. Do not duplicate its existing admitted-plan/Fabric inspectors.
 
 A role/reporting line remains advisory. Actual enrolled sessions are a separate observed set. Missing sessions do not mean zero staff. Goals and workstreams are linked views of Agent OS/Mission, not editable duplicate tables. Separate worker result, review and parent/product acceptance.
 
@@ -83,4 +92,3 @@ The current donor was also inspected at a4dbde6181bcc2bd4c3ad0443dc00eb4e040356d
 ## Exact first code-producing action
 
 After source/custody checks, add company/CompanyHQ.tsx and CompanyHQ.test.tsx. Implement the unavailable-source state and one valid project-selection callback against CompanyHQProps first. Then finish the entire component and regression matrix in this assignment.
-

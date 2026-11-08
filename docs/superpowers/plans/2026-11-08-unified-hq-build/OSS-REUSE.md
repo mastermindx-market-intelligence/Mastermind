@@ -59,4 +59,3 @@ Its [NOTICE](https://github.com/cdesktop-ai/cdesktop/blob/75bd015e88f9797d785c9f
 ## Integration and acceptance implications
 
 Inspect actual package availability and peers at implementation; repository manifests are not installed dependency proof. I serializes root manifests and lockfiles. Preserve library notices for copied material. Test canonical identity/selection retention, stale generations, orphan/cyclic graphs, null timestamps, authorized sanitized content, reduced motion and accessible alternatives. Imported donor quality is not proof of the Mastermind consumer or live telemetry.
-

@@ -1,9 +1,9 @@
 # Final App Integration and Acceptance Pro Build — finish the unified journey
 
-Operation: unified-hq-integration-20261108-sol-001  
-Editorial node: O3.I  
-Primary source: app/mastermind_os/src/living_hq/integration/**  
-Shared writes: only after current App/Office/native/package custody reconciliation
+- **Operation:** unified-hq-integration-20261108-sol-001
+- **Editorial node:** O3.I
+- **Primary source:** app/mastermind_os/src/living_hq/integration/**
+- **Shared writes:** only after current App/Office/native/package custody reconciliation
 
 ## Mission and DONE_WHEN
 
@@ -29,6 +29,15 @@ Freeze the package revision delivered with this prompt from branch sol/unified-h
 
 The verified app declares React/React DOM 19.3.0, TypeScript 7.0.2, Vite 8.3.0 and Vitest 5.0.1; those declarations do not prove tools are installed in your session. Existing commands from app/mastermind_os are npm run typecheck, npm run build and npx vitest run <scoped paths>. Detect actual executability once and report exact failures.
 
+
+## Compatibility update after first publication
+
+Protected master advanced by two commits to fd32eeb7cb6e1ff2b7e988741bd267b93d5c07ec. A bounded compare found no changes to this package, imported frontend contracts or the loaded Skillpack. The material organization change adds autonomy_ceo under meta_ceo, making ten advisory charter seats. Render source-supplied roles dynamically; do not freeze the older nine-seat count or treat the new charter as an enrolled session. Other added paths are the design-director source package. This does not grant a new runtime identity or require restarting the build census.
+
+## Controlled result-return state
+
+Use the revised package contract, not its first-publication API. Every A–C surface receives required viewState and onViewStateChange in HQSurfaceProps. HQViewState contains query, roleKeys, unmodified owner statuses, and canonical SourceState filters. I retains a separate state object for each surface above Office's unmount boundary, alongside the original Mission/result-return context. Preserve it through a result detour, requalify the target on return, and clear protected state on actual auth/principal/session/binding invalidation. Do not build an accumulating keyed cache, persistence service or parallel navigation store. Collapse/zoom can remain local. An additional return-critical filter requires one shared amendment through I. This API change is published before builder pickup; all fixtures and consumers must use the revised package revision.
+
 ## Shared source, design and access boundaries
 
 Your allowed directory is named below. Shared contracts, organization/**, App.tsx, meta-ceo/MetaCeoOffice.tsx, MissionHost, src-tauri authentication/main, root manifests/lockfiles and app-wide tokens/locales are read-only to component builders. The final integration assignment serializes those writes. Put component-local styles, bilingual copy, tests and clearly labeled synthetic fixtures in your own directory.
@@ -52,6 +61,7 @@ Requested reasoning style is a focused Pro build where eligible. This is not a m
 ## Integration inputs and dependency boundary
 
 Consume immutable accepted returns for:
+
 - A: CompanyHQ / CompanyHQProps in living_hq/company/.
 - B: LivingHQGraph / LivingHQGraphProps in living_hq/graph/.
 - C: AgentObservatory / AgentObservatoryProps in living_hq/traces/.
@@ -59,7 +69,19 @@ Consume immutable accepted returns for:
 
 Read the shared contracts.ts at the same package revision and every worker's EVIDENCE.md, tests, dependency proposal and exact head. No worker success statement substitutes for compatible source. You can recover source and prepare integration tests before all four return; shared mounting depends on verified compatible source and current custody.
 
-The protected base contains the organization foundation and Hermes continuity/native work. #2193 is the existing organization experience candidate, not disposable work. Its incumbent-office-mount.patch was deliberately unapplied; do not apply it blindly or on a stale preimage. #2177 changes the native chat/app surface and is actively moving. Inspect both current heads, changed files and actual writer/effect receipts once at pickup, then refresh only affected facts.
+The protected base contains the organization foundation and Hermes continuity/native work. #2193 is the existing organization experience candidate, not disposable work. Read app/mastermind_os/src/organization/INTEGRATION.md at b29e7dce112f69d87f8041788f732abd3f8bffb6. Its s0-appintegration-mount.patch names preimage 26604f550b42505808ea1b7ca2816be771aee5f5; incumbent-office-mount.patch names d7d5bfdb4bc656473a7e940dee07d0b437aed40d. They are alternatives for one mount, not cumulative patches; neither was applied to the incumbent worktrees. On advanced or joined source, carry only the corresponding minimal additions after reading the exact preimages.
+
+At the observed #2177 head, the shared collision footprint includes .github/workflows/mastermind-os.yml, app/mastermind_os/src/App.tsx, src/host.ts, src/native-executive-transport.ts, vite.config.ts and src-tauri/src/auth.rs, fresh_conversation.rs and project_conversations_read.rs. Its complete changed-file list did not include the app root package.json/package-lock.json, organization/**, meta-ceo/**, preferences/**, app-copy.ts or styles.css. This bounded absence does not establish that no other writer owns them; the I-only shared manifest fence still applies. Inspect current heads, changed files and actual writer/effect receipts once at pickup, then refresh only affected facts.
+
+## Existing organization interfaces and result-return repair
+
+Protected OrganizationWorkspace is the advisory foundation. #2193 adds missionProjection, loading, onOpenProjects, onOpenProject({workRef, rootJobId}), onInspectWorkerResult(ResultSelection) and planReader. Its OrganizationPlanReader is Pick<AdmittedPlanInspectorProps, "read" | "readActivity" | "sourceGeneration" | "canRead">. Keep these established callbacks and qualifiers when reconciling the candidate. Its organization-mission.ts reuses MissionDocument | Missionv3Document, qualifies the exact complete current Office mission and derives work with existing owner semantics; selected-operation counts are not a company-wide agent census.
+
+MetaCeoOffice already mounts AdmittedPlanInspector, FabricMissionInspector and AttendedFabricWorkspace. The admitted-plan reader already uses window.MastermindMissionHost.readAdmittedPlan, readRetainedActivity, invalidationGeneration and current sign-in/acquisition permission. If moving the plan inspector, remove its old instance. Do not duplicate an inspector, acquisition pipeline or source parser.
+
+The candidate explicitly leaves the external result round trip unproved: incumbent openOfficeWorkerResult selects Projects/Overview and calls pickResult, so Office unmounts. Component-local query and selected-row state are lost. Own restoration in the existing parent navigation/history state, keyed to the original authorized project/selection and source context. Preserve the exact ResultSelection's five fields; auth/source generation stays in its existing context, not an invented sixth selection field. Do not introduce another navigation store or persist protected content unnecessarily.
+
+Required behavioral test: set a nonempty query, select a nonfirst row, open that row's actual qualified retained result through the incumbent App route, unmount/remount Office and return to the same project, query, filters, row and useful keyboard focus. Repeat after a same-target current-source refresh. If authorization is revoked or the selection becomes invalid while the inspector is open, withhold the old result and clear invalid return data. Internal Back/Escape tests alone do not satisfy this case.
 
 ## Single-writer procedure
 
@@ -73,7 +95,7 @@ Only this assignment may reconcile root dependencies/lockfile, shared route/comp
 
 1. Reconcile protected ancestry, #2193/#2177, all A–D heads and source diffs. Preserve accepted code. Integrate the minimal shared types plus compatible components on the lawful original composition carrier.
 2. Apply necessary exact dependency changes once. Check React 19.3.0 peers, actual license notices, bundle behavior and locked versions. Fix cross-component interfaces here; do not send four builders to edit shared files.
-3. Mount one coherent workspace within the current shell. Own selection, graph mode, trace selection and result/Back state. A–C remain presentational. Wire typed HQNavigation to the existing Mission/job/result/evidence handlers only.
+3. Mount one coherent workspace within the current shell. Own selection, per-surface controlled viewState, graph mode, trace selection and result/Back state above the Office unmount boundary. A–C remain presentational. Wire typed HQNavigation to the existing Mission/job/result/evidence handlers only.
 4. Wire D to the already-authenticated Office reads. Repair the existing organization producer delivery through its real enrolled native session/binding and current Mission revision if it is still missing. Reuse HostLeadershipBinding.resolve/native_handler and the incumbent host route; do not call a browser-selected session a native enrollment or create a parallel endpoint/service.
 5. Reconcile #2193's result navigation and admitted-plan inspector. Keep the exact ResultSelection tuple and original return context. A result inspector must not erase the selected project, switch attempts, rerun the work or create another read pipeline.
 6. Preserve Hermes and DeepSeek conversation initiation/history, native sign-in, uncertain-send recovery and reopening behavior. Never recreate/resend the completed Hermes canary. Use existing retained evidence for reads; any new effect must be separately permitted and idempotent through its current owner.
@@ -94,7 +116,6 @@ Runtime proof: actual authenticated supplier association, exact deployed/install
 
 ## Recovery and exact first code-producing action
 
-After source/custody checks and at least compatible contract inputs, create integration/navigation.test.ts for the existing result → Back journey. Preserve all five ResultSelection fields and the original Mission selection. Implement the smallest integration/navigation adapter that makes this test pass, then complete the full shared composition and acceptance path.
+After source/custody checks and at least compatible contract inputs, create integration/navigation.test.tsx for the real result → Back journey, including Office unmount/remount, a nonempty query and nonfirst selected row. Preserve all five ResultSelection fields, the original Mission selection and authorized return focus. Implement the smallest integration/navigation adapter using the incumbent parent state that makes this behavioral test pass, then complete the full shared composition and acceptance path.
 
 Persist the same operation's exact source, tests, CI, deployment identity, browser evidence, held effects and next action. Do not stop after a mounting patch, plan, green suite or source merge while a safe in-scope integration/verification step remains. If a genuine runtime access gate remains, name the exact required host/session/control and the acceptance cases still unproved; never claim that another conceptual owner has taken over without a real handoff.
-

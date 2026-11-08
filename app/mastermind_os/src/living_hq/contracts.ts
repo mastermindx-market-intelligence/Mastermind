@@ -7,7 +7,7 @@
 import type { MissionSelection, EvidenceRef } from "../mission";
 import type { ResultSelection } from "../result";
 import type {
-  ProjectionContext, SourceClaim, ProjectedRead, OfficeProjection,
+  ProjectionContext, SourceState, SourceClaim, ProjectedRead, OfficeProjection,
 } from "../meta-ceo/projection";
 import type {
   OrganizationObservation, qualifyOrganization,
@@ -142,9 +142,20 @@ export interface LivingHQInput {
   readonly loading: Readonly<Partial<Record<"organization" | "sessions" | "graph" | "traces" | "placements", boolean>>>;
 }
 
+/** Return-critical UI state; retained by the existing parent navigation owner. */
+export interface HQViewState {
+  readonly query: string;
+  readonly roleKeys: readonly string[];
+  /** Unmodified source-owner status values, not a new lifecycle vocabulary. */
+  readonly statuses: readonly string[];
+  readonly sourceStates: readonly SourceState[];
+}
+
 export interface HQSurfaceProps {
   readonly snapshot: LivingHQSnapshot;
   readonly locale: HQLocale;
+  readonly viewState: HQViewState;
+  readonly onViewStateChange: (state: HQViewState) => void;
   readonly selected: HQTarget | null;
   readonly onSelect: (target: HQTarget | null) => void;
   readonly onNavigate: (destination: HQNavigation) => void;

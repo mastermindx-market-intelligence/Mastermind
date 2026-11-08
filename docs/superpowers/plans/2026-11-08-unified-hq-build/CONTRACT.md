@@ -19,7 +19,7 @@ Use the source at protected Mastermind 183bbd7ea0d71875984bea0f63bc81a98d930586:
 | Retained result | result.ts decoder and ResultEnvelopeDigestShape | Owner observation and five-part selection; 16 KiB bounds remain |
 | Parent acceptance | Mission acceptance / v4 ProductAcceptanceView where qualified | Worker COMPLETED never means original parent consumed or product accepted |
 
-Additional canonical mapping helpers: fabric/mission-interiors.ts exports FabricMission, FabricRow and missionInteriors (up to 256 displayed children; full-source duplicate/ancestor checks). fabric/mission-worker-result.ts exports qualifyWorkerResultRef for current Mission-v3/latest-attempt/unique-result navigation. meta-ceo/session-context.ts and mission-adapter.ts own enrolled session qualification and asynchronous capture/completion. Reuse them, not new association gates.
+Additional canonical mapping helpers: fabric/mission-interiors.ts exports FabricMission, FabricRow and missionInteriors (up to 256 displayed children; full-source duplicate/ancestor checks). fabric/mission-worker-result.ts exports qualifyWorkerResultRef for current Mission-v3/latest-attempt/unique-result navigation. meta-ceo/session-context.ts qualifies an observed Executive/Office session binding, not an enrollment roster; mission-adapter.ts owns asynchronous capture/completion. Reuse them, not new association gates.
 
 The native Hermes port is effectful (create/send/recover); only decoded observations may enter a read adapter. The v1 input deliberately does not invent a native-session-to-Executive join or new trace/placement supplier. A separately proved current supplier requires one compatible amendment by I. Historical local ledger model/pool labels remain historical; browser catalog reads require the existing EXACT_RUN_SET decoder.
 
@@ -36,9 +36,9 @@ adaptLivingHQ(input: LivingHQInput): LivingHQSnapshot
 
 All exported components have named exports from their own index.ts. D exports its adapter from adapters/index.ts. No builder creates the shared living_hq/index.ts; I owns final composition.
 
-Each surface receives snapshot, locale (en or zh-CN), selected, onSelect, onNavigate and optional onRefresh. B additionally receives controlled organization/execution mode; C receives controlled traceId. Inputs are immutable presentation data. Outputs are React elements and callbacks, not jobs, writes or background effects.
+Each surface receives snapshot, locale (en or zh-CN), required controlled viewState/onViewStateChange, selected, onSelect, onNavigate and optional onRefresh. B additionally receives controlled organization/execution mode; C receives controlled traceId. Inputs are immutable presentation data. Outputs are React elements and callbacks, not jobs, writes or background effects.
 
-Navigation is a typed intent to the existing app handlers: mission, job, result, evidence, back. The integrator validates the target against the currently selected source before using an existing handler. Do not manufacture URLs, effect verbs, launch permissions or shell commands. Search/filter/collapse/zoom state is local ephemeral UI state.
+Navigation is a typed intent to the existing app handlers: mission, job, result, evidence, back. The integrator validates the target against the currently selected source before using an existing handler. Do not manufacture URLs, effect verbs, launch permissions or shell commands. Search and role/status/source filters are ephemeral controlled HQViewState: query, roleKeys, statuses and sourceStates. Statuses remain unmodified owner values; sourceStates uses the existing SourceState union. I retains each surface’s controlled view state above Office’s unmount boundary for the exact originating Mission/result-return context, and clears it on actual authorization or owner-binding invalidation. A result detour alone is not an authorization change. On return, requalify the target against current source; filters never prove permission. Do not create a persistent store or accumulating keyed cache. Collapse and zoom can remain local; additional return-critical filters require one I-owned amendment.
 
 ## Data qualification and ownership
 
@@ -84,3 +84,7 @@ Root manifests and lockfiles remain serialized to I. A dependency proposal inclu
 
 Reject cross-auth, cross-session, changed binding and changed Mission revision; refuse wrong result tuple or digest; preserve SAME/UNKNOWN/CONFLICT owner observation; keep partial totals unknown; show stale/missing/denied states; never turn a charter into enrollment, reporting into delegation, a route into placement, a returned result into parent acceptance, or a fixture into live proof.
 
+
+## Pre-delivery contract amendment
+
+The first publication omitted controlled query/filter props, although #2193’s external-result path unmounts Office. The revised contract adds required HQViewState and onViewStateChange to every surface before builder pickup. This is a component API amendment, not a canonical model or authority change. The original contract SHA is historical only; consume the package revision delivered with the handoff. A bounded independent review accepted the amendment with explicit parent-above-unmount ownership and auth/binding invalidation rules.

@@ -47,7 +47,7 @@ The type file imports real existing exports from mission.ts, result.ts, meta-ceo
 
 It adds only presentation types and callback contracts. No runtime export, IO, new source decoder, scheduler, datastore, auth path, transport endpoint or product mount is implemented.
 
-Qualification executed: node --experimental-strip-types delivery/app/mastermind_os/src/living_hq/contracts.ts, exit 0, Node v24.22.1. This proves parse/strip execution of the type-only module; it is NOT TypeScript semantic typechecking, the frontend build or installed acceptance. A TypeScript executable was not found in this scratch runtime. Product frontend tests have not run because this package implements no frontend components. Hosted current-head checks are a separate publication result.
+Qualification executed: node --experimental-strip-types delivery/app/mastermind_os/src/living_hq/contracts.ts, exit 0, Node v24.22.1. This proves parse/strip execution of the type-only module; it is NOT TypeScript semantic typechecking, the frontend build or installed acceptance. A TypeScript executable was not found in this scratch runtime. No product frontend tests were executed locally. Hosted publication checks subsequently ran against the PR validation merge; their separate evidence is recorded below.
 
 ## Remaining source-to-product gaps
 
@@ -60,3 +60,29 @@ Qualification executed: node --experimental-strip-types delivery/app/mastermind_
 
 The package is an executable implementation handoff. It is not a completed unified Mastermind OS product.
 
+
+## Compatibility update after first publication
+
+Protected master advanced by two commits to fd32eeb7cb6e1ff2b7e988741bd267b93d5c07ec. A bounded compare found no changes to this package, imported frontend contracts or the loaded Skillpack. The material organization change adds autonomy_ceo under meta_ceo, making ten advisory charter seats. Render source-supplied roles dynamically; do not freeze the older nine-seat count or treat the new charter as an enrolled session. Other added paths are the design-director source package. This does not grant a new runtime identity or require restarting the build census.
+
+## Package review and first source publication
+
+PR: https://github.com/mastermindx-market-intelligence/Mastermind/pull/2284 (Draft). First complete package commit: 41670a23f6d81017159b0ed082f563af0ed9a0ce. All ten files were read back and matched the intended UTF-8 content exactly. The branch is sol/unified-hq-build-handoffs-20261108.
+
+A separate bounded source-contract review returned PASS for canonical type compatibility, unsupported-source honesty, result identity and parallel ownership. Its one wording correction distinguishes an observed Executive/Office session binding from an enrollment roster; the correction is applied. This technical review is not a formal GitHub approval or product acceptance.
+
+At the first hosted observation, Mastermind OS run 42465647928 (frontend/native-macos), CI run 42465647974 and CodeQL run 42465645134 had started on the exact first head. Pending and skipped checks were not called success. Final current-head check disposition belongs to GitHub and the delivery receipt.
+
+## Existing-candidate integration facts
+
+Root re-read #2193's [INTEGRATION.md](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b29e7dce112f69d87f8041788f732abd3f8bffb6/app/mastermind_os/src/organization/INTEGRATION.md). The S0 mount preimage is 26604f550b42505808ea1b7ca2816be771aee5f5; the incumbent Office mount preimage is d7d5bfdb4bc656473a7e940dee07d0b437aed40d. The two patches are alternatives. The candidate remains BUILT_NOT_PROVEN and explicitly records the Office-unmount loss of query/selected-row state on external result navigation. I's handoff now requires the real App route, unmount/remount, nonempty search, nonfirst row, focus restoration, refresh and auth-revocation cases.
+
+The complete #2193 changed-file list contains 20 organization source/test, patch, evidence and plan paths, with no direct App/Office edits. The complete #2177 list has shared App/host/native transport/native-auth/workflow/Vite changes, but no app root package.json/package-lock.json, organization/**, meta-ceo/**, preferences/**, app-copy.ts or styles.css. These are source collision observations at the recorded heads, not perpetual custody grants.
+
+## First-head hosted qualification and repair
+
+The frontend job [128684418413](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42465647928/job/128684418413), associated with first head 41670a23f6d81017159b0ed082f563af0ed9a0ce, ran on GitHub's PR validation merge d6ece7d0a2750413ec36ae56ad168421fb496b3b. It passed npm run typecheck, npm test (400 test files; 6,840 passed, 12 skipped), production tsc/Vite build and isolated browser-source-fixture build. This is source qualification; it is not authenticated installed acceptance.
+
+The initial CI fast-check job [128684467656](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42465647974/job/128684467656) failed git diff --check on Markdown trailing spaces and blank lines at EOF in this package. The failure is owned by this package, not attributed to the baseline. The follow-up normalizes those lines; final-head checks must independently establish the correction. No bypass or workflow weakening was introduced.
+
+The pre-delivery amendment adds required HQViewState and onViewStateChange above the Office unmount boundary, with current-context invalidation and no persistence. Revised contract SHA-256: 8e819aea71a708ca2f7b980a81867bff3fb0087874cd38912a585ed4034b7e9e. All five prompts use the amended API; no builder had picked up the first API. The first-head frontend evidence therefore qualifies the earlier contract only; the final head needs its own hosted typecheck.

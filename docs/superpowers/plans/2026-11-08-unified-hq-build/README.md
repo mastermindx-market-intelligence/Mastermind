@@ -1,8 +1,8 @@
 # Mastermind OS — five executable Pro build handoffs
 
-Operation: unified-hq-build-orchestration-20261108-sol-001  
-Existing programme: WS:CHAIRMAN-CONTROL-ROOM / Paperclip organization bridge, O3  
-Prepared: 2026-11-08  
+- **Operation:** unified-hq-build-orchestration-20261108-sol-001
+- **Existing programme:** WS:CHAIRMAN-CONTROL-ROOM / Paperclip organization bridge, O3
+- **Prepared:** 2026-11-08
 Product status: NOT COMPLETE. This package is an implementation contract and delivery split, not a running deployment.
 
 ## Outcome
@@ -61,6 +61,7 @@ Shared writes are serialized: App.tsx, meta-ceo/MetaCeoOffice.tsx, MissionHost, 
 - D provides adaptLivingHQ(input: LivingHQInput): LivingHQSnapshot with no IO, polling, persistence, dispatch or credential handling.
 - Keep organization and execution graph observations separate, including their provenance. A reporting edge is never a delegation edge.
 - Permission denial maps to existing WITHHELD with a safe reason. Missing, stale, unknown and unassociated keep their current meanings. Loading and complete-empty are distinct.
+- I holds each surface’s controlled search/filter state above Office’s unmount boundary and clears it on actual auth or owner-binding invalidation.
 - The original ResultSelection tuple is preserved through result and Back navigation. Worker completion, review, original-parent consumption and product acceptance remain separate.
 - Unsupported detailed traces, fleet enrollment or actual host/model placement remain unavailable. A configured route or role is not observation.
 
@@ -76,3 +77,7 @@ For each future return, retain the same child operation and branch; record exact
 
 The programme remains open until actual authorized application evidence shows: project selection → observed work/delegation → inspection → exact result → Back to the same project, including loading, denial, stale generations, interrupted sends/reopening and unavailable sources. Preserve existing Hermes and DeepSeek conversations and completed canaries. No new scheduler, task database, provider router, trace store or identity service is permitted.
 
+
+## Compatibility update after first publication
+
+Protected master advanced by two commits to fd32eeb7cb6e1ff2b7e988741bd267b93d5c07ec. A bounded compare found no changes to this package, imported frontend contracts or the loaded Skillpack. The material organization change adds autonomy_ceo under meta_ceo, making ten advisory charter seats. Render source-supplied roles dynamically; do not freeze the older nine-seat count or treat the new charter as an enrolled session. Other added paths are the design-director source package. This does not grant a new runtime identity or require restarting the build census.

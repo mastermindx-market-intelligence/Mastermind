@@ -1,8 +1,8 @@
 # Hermes, Fabric and Capacity Adapters Pro Build — connect genuine evidence
 
-Operation: unified-hq-adapters-20261108-sol-001  
-Editorial node: O3.D  
-Allowed source: app/mastermind_os/src/living_hq/adapters/**  
+- **Operation:** unified-hq-adapters-20261108-sol-001
+- **Editorial node:** O3.D
+- **Allowed source:** app/mastermind_os/src/living_hq/adapters/**
 Recommended new branch if no existing operation: sol/unified-hq-adapters-20261108
 
 ## Mission and DONE_WHEN
@@ -28,6 +28,15 @@ The existing organizational home is macro:agentos/workstreams/WS-CHAIRMAN-CONTRO
 Freeze the package revision delivered with this prompt from branch sol/unified-hq-build-handoffs-20261108 and read docs/superpowers/plans/2026-11-08-unified-hq-build/CONTRACT.md plus app/mastermind_os/src/living_hq/contracts.ts. Reuse the actual imported canonical types; do not privately fork the contract. The delivery branch is source, not protected procedure.
 
 The verified app declares React/React DOM 19.3.0, TypeScript 7.0.2, Vite 8.3.0 and Vitest 5.0.1; those declarations do not prove tools are installed in your session. Existing commands from app/mastermind_os are npm run typecheck, npm run build and npx vitest run <scoped paths>. Detect actual executability once and report exact failures.
+
+
+## Compatibility update after first publication
+
+Protected master advanced by two commits to fd32eeb7cb6e1ff2b7e988741bd267b93d5c07ec. A bounded compare found no changes to this package, imported frontend contracts or the loaded Skillpack. The material organization change adds autonomy_ceo under meta_ceo, making ten advisory charter seats. Render source-supplied roles dynamically; do not freeze the older nine-seat count or treat the new charter as an enrolled session. Other added paths are the design-director source package. This does not grant a new runtime identity or require restarting the build census.
+
+## Controlled result-return state
+
+Use the revised package contract, not its first-publication API. Every A–C surface receives required viewState and onViewStateChange in HQSurfaceProps. HQViewState contains query, roleKeys, unmodified owner statuses, and canonical SourceState filters. I retains a separate state object for each surface above Office's unmount boundary, alongside the original Mission/result-return context. Preserve it through a result detour, requalify the target on return, and clear protected state on actual auth/principal/session/binding invalidation. Do not build an accumulating keyed cache, persistence service or parallel navigation store. Collapse/zoom can remain local. An additional return-critical filter requires one shared amendment through I. This API change is published before builder pickup; all fixtures and consumers must use the revised package revision.
 
 ## Shared source, design and access boundaries
 
@@ -98,4 +107,3 @@ Assert zero IO/persistence/dispatch by design and tests at the public adapter en
 ## Exact first code-producing action
 
 After source/custody checks, create adapters/adapt-living-hq.ts and its test proving that an old auth generation cannot populate any protected node, trace, session or placement. Add a positive existing Mission Job/Attempt case next, then finish all source mappings and failure states.
-
