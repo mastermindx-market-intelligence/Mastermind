@@ -2,7 +2,7 @@
 
 ## Applied outcome
 
-The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options and Market Memory. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory and Guide. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
 | Current design entry | Verified continuation improvement |
 |---|---|
@@ -11,6 +11,7 @@ The first verified pass changed **44 artboards across 16 files**. The continuing
 | [F02 build contract](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0) | Evidence jumps preserve route/filters and place focus correctly; settled filter status is announced without moving focus. |
 | [GMI Foundations](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) | Current candidate source is bound correctly, with precise return-focus and snapshot-proof boundaries. |
 | [Expectation Build states](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | EN/ZH desktop/mobile numeric disclosures, distinct clocks, null values, failed selection and empty-series studies. |
+| [Market Guide handoff](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0) | Direct entry opens explicitly scoped US research; contextual Back requires a real origin, with a separate unavailable-link state. |
 | [Market Memory comparison](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | Selected source-version unavailability preserves both record references and the exact comparison return. |
 | [Options D08C companion](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) | Explicit assessment target, new-firing notice, General assessment, receipt/revision recovery and 320px study. |
 
@@ -53,9 +54,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Seven material continuation lanes are verified above; work remains active on bounded Mastermind AI and Market Guide journey improvements. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Eight material continuation lanes are verified above; the selected active unit is Mastermind AI interrupted-response clarity. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
-Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Market Memory companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Guide handoff are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -549,3 +550,41 @@ Root inspected both new recovery screenshots, the updated destination contract, 
 This is a disjoint visual/behavioral extension of the existing R2 proposal. The authorized reader/comparison consumer still owes real-path proof of classified failure, exact-pair return, original-reference copying and outcome separation. No source owner, retrieval service, migration, publication route or new application implementation was introduced.
 
 Current remaining selected work: AI interrupted-response outcome with the incumbent request’s uncertainty preserved, then Guide direct-entry versus contextual-return handoff. Current-source and candidate custody checks are required before each addition.
+
+
+## Continuation delivery 7 — Guide destination and contextual return
+
+Two R21 board cards claimed **Back to Stock Signals** / **Back to Sector Board**, although the held candidate registry maps both coverage records to the US Stocks page with no fragment. A user arriving through Guide search has a forward research destination, not an established originating board.
+
+### Exact source and preserved custody
+
+Root independently read these files at `d9638a11da77c1eb5175326e7fcd722d923d314d`:
+
+- [market_reference.yml](https://github.com/mastermindx-market-intelligence/macro/blob/d9638a11da77c1eb5175326e7fcd722d923d314d/config/market_reference.yml), blob `dbb925d0358d1177140fe59219972ecd4b2dfb57`: both coverage exceptions have `surface: us_stocks.html` and `not_an_indicator`.
+- [market_guide.py](https://github.com/mastermindx-market-intelligence/macro/blob/d9638a11da77c1eb5175326e7fcd722d923d314d/lib/market_guide.py), blob `d3a2783d6a884fcb64765e0d70473102f899e331`: coverage surfaces reject fragments.
+- [guide-client.js](https://github.com/mastermindx-market-intelligence/macro/blob/d9638a11da77c1eb5175326e7fcd722d923d314d/research/reference_rethink_20260921/guide-client.js), blob `180d774d1224a712b3a9bf3dbc5c98c196dc19c3`: `ownerURL` validates the registered `owner_ref` / `surface`; it does not manufacture a caller or return state.
+- [guide-view.js](https://github.com/mastermindx-market-intelligence/macro/blob/d9638a11da77c1eb5175326e7fcd722d923d314d/research/reference_rethink_20260921/guide-view.js), blob `04d16accfcd4862dc99780a12e6540ff2aea73db`: the existing owner action and unavailable-link fallback are separate from coverage labels.
+
+Fresh [PR #7647](https://github.com/mastermindx-market-intelligence/macro/pull/7647) readback confirms OPEN / Draft at that head. Its production, source and explicit refused-edit holds remain unchanged. No Guide source, registry semantics or release action was modified.
+
+### Paper changes and behavior
+
+File `01M32XYWDYSFTNDZVJKQ5QHT33`, [Search, Aliases + Recovery](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0), existing R21 artboard `32U-1`:
+
+- `33T-1` and `34G-1` now say **Open US stock research →**.
+- New companion `40N-0` distinguishes direct entry, actual contextual help and unresolved research links.
+- State row `40T-0`: direct entry `40U-0`, contextual return `411-0`, unavailable link `418-0`.
+- Chinese 390px direct-entry specimen `41G-0` explicitly names **研究目的地 · 美国** and **打开美股研究**.
+- Binding/proof `41K-0` and immutable source link `421-0` retain the existing navigation owner.
+
+Direct entry follows the validated US destination without promising a prior board, filter or row. United States remains explicit even if shared navigation shows a different market. **Back to board** exists only when the contextual-help owner has a real caller; it reuses the connected launcher/scroll/focus path and existing logical fallback. Browser-history return preserves the Guide’s current query and lesson route through existing routing.
+
+An unresolved owner link withholds that destination while keeping explanations and related definitions available. It does not classify the research data as missing or infer market support from the failure. Likewise, `not_an_indicator` explains a composite board; it is not an availability flag.
+
+Existing search, alias, related-lesson return, unknown-link and no-JavaScript definition states were preserved. No return parameter, storage mechanism or new cross-product navigation protocol was introduced.
+
+### Verification
+
+Root inspected the two corrected board cards, the complete new companion including its 390px Chinese specimen, and the full fit-content R21 artboard. The longer Open labels fit their original footers; all new text and 44px actions render legibly without clipping. All own mutations returned observed success and R21 was explicitly released. Runtime owner-URL, caller-focus and browser-history behavior remains a required proof, not a claim from static Paper.
+
+Next: implement the AI incomplete-response specimen using the current request owner, preserve the original request’s uncertain outcome, and avoid a default retry action.
