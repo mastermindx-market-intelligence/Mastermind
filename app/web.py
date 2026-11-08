@@ -4013,18 +4013,29 @@ def api_desk_experiments() -> JSONResponse:
 
     Returns {as_of, total, open, matured, judged, cancelled, matured_items: [...],
              open_tristate: [...], all_items: [...]}.
-    Never 500s — degrades to an empty registry on any failure."""
+    Read one registry snapshot without a maturity write. Read/projection failures
+    return an explicit unavailable payload; genuine absence remains a zero state."""
     try:
         from brain import experiment_registry
-        s = experiment_registry.summary()
-        all_items = experiment_registry.load()
+        all_items = experiment_registry.load(strict=True)
+        s = experiment_registry.summary(experiments=all_items)
         s["all_items"] = all_items
         return JSONResponse(s)
     except Exception as exc:  # noqa: BLE001 — additive; never break the desk
-        return JSONResponse({"as_of": None, "total": 0, "open": 0, "matured": 0,
-                             "judged": 0, "cancelled": 0, "matured_items": [], "all_items": [],
-                             "open_tristate": [],
-                             "note": f"Experiment registry unavailable: {exc}"})
+        _log.warning("experiment registry read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "as_of": None,
+            "total": None,
+            "open": None,
+            "matured": None,
+            "judged": None,
+            "cancelled": None,
+            "matured_items": None,
+            "all_items": None,
+            "open_tristate": None,
+            "error": "experiment_registry_unavailable",
+        })
 
 
 @router.get("/api/scheduler")
