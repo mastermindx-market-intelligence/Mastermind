@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. The next foreground slice is the OS created-project opening recovery and two exact directory pointer corrections. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. OS created-project opening recovery and two exact directory reference corrections are also completed. The next foreground slice is invalid project setup link recovery through the existing journey owner. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -370,8 +370,46 @@ All edits returned **APPLIED_RESPONSE_OBSERVED**. Scoped `finish_working_on_node
 
 **Remaining runtime acceptance:** bind exact candidate/occurrence/source-generation and Plan identities; exercise existing authenticated WatchStore outcomes and focus/return behavior; prove real outcome clocks, account transitions and disabled/touch/keyboard behavior. Comparison persistence remains unavailable until its exact existing-owner object/receipt contract is established.
 
-### Next active slice: OS created-project opening recovery
+### OS created-project opening recovery — source plan (now implemented)
 
 Read-only current-design and protected-source evidence identifies a specific gap: a project creation can be observed while the fresh project catalogue cannot resolve exactly one matching created work reference for opening. Add a disjoint proposed recovery specimen on p-E-0 using existing `ProjectPlanningJourney` and `App.openCreatedProject` owners. Preserve original created identity; retry only the exact read/selection path; keep unknown creation outcomes on original-request inspection. Open does not establish a conversation or running work.
 
 Protect current live Today/New project targets `LNV-0/N27-0/N8N-0/NBB-0` and the newer goal-first journey `PBQ-0`. Hidden prior JSX is not a visible overlap defect. Two independent directory corrections are narrowly authorized at `A3C-0` and `A3U-0`. No OS mutation has occurred yet in this continuing slice.
+
+### OS created-project recovery — completed Paper slice
+
+[OS daily-experience design page](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0).
+
+| Target | Result |
+|---|---|
+| `YEL-0` | 1600px recovery states, existing-owner binding and required consumer proof |
+| `YGX-0` | Desktop EN “Project created” / opening recovery |
+| `YLH-0` | 390px EN recovery with primary and return controls together |
+| `YOS-0` | Matching 390px ZH recovery |
+| `A3C-0`, `A3U-0` | Two existing directory reference pointers corrected |
+
+The new examples say **Project created**, explain that the project cannot yet be opened from the list, and offer **Try opening project** / **Back to projects**. The named Weekly market review is explicitly illustrative. Retry stays attached to the already-created identity. No unconditional “work has not started” claim was added: this opening handler performs no launch, while other work state remains independently owned.
+
+The contract covers observed creation, pending exact opening, unavailable opening, unconfirmed creation, and changed access/selection. Unknown creation retains its original-request check. Confirmed creation is qualified by matching createRequestId, workRef and principal plus accepted / SOURCE_OBSERVED through the existing validator. Opening refreshes Programs and requires exactly one current matching workRef while retaining host, auth, selection and catalogue witnesses. Success selects Projects / More; no conversation-opening promise is made.
+
+Source at the unchanged protected pin:
+
+- [ProjectPlanningJourney.tsx](https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/app/mastermind_os/src/projects/ProjectPlanningJourney.tsx), blob `8833462bbf32e8202445b9ff47387dfb4bd9078e`: qualified observed creation, open callback and OPEN_PROJECT_UNAVAILABLE.
+- [App.tsx](https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/app/mastermind_os/src/App.tsx), blob `20d9ee460253ede4a992d6c02141850930270137`: exact fresh-catalogue open, Projects / More selection and existing Back behavior.
+- [useProjectJourneyState.ts](https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/app/mastermind_os/src/projects/useProjectJourneyState.ts), blob `cf6a67550ad0b1f1d30b503c51a5e437309a94db`: current-actor local hide and reopening the original known operation.
+
+Back / Close use the existing current-host hide path and clear the project tab. Safe URL identifiers and the owned draft remain for reopening. Returning does not cancel creation; restored list scroll/filter or a clean URL is not promised.
+
+All screens reuse current Atelier geometry. The desktop's inherited Sources sidebar initially selected Settings; visual review caught the mismatch and the clone now uses the exact existing **Projects** navigation component `M4R-0` from AT02 `M4J-0`. Five primary destinations remain. This is semantic component reuse within the new page; source navigation and live Today/New project boards were not changed.
+
+Directory readback found 53 text nodes before and after, precisely two intended replacements, no missing nodes and no unrelated text changes. The reference blocks now identify Projects AT02 on page 12, Project workspace AT03 / Resources AT09 / Work AT10 on page 12A, and current Sources & access AT07 / AT07M plus SA01 / SA01M on page 12. The visible top-level index composition remains intact.
+
+Principal inspected desktop, EN/ZH mobile and contract screenshots. A bounded reasoning review found no actionable source, copy or layout contradiction. Header targets are 44px, primary controls 48px; no observed clipping. New boards have separate horizontal canvas positions. All writes returned **APPLIED_RESPONSE_OBSERVED**; scoped finish completed for the four new boards plus A2Q. No project was created/opened, no source implementation was altered and no runtime navigation was asserted.
+
+**Remaining consumer proof:** zero/one/ambiguous catalogue results, pending/repeated gestures, read failure then exact success, auth/host/selection invalidation and late responses, Back/reopen identity, keyboard/screen-reader behavior, and absence of duplicate creation or launch effects.
+
+### Next active slice: invalid project setup link
+
+The same source exposes a separate invalid-link entry. Open project setup invokes `openProjectJourney` and the existing journey owner: known safe selection resumes its original identity; an eligible retained same-actor goal can be restored; cold invalid entry has no recovered selection and opens blank setup. Host/auth/currentness still bind. This is presentation/URL navigation, not project creation or launch.
+
+Add concise EN/ZH proposed entry recovery using this distinction. Do not claim that the original project was restored, deleted, failed or expired. Back hides the local pane but does not repair an invalid URL; explicit setup opening uses the existing URL adapter. This adjacent work remains disjoint from live Today/New project writers.
