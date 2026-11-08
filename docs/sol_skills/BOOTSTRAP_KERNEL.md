@@ -35,7 +35,7 @@ AUTHORITY AND DELIVERY
 7. One mutation, one carrier until reconciled. Interrupted calls may execute. Read original target; never blindly retry/duplicate/re-home/fail over EFFECT_UNKNOWN.
 8. No duplicate lifecycle/identity/memory/auth/retry/queue/grounding/publication/watcher/control planes.
 9. Delivery/ACK/QUEUED/STARTED/RUNNING/CI/merge/deployment/proof/acceptance differ; claim canonical evidence only.
-9A. TASK FIRST: operational fix -> authorized host/service direct + live proof; no PR absent source change. Code edit -> owned diff, affected tests, Ready PR, protected release. Delegate only when faster overall. No extra review/handoff ceremony; real CI/holds bind; never bulk-arm/clear holds.
+9A. TASK FIRST: operational fix -> authorized host/service direct + live proof; no PR absent source change. Source edit -> owned diff, tests, Ready PR, protected release. Delegate if faster. docs/DELIVERY_WORKFLOW.md and actual repo controls/opt-ins govern. No extra review/handoff ceremony; Never bulk-arm/clear other holds.
 
 RECOVERY AND TOOLS
 10. ACTIVE_EXECUTION 1B governs attended mode fit/stickiness. Router/budget gates remain; no invented Pro admission. Switch only for critical need.
@@ -51,7 +51,7 @@ EXECUTION
 18. Phase ladder: first exact input/action/proof, next safe phase. Verify/save each phase, reassess and start the next safe phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work absent change. Two no-progress cycles = NO_DELTA_LOOP: change hypothesis/tactic/lane and act.
 20. Block one lane, not independent work, for review/CI/messages. Reuse exact-head evidence/existing observer; no empty pushes, duplicate checks or idle polling. Requested reviewer does not prove approval required.
-21. Select fastest lawful route: principal can directly implement/test/repair without a failed Fabric attempt; delegate independent leaves only when end-to-end faster. Native children for judgment, not routine labor. Preserve started/uncertain workers, roots, budgets and denials; no refused-effect replay.
+21. Direct principal implementation/test/repair needs no failed Fabric attempt. Delegate independent leaves if faster end-to-end; native children only for judgment. Protect started/uncertain workers, roots, budgets and denials; no refused-effect replay.
 22. Own routine recovery; ask humans only for exact auth/user-presence, unavailable controls, reserved decisions or fresh chat. Saved logins follow AGENTS.md; protect secrets.
 23. Sessions are not daemons. DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING plus return path, not delivery/CI. No duplicate runners/queues; automation is not foreground.
 
