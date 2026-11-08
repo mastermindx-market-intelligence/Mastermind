@@ -953,7 +953,7 @@ def run(svc, args):
             raise
         return _record(svc, plan, "APPLIED", "COMMITTED", True, durable=True)
 
-def require_forward_predecessor(svc, account, roots, config, manifest, original):
+def _require_forward_predecessor_before_paper_v22(svc, account, roots, config, manifest, original):
     """Retain the status, Paper and enrollment proof through a forward pin."""
     path = roots["state"] / TRANSACTION
     plan, raw, pd = _retained(svc, account, roots, path, forward_config=config)
@@ -965,3 +965,52 @@ def require_forward_predecessor(svc, account, roots, config, manifest, original)
             != {"schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}):
         fail("START_NOT_COMMITTED")
     _confirm_retained_durability(svc, roots, path)
+
+def require_forward_predecessor(svc, account, roots, config, manifest, original):
+    """Compose the reviewed admin Paper v22 edge with its retained status owner.
+
+    The supplied pair is the forward preimage, including during later start and
+    reconciliation. The native forward owner separately authenticates the live
+    pair. Historical records are never normalized, replaced or rewritten.
+    """
+    if account != "admin-business":
+        return _require_forward_predecessor_before_paper_v22(
+            svc, account, roots, config, manifest, original)
+    supplied = json.loads(config)
+    paper = supplied.get("paperDesign") if type(supplied) is dict else None
+    runtime_rel = svc.PAPER_RUNTIME_V22_REL
+    reviewed = svc.PAPER_RUNTIME_V22_BRIDGE_SHA256
+    expected_paper = svc._paper_design_config(
+        svc._user_root(), rel=runtime_rel, bridge_sha256=reviewed)
+    if type(paper) is not dict or paper.get("bridgePath") != expected_paper["bridgePath"]:
+        return _require_forward_predecessor_before_paper_v22(
+            svc, account, roots, config, manifest, original)
+
+    enrollment = svc._pin_enrollment_owner_module()
+    previous_config = svc._fabric_release_bytes(
+        roots["state"] / enrollment.TRANSACTION / "config.after")
+    previous_manifest = svc._fabric_release_bytes(
+        roots["state"] / TRANSACTION / "manifest.after")
+    if not historical_pair(
+            svc, account, roots, original_plan=original["plan"],
+            original_raw=original["raw"], config_bytes=previous_config,
+            manifest_bytes=previous_manifest):
+        fail("PAPER_V22_ORIGIN_UNQUALIFIED")
+
+    projected = json.loads(previous_config)
+    for key in ("bridgePath", "bridgeSha256", "pythonPath"):
+        projected["paperDesign"][key] = expected_paper[key]
+    projected_config = (json.dumps(projected, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    projected_manifest = json.loads(previous_manifest)
+    projected_manifest["configHash"] = digest(projected_config)
+    projected_manifest_bytes = (
+        json.dumps(projected_manifest, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    if config != projected_config or manifest != projected_manifest_bytes:
+        fail("PAPER_V22_SELECTION_CHANGED")
+
+    svc._verify_paper_runtime(
+        svc._user_root(), runtime_rel=runtime_rel, rel=runtime_rel,
+        expected_sha=reviewed)
+    return _require_forward_predecessor_before_paper_v22(
+        svc, account, roots, previous_config, previous_manifest, original)

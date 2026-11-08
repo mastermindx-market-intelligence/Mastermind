@@ -11,6 +11,8 @@ import private_service as svc
 PROFILES = json.loads(r'''[
   {
     "account": "fabric-design",
+    "forward_config_sha256": "d8224ad799b9927b43026d07f2716f63b5ecbdb41580f0eb2e15ba7a0ba84750",
+    "forward_canonical_manifest": "a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c",
     "old_canonical_manifest": "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
     "post_canonical_manifest": "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
     "post_config_sha256": "64dbdea9bd2dd7d3cba3df3c130d3095c8926c9424772146e9d31d58d7d66f52",
@@ -44,6 +46,8 @@ PROFILES = json.loads(r'''[
   },
   {
     "account": "fabric-read",
+    "forward_config_sha256": "ab8443c18e485cd15107b2d87ac28455ed9754cd08dc5b6c90d24ac38a7e15c7",
+    "forward_canonical_manifest": "6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c",
     "old_canonical_manifest": "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
     "post_canonical_manifest": "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
     "post_config_sha256": "e25f99f3d599f9bdabdb7e647474a0bb09869bb8982fef568012f916b8e4722c",
@@ -85,11 +89,18 @@ def post(row):
     return value
 
 
+def forward(row):
+    value = post(row)
+    value["configHash"] = row["forward_config_sha256"]
+    return value
+
+
 class TailnetPublicProfileTests(unittest.TestCase):
-    def test_exact_old_and_native_pin_post_states(self):
+    def test_exact_old_native_pin_and_forward_states(self):
         for row in PROFILES:
             for value, digest in ((row["public_manifest"], row["old_canonical_manifest"]),
-                                  (post(row), row["post_canonical_manifest"])):
+                                  (post(row), row["post_canonical_manifest"]),
+                                  (forward(row), row["forward_canonical_manifest"])):
                 with self.subTest(account=row["account"], state=digest):
                     self.assertEqual(svc._canonical_json_sha256(value), digest)
                     self.assertTrue(svc._native_pin_manifest_valid(
@@ -130,13 +141,14 @@ class TailnetPublicProfileTests(unittest.TestCase):
                     self.assertFalse(svc._native_pin_manifest_valid(
                         value, row["account"], value["label"]))
 
-    def test_only_two_accounts_and_four_fixed_states_select_tailnet(self):
+    def test_only_two_accounts_and_six_fixed_states_select_tailnet(self):
         self.assertEqual(set(svc._NATIVE_POOL_PIN_TAILNET_CANONICAL),
                          {row["account"] for row in PROFILES})
         for row in PROFILES:
             self.assertEqual(svc._NATIVE_POOL_PIN_TAILNET_CANONICAL[row["account"]],
                              frozenset((row["old_canonical_manifest"],
-                                        row["post_canonical_manifest"])))
+                                        row["post_canonical_manifest"],
+                                        row["forward_canonical_manifest"])))
 
 
 if __name__ == "__main__":
