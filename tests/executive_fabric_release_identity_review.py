@@ -829,3 +829,11 @@ REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
 }
+
+# Select-option value length bound, not a UID/GID or account identity. Only this
+# complete protocol source and typed literal are reviewed; any byte drift restores
+# ordinary D8 scrutiny. This grants no browser permission or runtime authority.
+REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
+    "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
+    "sites": ((128, 72, 75, "int", "512"),),
+}
