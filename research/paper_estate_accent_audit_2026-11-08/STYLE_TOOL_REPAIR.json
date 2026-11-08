@@ -968,7 +968,14 @@
       "v20BridgeMatchesAcceptedDigest": true
     }
   },
-  "runtimeDisposition": "Do not stop/restart live primary direct processes: configured bundle/SDK paths are absent and current app is not uniquely mapped to a seat. No update_styles call, runtime installation, selector change or Paper carrier change has occurred.",
+  "runtimeDisposition": {
+    "status": "SOURCE_MERGED_CURRENT_PRIMARY_APP_STILL_SCHEMA_HELD",
+    "sourceMergeCommit": "2cdfcfb5ebb41c37e730cce380543c1869846c96",
+    "currentCatalog": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb",
+    "updateStylesAccess": "edit_held_schema",
+    "updateStylesCalled": false,
+    "installedSourceProof": false
+  },
   "connectionIdentification": {
     "state": "DENIED_BROWSER_HOST_RESTRICTION",
     "requestedRead": "Observe connected ChatGPT page to locate existing Paper service binding",
@@ -979,5 +986,310 @@
     "alternateBrowserAttempted": false,
     "settingsChanged": false,
     "otherAuthorizedPaperWorkContinues": true
+  },
+  "actualMerge": {
+    "sha256": "b0849d0cd52923897dedfad84a48e9e3295b71970c55a9e539bf595028b7cac1",
+    "data": {
+      "schema": "paper-pr2326-merged-source-and-rollout-evidence-v1",
+      "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+      "status": "SOURCE_MERGED_CURRENT_PRIMARY_ADOPTION_UNPROVEN",
+      "observedAt": "2026-11-08T21:42:11.926784+00:00",
+      "sourceMerge": {
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2326",
+        "number": 2326,
+        "expectedHead": "89596672caa46600ace18fbb52d3a3a92e919522",
+        "headRefOid": "89596672caa46600ace18fbb52d3a3a92e919522",
+        "state": "MERGED",
+        "merged": true,
+        "mergedAt": "2026-11-08T21:35:38Z",
+        "mergeCommit": {
+          "oid": "2cdfcfb5ebb41c37e730cce380543c1869846c96"
+        },
+        "mergedBy": {
+          "login": "mastermindxryan"
+        },
+        "mergeQueueEntry": null,
+        "autoMergeRequest": null
+      },
+      "mergedCommitChecks": {
+        "observedAt": "2026-11-08T21:42:49.918239+00:00",
+        "oid": "2cdfcfb5ebb41c37e730cce380543c1869846c96",
+        "rollup": "PENDING",
+        "counts": {
+          "IN_PROGRESS": 1,
+          "SUCCESS": 14,
+          "SKIPPED": 1
+        },
+        "requiredChecks": [
+          {
+            "__typename": "CheckRun",
+            "name": "test",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42523465299/job/128862283760",
+            "isRequired": true
+          }
+        ],
+        "pendingChecks": [
+          {
+            "__typename": "CheckRun",
+            "name": "Hermes v9 and incumbent APPLICATION enrollment",
+            "status": "IN_PROGRESS",
+            "conclusion": null,
+            "detailsUrl": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42523465288/job/128861788090",
+            "isRequired": false
+          }
+        ],
+        "failingChecks": [],
+        "hasNextPage": false
+      },
+      "canonicalRolloutEvidence": {
+        "currentDocument": {
+          "ref": "c34df5ac9a933c14971a7cf9055c505effef50ce",
+          "path": "docs/PAPER_DIRECT_CHATGPT.md",
+          "blob": "1a75b7558aff3f1f86f3b944d179fcffe752fa3d",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/c34df5ac9a933c14971a7cf9055c505effef50ce/docs/PAPER_DIRECT_CHATGPT.md",
+          "finding": "Current document describes source-only v22 readiness/named-seat diagnostics as not installed, and explicitly separates protected merge, installer selection, live source-to-process proof and real app acceptance. It contains no adoption receipt for merge2cdfcfb5 or PR2326."
+        },
+        "pr2326Comments": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "documentedCarrier1011": {
+          "result": "NOT_FOUND",
+          "lookupCount": 2,
+          "meaning": "The current documentation names#1011 as its implementation carrier, but neither the Issue resolver nor the exact issue-or-pull-request resolver found that number. This is an unavailable canonical record, not evidence of deployment or a permissions override."
+        },
+        "currentPrimaryAdoption": "NOT_ESTABLISHED",
+        "actualPrimaryAppCatalogRechecked": false
+      },
+      "nextEvidenceBearingAction": "A source merge does not refresh the in-process bridge. Root may obtain one fresh catalog receipt from the existing primary Paper app as a changed-source milestone; only actual per-tool acceptance establishes update_styles qualification. If still held, require a canonical receipt binding this merged source/bridge digest to the actual current primary service and existing binding through its incumbent owner. Do not repeat closed host-path/log/app-identity probes or infer seat identity from a name.",
+      "boundaries": {
+        "prGateQueries": 1,
+        "exactMergedCommitCheckReads": 1,
+        "canonicalDocumentReads": 1,
+        "canonicalCarrierLookups": 2,
+        "prCommentReads": 1,
+        "GitHubMutations": 0,
+        "PaperCalls": 0,
+        "hostRuntimeProbes": 0,
+        "serviceRestarts": 0,
+        "heldToolCalls": 0,
+        "classicProtectionEndpointReads": 0
+      },
+      "exactEvidence": {
+        "path": "/workspace/scratch/5ad934bc9c22/paper_pr2326_merged_rollout_gate_receipts_20261108.json",
+        "sha256": "d9e4496280ad3908e9ca9a1dcdf8c80655548e4d692eeb735d648daa1929f2b4"
+      }
+    }
+  },
+  "independentPaperUiSurface": {
+    "metadataReview": {
+      "sha256": "ce4b6bf9a23d5c8652008df8612961b6417a18134adb0d4478977d2fc467876d",
+      "data": {
+        "schema": "paper-native-ui-surface-metadata-review-v1",
+        "observedAt": "2026-11-08T21:44:39.845Z",
+        "status": "CURRENT_PRIMARY_PAPER_NATIVE_UI_SURFACE_NOT_ESTABLISHED",
+        "scope": "Metadata and already loaded source instructions only; exact reconciled property-repair route assessment, not ChatGPT identity discovery.",
+        "finding": "No exposed action or supplied surface handle establishes a native Paper Desktop property inspector on the current M2 Paper document. Generic computer-use capability does not establish that target.",
+        "capabilities": [
+          {
+            "surface": "Mastermind Paper direct app",
+            "tools": [
+              "mcp__codex_apps__mastermind_paper_paper_catalog",
+              "mcp__codex_apps__mastermind_paper_paper_edit",
+              "mcp__codex_apps__mastermind_paper_paper_inspect",
+              "mcp__codex_apps__mastermind_paper_paper_prepare",
+              "mcp__codex_apps__mastermind_paper_paper_read"
+            ],
+            "finding": "Five guarded MCP wrapper actions. Native screenshots and JSX are available through read; there is no exposed mouse, keyboard, accessibility or native property-inspector action. A prepare description is not proof of generic UI control or service identity."
+          },
+          {
+            "surface": "Studio Direct and Remote Desktop Commander",
+            "toolCounts": {
+              "studioDirect": 40,
+              "remoteDesktopCommander": 30
+            },
+            "finding": "Exposed actions cover guarded Paper MCP, filesystem, process and host/workspace operations. No native app/window/accessibility/screenshot/click/keyboard controller appeared in the targeted metadata scan. A generic process runner is not a qualified Paper UI editing surface."
+          },
+          {
+            "surface": "Connected Browser",
+            "tools": [
+              "mcp__codex_apps__browser_js"
+            ],
+            "finding": "Executes JavaScript in a connected browser instance. No exact Paper browser tab, native Desktop window or property-control binding was supplied or established. This does not authorize reading denied chatgpt.com content."
+          },
+          {
+            "surface": "CUA / Sky",
+            "basis": "Developer-provided cua_repl API documentation",
+            "finding": "The documented native desktop is this cloud Linux workspace. Native app enumeration/control is generic and would require its own observed app/window target; no M2 Paper Desktop surface, exact file/node binding or supported property control is presently established. No CUA API was invoked."
+          }
+        ],
+        "distinction": {
+          "currentUiAvailability": "UNPROBED/UNESTABLISHED, not a claim of global UNAVAILABLE",
+          "browserDenial": "The chatgpt.com content denial remains action-local and unreplayed. No screenshots, desktop automation or alternate browser carrier were used to recover that content.",
+          "independentPaperUi": "A separately observed authorized Paper app surface could be a different action after all relevant prior effects are reconciled, but current metadata does not qualify such a surface. Do not assume availability or target identity from a generic tool."
+        },
+        "nextEvidenceBearingAction": "No UI mutation is supported by the present evidence. Root can continue qualified exact-target Paper MCP work. For the newly merged profile, one fresh catalog read on the current primary app is the direct evidence-bearing step. A future native UI route would first need an observed Paper app/window and exact document/node/property-control identity through an already authorized native surface; it cannot be established by probing denied ChatGPT content.",
+        "source": {
+          "procedurePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "currentObservedRef": "c34df5ac9a933c14971a7cf9055c505effef50ce",
+          "path": "docs/PAPER_DIRECT_CHATGPT.md",
+          "blob": "1a75b7558aff3f1f86f3b944d179fcffe752fa3d",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/c34df5ac9a933c14971a7cf9055c505effef50ce/docs/PAPER_DIRECT_CHATGPT.md",
+          "applicableLines": [
+            {
+              "line": 54,
+              "text": "normal existing direct app will benefit automatically only after the reviewed"
+            },
+            {
+              "line": 87,
+              "text": "- `serve`: expose the existing guarded stdio MCP server only. No workstation commands become tools."
+            },
+            {
+              "line": 282,
+              "text": "same installed execution binding. The 64-hex snapshot guard incorporates both"
+            },
+            {
+              "line": 289,
+              "text": "The existing five-tool input surface stays closed: the caller cannot supply a"
+            },
+            {
+              "line": 386,
+              "text": "## Source readiness and named-seat diagnostics (v22; not installed)"
+            },
+            {
+              "line": 411,
+              "text": "This is source integration only. It changes no installed selector, service,"
+            }
+          ]
+        },
+        "metadataEvidence": {
+          "prefixes": [
+            {
+              "prefix": "mcp__codex_apps__studio_direct_",
+              "names": [
+                "mcp__codex_apps__studio_direct_create_directory",
+                "mcp__codex_apps__studio_direct_edit_block",
+                "mcp__codex_apps__studio_direct_force_terminate",
+                "mcp__codex_apps__studio_direct_get_config",
+                "mcp__codex_apps__studio_direct_get_file_info",
+                "mcp__codex_apps__studio_direct_get_more_search_results",
+                "mcp__codex_apps__studio_direct_get_prompts",
+                "mcp__codex_apps__studio_direct_get_recent_tool_calls",
+                "mcp__codex_apps__studio_direct_get_usage_stats",
+                "mcp__codex_apps__studio_direct_give_feedback_to_desktop_commander",
+                "mcp__codex_apps__studio_direct_interact_with_process",
+                "mcp__codex_apps__studio_direct_kill_process",
+                "mcp__codex_apps__studio_direct_list_directory",
+                "mcp__codex_apps__studio_direct_list_processes",
+                "mcp__codex_apps__studio_direct_list_searches",
+                "mcp__codex_apps__studio_direct_list_sessions",
+                "mcp__codex_apps__studio_direct_move_file",
+                "mcp__codex_apps__studio_direct_paper_catalog",
+                "mcp__codex_apps__studio_direct_paper_edit",
+                "mcp__codex_apps__studio_direct_paper_inspect",
+                "mcp__codex_apps__studio_direct_paper_prepare",
+                "mcp__codex_apps__studio_direct_paper_read",
+                "mcp__codex_apps__studio_direct_read_file",
+                "mcp__codex_apps__studio_direct_read_multiple_files",
+                "mcp__codex_apps__studio_direct_read_process_output",
+                "mcp__codex_apps__studio_direct_set_config_value",
+                "mcp__codex_apps__studio_direct_start_process",
+                "mcp__codex_apps__studio_direct_start_search",
+                "mcp__codex_apps__studio_direct_stop_search",
+                "mcp__codex_apps__studio_direct_studio_fleet_status",
+                "mcp__codex_apps__studio_direct_studio_git_commit_current_changes",
+                "mcp__codex_apps__studio_direct_studio_git_publish_status",
+                "mcp__codex_apps__studio_direct_studio_git_push_current_branch",
+                "mcp__codex_apps__studio_direct_studio_output_page",
+                "mcp__codex_apps__studio_direct_studio_ping",
+                "mcp__codex_apps__studio_direct_studio_select_host",
+                "mcp__codex_apps__studio_direct_studio_workspace_acquire",
+                "mcp__codex_apps__studio_direct_studio_workspace_repositories",
+                "mcp__codex_apps__studio_direct_write_file",
+                "mcp__codex_apps__studio_direct_write_pdf"
+              ]
+            },
+            {
+              "prefix": "mcp__codex_apps__remote_desktop_commander_",
+              "names": [
+                "mcp__codex_apps__remote_desktop_commander_create_directory",
+                "mcp__codex_apps__remote_desktop_commander_edit_block",
+                "mcp__codex_apps__remote_desktop_commander_force_terminate",
+                "mcp__codex_apps__remote_desktop_commander_get_config",
+                "mcp__codex_apps__remote_desktop_commander_get_file_info",
+                "mcp__codex_apps__remote_desktop_commander_get_more_search_results",
+                "mcp__codex_apps__remote_desktop_commander_get_recent_tool_calls",
+                "mcp__codex_apps__remote_desktop_commander_get_tool_result",
+                "mcp__codex_apps__remote_desktop_commander_get_usage_stats",
+                "mcp__codex_apps__remote_desktop_commander_interact_with_process",
+                "mcp__codex_apps__remote_desktop_commander_kill_process",
+                "mcp__codex_apps__remote_desktop_commander_list_devices",
+                "mcp__codex_apps__remote_desktop_commander_list_directory",
+                "mcp__codex_apps__remote_desktop_commander_list_processes",
+                "mcp__codex_apps__remote_desktop_commander_list_remote_tool_calls",
+                "mcp__codex_apps__remote_desktop_commander_list_searches",
+                "mcp__codex_apps__remote_desktop_commander_list_sessions",
+                "mcp__codex_apps__remote_desktop_commander_move_file",
+                "mcp__codex_apps__remote_desktop_commander_read_file",
+                "mcp__codex_apps__remote_desktop_commander_read_multiple_files",
+                "mcp__codex_apps__remote_desktop_commander_read_process_output",
+                "mcp__codex_apps__remote_desktop_commander_review_device_call",
+                "mcp__codex_apps__remote_desktop_commander_set_config_value",
+                "mcp__codex_apps__remote_desktop_commander_shutdown",
+                "mcp__codex_apps__remote_desktop_commander_start_process",
+                "mcp__codex_apps__remote_desktop_commander_start_search",
+                "mcp__codex_apps__remote_desktop_commander_stop_search",
+                "mcp__codex_apps__remote_desktop_commander_who_am_i",
+                "mcp__codex_apps__remote_desktop_commander_write_file",
+                "mcp__codex_apps__remote_desktop_commander_write_pdf"
+              ]
+            },
+            {
+              "prefix": "mcp__codex_apps__mastermind_paper_",
+              "names": [
+                "mcp__codex_apps__mastermind_paper_paper_catalog",
+                "mcp__codex_apps__mastermind_paper_paper_edit",
+                "mcp__codex_apps__mastermind_paper_paper_inspect",
+                "mcp__codex_apps__mastermind_paper_paper_prepare",
+                "mcp__codex_apps__mastermind_paper_paper_read"
+              ]
+            },
+            {
+              "prefix": "mcp__codex_apps__browser_",
+              "names": [
+                "mcp__codex_apps__browser_js"
+              ]
+            }
+          ],
+          "nativeUiMetadataMatches": [],
+          "limitations": "Only names/descriptions and provided API documentation were examined. No actual desktop/app inventory or UI state was read."
+        },
+        "actions": {
+          "PaperCalls": 0,
+          "UiCalls": 0,
+          "BrowserCalls": 0,
+          "remoteHostCommands": 0,
+          "focusChanges": 0,
+          "installs": 0,
+          "serviceRestarts": 0,
+          "alternativeWrites": 0
+        }
+      }
+    },
+    "rootBrowserInventory": {
+      "method": "Existing originating Browser user.openTabs metadata filtered only to paper.design",
+      "result": [],
+      "contentRead": false,
+      "chatgptContentDenialRespected": true
+    },
+    "qualifiedSurface": false
+  },
+  "executionEnvironment": {
+    "scratch": "UNAVAILABLE_REPORTED",
+    "Paper": "CURRENT_DIRECT_CALLS_WORKING",
+    "canonicalGitHubPersistence": "CURRENT_DIRECT_CALLS_WORKING",
+    "noHostRestart": true
   }
 }
