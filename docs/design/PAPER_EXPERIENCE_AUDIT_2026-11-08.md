@@ -17,7 +17,7 @@ This map points to the editable designs and current continuation sections. All c
 | Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
-| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): failed/pending/filter states now identify the Research index. [Research-list detail returns](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0) add EN/ZH filing companions `7QG-0` / `7SY-0` with their actual list origin. Current details and the new companions now distinguish numeric Edge index / 剩余边际指数 from the categorical stage. |
+| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): failed/pending/filter states now identify the Research index. [Research-list detail returns](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0) include EN/ZH filing companions `7QG-0` / `7SY-0` for000030.SZ and company-evidence companions `7Y5-0` / `80K-0` for000829.SZ, each with its actual list origin. Current details and the new companions now distinguish numeric Edge index / 剩余边际指数 from the categorical stage. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
 | Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
@@ -1262,3 +1262,54 @@ Owned status text **1NEJ-0** retains A05–A11 and B's provisional status, then 
 Root inspected the complete row render and final four-line link group. The final label was shortened so the p13 URL fits without an isolated trailing character; typography and all layout roles remain unchanged. Computed styles show the existing root1NDQ has content-driven height. Masking only1NEH and1NEJ makes the entire row JSX identical modulo whitespace (**6,742→6,971** characters).
 
 The two text edits, fit correction and scoped **options-scenario-directory-finish-01** returned **APPLIED_RESPONSE_OBSERVED**. This is a discoverability correction to the incumbent directory, with no candidate promotion, held-lane modification or new navigation owner.
+
+
+## Intelligence Hub: the first research result retains its own evidence and list return
+
+The same return-path contract also applies to published source position01, **000829.SZ**. Root confirmed that the existing EN and ZH detail specimens still represented only the China overview origin. Two additional light-theme companions now close that specific gap on [Hub p5](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0).
+
+| Locale | Actual published-list origin | New company evidence | Changed origin text |
+| --- | --- | --- | --- |
+| EN light | List59 **2OW-0**; row **6ZG-0**; Evidence **6ZQ-0** | **7Y5-0**, x4230,y5525,390×1827 | Breadcrumb **808-0**, Research results / Company evidence; return text **7YB-0**, Back to your research results, inside44px **7YA-0**. |
+| ZH light | List93 **4KM-0**; row **71W-0**; 研究依据 **726-0** | **80K-0**, x4700,y5525,390×1711 | Breadcrumb **82N-0**, 研究结果 / 公司研究依据; return text **80Q-0**, 返回研究结果, inside44px **80P-0**. |
+
+Both actual list invokers are104×44. The new Close controls **804-0 /82J-0** remain44×44. Existing command-origin originals **1PU-0 /1V9-0** are preserved, including their current corrected Edge index terminology.
+
+The parent contract is existing native **4J/4K**, which maps source row01 to detail48 and allows list59 as the actual origin. Native **7U** separately maps Chinese list93 source01 to existing detail51. The new views preserve captured query, applied stage, source snapshot, scroll, language/theme and conditional focus on the actual surviving Evidence control. Empty query/All stages remains the pictured example. A vanished or changed origin uses the incumbent research-results fallback, while direct entry without an origin keeps the existing China Hub fallback. Navigation never causes an automatic refresh or silently replaces a historical record.
+
+### This company's own source record is retained
+
+Root read the exact historical fixture **command[0]** at Macro **bb310311b716ac3c7db7b7ed64d40039dd02bff7**, `site/china_intel/command.json`, blob **692e0238c7c500ca2fa1d5ae73ccf2c54af3a878**.
+
+For000829.SZ, **visits.state = measured_no_event**, **coverage_start =2026-08-20**, **recent =[]**. The design correctly says no visit filing was observed in coverage. This does not establish that no visit occurred, that institutions have no holdings, or that buying/selling is known. **The record contains no specific original-filing reference.** It therefore retains its coverage-inspection action and does not borrow000030.SZ's September3 notice or PDF.
+
+Alternative Data is the one present, constructive desk. News, Radar, Stocks Board and Special Situations are absent from the captured desk matrix. The same record supplies20-day stock return **+7.00%**, source relative-performance reading versus CSI300 **+10.76%**, distance from observed high **−23.23%**, opportunity **74.4**, edge_remaining **0.811 /index81.1**, and categorical **early**. All are unchanged. Available price measurements do not establish an entry result or review threshold; the unavailable-entry/research-only warnings remain.
+
+The capture stays **27 September2026, preview, not live**. Artifact generation **2026-09-27T13:00:52.369955+00:00** is not relabelled as a price-observation clock. The producer's name is the listing code itself; no company-name resolution was invented.
+
+### Evidence navigation keeps the company and actual invoker
+
+| Existing consumer purpose | New EN control | New ZH control |
+| --- | --- | --- |
+| Inspect Alternative Data | **7ZD-0** | **81S-0** |
+| Inspect filing coverage/original records | **7YT-0** | **818-0** |
+| Inspect the dated source record | **7YH-0** | **80W-0** |
+| Review the listing on Stocks Board | **7YC-0** | **80R-0** |
+
+All six source-inspection controls retain44px height. They carry000829.SZ and its selected observation through the existing consumer. A source-inspection return restores the company detail and exact evidence invoker before the company detail returns to the research list. Stocks Board follows that product's actual navigation/return semantics and exact listing, rather than creating a local modal or trading action.
+
+No underlying Alternative Data receipt or PDF body was fetched or fabricated. These views preserve the current command-level evidence and clearly stated coverage limitations.
+
+### Existing supplement extended; complete native verification
+
+The existing return supplement **7VG-0** now covers both source positions01/02 in four EN/ZH companions. Its owned introduction **7VJ-0**, scope **7VY-0** and metric-consistency paragraph **7Y3-0** were updated to that exact coverage; new section **82Z-0** contains the000829 mappings and source boundaries. Wrapper **7XY-0** is named **05 ·R4 SUPPLEMENT ·Research-list detail returns ·Source01–02 ·Provisional**. No additional directory, router, history store or source viewer was added.
+
+Both full mobile renders and the new native note were inspected. A first newly cloned EN render omitted status icons; an exact-root read subsequently displayed the preserved time/icons without another edit. Verification proves:
+
+- Inverse-mapping generated IDs and masking **only breadcrumb and return text** reproduces each entire original detail modulo whitespace. EN new JSX is **21,630** characters; ZH **22,118**.
+- The original EN and ZH boards remain byte-identical to the phase's before reads: **21,613** and **22,116** characters.
+- Removing only82Z and masking the three explicitly changed owned paragraphs reproduces all prior7VG content modulo whitespace. The earlier000030 notice/return mappings remain intact.
+- Native p5 inventory grew **19→21**, with both new390px boards separated by80px and no overlap with any existing board. Computed styles verify the44px origin/close/return/evidence controls.
+- All operations and scoped **hub-000829-list-finish-01** returned **APPLIED_RESPONSE_OBSERVED** with no per-node errors.
+
+The visible light EN/ZH paths for the first two published records now have their actual list origin. This does not claim every company, dark/filtered/prior-snapshot variant, working browser back-stack, document-access path or runtime focus behavior is complete. Current candidate_unqualified status, held p7 and source-only p8 remain preserved.
