@@ -187,3 +187,47 @@ The Paper changes are applied and verified. This source record is reviewable doc
 The protected Mastermind merge-queue ruleset is visible. The GitHub connection returned **403 / Resource not accessible by integration** for the legacy branch-protection read. That denied read is not retried through another account/carrier. Source publishing remains an independent authorized action; release enrollment requires sufficient current enforcement evidence and is not inferred from this record.
 
 Both read-only architecture collaborations received ACCEPTED / STOP after their findings were consumed. No paid worker, external dialogue, automation or temporary watcher was started. No Slack message or Linear/Agent OS status update was sent. The record preserves the design facts without advancing company lifecycle projections.
+
+## Wave 2 — continued design implementation, 2026-11-08
+
+The Chairman explicitly extended the mission to continue implementing and improving autonomously. This section records verified design work within that ongoing mission; it is not a mission closeout.
+
+### Current source and composition basis
+
+Mastermind law remains pinned at `5c3d3885234358aefb97ecdbc59be0864df14f8b`. Macro main was re-read at `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`; current `docs/DESIGN_DOCTRINE.md` blob `3fc7ff36799ae3855c8dc25218dff00c18b04cc1` and `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` blob `f8a28702767b78b2e48299f55a85e21a5c2360cd` govern this composition.
+
+F01 geometry is read from [candidate.4's joint contract](https://github.com/mastermindx-market-intelligence/macro/blob/abfecf1efc452383fe720cb3ea2016ad8d7088e0/research/design_candidates/production_design_20261102/f01/JOINT_SHELL_SYSTEM_CONTRACT.md). It remains PARTIAL / REQUEST_CHANGES and a draft. This work does not accept F01/F02, authorize persistence, or establish implemented routing.
+
+### Applied native designs
+
+All three are in [Terminal / D08A](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0).
+
+| Target | Applied change | Proof and retained boundary |
+| --- | --- | --- |
+| **A05 `1Y3I-0` — Flow in shared shell, 1440, Noir EN, DRAFT** | Native C01 global header and navigation, with Options active under Workspaces, surround the existing A01 analytical groups. Local Options views and underlying selector remain distinct. Useful width1168 is allocated to824px scan +24px gap +320px evidence. | Full-board screenshot and JSX readback verified the source session, three scan observations, chart qualification, exact selected observation, original-source fields and root-only contract-verification limit. The inherited fixed1152px canvas clipped the footer; the owned candidate was recomposed to fit its full content. Earlier seed `1XOP-0` was replaced only within this newly authored candidate; original A01/C01 remain intact. |
+| **A04 `1STH-0` — phone Flow scan,390** | Reused the56px shared mobile header; global menu, Options view selector and underlying control now have distinct roles. Main gutters are16px. Source “Views…” became “More scans”; helper now says “6 scan modes.” New rows are an explicit “Review12 new” action. Mobile Inspect actions say “View evidence.” | All eight primary content roots remain: `1SU7-0`, `1SUC-0`, `1SUL-0`, `1SV4-0`, `1SVB-0`, `1SVN-0`, `1SVY-0`, `1SWA-0`. Source data and observation identities are preserved. Small navigation/action frames were recomposed with minimum44px height; visible text remains readable. Final screenshot verified fit and all source cards. |
+| **A06 `1Y9X-0` — phone evidence and exact return,390, Noir EN, DRAFT** | Added the missing full-phone evidence surface with “Back to Flow,” original observation#1082 and source session30Oct2026ET. Reused A01's source-evidence component at358px. | Screenshot verified SPY680Call / expiry06Nov2026 / gross premium$3.24m / deviation+2.3σ /14 reported prints / event10:14ET / schema `live_flow.feed/v1`. Book verification remains required; the existing root-only/no-save-or-trade qualification remains visible. Both next-action targets are at least44px high. |
+
+The displayed financial values remain illustrative fixture values; no new market evidence, forecasts, execution or trade authority were introduced. The design introduces a surface for evidence inspection, not a new data store or lifecycle.
+
+### Responsive and return requirements established for this candidate
+
+- Above860px, use the agreed expanded shell. At1440,224px navigation and24px main gutters leave1168px useful width. The observed Flow scan declares a larger690px minimum; inspector eligibility must preserve that domain minimum.
+- At1280, the generic F01 calculation leaves664px beside a dock. That is below this Flow scan's690px minimum, so use a modal evidence inspector for Flow. The generic640px rule does not justify shrinking the table.
+- At1024, use the440px modal; at600px and below use a full-width evidence surface with16px internal gutters. One top-level modal owns focus and scroll. Close the global menu before opening another modal.
+- Returning from evidence restores the original source view, filters, sort, selected observation, source session/version, focus and scan position. A refresh must not silently replace the retained observation.
+- Flow/Exposure/Volatility/Research plan/Replay share the current underlying where identity is qualified. Exact contract or cohort context is carried only when established. An unverified observation retains the underlying-level fallback.
+- Research plan keeps explicit authored legs, quantities, entry assumptions, rationale and invalidation. Observed flow does not infer trade side or quantity. Historical Replay remains visibly dated and does not become live by navigation.
+- Native mockups do not prove keyboard focus, actual touch handlers, router behavior, source reads, storage, motion/reduced-motion behavior, or production acceptance. These remain implementation gates.
+
+### Mutation and verification receipt
+
+Carrier: Studio Direct C3 Personal. Exact-file `get_basic_info` supplied a fresh guarded binding before each edit. Every operation returned `APPLIED_RESPONSE_OBSERVED`; none returned EFFECT_UNKNOWN. Operation prefix is `paper-experience-audit-20261108-c3-w2-`.
+
+Applied groups: `flow-shell-seed-01`, `flow-shell-name-01`, `flow-shell-wrapper-01`, `flow-global-header-01`, `flow-body-01`, `flow-global-nav-01`, `flow-workspace-01`, `flow-local-row-01`, `flow-local-views-01`, `flow-local-subject-01`, `flow-question-01`, `flow-pulse-01`, `flow-filters-01`, `flow-evidence-row-01`, `flow-scan-01`, `flow-evidence-dock-01`, `flow-fixture-clarity-01`, `flow-fit-canvas-01`; mobile `mobile-evidence-*`, `mobile-scan-*`, `mobile-global-*`, `mobile-hit-target-01` through `09`.
+
+Scoped `flow-desktop-mobile-finish-01` completed on exactly `1Y3I-0`, `1STH-0`, `1Y9X-0`. The exact-file guard remains `7d22882d4e7f5880d4093f19b73b4ef54f9a5977b32ec236d850058d82f66f9f`; because the adapter's basic info reflects the file's active page, content verification uses exact target-node JSX/screenshots in addition to that guard.
+
+### Next work remains active
+
+The next safe work is to repair the existing F03 directory's stale A/D combined status, distinguish the D06 supplemental return, correct source-backed D08B/C metric/cost/leg-count labels and mobile controls, and make navigation-open/return states reviewable. Oversized PAGES remains read-only; current specialized candidates do not establish complete supersession of its broader routes, states or variants. Existing D08D denial, F01/F02 acceptance holds and protected historical effects remain untouched.
