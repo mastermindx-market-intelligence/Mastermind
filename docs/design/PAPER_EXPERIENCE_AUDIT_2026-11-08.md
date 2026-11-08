@@ -9,7 +9,7 @@ This map points to the editable designs and current continuation sections. All c
 
 | Review area | Native destination and visible improvement |
 | --- | --- |
-| Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return. |
+| Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
@@ -678,3 +678,61 @@ These requirements bind to F01 candidate.4 §4 at `abfecf1efc452383fe720cb3ea201
 Root inspected both complete1280px renders; the modal fits, all source facts/actions are readable, and the restored scan keeps the selected row and full chart. JSX verified the1008/690/440 dimensions, selected identity, scope, pending update and focused return target. The native chart subtree in both new boards is identical to A05 after removing node IDs and formatting whitespace; bars, labels and analytical values were preserved. Fresh A05 JSX is unchanged.
 
 The existing F03 directory `1NDQ-0` / Options section `1NEC-0` now references **Draft A05–A10: shell, phone evidence, 1280 modal/return** in `1NEJ-0`. Its existing A-page link and historical handoff URL remain, as do B/C provisional status, D08D's no-admission/target-hold text and Review pending / no acceptance implied. The directory text was rendered/read back. `flow1280-pair-finish-01` finished only A09, A10 and that status text. This completes a new native responsive pair, not a runtime or released-breakpoint proof.
+
+
+## Options Tape: phone filter draft with explicit source-default fixture
+
+A new **A11 · Tape filter draft · 390 · Source-default fixture · DRAFT**, native **`21Y1-0`**, now sits at x9160/y0 on [Options · Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0). It is390×844,80px beyond A10's right edge, and reuses A04's native phone status-bar artwork. The named full-width editor has44px fields/actions, a reachable footer and explicit **Cancel**, **Reset draft**, **Apply** and existing **Presets** entry.
+
+### Fixture identity and applied-versus-draft meaning
+
+A04/A05 expose **Filters · 3** but do not identify those three values. Their SPY context does not establish which root/search mechanism supplied it. A11 therefore does **not** reconstruct that state or reuse its317-result count. It is a separate source-default fixture:
+
+```json
+{
+  "minPrem": 0,
+  "dteBuckets": [],
+  "mnyBuckets": [],
+  "groupFilter": "",
+  "drillTicker": null,
+  "tapeTickerSearch": "",
+  "sideFilter": "",
+  "flagFilter": "",
+  "sortKey": "ts",
+  "sortDir": -1
+}
+```
+
+Only the visible draft's `minPrem` changes to500000. The top note says **Applied: no filters · Newest first**, **Draft: minimum premium $500K**, and **Changes apply only when you select Apply.** Expiry and moneyness remain Any, ticker search is empty with an example placeholder, sort stays Newest first, and otherwise-hidden group/root/estimated-side/flag state is explicitly disclosed. No recomputed count, loaded result population, saved object or selected observation is fabricated.
+
+### Existing source model and proposed interaction boundary
+
+Root read the following at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`:
+
+| Source | Blob | Implication |
+| --- | --- | --- |
+| `terminal/components/OptionsHubView.tsx` | `0d932ec2561314d44c6d0a0c7bfb00cf237f60cb` | Current controls/presets apply immediately. Reset clears filters, root, search and sorting; changing filters/sort resets the150-row rendering window. |
+| `terminal/lib/optionsTapeView.ts` | `b9aabe50e27538d88b7415366d3ca4d46cdb6d2f` | Existing ten-key Tape state, default values, validation and versioned codec are reused. |
+| `terminal/lib/optionsIa.ts` | `385821bff793ca49c62a7308e564b2a990c4d60a` | Tape remains in Flow, at the existing `/options?tab=tape` scope. This is not a universal filter editor for every Flow view. |
+
+Candidate Macro `c3413d84650ce85ca0c875c16b53b5e519b46f35`, `d08a/ANNOTATED_DESIGN.md` (blob `2917806107417419b5e236192e4a3fd7cb55c160`) plans phone filters/details and N39 draft/applied separation. `d08a/RESPONSIVE.md` (blob `8a0b4ba17ad41bccd111ab9e91159c41c590051d`) requires Apply/Reset/close and one sheet. These source planning references are distinct from native artboard numbering.
+
+A11 represents a **proposed staged editor**, not current runtime behavior. Its builder requirements are:
+
+| Gesture or condition | Required behavior within the existing Tape owner |
+| --- | --- |
+| Open | Copy the admitted applied Tape state into a local draft; keep applied results unchanged. |
+| Edit or choose an existing preset | Update only the draft using supported values/incumbent preset setter semantics; do not create another saved-view store or call immediate applied-state setters. |
+| Cancel / close / Escape | Discard the draft, retain applied filters/sort/source context and pending updates, and return conditionally to the originating Filters control. |
+| Reset draft | Stage all ten source defaults, including cleared root/search and newest-first sort. Apply remains necessary. Do not invoke the current immediate Reset handler while editing. |
+| Apply | Validate and commit the supported draft through the incumbent Tape owner, then close. Preserve unrelated URL/history state through the existing owner; no new route grammar or persistence owner. |
+| Result membership changes | Apply may exclude the previously selected row and reset the source's150-row rendering window. Do not promise unchanged row/scroll after Apply. Cancel preserves the admitted original context. |
+| Invoker or context no longer valid | Use the existing stable Tape heading/control fallback; do not guess another observation or restore unauthorized content. |
+
+The supported premium thresholds remain0/100K/250K/500K/1M/5M. DTE and moneyness controls retain their existing set-valued choices; Any means an empty unrestricted set. Group names come from the actual source rather than an invented sector list. Editing ticker search clears an exact root drill in the draft according to current semantics; a retained group remains available when a root drill is cleared. Side/flag values remain in the codec and visible summary; this composition does not claim a currently implemented generic picker for them. Presets preserve their actual field-specific semantics and stage their changes in the draft.
+
+### Native verification and retained limits
+
+The complete390×844 render shows every field, the less-visible state summary, Reset/Apply and the device safe area without clipping. JSX verifies the fixture copy,44px controls, fixed viewport dimensions, x9160 placement, absence of317 and absence of observation1082. Fresh A04 JSX is unchanged. A09/A10, all previous source values and the held D08D target are untouched.
+
+F03 status `1NEJ-0` now adds **A11: Tape filter draft · source-default fixture**, retaining the A05–A10 line, provisional B/C status and all D/review holds. The final status render/readback is complete. `flow-phone-filter-finish-01` finished only A11 and that directory text. No actual preset, filter URL, account setting or application state was written. Keyboard/software-keyboard, multi-select menus, long locales, Apply/Cancel behavior and real result handling remain implementation proof obligations.
