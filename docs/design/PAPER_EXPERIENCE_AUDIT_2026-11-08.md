@@ -298,7 +298,7 @@ All `portfolio-*` operation responses under the wave2 prefix were observed appli
 
 ## Continuation: Portfolio Targets read truth and retained intention
 
-Added native **08 · Portfolio targets · Read and retention states · DESIGN**, board `1ZET-0`, on [Terminal Personal Desk](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0). It sits beside record-repair atlas `1Z0H-0`; the original six Personal Desk compositions, including Targets `1LQD-0`, remain intact.
+Added native **08 · Portfolio targets · Read, retention and removal · DESIGN**, board `1ZET-0`, on [Terminal Personal Desk](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0). It sits beside record-repair atlas `1Z0H-0`; the original six Personal Desk compositions, including Targets `1LQD-0`, remain intact.
 
 The feature gap was that an empty target set, a failed read and an uncomputable weight need different user explanations and recovery actions. A saved allocation target also remains meaningful after its holding closes. The new atlas makes those cases explicit:
 
@@ -306,8 +306,8 @@ The feature gap was that an empty target set, a failed read and an uncomputable 
 | --- | --- | --- |
 | Successful empty read | `1ZF1-0` first card | Retains the existing 09 October 2026 snapshot and native zero-target badge. Choose a security starts target setup. Zero is only shown after a valid current-owner empty response. |
 | Failed read with no retained view | `1ZF1-0` second card | Targets unavailable; both count and comparisons are unavailable. Reload targets is explicitly read-only. A failed read never becomes zero. |
-| Open holding, weight unavailable | `1ZF2-0` first card | NEM target 20% and tolerance ±5 percentage points are visibly illustrative. Saved intention remains; current weight, gap and band verdict are unavailable. Review NEM records preserves both independent position records; Edit target remains a separate action. |
-| No open holding, target retained | `1ZF2-0` second card | MCD target 20% and band ±5 percentage points are visibly illustrative. The target remains saved when no open holding remains. Edit target and Remove target are distinct actions; closing a holding does not implicitly remove its target. |
+| Open holding, weight unavailable | `1ZF2-0` first card | NEM target 20% and tolerance ±5 percentage points are visibly illustrative. Saved intention remains; current weight, gap and band verdict are unavailable. Review NEM records preserves both independent position records; Edit target is unavailable for this snapshot because both records lack quantity. |
+| No open holding, target retained | `1ZF2-0` second card | MCD target 20% and band ±5 percentage points are visibly illustrative. The target remains saved when no open holding remains. Remove target is available as a proposed confirmation entry point. Weight/band editing is unavailable without an eligible open holding; closing a holding does not implicitly remove its target. |
 
 Native builder contract `1ZGR-0` records the exact state distinctions:
 
@@ -324,3 +324,20 @@ Source: [current portfolioTargets owner](https://github.com/mastermindx-market-i
 Verification: root reviewed the complete 1440px atlas and focused contract screenshot, then read back its full native JSX. All four states, fixture labels, null/band qualifications, 44px actions and source references were present without visible clipping. A final spacing correction was verified in the contract. All `targets-*` operation receipts under the wave2 prefix were observed applied; `targets-read-retention-finish-01` finished exactly `1ZET-0`.
 
 Still required in the current consumer: valid empty, read failure with and without retained data, null weight, orphaned retention, exact target-save reread, remove-target confirmation, access recovery and return/focus proof. The Paper atlas establishes design behavior and builder guidance, not runtime acceptance. The next safe work is connecting these atlases to the existing Personal Desk build directory and checking the next source-backed journey gap.
+
+
+### Targets eligibility, removal completion and local builder discovery
+
+A follow-up exact-source check identified a necessary action correction. [Target route at the same Terminal pin](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/app/api/portfolio/targets/route.ts), blob `b285f814cc6928277a7d5f81ff9d8af4fc452a42`, admits weight/band edits only when a canonical same-ticker open record has finite quantity and entry price. Both NEM records in this dated fixture lack quantity; the MCD example has no open holding. The atlas now makes the NEM edit unavailable with its reason and removes the unsupported MCD edit action. Other unweighable states, such as currency or denominator gaps, are not automatically denied editing by that narrower route rule.
+
+Completed the existing Remove target entry with four native state cards on `1ZLU-0`: confirmation with illustrative 20% / ±5 pp, pending removal, removal unconfirmed with a read-only Check saved target action, and confirmed return. Cancel receives initial focus. Position records remain unchanged; clearing a target is not a trade or position deletion. The confirmation and explicit recovery control are proposed UI increments over the existing `clearTarget` capability, not claims that the current consumer already presents them.
+
+The builder contract requires current account scope, the existing serialized writer, cancellation of queued target drafts before clear, successful clear response and authoritative absence from both `drifts` and `orphaned`. A matching absence without the retained successful response does not prove this submission. Do not silently replay uncertain removal or imply that closing the prompt cancels a possible effect. Return focus goes to the next retained target action or the Targets heading, with counts recomputed from the authoritative read.
+
+On the existing [Portfolio builder page](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0):
+- Acceptance board `1L4E-0` now distinguishes acknowledgement from readback, limits draft retention to the open editor and qualifies focus return after filter membership changes. Its original header, state examples, comparison and acceptance sections remain intact.
+- Blueprint `1L19-0` labels its original source census as historical, dated 11 October 2026; all three historical pins remain unchanged. Its footer points to the new Personal Desk continuations.
+- Added adjacent local reference board **09 · Current recovery references · 08 Nov 2026**, `1ZLS-0`, carrying exact page and board names/IDs for 07 and 08, the current Terminal source pin and remaining consumer proof. Personal Desk 05 remains a future preview. This stays on the existing builder page and adds no global directory or lifecycle.
+- A trial insertion into the fixed-height acceptance board clipped its lower section. The new reference panel was moved to the adjacent board; the full original acceptance board was then re-read and screenshot-verified without clipping. The reference controls are visual Paper destination references; their href was not retained in JSX, so working prototype navigation is not claimed.
+
+Root inspected the two retention cards, removal row, full extended Targets atlas, source-census block, reference panel and final complete acceptance board. Native JSX verified eligibility, all four removal states and owner/return requirements. `portfolio-design-continuation-finish-01` finished exactly `1L19-0`, `1L4E-0`, `1ZLS-0` and `1ZET-0`. All associated operation responses were observed applied. No product implementation, target mutation or account change occurred. Continued work moves to two source-backed News corrections and the next GMI recovery-state differences.
