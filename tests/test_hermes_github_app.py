@@ -113,7 +113,8 @@ class FakeGitHub:
 
 
 def make(fake=None, *, authorized_paths=("docs/hermes/",), allowed_issues=frozenset(),
-         role="engineering", guard=None, branch=BRANCH):
+         role="engineering", guard=None, branch=BRANCH,
+         profile_id="engineering"):
     fake = fake or FakeGitHub()
     issuer = GitHubAppInstallationTokens(
         app_id=123, installation_id=4321, repository=REPO,
@@ -126,7 +127,7 @@ def make(fake=None, *, authorized_paths=("docs/hermes/",), allowed_issues=frozen
     state = {"current": True}
     guard = guard or (lambda: state["current"])
     binding = HostGitHubSession(
-        profile_id="engineering", role=role, session_id="session-123",
+        profile_id=profile_id, role=role, session_id="session-123",
         operation_id="work-001", repository=REPO,
         branch=branch, base_branch="master", base_sha=BASE,
         installation_id=4321, allowed_path_prefixes=authorized_paths,
@@ -364,14 +365,12 @@ def test_actual_native_registration_owns_exact_tool_scope_when_donor_available(t
         path=str(scope), provides_tools=[TOOL_NAME], key="mastermind-github-app",
     )
     ctx = owner.PluginContext(manifest, manager)
-    app, fake, _ = make()
+    app, fake, _ = make(profile_id=ctx.profile_name)
     binding = HostHermesGitHubBinding(
         profile_id=ctx.profile_name,
         resolve_client=lambda session: app if session == "session-123" else None,
         currentness_guard=lambda: True,
     )
-    # The host-bound client must name the exact native profile.
-    object.__setattr__(app.binding, "profile_id", ctx.profile_name)
     lease = register_native_tool(ctx, binding, profile_id=ctx.profile_name)
     try:
         entry = owner.registry.snapshot_registration(TOOL_NAME, scope=str(scope))
