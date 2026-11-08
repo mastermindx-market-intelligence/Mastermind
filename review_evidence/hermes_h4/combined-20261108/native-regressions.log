@@ -1,0 +1,26 @@
+▶ not activated — using HERMES_PYTHON: /Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native-test-environment/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 5 test files (~686 tests) under ['tests/test_fallback_family_first.py', 'tests/tui_gateway/test_omit_messages_resume_bounded_ack.py', 'tests/tui_gateway/test_kanban_resume_guard.py', 'tests/tui_gateway/test_protocol.py', 'tests/tui_gateway/test_tui_gateway_server.py']; running with -j 2
+[  1.3% |     9/~686 | ✓9 | ✗0] ✓ tests/test_fallback_family_first.py (9✓, 3.7s)
+[  1.6% |    11/~686 | ✓11 | ✗ 0] ✓ tests/tui_gateway/test_kanban_resume_guard.py (2✓, 4.2s)
+[  1.7% |    12/~686 | ✓13 | ✗ 0] ✓ tests/tui_gateway/test_omit_messages_resume_bounded_ack.py (2✓, 2.0s)
+[ 10.6% |    73/~686 | ✓18 | ✗ 0] ✓ tests/tui_gateway/test_protocol.py (5✓, 4.8s)
+[100.0% |   686/~686 | ✓28 | ✗ 0] ✓ tests/tui_gateway/test_tui_gateway_server.py (10✓, 4.7s)
+
+=== Summary: 5 files, 28 tests passed, 0 failed (100% complete) in 10.6s (2 workers) ===
+  Durations cached to test_durations.json (5 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   5
+  Total subprocess CPU-wall: 19.4s  (runner wall: 10.6s, parallelism: 2x)
+  P50: 4.20s  P90: 4.82s  P95: 4.82s  P99: 4.82s  Max: 4.82s
+  <1s: 0 files (0%)  <2s: 0 files (0%)
+  Top 10 slowest:
+      4.82s  tests/tui_gateway/test_protocol.py
+      4.65s  tests/tui_gateway/test_tui_gateway_server.py
+      4.20s  tests/tui_gateway/test_kanban_resume_guard.py
+      3.66s  tests/test_fallback_family_first.py
+      2.03s  tests/tui_gateway/test_omit_messages_resume_bounded_ack.py
