@@ -11,13 +11,13 @@
       "source": "../../../control_plane/codex_provider_realm.py"
     },
     "ext/experiential_bridge.py": {
-      "bytes": 35017,
-      "sha256": "288471efc8b10e1471102b34096d77d725ab935cc6574e4c943909f68cb346de",
+      "bytes": 35442,
+      "sha256": "1e364feec281b731293f1dcc05ed4f71ab4221433e0ba2dd8c5684f0098ad36e",
       "source": "../experiential_native_bridge/experiential_bridge.py"
     },
     "ext/experiential_host_context.py": {
-      "bytes": 9527,
-      "sha256": "ad157e490bdd949ca19c64897db0257434c3a0a0b45c69361dd57a3db223c276",
+      "bytes": 9606,
+      "sha256": "129f2fa556499fac57b4388dfd1ab8edfc0c127c67e3047a81bd9accd5a824c7",
       "source": "../experiential53/experiential_host_context.py"
     },
     "ext/experiential_pin.py": {
@@ -26,13 +26,13 @@
       "source": "../experiential53/experiential_pin.py"
     },
     "ext/experiential_plan_policy.py": {
-      "bytes": 11862,
-      "sha256": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8",
+      "bytes": 14328,
+      "sha256": "f7242f6bcfe0227fc6a7374430c101a845903c8ff4e2da9a9fa42b43d75d81cc",
       "source": "../../../control_plane/experiential_plan_policy.py"
     },
     "ext/experiential_transport.py": {
-      "bytes": 58794,
-      "sha256": "499663819213645acb10e3948c29185abdbbad781660adcc47bca3c0c8786639",
+      "bytes": 61369,
+      "sha256": "47bb544363435c5bfe6f4773a856ee20cd016c34ba1dac4840952bc078c3b291",
       "source": "../experiential53/experiential_transport.py"
     },
     "ext/fs_security.py": {
@@ -41,15 +41,15 @@
       "source": "../../../control_plane/fs_security.py"
     },
     "ext/native_plan_worker.py": {
-      "bytes": 26207,
-      "sha256": "266c6dddb43e9abb669101504d6dc62a1936acd58628dd59927451deb8cc3f28",
+      "bytes": 25960,
+      "sha256": "ef27796c353e408aaaa8df89fa66c3332175007d6b1cfd6354a644a2d23bbef0",
       "source": "candidate/native_plan_worker.py"
     }
   },
   "application_manifest_sha256": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
-  "manifest_sha256": "98e8e868c9528ad07f86a74e930fcda15108bbae5ad054ee0577f3dd3d1610b6",
-  "provider_manifest_sha256": "f4b5cc916d12c26cc5eb81ccb8df6a84404ee3693dd126bcb4d2046b8d1f959f",
-  "provider_profile_sha256": "ea1f44245a6e01b2aae4873fcc0d89d9a650dfd567fd38bbc81e352e4d1ae3cd",
+  "manifest_sha256": "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d",
+  "provider_manifest_sha256": "41fad97dedbf2f09389e89890418d262fca31ebc20a8de97cefadf23ba203ddd",
+  "provider_profile_sha256": "b9248ed0ee912adb9c5a908d4517cc63d752396d0c97e9d635ff8a63c005484d",
   "provider_profile_source": "../provider_plans/profile.json",
   "replacements": {
     "ext/fabric_task.py": {

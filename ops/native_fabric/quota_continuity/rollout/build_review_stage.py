@@ -410,7 +410,7 @@ def before_host_pull_integrity(manifest):
 
 # An explicit forward composition of the selected provider plan and the exact
 # current APPLICATION107 source. The historical provider composer stays frozen.
-PROVIDER_APPLICATION_RECORD_SHA256 = "ace37675f37671ab569dd9d55279eaade814ae6b76f5791790f48b67e584a00a"
+PROVIDER_APPLICATION_RECORD_SHA256 = "7bbe9fbffd0087d7ae5c191a50e8c6f6ce28fae43554a97e4efc0c23bba26584"
 PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
     "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
     "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
@@ -825,8 +825,8 @@ QUOTA_RESET_PATCHES = {
 
 # Exact H2 successor of the provider-preserving116 source. This is distinct
 # from the historical H2-only107 family; neither can impersonate the other.
-PROVIDER_QUOTA_RESET_PARENT_SHA256 = "98e8e868c9528ad07f86a74e930fcda15108bbae5ad054ee0577f3dd3d1610b6"
-PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "a54944076b65af94c047b9300f7c6f8ca0643b5d7e8870e9b189b7809aec66d7"
+PROVIDER_QUOTA_RESET_PARENT_SHA256 = "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d"
+PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "b4618809aeedaa80081446e78d1760f08896d7d40f5246b9a81ac73d342df733"
 PROVIDER_QUOTA_RESET_PREIMAGES = dict(QUOTA_RESET_PREIMAGES, **{
     "lease_broker.py": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
     "pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
