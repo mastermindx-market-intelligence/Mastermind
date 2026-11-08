@@ -299,8 +299,42 @@ Each exact-vintage query selected only `series, period, realtime_start, realtime
 
 Final completion observations: 14:27:30.903985Z and14:27:50.775261Z. The reader itself still returns `content_sha256:null`; its query receipt is not the separate artifact checksum and this is not an implemented atomic content-bound consumer API. The adapter labels the source `unqualified_snapshot` and `production_qualification:NOT_ESTABLISHED_BY_THIS_ADAPTER`.
 
-The six-column Parquet has **no retained unit, index-base or seasonal-treatment metadata**. Paper can truthfully show111.5/111.4 as retained source values. Their stored-scale arithmetic difference is−0.1, but no qualified economic unit is established; the product proposal does not label it as percent, percentage points, basis points or verified index points. The [existing comparison owner](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/rates_command_basis.py) was read by the principal: `same_basis_level_change.v1` inherits the helper’s `output_unit="bp"` default and does not require a same-period match. The CPI adapter must explicitly qualify both period and unit rather than reuse that rule unchanged.
+The six-column Parquet has **no retained unit, index-base or seasonal-treatment metadata**. Paper can truthfully show 111.5/111.4 as retained source values. Their stored-scale arithmetic difference is−0.1, but no qualified economic unit is established; the product proposal does not label it as percent, percentage points, basis points or verified index points. The [existing comparison owner](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/rates_command_basis.py) was read by the principal: `same_basis_level_change.v1` inherits the helper’s `output_unit="bp"` default and does not require a same-period match. The CPI adapter must explicitly qualify both period and unit rather than reuse that rule unchanged.
 
-The inherited **16Oct2026 21:23UTC** Paper snapshot observation is not established by the new read or manifest. It remains separate and labelled as an inherited observation whose receipt is unbound in this proposed view. The actual8Nov verification-read times are explicit; knowledge cutoff is **Not provided**, not inferred from either clock.
+The inherited **16Oct2026 21:23UTC** Paper snapshot observation is not established by the new read or manifest. It remains separate and labelled as an inherited observation whose receipt is unbound in this proposed view. The actual 8 Nov verification-read times are explicit; knowledge cutoff is **Not provided**, not inferred from either clock.
 
 Applied follow-through: desktop/mobile proposed comparisons `MX-0 / P7-0` now show the two actual values and **Units and basis: Not retained**. Difference remains unavailable pending qualification. Exact earlier-record detail `YI-0`, dark mobile `105-0`, expanded provenance and recovery transitions are still being composed. Original revision-history views remain preserved and will receive a comparison entry after destination verification. Next safe work continues immediately.
+
+
+### Market Memory comparison — completed Paper slice, continuing mission
+
+[New proposed workflow](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) contains eight new artboards:
+
+| Artboard | Purpose |
+| --- | --- |
+| `MX-0` | Desktop EN comparison with verified retained values 111.5/111.4, withheld qualified difference, expanded source basis |
+| `P7-0` | Light EN mobile comparison; collapsed source disclosure |
+| `105-0` | Dark EN mobile comparison; expanded disclosure |
+| `17H-0` | Light ZH mobile comparison |
+| `194-0` | Dark ZH mobile comparison with expanded chronology/cutoff |
+| `YI-0` | Earlier exact source-record detail, row 180960, value 111.5 |
+| `163-0` | Later exact source-record detail, row 181023, value 111.4 |
+| `V1-0` | Six record/basis states, owner/binding/return contract and changed-source review `1BY-0` |
+
+The original eight history artboards `1-0,2Q-0,51-0,7C-0,9N-0,C9-0,EV-0,HG-0` now each have one 44px **Compare source records / 对比源记录** entry. Exact text readback preserved all 380 original text nodes: desktop 47×4 and mobile 48×4; each gained only the one intended entry. Original summaries and historical evidence remain unchanged. Main vertically adjacent desktop boards retain 16px clearance; new-page boards are horizontally separated.
+
+The journey is now concretely specified: same selected period/history → source comparison → either exact source record → return to the same comparison/history and focused action. Copy references include exact identity/provenance. Source details expose the full artifact fingerprint, exact row reference, zero-based locator and actual read time. Knowledge cutoff is explicitly **Not provided**. Inherited snapshot observation and new verification read remain separate.
+
+Recovery covers missing value, access reason, incomplete scan, changed source/version, incompatible/unknown basis and truly equal verified values. **Lookup incomplete** does not claim a running process. The changed-source inspector shows the selected artifact versus an unverified replacement and offers keeping the selected records or inspecting observed source identity; it offers no unsupported adoption. Destination mapping is recorded on `1B4-0`. No source/version/selection mutation occurs merely from opening or closing disclosure.
+
+Principal visually checked desktop, both mobile themes through EN/ZH examples, exact-record detail, states/contract, changed-source inspector and original mobile entry. The bounded visual critique’s concrete issues—paused lookup wording, expanded mobile source facts, absent cutoff and undefined action destinations—were resolved. All Paper writes returned **APPLIED_RESPONSE_OBSERVED**; scoped finish completed for all 16 touched/new boards. No production route or atomic content-bound API was shipped.
+
+**Remaining runtime acceptance:** source-backed unit/basis qualification, exact content-bound CPI pair projection through existing owners, authenticated consumer route and focused real-interface checks. Actual source values and artifact fingerprint have been proven in this session; do not reopen that gap without a source/version change.
+
+### Next active slice: Prophet D03 comparison and save meaning
+
+Complete the current illustrative INTC/MSFT selection’s full comparison, preserve selected identity in the insufficient-data view, and make the save object explicit. The old DEMO:CPU/DEMO:MEM reference stays untouched. Current D03 remains DRAFT / PROVISIONAL; no canonical approval is inferred.
+
+D03 draft programme source `52636ee4a8e64548983eea09bf629b6b3156b644` cites older WatchStore `fc85b0428cf8b0ca4f2fbbc5a415b2871f15a1c9`. A bounded exact-file reconciliation established unchanged `saveChecked/symbolInspect` behavior across those and the existing product pin. The source of record for this build contract is [WatchStore at the session product pin](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/site/watchstore.js), blob `46e95da158fbe8120c9cb3b56d8e7bdff27bf9ab`. It is byte-identical to freshly observed main `ad00e5676aa94d22918b3b92d8026bd45328536c`; that branch reports protected:false and is not a release/acceptance proof. Governing Mastermind law pin remains unchanged.
+
+Existing WatchStore saves securities/ticker memberships in an explicit account-owned list. It does not establish durable Prophet occurrence/comparison persistence. Proposed UI must distinguish **Add 2 securities to a watchlist** from unavailable **Save this comparison**. Waiting/saved/rejected/uncertain are different outcomes; exact-list membership inspection is read-only and never a receipt for the earlier insert or authorization to retry. No new persistence service, operation identity or automatic retry is invented.
