@@ -8,7 +8,7 @@ The assigned goal was to audit and improve the existing Paper designs, especiall
 
 Before, several designs confused the scope of evidence with a conclusion, hid the meaning of a comparison or return link, or obscured the starting point among design versions. After, the affected screens communicate those distinctions explicitly, and the corrected states are visible in the editable Paper files.
 
-This is a completed, representative audit-and-improvement outcome at the **Paper design level**. It is not an exhaustive redesign of every historical board, an approved shared-shell replacement, a website implementation, functioning anchor/return proof, live financial-data validation, or production acceptance.
+The first wave is a completed, representative audit-and-improvement outcome at the **Paper design level**. The Chairman subsequently extended the mission to continued autonomous improvements; the sections below record the additional verified design work and remaining consumer proof. Paper output is not website implementation, functioning anchor/return proof, live financial-data validation or production acceptance.
 
 - Governing protected Mastermind SHA: `5c3d3885234358aefb97ecdbc59be0864df14f8b` (rechecked unchanged before delivery).
 - Skillpack: `mastermind.sol_skillpack.v1`, version 1.0.1, bootstrap major 1.
@@ -291,6 +291,36 @@ Current protected Terminal source pin: `f0af84bbd6c28c2f6477bd8ffc031903979023bd
 - [Position modal](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/PositionModal.tsx), blob `6c07f488fa8b63b5c0aea121bfd936cfd58b5253`.
 - [Portfolio view](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/PortfolioView.tsx), blob `e5f8abbb848dc5a60c2d58f6b8a3c1ffe7b59ef6`.
 
-Root reviewed individual phone/state screenshots, the complete atlas and a72206-character JSX readback. A read-only C3 critique identified the missing-acknowledgement branch, unknown-exit branch and deterministic focus fallback; all three were incorporated and rechecked. This is advisory design reasoning, not a formal acceptance or GitHub approval. Existing currency persistence and dirty-exit implementation were not mislabeled as absent.
+Root reviewed individual phone/state screenshots, the complete atlas and a 72,206-character JSX readback. A read-only C3 critique identified the missing-acknowledgement branch, unknown-exit branch and deterministic focus fallback; all three were incorporated and rechecked. This is advisory design reasoning, not a formal acceptance or GitHub approval. Existing currency persistence and dirty-exit implementation were not mislabeled as absent.
 
 All `portfolio-*` operation responses under the wave2 prefix were observed applied. `portfolio-record-recovery-finish-01` finished exactly `1Z0H-0`. The proposed explicit read-only recovery control, mobile navigation and new focus-return bindings still require implementation/consumer proof. No runtime change, account mutation or deployment occurred. The next independent design slice is Targets read failure versus a real empty target set, and retention when a holding is closed or unweighable.
+
+
+## Continuation: Portfolio Targets read truth and retained intention
+
+Added native **08 · Portfolio targets · Read and retention states · DESIGN**, board `1ZET-0`, on [Terminal Personal Desk](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0). It sits beside record-repair atlas `1Z0H-0`; the original six Personal Desk compositions, including Targets `1LQD-0`, remain intact.
+
+The feature gap was that an empty target set, a failed read and an uncomputable weight need different user explanations and recovery actions. A saved allocation target also remains meaningful after its holding closes. The new atlas makes those cases explicit:
+
+| State | Native group | User-facing meaning and next action |
+| --- | --- | --- |
+| Successful empty read | `1ZF1-0` first card | Retains the existing 09 October 2026 snapshot and native zero-target badge. Choose a security starts target setup. Zero is only shown after a valid current-owner empty response. |
+| Failed read with no retained view | `1ZF1-0` second card | Targets unavailable; both count and comparisons are unavailable. Reload targets is explicitly read-only. A failed read never becomes zero. |
+| Open holding, weight unavailable | `1ZF2-0` first card | NEM target 20% and tolerance ±5 percentage points are visibly illustrative. Saved intention remains; current weight, gap and band verdict are unavailable. Review NEM records preserves both independent position records; Edit target remains a separate action. |
+| No open holding, target retained | `1ZF2-0` second card | MCD target 20% and band ±5 percentage points are visibly illustrative. The target remains saved when no open holding remains. Edit target and Remove target are distinct actions; closing a holding does not implicitly remove its target. |
+
+Native builder contract `1ZGR-0` records the exact state distinctions:
+
+- Preserve and date last-good targets when the incumbent owner supplies them. The failure specimen explicitly assumes no retained view; it does not instruct builders to clear existing data.
+- Use the existing Targets owner for reload, save, access and removal. Authorization failure returns through the existing access flow.
+- Target-write confirmation uses a successful response plus an exact current-scope reread of ticker, target percentage and supplied band. The position-mutation receipt predicate is not copied across owners by analogy.
+- An open but unweighable target keeps its saved target and band while `currentWeightPct` and `driftPct` are null. No within/outside-band conclusion or fake 0% is shown.
+- The orphaned-target branch applies when no open holding remains for the security. An open record with missing quantity is unweighable, not orphaned.
+- Targets are per security; position records remain independent. Review NEM records returns to the same target. Weights use eligible entry cost, bands use percentage points, and no FX conversion or automatic rescaling is implied.
+- The populated targets are illustrative, while the original zero-target snapshot remains on `1LQD-0`. No real target or account data was changed.
+
+Source: [current portfolioTargets owner](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/lib/portfolioTargets.ts), blob `0a20689a576bf164343b0a6db6c6ab814f09dbe7`, and the current PortfolioView source already cited above. This corrects a design ambiguity without treating older exported orphan copy as the branch predicate.
+
+Verification: root reviewed the complete 1440px atlas and focused contract screenshot, then read back its full native JSX. All four states, fixture labels, null/band qualifications, 44px actions and source references were present without visible clipping. A final spacing correction was verified in the contract. All `targets-*` operation receipts under the wave2 prefix were observed applied; `targets-read-retention-finish-01` finished exactly `1ZET-0`.
+
+Still required in the current consumer: valid empty, read failure with and without retained data, null weight, orphaned retention, exact target-save reread, remove-target confirmation, access recovery and return/focus proof. The Paper atlas establishes design behavior and builder guidance, not runtime acceptance. The next safe work is connecting these atlases to the existing Personal Desk build directory and checking the next source-backed journey gap.
