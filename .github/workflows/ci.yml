@@ -155,10 +155,11 @@ jobs:
       contents: read
       actions: read
     runs-on: ubuntu-latest
-    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
-    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
-    # 60 minutes stays inside the merge queue's 100-minute check response limit.
-    timeout-minutes: 60
+    # Keep every prerequisite and the full 45-minute repository allowance.
+    # Actual setup took ~23m; a successful test/upload then crossed job60 in
+    # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
+    # This budget correction does not diagnose a post-test process-exit stall.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -576,11 +577,10 @@ jobs:
 
       - name: Run repository test shard
         if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
-        # Give best-effort upload an opportunity inside the 60-minute job.
-        # The prior 38-minute step timed out; its snapshot retained the final
-        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
-        # for setup/cleanup opportunity, not a guaranteed future bound.
-        # Slow setup or runner loss can still prevent artifact delivery.
+        # Preserve the independent 45-minute test limit. Job75 accommodates
+        # observed ~23m prerequisite work plus upload/cleanup; slow setup or
+        # runner loss can still prevent artifact delivery. No exit is inferred
+        # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
