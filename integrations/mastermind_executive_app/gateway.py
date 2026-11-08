@@ -3549,8 +3549,8 @@ class CeoIngressReadGateway:
             "execution readiness were not observed."
         )
 
-    @staticmethod
-    def _read_failure(response: CeoIngressResponse) -> tuple[str, str]:
+    @classmethod
+    def _read_failure(cls, response: CeoIngressResponse) -> tuple[str, str]:
         """Classify one read boundary without exposing backend text or arm state."""
         code = "backend_unavailable"
         message = "Executive reader returned an invalid response."
@@ -3570,9 +3570,7 @@ class CeoIngressReadGateway:
             and isinstance(response.error.get("code"), str)
             and response.error["code"] in ceo_ingress.ERROR_CODES
         ):
-            return CeoIngressReadGateway._classified_upstream_failure(
-                response.error["code"]
-            )
+            return cls._classified_upstream_failure(response.error["code"])
         return code, (
             message + " Read-only describes this read operation; submission and "
             "execution readiness were not observed."
