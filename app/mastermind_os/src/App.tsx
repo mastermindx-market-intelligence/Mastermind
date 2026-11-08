@@ -5041,6 +5041,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
+  const todayCatalogueFrame = useRef({active, index, epoch: programIndexEpoch});
+  todayCatalogueFrame.current = {active, index, epoch: programIndexEpoch};
+  const currentTodayCatalogue = () => todayCatalogueFrame.current.active === "Today" &&
+    todayCatalogueFrame.current.index === index && todayCatalogueFrame.current.epoch === programIndexEpoch &&
+    currentProgramsRead();
   const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
     const host = window.MastermindMissionHost, selected = projectJourney.selection;
     try {
@@ -5315,6 +5320,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     </>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
+      currentCatalogue={{value: index, current: currentTodayCatalogue}}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return;
+        const cards = index.programs.filter(card => card.workRef === workRef);
+        if (cards.length !== 1) return;
+        const card = cards[0];
+        // Reuse current-catalogue navigation; only its actual singleton root
+        // may enter Mission. A rootless card opens project details instead.
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return;
+        }
+        setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+        setProjectTab("More"); setActive("Projects");
+      }}
       composer={commandPanel}
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
