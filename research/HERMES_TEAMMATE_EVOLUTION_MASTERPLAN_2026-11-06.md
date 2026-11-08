@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §§56–59. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–60. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2572,3 +2572,52 @@ The full in-process App -> retained CooFactsClient -> original CeoIngressWorkspa
 The exact Company identity-pin update was compared against protected1890: complete Company listener AST and all six original Constant tokens, values, spellings, paths and columns are unchanged. Source SHA256 f9c371d3eca6ab1f3572c66d8eea38e663defb06192e77070ff76f2a56283b06; enclosing ingress AST SHA25627fcfd5595d71bd938b68546b28427e5ed9297099e71d93942c1d1abe6c164f6. Only the authorized source/method pins changed. The interrupted file write was read back successfully before further work.
 
 C3 remains source validation only. Original runtimeC26/Fabric/socket/fleet denials, primary APPLICATION writer,398/409 holds and installed acceptance obligations remain unchanged. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
+
+## 60. Published project knowledge, reconciled CI custody, and existing Agent OS continuity — 2026-11-08
+
+### Connected v5 source result
+
+The finite §§57–58 contribution is published as [Mastermind PR #2264](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2264), operation **hermes-native-project-knowledge-20261108-c3**, branch **sol/hermes-native-project-knowledge-20261108-c3**. Exact head **579f2d116e2e79707ed5b655ba45073b01ed8502**, parent **1890f60881707da8939167e5736aa02af1d7f125**, tree **3c0f275248dc89681fc883648e097c36c766d99a**. Its 27 changed files are the 20 finite production paths plus seven test/documentation paths. GitHub tree identity matches the staged C3 postimages; branch CAS and readback succeeded. The published head was fetched back into the owned C3 source-validation checkout, which is clean. Exact committed-head D8 qualification passed (PID12937, one case), JUnit SHA256 **deed97eefb4408a42380e440c46542c3d515c372054b092c57912923fc4b7850**.
+
+The new explicit v5 catalogue/profile adds current project-knowledge reads and governed note/preference authoring to the existing two discovery tools. It preserves the same ConsumerSlot, authenticated Executive/Workspace pair, original SDK future and uncertainty, registration leases, compiler, private input, Events and Git publisher. The capability profile remains disabled. Project files and project communication preference are the canonical owners; this is not a new personal-memory plane or automatic inclusion of every note in every prompt.
+
+Final source qualification:
+- 62 final knowledge/historical-discovery cases passed (PID72120). JUnit **673ca027cdd9f65dc1ecbbc4c1ed2d2b235468184f50b0389ef82acd3380b493**. The real temporary-Git journey covers prepare/full seven-field lookup/submit/proposal/repeat/land/reconcile/current source, original witnesses, content/blob and immutable snapshot checks.
+- 10 context/release cases passed through the actual signed App/client/ExecutiveService/provider/compiler/native decoder path in an explicitly in-memory carrier. They are the successful subset of the earlier 20-case development cohort, whose later workspace-grant expectation failed; that expectation was corrected to retain production EFFECT_UNKNOWN after an attempted POST and passes in the final 62-case group. Development XML **8f64b184eedb92d92d896eeff877154fcd9b6a442280a324e72d55e3485eb1a9** is not a claim that the entire cohort passed.
+- 40 native owner/capability cases passed. JUnit **8850dadd2721746b7b53292196b3041d5b38754b4c3efe118b7fcd152ed6005c**.
+- Two additional actual pinned-Hermes PluginContext/ToolRegistry tests passed (PID87428), including four-tool dispatch/disposal and fourth-tool collision. Hermes pin **1c0cd667746d3395fe9e1b6c74f8f85952486f18**; JUnit **743885666694cd2f749bdfeaa7534c5a0083c5c8596044f244a58671871fb895**.
+- 72 incumbent source/release/MCP/public-composition/gateway/Company-pin regressions passed (PID94208). The original real-socket test was excluded. JUnit **4530f5ac7b8f32d58d26f0acd1d805fa3de26499a586d865c7ed7494e376c502**.
+
+These are declared source fixtures, with inert account/credential/PR/host-seal edges, not installed service, account login, provider inference or product acceptance. PR2264 is Ready; its initial hosted checks were pending and no native release request had yet been issued at this milestone.
+
+### Corrected CI-repair ownership; supersedes §59's new-carrier assumption
+
+The assigned principal missed an earlier active same-purpose repair before creating [#2262](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2262). The original [#2260](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2260), operation **hermes-runtime-ci-budget-20261108-sol-001**, already owned exactly **.github/workflows/hermes-runtime.yml**, changing only runtime-acceptance.timeout-minutes from10 to30. Its exact head is **7da527cab652d9e013f7ac38459809bbcad2d436**, tree **32ca3a9487e26a6f0751590a6a04d513cc8d1e86**, parent1890f608. Original ownership and arm receipts are [6714830381](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234#issuecomment-6714830381) and [6714894034](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234#issuecomment-6714894034).
+
+The redundant root carrier #2262 at **425346b2f0124269133259b350b1c6fe300aff64** has been visibly withdrawn and CLOSED. Exact native readback PID22233 confirms CLOSED, unmerged, autoMergeRequest=null, mergeQueueEntry=null and mergeCommit=null. Do not reopen, rearm or continue that repair. Its historical runtime-CI success is not an auth/EVAL acceptance receipt.
+
+The same native readback preserves #2260 OPEN/unmerged at7da527, with autoMergeRequest=null and original queue **MQE_lQDOTotz3c8AAAABNl3ors4ABAiKzgPPHGc**, AWAITING_CHECKS. No mutation of that original effect occurred. Consume #2260's accepted merge through the original AUTH carrier when actually available. No duplicate maintenance PR, manual rerun or release bypass is authorized.
+
+### Other original effects and accepted continuity receipts
+
+EVAL [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) remains on exact head **c43807ba8a816ab81547a5de3d2ae2c917419aa8** with original queue **MQE_lQDOTotz3c8AAAABNi1Bcs4ABAiKzgPPA_0**. The generated candidate advanced to **f91eb6f7198e1a271510ecb755b4658207f0b154**, CI [42431263059](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42431263059), after protected-master movement. Historical c78802cf shard failure is not current-candidate failure. Native mergeability was UNKNOWN, so a source conflict is not established. No re-arm or replacement carrier.
+
+AUTH [#2257](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2257) remains Draft at **e1a2ef899c119e64fbff2e6c962b8153a2d46a80**. Its diagnosed ten-minute cancellation is owned by original2260; compose only actually accepted prerequisites/current source and then qualify the material delta. Keep EVAL's workflow-path fence unchanged.
+
+Macro [#10831](https://github.com/mastermindx-market-intelligence/macro/pull/10831) is MERGED at **abab066981e46860b1be51dcb05883aed1a6b5b0**, 2026-11-07T22:22:40Z. Macro [#10836](https://github.com/mastermindx-market-intelligence/macro/pull/10836) is MERGED at **2326bcdc176d6f50825dfeeac0021cac8adfd3a6**, 2026-11-07T20:52:01Z. Both are independently read back; do not resume their obsolete pending-merge actions.
+
+### Finite existing-record amendment before edit
+
+Operation **hermes-teammate-continuity-20261108-c3**, sole planned GitHub-native carrier **sol/hermes-teammate-continuity-20261108-c3**, is authorized to amend exactly this existing Macro file:
+
+**agentos/handoffs/CHAIRMAN-CONTROL-ROOM-2026-11-07-hermes-teammate.md**
+
+Observed Macro main **29771cb7bd4acabc114981e4fea44dfa24e04709**, file preimage **171b33befb8979c7c53264b3e9f29daccd7551d7**. Its section37/current-queue statements are materially stale. Update frontmatter and body in place to point at this current source-linked plan; carry accepted receipts, original active/closed effects, exact unverified installed journeys and executable continuation. Preserve independent Control Room/R2 obligations. No new workstream, memory mirror, owner/claim, generated view, runtime grant or additional file is included. Before publication, confirm the branch is unstarted and no same-purpose live source carrier exists; preserve any observed writer/effect conflict.
+
+The protected GitHub-native source route needs no host checkout. This record-only mutation will receive exact source/preimage/diff readback and the repository's actual Agent OS/hosted validation; do not claim an unexecuted local validator. Macro release remains its existing merge-on-green controller, after actual concluded required checks and current hold/head inspection, never native auto-merge or manual bypass.
+
+### Installed and held obligations
+
+The original installed operation remains **meta-ceo-byok-followon-parent-20261106-c35-01**, M2 workspace **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Original Ubuntu1/root C26 administrative access must be restored and that retained operation reconciled before dependent installed action. Its explicit PermissionError was not replayed; C3 remains source validation only.
+
+Primary APPLICATION2175, OutcomeLearning398, security-held409, Fleet C3/#531 and all original Fabric/socket/refused effects retain their exact custody and holds. Project source acceptance does not discharge real browser/account/provider, original note publication/current feedback, restart/revocation, host/fleet, technically valid held-out EVAL or seven-day acceptance. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
