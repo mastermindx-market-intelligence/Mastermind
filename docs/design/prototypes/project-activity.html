@@ -101,10 +101,10 @@
     .detail-list strong { display:block; font-weight:500; }
     .detail-list small { display:block; color:var(--secondary); font-size:14px; margin-top:2px; }
     .detail-list .chevron { color:var(--muted); font-size:24px; }
-    .owner-view { padding:0 0 16px; }
-    .owner-view > .text-button { padding-left:0; margin-bottom:16px; }
-    .owner-view h4 { font-size:18px; font-weight:500; margin:0 0 12px; }
-    .owner-view p { color:var(--secondary); max-width:640px; }
+    .detail-content { padding:0 0 16px; }
+    .detail-content > .text-button { padding-left:0; margin-bottom:16px; }
+    .detail-content h4 { font-size:18px; font-weight:500; margin:0 0 12px; }
+    .detail-content p { color:var(--secondary); max-width:640px; }
     dl { display:flex; flex-direction:column; gap:0; margin:0; }
     dl > div { display:flex; gap:24px; padding:14px 0; border-bottom:1px solid var(--line); }
     dt { width:150px; color:var(--muted); flex-shrink:0; font-size:14px; }
@@ -263,12 +263,12 @@
               <button type="button" data-section="history"><span><strong>History and sources</strong><small>Conversations, journal and evidence</small></span><span class="chevron" aria-hidden="true">›</span></button>
             </div>
           </div>
-          <section class="owner-view" id="owner-direction" tabindex="-1" aria-label="Inspect Direction" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Direction</h4><p>Make everyday work easier. Keep the key journeys clear.</p></section>
-          <section class="owner-view" id="owner-plan" tabindex="-1" aria-label="Inspect Plan" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Plan</h4><p>Review the layouts. Refine the interactions. Inspect the returned work.</p></section>
-          <section class="owner-view" id="owner-work" tabindex="-1" aria-label="Inspect Work controls" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Work controls</h4><p>This reference has no connected project controls.</p></section>
-          <section class="owner-view" id="owner-instructions" tabindex="-1" aria-label="Inspect Standing instructions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Standing instructions</h4><p>Keep the conversation primary. Preserve drafts and useful evidence.</p></section>
-          <section class="owner-view" id="owner-permissions" tabindex="-1" aria-label="Inspect Project permissions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Project permissions</h4><p>No permission records are supplied in this example.</p></section>
-          <section class="owner-view" id="owner-history" tabindex="-1" aria-label="Inspect History and sources" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>History and sources</h4><p><span id="owner-history-summary">Two recent example runs are available. Earlier history may exist.</span> <a href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0" target="_blank" rel="noopener noreferrer">Open the design contract ↗</a></p></section>
+          <section class="detail-content" id="owner-direction" tabindex="-1" aria-label="Inspect Direction" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Direction</h4><p>Make everyday work easier. Keep the key journeys clear.</p></section>
+          <section class="detail-content" id="owner-plan" tabindex="-1" aria-label="Inspect Plan" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Plan</h4><p>Review the layouts. Refine the interactions. Inspect the returned work.</p></section>
+          <section class="detail-content" id="owner-work" tabindex="-1" aria-label="Inspect Work controls" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Work controls</h4><p>This reference has no connected project controls.</p></section>
+          <section class="detail-content" id="owner-instructions" tabindex="-1" aria-label="Inspect Standing instructions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Standing instructions</h4><p>Keep the conversation primary. Preserve drafts and useful evidence.</p></section>
+          <section class="detail-content" id="owner-permissions" tabindex="-1" aria-label="Inspect Project permissions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Project permissions</h4><p>No permission records are supplied in this example.</p></section>
+          <section class="detail-content" id="owner-history" tabindex="-1" aria-label="Inspect History and sources" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>History and sources</h4><p><span id="owner-history-summary">Two recent example runs are available. Earlier history may exist.</span> <a href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0" target="_blank" rel="noopener noreferrer">Open the design contract ↗</a></p></section>
         </section>
         <section class="disclosure" id="files-panel" tabindex="-1" aria-labelledby="files-heading" hidden><header class="disclosure-head"><h3 id="files-heading">Files</h3><button type="button" class="text-button" data-close>Back to conversation</button></header><a class="button" href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0" target="_blank" rel="noopener noreferrer">Project workspace · Paper ↗</a></section>
         <section class="disclosure" id="activity-panel" tabindex="-1" aria-labelledby="activity-heading" hidden><header class="disclosure-head"><h3 id="activity-heading">Run details</h3><button type="button" class="text-button" data-close>Back to conversation</button></header><dl><div><dt>Project</dt><dd>Mastermind OS · example-project</dd></div><div id="inspector-operation-row"><dt>Original request</dt><dd>example-operation-17</dd></div><div id="inspector-run-row"><dt>Run</dt><dd>example-run-17</dd></div><div><dt>Observation</dt><dd id="inspector-state">Working · 14:32 UTC</dd></div><div id="inspector-mode-row"><dt>Execution mode</dt><dd id="inspector-mode">Attended session</dd></div><div><dt>Coverage</dt><dd id="inspector-coverage">Coordinator and two tasks supplied by this example observation</dd></div></dl></section>
@@ -345,7 +345,7 @@
     media.addEventListener('change', setMotionPreference);
     $('reduce-motion').addEventListener('change', setMotionPreference);
     function resetDetails(focusReturn) {
-      document.querySelectorAll('.owner-view').forEach(panel => panel.hidden = true);
+      document.querySelectorAll('.detail-content').forEach(panel => panel.hidden = true);
       $('details-overview').hidden = false;
       selectedSection = null;
       if (focusReturn && sectionOpener) sectionOpener.focus();
@@ -373,7 +373,7 @@
     document.querySelectorAll('[data-section]').forEach(button => button.addEventListener('click', () => {
       selectedSection = button.dataset.section; sectionOpener = button;
       $('details-overview').hidden = true;
-      document.querySelectorAll('.owner-view').forEach(panel => panel.hidden = panel.id !== 'owner-' + selectedSection);
+      document.querySelectorAll('.detail-content').forEach(panel => panel.hidden = panel.id !== 'owner-' + selectedSection);
       $('owner-' + selectedSection).focus();
     }));
     document.querySelectorAll('[data-section-back]').forEach(button => button.addEventListener('click', () => resetDetails(true)));
