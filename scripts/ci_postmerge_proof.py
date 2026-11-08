@@ -2,8 +2,9 @@
 
 This is not a release authority, check replacement, queue, or background
 observer. On a protected master push only, a successful *same-SHA* native
-merge_group CI workflow with all six shards and its required test may be
-reused. Missing, ambiguous, stale, unauthorized or invalid evidence means
+merge_group CI workflow with all six shards, source qualification, trusted
+full-scope records and its required test may be reused. Missing, ambiguous,
+stale, unauthorized or invalid evidence means
 "reuse=false": the incumbent shard runs normally. Non-pytest gates still run.
 """
 from __future__ import annotations
@@ -21,7 +22,28 @@ from typing import Any
 _REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _WORKFLOW = ".github/workflows/ci.yml"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
-_JOB_NAMES = {f"pytest shard {index}" for index in range(6)} | {"test"}
+_JOB_NAMES = {f"pytest shard {index}" for index in range(6)} | {
+    "test", "Source qualification", "Source qualification Fabric",
+    "Source qualification native", "PR test scope", "PR fast checks",
+}
+_QUALIFICATION_STEPS_BY_JOB = {'Source qualification': {'Checkout paired Brain production owner fixture',
+                          'Compile source',
+                          'Fast source-bound release preflight',
+                          'Validate shell scripts',
+                          'Verify Paper Studio prepare guard',
+                          'Verify Paper direct pinned MCP SDK',
+                          'Verify actual Brain Fabric and production inference composition',
+                          'Verify closed application transport in isolated root fixtures',
+                          'Verify event source and immutable fixture anchor',
+                          'Verify native application admission unittest contracts'},
+ 'Source qualification Fabric': {'Fast source-bound release preflight',
+                                 'Verify event source and immutable fixture anchor',
+                                 'Verify private Fabric HTTP compatibility and incumbent backend '
+                                 'lifetime'},
+ 'Source qualification native': {'Fast source-bound release preflight',
+                                 'Verify event source and immutable fixture anchor',
+                                 'Verify native application admission and dispatch custody'}}
+
 _API = "https://api.github.com"
 _MAX_RESPONSE = 256_000
 
@@ -164,13 +186,14 @@ def find_reusable_run(
         if not isinstance(job, dict):
             return None
         name, check_id = job.get("name"), job.get("id")
+        skipped_fast = name == "PR fast checks"
         if (
             not isinstance(name, str)
             or name not in _JOB_NAMES or name in seen
             or type(check_id) is not int or check_id <= 0
             or check_id in check_ids
             or job.get("status") != "completed"
-            or job.get("conclusion") != "success"
+            or job.get("conclusion") != ("skipped" if skipped_fast else "success")
             or job.get("head_sha") != sha
             or job.get("run_id") != identifier
             or job.get("run_attempt") != attempt
@@ -182,23 +205,25 @@ def find_reusable_run(
         job_end = _time(job.get("completed_at"))
         if (
             job_start is None or job_end is None
-            or not (group_start <= job_start <= job_end <= group_end <= push_start)
+            or not (group_start <= job_start <= group_end <= push_start)
+            or not (group_start <= job_end <= group_end)
+            # GitHub's skipped-job metadata can stamp its start after its
+            # completion decision. Executed jobs must retain strict order.
+            or (not skipped_fast and job_start > job_end)
         ):
             return None
         # GitHub reports a successful JOB even if its test STEP was skipped.
         # Verify the actual executable steps in the prior integrated run.
-        required = (
-            {"Run repository test gate"} if name == "test"
-            else {"Run repository test shard", "Fast source-bound release preflight"}
-        )
-        if name == "pytest shard 0":
-            required |= {
-                "Verify Paper direct pinned MCP SDK",
-                "Verify Paper Studio prepare guard",
-                "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-                "Compile source",
-                "Validate shell scripts",
-            }
+        if name == "test":
+            required = {"Run repository test gate"}
+        elif name in _QUALIFICATION_STEPS_BY_JOB:
+            required = _QUALIFICATION_STEPS_BY_JOB[name]
+        elif name == "PR test scope":
+            required = {"Classify integrated source diff using protected base code"}
+        elif skipped_fast:
+            required = set()
+        else:
+            required = {"Run repository test shard", "Fast source-bound release preflight"}
         if name == "pytest shard 2":
             required |= {
                 "H1 initializer Linux fast preflight",
@@ -206,6 +231,8 @@ def find_reusable_run(
             }
         steps = job.get("steps")
         if not isinstance(steps, list):
+            return None
+        if skipped_fast and steps:
             return None
         for required_name in required:
             matches = [

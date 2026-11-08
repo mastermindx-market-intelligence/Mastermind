@@ -314,7 +314,7 @@ def _proposed_mcp(prior, document, *, expected_release_sha,
             "proposed MCP configuration fields differ")
     # Only the owner supplies this exact target-registry map. None retains
     # the legacy pure compiler behavior; no request may select a digest.
-    from ops.executive_os.mcp_component_update import _apply_capability_profile_digests
+    from ops.executive_os.executive_mcp_entry import _apply_capability_profile_digests
     expected = copy.deepcopy(prior)
     _apply_capability_profile_digests(prior, expected, capability_profile_digests)
     _apply_capability_profile_digests(prior, proposed, capability_profile_digests)

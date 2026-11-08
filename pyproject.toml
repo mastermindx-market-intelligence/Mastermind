@@ -28,7 +28,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8,<10",
+    # Keep automatic case identities equal in required CI and locked RWE.
+    "pytest==9.2.0",
+    # In-shard CI parallelism (scripts/ci_parallel_shard.py --workers). Exact
+    # pin so worker scheduling cannot drift between hosted runs.
+    "pytest-xdist==3.8.0",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.

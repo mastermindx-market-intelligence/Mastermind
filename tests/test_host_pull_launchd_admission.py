@@ -22,8 +22,7 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-# Combined exact current107 host-pull and Broker source image.
-MANIFEST_SHA256 = "470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d"
+MANIFEST_SHA256 = "28e4c5049a99f28cbb43459ad07e9b2b5bad8a28a3ff0228c15a84360fc16d1f"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -155,18 +154,31 @@ def _builder():
 
 BUILDER = _builder()
 HOST_COHORT = ("ext/host_pull.sh", "ext/host_pull_backend.py", "ext/host_pull_daemon.sh")
+HOST_PULL_PARENT_ROWS = (
+    (BUILDER.GO_OBSERVER_PREIMAGE_SHA256,
+     "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6",
+     "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"),
+    (BUILDER.GO_OBSERVER_SUCCESSOR_SHA256,
+     "eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7",
+     "8a7e89dd92cd4c8252ac03188670985f9d76d498a8710a120b1a8a5adfa25cb7"),
+)
 
 
-def _host_pull_cohort():
-    # Exercise this historical host-only cohort on its authenticated Broker parent.
-    # The combined current image is separately qualified by the source-cohort suite.
+@pytest.fixture(params=HOST_PULL_PARENT_ROWS, ids=("historical-observer", "current-observer"))
+def host_pull_history(request):
+    return request.param
+
+
+def _host_pull_cohort(history):
+    # Authenticate advice/Broker inverses before selecting either exact history.
     successor = BUILDER.before_qualification_quiescence(
         BUILDER.before_sparse_index_advice(json.loads(MANIFEST_PATH.read_text())))
+    successor["ext/current_source_observation.py"] = history[0]
     predecessor = dict(successor)
     predecessor.update(BUILDER.HOST_PULL_INTEGRITY_PREIMAGES)
     assert hashlib.sha256(
         (json.dumps(predecessor, sort_keys=True, indent=2) + "\n").encode()
-    ).hexdigest() == "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+    ).hexdigest() == history[1]
     return predecessor, successor
 
 
@@ -177,8 +189,8 @@ def _go_dependency_bytes():
     }
 
 
-def test_host_pull_successor_reaches_existing_validation_without_relabeling():
-    predecessor, successor = _host_pull_cohort()
+def test_host_pull_successor_reaches_existing_validation_without_relabeling(host_pull_history):
+    predecessor, successor = _host_pull_cohort(host_pull_history)
     original = dict(successor)
     for relative in HOST_COHORT:
         raw = (CANDIDATE / relative.removeprefix("ext/")).read_bytes()
@@ -193,7 +205,7 @@ def test_host_pull_successor_reaches_existing_validation_without_relabeling():
     historical = BUILDER.before_admission_integrity(normalized)
     assert hashlib.sha256(
         (json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()
-    ).hexdigest() == "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+    ).hexdigest() == host_pull_history[2]
     historical_capture = {name: successor['ext/' + name]
                           for name in BUILDER.GO_APPLICATION_DEPENDENCIES}
     BUILDER.validate_go_base_manifest(successor, historical_capture)
@@ -203,8 +215,8 @@ def test_host_pull_successor_reaches_existing_validation_without_relabeling():
     assert successor == original
 
 
-def test_host_pull_predecessor_keeps_its_existing_validation_path():
-    predecessor, _ = _host_pull_cohort()
+def test_host_pull_predecessor_keeps_its_existing_validation_path(host_pull_history):
+    predecessor, _ = _host_pull_cohort(host_pull_history)
     original = dict(predecessor)
     normalized = BUILDER.before_host_pull_integrity(predecessor)
     assert normalized == predecessor
@@ -221,8 +233,8 @@ def test_host_pull_predecessor_keeps_its_existing_validation_path():
 @pytest.mark.parametrize("members", [
     (0,), (1,), (2,), (0, 1), (0, 2), (1, 2),
 ])
-def test_host_pull_partial_successor_is_refused(members):
-    predecessor, successor = _host_pull_cohort()
+def test_host_pull_partial_successor_is_refused(members, host_pull_history):
+    predecessor, successor = _host_pull_cohort(host_pull_history)
     mixed = dict(predecessor)
     for index in members:
         mixed[HOST_COHORT[index]] = successor[HOST_COHORT[index]]
@@ -233,20 +245,22 @@ def test_host_pull_partial_successor_is_refused(members):
 
 
 @pytest.mark.parametrize("member", HOST_COHORT)
-def test_host_pull_foreign_member_is_refused(member):
-    _, successor = _host_pull_cohort()
+def test_host_pull_foreign_member_is_refused(member, host_pull_history):
+    _, successor = _host_pull_cohort(host_pull_history)
     successor[member] = "f" * 64
     with pytest.raises(ValueError, match="host-pull integrity cohort"):
         BUILDER.validate_go_base_manifest(successor, _go_dependency_bytes())
 
 
 @pytest.mark.parametrize("drift", [
-    "unrelated", "extra", "missing", "historical106", "historical104", "historical102",
+    "unrelated", "foreign-observer", "extra", "missing", "historical106", "historical104", "historical102",
 ])
-def test_host_pull_successor_cannot_relabel_another_complete_closure(drift):
-    _, successor = _host_pull_cohort()
+def test_host_pull_successor_cannot_relabel_another_complete_closure(drift, host_pull_history):
+    _, successor = _host_pull_cohort(host_pull_history)
     if drift == "unrelated":
         successor["pool"] = "f" * 64
+    elif drift == "foreign-observer":
+        successor["ext/current_source_observation.py"] = "f" * 64
     elif drift == "extra":
         successor["ext/unreviewed.py"] = "f" * 64
     elif drift == "missing":
@@ -268,8 +282,8 @@ def test_host_pull_successor_cannot_relabel_another_complete_closure(drift):
     ("ext/fabric_task.py",), ("ext/lane_runtime.py",),
     ("ext/fabric_task.py", "ext/lane_runtime.py"),
 ])
-def test_host_pull_successor_requires_current_admission_integrity_pair(members):
-    _, successor = _host_pull_cohort()
+def test_host_pull_successor_requires_current_admission_integrity_pair(members, host_pull_history):
+    _, successor = _host_pull_cohort(host_pull_history)
     for member in members:
         successor[member] = BUILDER.ADMISSION_INTEGRITY_PREIMAGES[member]
     with pytest.raises(ValueError, match="host-pull integrity parent closure differs"):
@@ -282,8 +296,8 @@ def test_host_pull_manifest_type_is_closed(manifest):
         BUILDER.before_host_pull_integrity(manifest)
 
 
-def test_unrecognized_host_trio_still_fails_the_existing_complete_guard():
-    predecessor, _ = _host_pull_cohort()
+def test_unrecognized_host_trio_still_fails_the_existing_complete_guard(host_pull_history):
+    predecessor, _ = _host_pull_cohort(host_pull_history)
     for member in HOST_COHORT:
         predecessor[member] = "f" * 64
     with pytest.raises(ValueError, match="admission integrity parent closure differs"):

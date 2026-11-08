@@ -12,6 +12,8 @@ import test_fabric_native_security_composition_20261018 as composed
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT_INVENTORY_SHA256 = "fc3347a3633cd9127e93a77d23e6b60eab4b8dddad632f87dd7dad5a57886dc5"
+CURRENT_OBSERVER_PARENT_MANIFEST_SHA256 = "2c395c2a259e1027b5fe9243667ee0cd2dfc66c1cdc055dc19897950e91371a3"
+CURRENT_OBSERVER_PARENT_INVENTORY_SHA256 = "22e406ec1c76b69e7d991689d1c680e616dcd03eeddf62b47b7bb9a0f2c30c2c"
 PARENT_EXECUTOR_BYTES = 61402
 ROLLOUT = ROOT / "ops/native_fabric/quota_continuity/rollout"
 EXECUTOR = "ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py"
@@ -113,7 +115,7 @@ def test_exact107_current_bytes_and_historical_parent_are_separate():
     current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
     parent = b.before_sparse_index_advice(current)
     parent_raw = (json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()
-    assert hashlib.sha256(parent_raw).hexdigest() == b.SPARSE_INDEX_ADVICE_PARENT_SHA256
+    assert hashlib.sha256(parent_raw).hexdigest() == CURRENT_OBSERVER_PARENT_MANIFEST_SHA256
     assert len(parent) == len(current) == 107
     assert {k for k in current if current[k] != parent[k]} == {"ext/remote_sub_exec.py"}
     original = dict(current)
@@ -132,15 +134,18 @@ def test_exact107_current_bytes_and_historical_parent_are_separate():
     assert row["bytes"] == len((ROOT / EXECUTOR).read_bytes())
     row["sha256"] = b.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
     row["bytes"] = PARENT_EXECUTOR_BYTES
-    assert hashlib.sha256((json.dumps(new, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == PARENT_INVENTORY_SHA256
+    assert hashlib.sha256((json.dumps(new, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == CURRENT_OBSERVER_PARENT_INVENTORY_SHA256
 
 
-@pytest.mark.parametrize("drift", ["extra", "missing", "foreign", "old-broker", "old-host", "executor-byte"])
-def test_mixed_or_foreign107_never_reuses_advice_qualification(drift):
+@pytest.mark.parametrize("observer", ['42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18', 'c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a'])
+@pytest.mark.parametrize("drift", ["extra", "missing", "foreign", "foreign-observer", "old-broker", "old-host", "executor-byte"])
+def test_mixed_or_foreign107_never_reuses_advice_qualification(drift, observer):
     b = builder(); current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    current["ext/current_source_observation.py"] = observer
     if drift == "extra": current["ext/foreign.py"] = "f" * 64
     elif drift == "missing": del current["pool"]
     elif drift == "foreign": current["pool"] = "f" * 64
+    elif drift == "foreign-observer": current["ext/current_source_observation.py"] = "f" * 64
     elif drift == "old-broker": current["ext/lease_broker.py"] = b.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
     elif drift == "old-host": current.update(b.HOST_PULL_INTEGRITY_PREIMAGES)
     else: current["ext/remote_sub_exec.py"] = hashlib.sha256((ROOT / EXECUTOR).read_bytes() + b"\n").hexdigest()
@@ -156,3 +161,25 @@ def test_new_forward_proof_rejects_unrelated_byte_drift(tmp_path, monkeypatch):
         return raw + b"\n# foreign byte\n" if path == source else raw
     monkeypatch.setattr(Path, "read_bytes", drift)
     with pytest.raises(AssertionError): composed._composition(tmp_path)
+
+@pytest.mark.parametrize("observer,parent_sha,inventory_sha,observer_row", [('42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18', '45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18', 'fc3347a3633cd9127e93a77d23e6b60eab4b8dddad632f87dd7dad5a57886dc5', {'bytes': 112091, 'installed_preimage_sha256': None, 'sha256': '42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18', 'source': 'candidate/current_source_observation.py'}), ('c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a', '2c395c2a259e1027b5fe9243667ee0cd2dfc66c1cdc055dc19897950e91371a3', '22e406ec1c76b69e7d991689d1c680e616dcd03eeddf62b47b7bb9a0f2c30c2c', {'bytes': 112986, 'installed_preimage_sha256': None, 'sha256': 'c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a', 'source': 'candidate/current_source_observation.py'})])
+def test_both_observer_advice_histories_remain_exact(observer, parent_sha, inventory_sha, observer_row):
+    b = builder()
+    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    current["ext/current_source_observation.py"] = observer
+    original = dict(current)
+    parent = b.before_sparse_index_advice(current)
+    assert hashlib.sha256((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == parent_sha
+    assert {key for key in current if current[key] != parent[key]} == {"ext/remote_sub_exec.py"}
+    assert parent["ext/current_source_observation.py"] == observer
+    assert b.before_sparse_index_advice(parent) == parent
+    capture = {name: current["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    b.validate_go_base_manifest(current, capture)
+    b.validate_go_base_manifest(parent, capture)
+    assert current == original
+    inventory = json.loads((ROLLOUT / "native-source-inventory.json").read_bytes())
+    inventory["files"]["ext/current_source_observation.py"] = dict(observer_row)
+    row = inventory["files"]["ext/remote_sub_exec.py"]
+    row["sha256"] = b.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+    row["bytes"] = PARENT_EXECUTOR_BYTES
+    assert hashlib.sha256((json.dumps(inventory, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == inventory_sha

@@ -44,14 +44,18 @@ import os
 import platform
 import re
 import selectors
+import select
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 SCHEMA = "mastermind.worker_environment/v1"
 
@@ -920,18 +924,93 @@ def _display_subset_path(root: Path, subset: str) -> str:
     return relative.as_posix()
 
 
-def _stream_gate(argv: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Tee the original gate's two streams without hiding progress until exit.
+class _GateInterrupted(BaseException):
+    def __init__(self, signum: int):
+        super().__init__(f"gate interrupted by signal {signum}")
+        self.signum = signum
 
-    Drain both pipes together so either can exceed the OS pipe capacity. Keep
-    stdout and stderr separate: the receipt parser deliberately prefers a
-    stdout count, including zero, over unrelated stderr output. An interrupted
-    or failed observation raises before a completed gate receipt is written.
-    """
+
+_CONTROLLER_CLEANUP_SECONDS = 10.0
+
+
+@contextmanager
+def _gate_output_writer(destination, check_interrupt: Callable[[], None] | None):
+    """Keep descriptor-backed CLI output cancellable under pipe backpressure."""
+    def cooperative(text):
+        if check_interrupt is not None:
+            check_interrupt()
+        destination.write(text)
+        destination.flush()
+        if check_interrupt is not None:
+            check_interrupt()
+
+    if check_interrupt is None:
+        yield cooperative
+        return
+    try:
+        descriptor = destination.fileno()
+    except (AttributeError, io.UnsupportedOperation):
+        # Custom in-process observers have only their own cooperative contract.
+        yield cooperative
+        return
+    was_blocking = os.get_blocking(descriptor)
+
+    def writable():
+        while True:
+            check_interrupt()
+            try:
+                _, ready, _ = select.select([], [descriptor], [], 0.1)
+            except InterruptedError:
+                continue
+            if ready:
+                return
+
+    def forward(text):
+        remaining = memoryview(text.encode(
+            getattr(destination, "encoding", None) or "utf-8",
+            getattr(destination, "errors", None) or "strict",
+        ))
+        while remaining:
+            check_interrupt()
+            try:
+                count = os.write(descriptor, remaining)
+            except BlockingIOError:
+                writable()
+                continue
+            except InterruptedError:
+                continue
+            if count <= 0:
+                raise OSError("gate output made no progress")
+            remaining = remaining[count:]
+
+    try:
+        os.set_blocking(descriptor, False)
+        # Preserve any text buffered before the gate without a blocking flush.
+        while True:
+            check_interrupt()
+            try:
+                destination.flush()
+                break
+            except BlockingIOError:
+                writable()
+        yield forward
+    finally:
+        prior_failure = sys.exc_info()[1]
+        try:
+            os.set_blocking(descriptor, was_blocking)
+        except OSError:
+            if prior_failure is None:
+                raise
+            prior_failure.add_note("rwe_env gate: output flags restoration failed")
+
+
+def _observe_gate(
+    argv: Sequence[str], process: subprocess.Popen[str], *,
+    check_interrupt: Callable[[], None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Drain and forward both original streams, retaining their separate text."""
     captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
-    with subprocess.Popen(
-        list(argv), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    ) as process, selectors.DefaultSelector() as pending:
+    with ExitStack() as outputs, selectors.DefaultSelector() as pending:
         for name, stream, destination in (
             ("stdout", process.stdout, sys.stdout),
             ("stderr", process.stderr, sys.stderr),
@@ -940,35 +1019,205 @@ def _stream_gate(argv: Sequence[str], *, cwd: Path) -> subprocess.CompletedProce
             decoder = io.IncrementalNewlineDecoder(
                 codecs.getincrementaldecoder(stream.encoding)(errors=stream.errors), translate=True,
             )
-            pending.register(stream, selectors.EVENT_READ, (name, destination, decoder))
-        try:
-            while pending.get_map():
-                for key, _ in pending.select():
-                    name, destination, decoder = key.data
-                    chunk = os.read(key.fd, 65536)
-                    text = decoder.decode(chunk, final=not chunk)
-                    if text:
-                        captured[name].append(text)
-                        destination.write(text)
-                        destination.flush()
-                    if not chunk:
-                        pending.unregister(key.fileobj)
+            forward = outputs.enter_context(_gate_output_writer(destination, check_interrupt))
+            pending.register(stream, selectors.EVENT_READ, (name, forward, decoder))
+        while pending.get_map():
+            if check_interrupt is not None:
+                check_interrupt()
+            ready = pending.select(timeout=0.1) if check_interrupt is not None else pending.select()
+            if check_interrupt is not None:
+                check_interrupt()
+            for key, _ in ready:
+                name, forward, decoder = key.data
+                chunk = os.read(key.fd, 65536)
+                text = decoder.decode(chunk, final=not chunk)
+                if text:
+                    captured[name].append(text)
+                    forward(text)
+                    if check_interrupt is not None:
+                        check_interrupt()
+                if not chunk:
+                    pending.unregister(key.fileobj)
+        if check_interrupt is None:
             returncode = process.wait()
-        except BaseException:
-            # This wrapper owns only this gate child. Never report an
-            # interrupted read or a partial capture as a completed test run.
-            if process.poll() is None:
-                process.kill()
-            process.wait()
-            raise
+        else:
+            while True:
+                check_interrupt()
+                try:
+                    returncode = process.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
     return subprocess.CompletedProcess(
         list(argv), returncode, "".join(captured["stdout"]), "".join(captured["stderr"]),
     )
 
 
+def _stop_gate_controller(process: subprocess.Popen[str]) -> bool:
+    """Allow the incumbent controller to drain its own independent child groups.
+
+    This adapter owns only the controller. A forced controller kill or a failed
+    drain is unconfirmed cleanup, never proof that independent pytest sessions stopped.
+    """
+    deadline = time.monotonic() + _CONTROLLER_CLEANUP_SECONDS
+    drain_deadline = deadline - min(1.0, _CONTROLLER_CLEANUP_SECONDS / 2)
+    healthy = True
+    complete = False
+    signal_unavailable = False
+    descriptors = set()
+    try:
+        if process.poll() is None:
+            try:
+                process.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                signal_unavailable = True
+            except OSError:
+                # Observe/reap only after refusal; never retry or escalate the
+                # same controller identity through the forced-kill fallback.
+                signal_unavailable = True
+                healthy = False
+        for stream in (process.stdout, process.stderr):
+            try:
+                if stream is not None and not stream.closed:
+                    descriptors.add(stream.fileno())
+            except Exception:
+                healthy = False
+        while (descriptors or process.poll() is None) and time.monotonic() < drain_deadline:
+            remaining = max(0.0, drain_deadline - time.monotonic())
+            if descriptors:
+                try:
+                    ready, _, _ = select.select(list(descriptors), [], [], min(0.1, remaining))
+                except InterruptedError:
+                    continue
+                except Exception:
+                    # A broken observer must not skip the controller's grace
+                    # or bounded reap. No completion is claimed for this drain.
+                    healthy = False
+                    descriptors.clear()
+                    continue
+                for descriptor in ready:
+                    try:
+                        chunk = os.read(descriptor, 65536)
+                    except InterruptedError:
+                        continue
+                    except Exception:
+                        healthy = False
+                        descriptors.remove(descriptor)
+                        continue
+                    if not chunk:
+                        descriptors.remove(descriptor)
+            else:
+                try:
+                    process.wait(timeout=min(0.1, remaining))
+                except subprocess.TimeoutExpired:
+                    pass
+        complete = healthy and not descriptors and process.poll() in (0, 128 + signal.SIGTERM)
+    finally:
+        if process.poll() is None:
+            if not signal_unavailable:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    healthy = False
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                pass
+    return complete
+
+
+def _stream_supervised_gate(argv: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Forward cancellation to the existing scheduler before reaping it."""
+    if threading.current_thread() is not threading.main_thread():
+        raise EnvError("supervised gate requires the main thread before launch")
+    received_signal: int | None = None
+    previous_handlers = {}
+    process = None
+    failure = None
+    close_failure = None
+
+    def interrupt(signum, _frame):
+        nonlocal received_signal
+        # Record only: never throw through Popen's handle registration, an
+        # observer's internal exception handler, or the controller's cleanup.
+        if received_signal is None:
+            received_signal = signum
+
+    def check_interrupt():
+        if received_signal is not None:
+            raise _GateInterrupted(received_signal)
+
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.signal(signum, interrupt)
+        check_interrupt()
+        process = subprocess.Popen(
+            list(argv), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        check_interrupt()
+        completed = _observe_gate(argv, process, check_interrupt=check_interrupt)
+        check_interrupt()
+    except BaseException as error:
+        failure = error
+        if process is not None:
+            try:
+                confirmed = _stop_gate_controller(process)
+            except Exception:
+                confirmed = False
+            if not confirmed:
+                failure.add_note("rwe_env gate: controller cleanup unconfirmed")
+        raise
+    finally:
+        try:
+            if process is not None:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception as error:
+                            if close_failure is None:
+                                close_failure = error
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+        if failure is not None and close_failure is not None:
+            failure.add_note("rwe_env gate: stream close failed during cleanup")
+    if close_failure is not None:
+        raise close_failure
+    # A signal during normal stream closure still prevents a receipt.
+    check_interrupt()
+    return completed
+
+
+def _stream_gate(
+    argv: Sequence[str], *, cwd: Path, supervised_controller: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Expose original progress; an interrupted observation cannot prove a gate."""
+    if supervised_controller:
+        return _stream_supervised_gate(argv, cwd=cwd)
+    with subprocess.Popen(
+        list(argv), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) as process:
+        try:
+            return _observe_gate(argv, process)
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            raise
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve() if args.root else repo_root()
     shard_index = getattr(args, "shard_index", None)
+    processes = getattr(args, "processes", 0)
+    if (type(processes) is not int or processes not in (0, 4)
+            or (processes and (shard_index is None or args.subset is not None))):
+        print("rwe_env gate refused: processes must be 0 or 4, and 4 requires one canonical shard",
+              file=sys.stderr)
+        return 2
     if shard_index is not None and (
         type(shard_index) is not int or shard_index not in range(6) or args.subset is not None
     ):
@@ -1035,9 +1284,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
     elif shard_index is not None:
         display_python = "<env>/bin/python"
         suffix = ["-u", "-m", "scripts.ci_parallel_shard", "--jobs", "6", "--index", str(shard_index)]
+        if processes:
+            suffix.extend(("--processes", str(processes)))
         argv = [str(venv_python), *suffix]
         display_argv = [display_python, *suffix]
-        completed = _stream_gate(argv, cwd=root)
+        completed = (_stream_gate(argv, cwd=root, supervised_controller=True) if processes
+                     else _stream_gate(argv, cwd=root))
     else:
         display_python = "<env>/bin/python"
         argv = [str(venv_python), "-u", str(root / GATE_SCRIPT_RELATIVE), "--progress"]
@@ -1063,16 +1315,23 @@ def cmd_gate(args: argparse.Namespace) -> int:
     if shard_index is not None:
         records = [line for line in completed.stdout.splitlines()
                    if line.startswith("parallel_shard=")]
+        # Bind the one declaration to the exact requested mode. Serial keeps
+        # both incumbent forms; it cannot qualify a four-child request.
+        execution = r" workers=0 processes=4" if processes else r"(?: workers=0)?"
         match = re.fullmatch(
-            r"parallel_shard=(\d+)/6 modules=(\d+) included_sha256=([0-9a-f]{64})",
+            r"parallel_shard=(\d+)/6 modules=(\d+) included_sha256=([0-9a-f]{64})" + execution,
             records[0],
         ) if len(records) == 1 else None
         valid = (match is not None and int(match[1]) == shard_index + 1
-                 and discovered is not None and 0 < int(match[2]) <= discovered)
+                 and discovered is not None and max(1, processes) <= int(match[2]) <= discovered)
         gate_proof.update(scope="canonical_shard", index=shard_index, jobs=6,
                           selected_modules=int(match[2]) if valid else None,
                           included_sha256=match[3] if valid else None,
                           plan_observation="matched" if valid else "invalid")
+        if processes:
+            gate_proof["requested_processes"] = processes
+            if valid:
+                gate_proof.update(workers=0, processes=processes)
         observation_failed = not valid
 
     # Build (or rebuild) the receipt so `gate` works standalone after `realize`.
@@ -1402,6 +1661,8 @@ def build_parser() -> argparse.ArgumentParser:
     gate_scope = p_gate.add_mutually_exclusive_group()
     gate_scope.add_argument("--subset", default=None)
     gate_scope.add_argument("--shard-index", type=int, choices=range(6), default=None)
+    p_gate.add_argument("--processes", type=int, choices=(0, 4), default=0,
+                        help="four precollection children for one shard; zero retains serial execution")
     p_gate.add_argument("--root", default=None)
     p_gate.set_defaults(func=cmd_gate)
 
@@ -1418,11 +1679,45 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _report_gate_interruption(error: _GateInterrupted) -> None:
+    """Make one nonblocking best-effort write; never buffer terminal diagnostics."""
+    notes = getattr(error, "__notes__", ())
+    lines = [f"rwe_env gate interrupted by signal {error.signum}"]
+    for note in (
+        "rwe_env gate: controller cleanup unconfirmed",
+        "rwe_env gate: stream close failed during cleanup",
+        "rwe_env gate: output flags restoration failed",
+    ):
+        if note in notes:
+            lines.append(note)
+    payload = ("\n".join(lines) + "\n").encode("ascii")
+    try:
+        descriptor = sys.stderr.fileno()
+        was_blocking = os.get_blocking(descriptor)
+    except Exception:
+        # An arbitrary descriptorless observer has no bounded write contract.
+        return
+    try:
+        os.set_blocking(descriptor, False)
+        os.write(descriptor, payload)
+    except Exception:
+        # A closed/full output sink must not replace the first signal's exit.
+        pass
+    finally:
+        try:
+            os.set_blocking(descriptor, was_blocking)
+        except Exception:
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         return int(args.func(args))
+    except _GateInterrupted as exc:
+        _report_gate_interruption(exc)
+        return 128 + exc.signum
     except EnvError as exc:
         # Defense in depth: individual subcommands already catch the
         # EnvError cases they anticipate and print a clean refusal message.

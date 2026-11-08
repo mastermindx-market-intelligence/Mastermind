@@ -3908,3 +3908,33 @@ def test_cr1a_gather_has_no_raw_event_or_tree_election_path() -> None:
     assert "EXECUTIVE_TERMINAL_RETURN_APPLIED" not in gather
     assert "SELECT * FROM attempts" not in gather
     assert "SELECT * FROM jobs" not in gather
+
+@pytest.mark.parametrize("explicit", [False, True], ids=["resolved-default", "explicit-root"])
+def test_gather_selects_root_at_its_io_boundary(monkeypatch, tmp_path, explicit):
+    # A symlinked module filename must retain the canonical default root.
+    # Explicit callers must not consult that default at all.
+    original_file = Path(ccr.__file__)
+    expected_default = original_file.resolve().parent.parent
+    linked_file = tmp_path / "linked-control-room.py"
+    linked_file.symlink_to(original_file)
+    monkeypatch.setattr(ccr, "__file__", str(linked_file))
+    explicit_root = tmp_path / "explicit-root"
+    selected = []
+
+    class RootObserved(BaseException):
+        pass
+
+    def stop_before_collecting(**kwargs):
+        selected.append(kwargs["repo_root"])
+        raise RootObserved
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", stop_before_collecting)
+    if explicit:
+        def refuse_default_resolution(*args, **kwargs):
+            raise AssertionError("an explicit root must bypass default resolution")
+        monkeypatch.setattr(Path, "resolve", refuse_default_resolution)
+    with pytest.raises(RootObserved):
+        ccr.build_control_room(
+            repo_root=explicit_root if explicit else None,
+            environ={}, now="2026-11-07T00:00:00Z")
+    assert selected == [explicit_root if explicit else expected_default]

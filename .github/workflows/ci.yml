@@ -140,6 +140,411 @@ jobs:
           npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
           npm --prefix app/mastermind_os run typecheck
 
+  # Required source qualifications overlap the canonical pytest matrix.
+  # Their unchanged commands and pinned fixtures remain mandatory at test.
+  source_qualification:
+    name: Source qualification
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
+
+      # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
+      - name: Checkout pinned Macro engine
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Fast deterministic release-source checks before expensive hosted work.
+      # Reuse the incumbent strict EVAL changed-path and fixed-role package
+      # tests without replacing or excluding any discovery-first shard.
+      # These run for every shard, with the same immutable checkout; failures
+      # stop the shard early and still fail the original protected test fan-in.
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
+      - name: Verify Paper direct pinned MCP SDK
+        run: |
+          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
+          python -m venv "$PAPER_MCP_VENV"
+          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
+            -r integrations/paper_desktop/requirements-mcp.txt
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
+
+      # Exercise the guarded Paper Studio prepare action in hosted CI.
+      # These Node tests are not included in the canonical pytest shard plan.
+      - name: Verify Paper Studio prepare guard
+        working-directory: integrations/studio_direct_mcp
+        run: node --test paper-design.test.mjs
+
+      - name: Compile source
+        run: >-
+          python -m compileall -q
+          app bot brain bridge common control_plane data_layer integrations loop
+          portfolio scripts
+
+      - name: Validate shell scripts
+        run: |
+          find scripts ops/executive_os -type f -name '*.sh' -print0 |
+            xargs -0 -n1 bash -n
+
+      - name: Verify native application admission unittest contracts
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite = unittest.TestSuite()
+          for pattern in (
+              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
+              "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_bailian_application_handler_composition.py",
+              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
+              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
+          ):
+              suite.addTests(unittest.defaultTestLoader.discover(
+                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PYTEST
+
+      # A root-only finite owner must have positive proof, not skipped tests.
+      # The container receives only tracked public source and disposable tmpfs.
+      - name: Verify closed application transport in isolated root fixtures
+        run: |
+          set -euo pipefail
+          application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
+          trap 'rm -rf "$application_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$application_transport_source"
+          # The isolated root has no DAC override; expose only this public archive.
+          chmod 0755 "$application_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile \
+            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
+            mastermind-application-transport:${{ github.sha }}
+
+      # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
+      # This remains mandatory at the final gate, including merge_group and reuse.
+      - name: Checkout paired Brain production owner fixture
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: f0375acf4ba076718e7cb420ed28ab61fb0a4f26
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Verify actual Brain Fabric and production inference composition
+        env:
+          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_BROWSER: "1"
+        run: |
+          set -euo pipefail
+          brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
+          git archive HEAD brain bot common app control_plane portfolio \
+            scripts/translate_all.py \
+            tests/integration/test_production_inference_composition.py \
+            tests/integration/test_fabric_inference_composition.py \
+            tests/integration/test_fabric_translation_composition.py \
+            tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_buffered_delivery.py \
+            tests/integration/test_fabric_text_native_application.py \
+            tests/integration/test_fabric_chat_browser.py \
+            ops/native_fabric/quota_continuity \
+            ops/native_fabric/experiential_proxy/gateway.py |
+            tar -x -C "$brain_composition_root"
+          mkdir -p "$brain_composition_root/vendor/macro"
+          # Isolate synthetic owner configuration in a copy of the exact source.
+          cp -R "$GITHUB_WORKSPACE/.ci-production-macro/engine" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/lib" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/config" "$brain_composition_root/vendor/macro/"
+          touch "$brain_composition_root/vendor/macro/.fabric-composition-fixture"
+          export MM_FABRIC_FIXTURE_ROOT="$brain_composition_root/vendor/macro"
+          cd "$brain_composition_root"
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p 'test_*inference_composition.py' -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_buffered_delivery.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_native_application.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_translation_composition.py -v
+          python -m pip install --disable-pip-version-check playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_browser.py -v
+
+
+  source_qualification_fabric:
+    name: Source qualification Fabric
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
+
+      # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
+      - name: Checkout pinned Macro engine
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Fast deterministic release-source checks before expensive hosted work.
+      # Reuse the incumbent strict EVAL changed-path and fixed-role package
+      # tests without replacing or excluding any discovery-first shard.
+      # These run for every shard, with the same immutable checkout; failures
+      # stop the shard early and still fail the original protected test fan-in.
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
+      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
+        working-directory: integrations/studio_direct_mcp
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          python -m unittest discover -s . -p 'private_service*test.py'
+          python -m unittest discover -s . -p 'control_bundle*test.py'
+
+
+  source_qualification_native:
+    name: Source qualification native
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
+
+      # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
+      - name: Checkout pinned Macro engine
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Fast deterministic release-source checks before expensive hosted work.
+      # Reuse the incumbent strict EVAL changed-path and fixed-role package
+      # tests without replacing or excluding any discovery-first shard.
+      # These run for every shard, with the same immutable checkout; failures
+      # stop the shard early and still fail the original protected test fan-in.
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
+      - name: Verify native application admission and dispatch custody
+        run: |
+          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
+          trap 'rm -rf "$native_rollout_test_root"' EXIT
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            -p scripts.ci_xdist_guard -n 4 --dist load --max-worker-restart=0 --durations=20 \
+            --junitxml="$native_rollout_test_root/native-proof.xml" \
+            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
+            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
+            tests/test_native_launcher_successor_transition.py
+          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
@@ -154,8 +559,7 @@ jobs:
       contents: read
       actions: read
     runs-on: ubuntu-latest
-    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
-    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
+    # Keep the existing full-suite budget while qualifying the new DAG.
     # 60 minutes stays inside the merge queue's 100-minute check response limit.
     timeout-minutes: 60
     strategy:
@@ -240,49 +644,6 @@ jobs:
           tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
           tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
 
-      # Non-pytest qualification is required once per immutable CI checkout.
-      # Failure of shard 0 also fails the exact required fan-in status.
-      - name: Verify Paper direct pinned MCP SDK
-        if: matrix.index == 0
-        run: |
-          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
-          python -m venv "$PAPER_MCP_VENV"
-          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
-            -r integrations/paper_desktop/requirements-mcp.txt
-          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
-          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
-
-      # Exercise the guarded Paper Studio prepare action in hosted CI.
-      # These Node tests are not included in the canonical pytest shard plan.
-      - name: Verify Paper Studio prepare guard
-        if: matrix.index == 0
-        working-directory: integrations/studio_direct_mcp
-        run: node --test paper-design.test.mjs
-
-      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
-        if: matrix.index == 0
-        working-directory: integrations/studio_direct_mcp
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
-          python -m unittest discover -s . -p 'private_service*test.py'
-          python -m unittest discover -s . -p 'control_bundle*test.py'
-
-      - name: Compile source
-        if: matrix.index == 0
-        run: >-
-          python -m compileall -q
-          app bot brain bridge common control_plane data_layer integrations loop
-          portfolio scripts
-
-      - name: Validate shell scripts
-        if: matrix.index == 0
-        run: |
-          find scripts ops/executive_os -type f -name '*.sh' -print0 |
-            xargs -0 -n1 bash -n
-
-      # Supplementary fast discrimination for the three observed Linux
-      # initializer failures. A green matrix still requires every full shard.
       - name: H1 initializer Linux fast preflight
         if: matrix.index == 2
         run: >-
@@ -331,126 +692,6 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
-      - name: Verify native application admission and dispatch custody
-        if: matrix.index == 0
-        run: |
-          python - <<'PYTEST'
-          import unittest
-          suite = unittest.TestSuite()
-          for pattern in (
-              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
-              "test_application_http_admission.py", "test_application_http_realm_projection.py",
-              "test_bailian_application_handler_composition.py",
-              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
-              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
-          ):
-              suite.addTests(unittest.defaultTestLoader.discover(
-                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          raise SystemExit(not result.wasSuccessful())
-          PYTEST
-          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
-          trap 'rm -rf "$native_rollout_test_root"' EXIT
-          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
-            --junitxml="$native_rollout_test_root/native-proof.xml" \
-            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
-            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
-            tests/test_native_launcher_successor_transition.py
-          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
-          import json, sys, xml.etree.ElementTree as ET
-          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
-          totals = {key: sum(int(s.get(key, "0")) for s in suites)
-                    for key in ("tests", "failures", "errors", "skipped")}
-          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
-          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
-          PROOF
-
-      # A root-only finite owner must have positive proof, not skipped tests.
-      # The container receives only tracked public source and disposable tmpfs.
-      - name: Verify closed application transport in isolated root fixtures
-        if: matrix.index == 0
-        run: |
-          set -euo pipefail
-          application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
-          trap 'rm -rf "$application_transport_source"' EXIT
-          git archive --format=tar HEAD | tar -x -C "$application_transport_source"
-          # The isolated root has no DAC override; expose only this public archive.
-          chmod 0755 "$application_transport_source"
-          docker build --file tests/application_tunnel_ci/Dockerfile \
-            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
-          docker run --rm --network=none --cap-drop=ALL \
-            --security-opt=no-new-privileges --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
-            --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
-            --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
-            mastermind-application-transport:${{ github.sha }}
-
-      # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
-      # This executes before any full-suite reuse decision, including merge_group.
-      - name: Checkout paired Brain production owner fixture
-        if: matrix.index == 0
-        uses: actions/checkout@v4
-        with:
-          repository: mastermindx-market-intelligence/macro
-          ref: f0375acf4ba076718e7cb420ed28ab61fb0a4f26
-          path: .ci-production-macro
-          sparse-checkout: |
-            engine
-            lib
-            config
-          persist-credentials: false
-          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
-      - name: Verify actual Brain Fabric and production inference composition
-        if: matrix.index == 0
-        env:
-          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
-          MM_REQUIRE_FABRIC_COMPOSITION: "1"
-          MM_REQUIRE_FABRIC_BROWSER: "1"
-        run: |
-          set -euo pipefail
-          brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
-          trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
-          git archive HEAD brain bot common app control_plane portfolio \
-            scripts/translate_all.py \
-            tests/integration/test_production_inference_composition.py \
-            tests/integration/test_fabric_inference_composition.py \
-            tests/integration/test_fabric_translation_composition.py \
-            tests/integration/test_fabric_chat_inference_composition.py \
-            tests/integration/test_fabric_chat_buffered_delivery.py \
-            tests/integration/test_fabric_text_native_application.py \
-            tests/integration/test_fabric_chat_browser.py \
-            ops/native_fabric/quota_continuity \
-            ops/native_fabric/experiential_proxy/gateway.py |
-            tar -x -C "$brain_composition_root"
-          mkdir -p "$brain_composition_root/vendor/macro"
-          # Isolate synthetic owner configuration in a copy of the exact source.
-          cp -R "$GITHUB_WORKSPACE/.ci-production-macro/engine" \
-            "$GITHUB_WORKSPACE/.ci-production-macro/lib" \
-            "$GITHUB_WORKSPACE/.ci-production-macro/config" "$brain_composition_root/vendor/macro/"
-          touch "$brain_composition_root/vendor/macro/.fabric-composition-fixture"
-          export MM_FABRIC_FIXTURE_ROOT="$brain_composition_root/vendor/macro"
-          cd "$brain_composition_root"
-          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p 'test_*inference_composition.py' -v
-          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_fabric_chat_buffered_delivery.py -v
-          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_fabric_text_native_application.py -v
-          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_fabric_translation_composition.py -v
-          python -m pip install --disable-pip-version-check playwright==1.62.0
-          python -m playwright install --with-deps chromium
-          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_fabric_chat_browser.py -v
-
       - name: Prepare fixed test diagnostics
         run: |
           diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
@@ -475,7 +716,7 @@ jobs:
         # for setup/cleanup opportunity, not a guaranteed future bound.
         # Slow setup or runner loss can still prevent artifact delivery.
         timeout-minutes: 45
-        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
+        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -483,7 +724,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-fixed-diagnostics-${{ matrix.index }}
-          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-0/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-1/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-2/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-3/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
@@ -493,7 +738,7 @@ jobs:
   # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
     name: test
-    needs: [pr_scope, pr_fast, pytest_shards]
+    needs: [pr_scope, pr_fast, pytest_shards, source_qualification, source_qualification_fabric, source_qualification_native]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -512,6 +757,9 @@ jobs:
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
+          QUALIFICATION_STATUS: ${{ needs.source_qualification.result }}
+          FABRIC_QUALIFICATION_STATUS: ${{ needs.source_qualification_fabric.result }}
+          NATIVE_QUALIFICATION_STATUS: ${{ needs.source_qualification_native.result }}
         run: |
           set -euo pipefail
           if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then
@@ -521,13 +769,13 @@ jobs:
             fi
             case "$PR_SCOPE_MODE" in
               full)
-                if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
-                  echo "critical/unqualified source must pass all six pytest shards"
+                if [ "$SHARDS_STATUS" != success ] || [ "$QUALIFICATION_STATUS" != success ] || [ "$FABRIC_QUALIFICATION_STATUS" != success ] || [ "$NATIVE_QUALIFICATION_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
+                  echo "critical/unqualified source must pass all six pytest shards and all three source qualification lanes"
                   exit 1
                 fi
                 ;;
               fast|smoke)
-                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then
+                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUALIFICATION_STATUS" != skipped ] || [ "$FABRIC_QUALIFICATION_STATUS" != skipped ] || [ "$NATIVE_QUALIFICATION_STATUS" != skipped ]; then
                   echo "eligible source must pass its exact fast/smoke check"
                   exit 1
                 fi
@@ -539,9 +787,10 @@ jobs:
             esac
           else
             # Protected pushes and deliberate manual CI always run all shards.
-            if [ "$SHARDS_STATUS" != success ] ||
+            if [ "$SHARDS_STATUS" != success ] || [ "$QUALIFICATION_STATUS" != success ] ||
+             [ "$FABRIC_QUALIFICATION_STATUS" != success ] || [ "$NATIVE_QUALIFICATION_STATUS" != success ] ||
                [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
-              echo "integration/release CI must pass the full matrix"
+              echo "integration/release CI must pass the full matrix and all three source qualification lanes"
               exit 1
             fi
           fi

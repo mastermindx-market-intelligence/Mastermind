@@ -43,11 +43,38 @@ def bootstrap(tmp_path,monkeypatch):
     # Only the native Root ownership/ancestor mode/ACL premise is simulated.
     # The actual opened FD, named identities, bytes, import finder and compile run.
     raw_fstat=os.fstat;raw_stat=os.stat
+    # The fixture simulates an immutable, root-owned source ancestry while
+    # running under pytest's shared and actively changing temp directory.
+    # Freeze volatile directory metadata of ancestors ABOVE this test's tmp_path;
+    # inside tmp_path every held directory and file retains its real ctime,
+    # mtime, inode, mode, and bytes so mutation/refusal tests stay effective.
+    upstream_times={}
+    for ancestor in tmp_path.parents:
+        info=raw_stat(ancestor)
+        upstream_times[(info.st_dev,info.st_ino)]=(info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_nlink)
     class RootInfo:
         def __init__(self,value):self.value=value
         st_uid=0;st_gid=0
         @property
         def st_mode(self):return self.value.st_mode&~0o022 if stat.S_ISDIR(self.value.st_mode) else self.value.st_mode
+        def stable_ancestor(self):
+            return upstream_times.get((self.value.st_dev,self.value.st_ino))
+        @property
+        def st_size(self):
+            saved=self.stable_ancestor()
+            return saved[0] if saved is not None else self.value.st_size
+        @property
+        def st_mtime_ns(self):
+            saved=self.stable_ancestor()
+            return saved[1] if saved is not None else self.value.st_mtime_ns
+        @property
+        def st_ctime_ns(self):
+            saved=self.stable_ancestor()
+            return saved[2] if saved is not None else self.value.st_ctime_ns
+        @property
+        def st_nlink(self):
+            saved=self.stable_ancestor()
+            return saved[3] if saved is not None else self.value.st_nlink
         def __getattr__(self,key):return getattr(self.value,key)
     monkeypatch.setattr(os,'fstat',lambda fd:RootInfo(raw_fstat(fd)))
     monkeypatch.setattr(os,'stat',lambda *a,**kw:RootInfo(raw_stat(*a,**kw)))

@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 import test_native_generation as fixtures
 
@@ -11,7 +12,9 @@ import test_native_generation as fixtures
 class NativeRuntimeBindingTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.NativeGenerationTests()
+        self.addCleanup(self.fixture.doCleanups)
         self.fixture.setUp()
+        self.addCleanup(self.fixture.tearDown)
         f = self.fixture
         staged = Path(__file__).resolve().parents[1] / "source"
         overlays = Path(__file__).resolve().parents[1] / 'candidate'
@@ -28,9 +31,6 @@ class NativeRuntimeBindingTests(unittest.TestCase):
         (f.ext / "state/remote_sub/proof.log").write_text("dummy evidence\n")
         self.release = f.publish("V1")
         self.here = self.release / "ext"
-
-    def tearDown(self):
-        self.fixture.tearDown()
 
     def child(self, program):
         prefix = ("import sys\nfrom pathlib import Path\n"
@@ -100,6 +100,45 @@ class NativeRuntimeBindingTests(unittest.TestCase):
             "assert delivery.local_file(HERE/'state/remote_sub/proof.log') == b'dummy evidence\\n'\n"
             "with delivery.DirectoryChain(HERE/'state/remote_sub') as chain:\n    chain.verify()\n")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class NativeRuntimeFixtureLifecycleTests(unittest.TestCase):
+    def exercise_nested_case(self, publication_error=None):
+        owner = fixtures.installer.studio_consumer_owner
+        previous = owner.STUDIO_CONSUMER_ROOT
+        self.addCleanup(setattr, owner, "STUDIO_CONSUMER_ROOT", previous)
+        case = NativeRuntimeBindingTests(
+            "test_tampered_declared_alias_fails_closed")
+        result = unittest.TestResult()
+        if publication_error is None:
+            case.run(result)
+        else:
+            with mock.patch.object(fixtures.NativeGenerationTests, "publish",
+                                   side_effect=publication_error):
+                case.run(result)
+        # Drain the disposable probe even when its lifecycle assertion fails.
+        self.addCleanup(case.fixture.doCleanups)
+        if case.fixture.base.exists():
+            self.addCleanup(case.fixture.tearDown)
+        self.assertIs(owner.STUDIO_CONSUMER_ROOT, previous)
+        self.assertFalse(case.fixture.base.exists())
+        return result
+
+    def test_nested_fixture_restores_owner_after_success(self):
+        result = self.exercise_nested_case()
+        self.assertEqual(result.testsRun, 1)
+        self.assertTrue(result.wasSuccessful(), (result.errors, result.failures))
+        self.assertEqual(result.skipped, [])
+
+    def test_nested_fixture_restores_owner_after_setup_failure(self):
+        result = self.exercise_nested_case(
+            RuntimeError("controlled native runtime fixture publication failure"))
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 1)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.skipped, [])
+        self.assertIn("controlled native runtime fixture publication failure",
+                      result.errors[0][1])
 
 
 if __name__ == "__main__":

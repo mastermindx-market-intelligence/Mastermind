@@ -84,9 +84,9 @@
       "source": "source/current_failed_artifact_evidence.py"
     },
     "ext/current_source_observation.py": {
-      "bytes": 112091,
+      "bytes": 112986,
       "installed_preimage_sha256": null,
-      "sha256": "42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18",
+      "sha256": "c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a",
       "source": "candidate/current_source_observation.py"
     },
     "ext/fabric_client_projection.py": {

@@ -184,8 +184,20 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
                     _, withheld = await host.call(http, token, OBSERVE_TOOL, {})
                     assert withheld["ok"] is False and withheld["data"] is None
                     assert len(calls) == 2
-                    _, empty = await host.call(http, token, OBSERVE_TOOL, {})
-                    assert empty["ok"] is True and empty["data"]["sources"] == []
+                    final_response, empty = await host.call(http, token, OBSERVE_TOOL, {})
+                    error = empty.get("error") if isinstance(empty, dict) else None
+                    code = error.get("code") if isinstance(error, dict) else None
+                    public_codes = {
+                        "not_found", "invalid_input", "authentication_required",
+                        "scope_refused", "scope_changed", "source_unavailable",
+                        "output_too_large",
+                    }
+                    diagnostic = {
+                        "http_status": final_response.status_code,
+                        "error_code": code if isinstance(code, str) and code in public_codes else "OTHER_OR_ABSENT",
+                        "census_calls": len(calls),
+                    }
+                    assert empty["ok"] is True and empty["data"]["sources"] == [], diagnostic
                     assert len(calls) == 2, "withdrawn permission must not re-enter C2"
             assert constructors, "the actual Control factory never composed the installed owner"
 

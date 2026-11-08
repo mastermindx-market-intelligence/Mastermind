@@ -37,6 +37,8 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             assert programs["ok"] and runtime.events.list_events()==before_programs
             _, created = await post(app, "create", {**request,"preview_digest":preview["data"]["preview"]["digest"]}, token, wt)
             assert created["ok"] and created["data"]["state"] == "CREATED", created
+            child_id = created["data"]["locator"]["job_id"]
+            original_dispatch_task = service._dispatch_tasks[child_id]
             from control_plane.fresh_conversation import FreshConversationOwner
             from control_plane.principal_projection import neutral_principal_projection
             raw=calls[-1]["principal"]
@@ -82,11 +84,11 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             turn_selected = {**selected,"turn_key":turn_request["turn_key"]}
             _, read = await post(app,"turn_read",turn_selected,token)
             assert read["ok"] and read["data"]["result"] == second["data"]["result"],(read,diagnostics,service._dispatch_errors)
-            # The original result may be durable before its background job
-            # appends JOB_COMPLETED. Finish that original dispatch before
-            # measuring whether the duplicate itself adds any event.
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            # RECORDED resolves the reply before the original job finishes its
+            # ordinary cleanup. Settle that captured operation before proving
+            # the duplicate request leaves the complete event stream unchanged.
+            await asyncio.wait_for(asyncio.shield(original_dispatch_task), 5)
+            assert child_id not in service._dispatch_errors, service._dispatch_errors
             events = runtime.events.list_events()
             _, repeated = await post(app,"turn",turn_request,token,wt)
             assert repeated["ok"] and repeated["data"]["result"] == second["data"]["result"],repeated
@@ -110,6 +112,79 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
                         stream,ensure_ascii=False,sort_keys=True,indent=2)
         finally:
             await cleanup(service)
+    asyncio.run(run())
+
+
+def test_recorded_duplicate_is_read_only_while_original_finalization_is_pending(tmp_path, rsa_key, monkeypatch):
+    async def run():
+        app, token, wt, service, runtime, request, adapters, calls, sink = await mounted(tmp_path, rsa_key, monkeypatch)
+        finalizer_entered = asyncio.Event()
+        release_finalizer = asyncio.Event()
+        finalizer_calls = []
+        original_dispatch_task = None
+        try:
+            _, preview = await post(app, "preview", request, token, wt)
+            assert preview["ok"], preview
+            _, created = await post(app, "create", {**request, "preview_digest": preview["data"]["preview"]["digest"]}, token, wt)
+            assert created["ok"] and created["data"]["state"] == "CREATED", created
+            locator = created["data"]["locator"]
+            original_dispatch_task = service._dispatch_tasks[locator["job_id"]]
+            supervisor = service.operator_supervisor
+            original_finish = supervisor.finish_retained_native_job
+
+            async def held_finish(retained):
+                assert retained.owner is supervisor
+                assert retained.job.job_id == locator["job_id"]
+                assert retained.session.attempt_id == locator["attempt_id"]
+                finalizer_calls.append(retained)
+                finalizer_entered.set()
+                await asyncio.wait_for(release_finalizer.wait(), 5)
+                return await original_finish(retained)
+
+            monkeypatch.setattr(supervisor, "finish_retained_native_job", held_finish)
+            selected = {key: request[key] for key in ("work_ref", "operation_key")}
+            _, initial = await post(app, "read", selected, token)
+            assert initial["ok"], initial
+            consume_request = {**selected, "initial_digest": initial["data"]["result"]["digest"]}
+            _, consumed = await post(app, "consume", consume_request, token, wt)
+            assert consumed["ok"] and consumed["data"]["state"] == "CONSUMED", consumed
+            turn_request = {**consume_request, "turn_key": "recorded-before-original-finalization", "message": "One bounded original follow-up."}
+            _, second = await post(app, "turn", turn_request, token, wt)
+            assert second["ok"] and second["data"]["state"] == "RECORDED", second
+            await asyncio.wait_for(finalizer_entered.wait(), 5)
+            assert len(finalizer_calls) == 1 and not original_dispatch_task.done()
+            assert locator["job_id"] not in service._dispatch_errors, service._dispatch_errors
+            assert len(runtime.jobs.list_jobs()) == 2 and len(runtime.attempts.list_attempts()) == 1
+            assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
+
+            events = runtime.events.list_events()
+            _, repeated = await post(app, "turn", turn_request, token, wt)
+            assert repeated["ok"] and repeated["data"]["result"] == second["data"]["result"], repeated
+            assert runtime.events.list_events() == events
+            assert not original_dispatch_task.done() and len(finalizer_calls) == 1
+            assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
+            assert len(runtime.jobs.list_jobs()) == 2 and len(runtime.attempts.list_attempts()) == 1
+
+            release_finalizer.set()
+            await asyncio.wait_for(asyncio.shield(original_dispatch_task), 5)
+            assert locator["job_id"] not in service._dispatch_errors, service._dispatch_errors
+            settled_events = runtime.events.list_events()
+            _, settled = await post(app, "read", selected, token)
+            assert settled["ok"] and settled["data"]["state"] == "SETTLED", settled
+            assert settled["data"]["result"] == initial["data"]["result"]
+            _, turn_read = await post(app, "turn_read", {**selected, "turn_key": turn_request["turn_key"]}, token)
+            assert turn_read["ok"] and turn_read["data"]["result"] == second["data"]["result"], turn_read
+            assert runtime.events.list_events() == settled_events
+            assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
+        finally:
+            release_finalizer.set()
+            try:
+                # A failed assertion while the gate is held must drain the
+                # original finalizer before cleanup can cancel its dispatcher.
+                if original_dispatch_task is not None and finalizer_entered.is_set():
+                    await asyncio.wait_for(asyncio.shield(original_dispatch_task), 5)
+            finally:
+                await cleanup(service)
     asyncio.run(run())
 
 

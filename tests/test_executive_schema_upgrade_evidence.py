@@ -170,8 +170,23 @@ def _chain_paths(runtime: Path, backups: Path) -> list:
     return paths
 
 
-def _temp_roots() -> set:
-    return set(Path("/tmp").glob("mastermind-executive-upgrade-evidence-*"))
+def _track_owned_temp_roots(monkeypatch) -> set[Path]:
+    """Track exactly this test's private copies, not other xdist workers.
+
+    The actual reader still creates and removes its own private directories.
+    A scan of shared /tmp can confuse an in-flight unrelated worker with a leak.
+    """
+    owned: set[Path] = set()
+    original = evidence.tempfile.mkdtemp
+
+    def tracked(*args, **kwargs):
+        path = original(*args, **kwargs)
+        if Path(path).name.startswith("mastermind-executive-upgrade-evidence-"):
+            owned.add(Path(path))
+        return path
+
+    monkeypatch.setattr(evidence.tempfile, "mkdtemp", tracked)
+    return owned
 
 
 def _descriptor_count() -> int:
@@ -367,7 +382,7 @@ def test_production_config_gate_is_root_owned_0440(tmp_path, monkeypatch):
 def test_positive_chain_yields_closed_material_and_cleans_temps(tmp_path, monkeypatch):
     runtime, backups, config, release = _build_chain(tmp_path, monkeypatch)
     before = _snapshot(_chain_paths(runtime, backups))
-    temp_roots_before = _temp_roots()
+    owned_temp_roots = _track_owned_temp_roots(monkeypatch)
     with _open_initial(runtime, release) as material:
         assert material.phase == "INITIAL"
         assert material.material["phase"] == "INITIAL"
@@ -443,7 +458,8 @@ def test_positive_chain_yields_closed_material_and_cleans_temps(tmp_path, monkey
         }
     assert not material.source_v5_database.exists()
     assert not material.target_v7_database.exists()
-    assert _temp_roots() == temp_roots_before
+    assert owned_temp_roots, "positive evidence reading must create private copies"
+    assert not any(path.exists() for path in owned_temp_roots)
     assert _snapshot(_chain_paths(runtime, backups)) == before
 
 
@@ -908,7 +924,7 @@ def test_initial_opening_never_mutates_or_relaxes_originals(tmp_path, monkeypatc
 def test_failure_paths_close_descriptors_and_remove_private_temps(
     tmp_path, monkeypatch
 ):
-    temp_roots_before = _temp_roots()
+    owned_temp_roots = _track_owned_temp_roots(monkeypatch)
     runtime, backups, config, release = _build_chain(tmp_path, monkeypatch)
     _receipt_path(runtime, "C67").unlink()
     before = _descriptor_count()
@@ -916,7 +932,7 @@ def test_failure_paths_close_descriptors_and_remove_private_temps(
         with _open_initial(runtime, release):
             pass
     assert _descriptor_count() <= before + 2
-    assert _temp_roots() == temp_roots_before
+    assert not any(path.exists() for path in owned_temp_roots)
 
     runtime2, backups2, config2, release2 = _build_chain(tmp_path, monkeypatch)
 
@@ -929,7 +945,8 @@ def test_failure_paths_close_descriptors_and_remove_private_temps(
         with _open_initial(runtime2, release2):
             pass
     assert _descriptor_count() <= before2 + 2
-    assert _temp_roots() == temp_roots_before
+    assert owned_temp_roots, "mid-copy failure must prove private temp cleanup"
+    assert not any(path.exists() for path in owned_temp_roots)
 
 
 # Native principal integration regressions, after the retained raw Fabric

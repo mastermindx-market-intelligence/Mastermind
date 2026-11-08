@@ -26,7 +26,10 @@ from integrations.hermes_runtime.errors import RuntimeRefusal
 
 
 def git(root, *args):
-    result = subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
+    # Optional locks do not disable detached maintenance in disposable Git repos.
+    # Keep the fixture namespace stable through the complete metadata walk.
+    result = subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0",
+                             "-C", str(root), *args], check=True, capture_output=True,
                             env={"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1",
                                  "GIT_CONFIG_GLOBAL": os.devnull,
                                  "GIT_OPTIONAL_LOCKS": "0"}, text=True)

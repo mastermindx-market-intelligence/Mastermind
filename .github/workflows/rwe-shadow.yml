@@ -18,12 +18,21 @@ on:
       - "scripts/ci_pytest.py"
       - "scripts/ci_parallel_shard.py"
       - "scripts/ci_pytest_timing.py"
+      - "scripts/ci_xdist_guard.py"
       - "tests/test_rwe*.py"
       - "tests/test_ci_pytest*.py"
+      - "tests/test_ci_prepartition.py"
       - ".github/workflows/ci.yml"
       - ".github/workflows/rwe-shadow.yml"
       - "pyproject.toml"
   workflow_dispatch:
+    inputs:
+      processes:
+        description: "Existing precollection children per shard (0 keeps the serial control)"
+        type: choice
+        options: ["0", "4"]
+        default: "0"
+        required: true
 
 permissions:
   contents: read
@@ -127,7 +136,9 @@ jobs:
         run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
 
       - name: Run canonical test shard inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}
+        env:
+          RWE_PROCESSES: ${{ inputs.processes || '0' }}
+        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }} --processes "$RWE_PROCESSES"
 
       - name: Upload receipt
         if: always()

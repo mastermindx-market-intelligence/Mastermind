@@ -866,7 +866,7 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """Keep a finite, adequate 60-minute shard window with fail-closed fan-in."""
+    """Keep finite shard and independent qualification budgets with strict fan-in."""
     import yaml
 
     workflow = yaml.load(
@@ -874,8 +874,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
         Loader=cip._WorkflowYAMLLoader,
     )
     jobs = workflow["jobs"]
-    shards = jobs["pytest_shards"]
-    gate = jobs["test"]
+    shards, gate = jobs["pytest_shards"], jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
     assert shards["permissions"] == {"contents": "read", "actions": "read"}
     assert shards["timeout-minutes"] == 60
@@ -886,26 +885,39 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards.get("continue-on-error", False) is False
     assert gate.get("continue-on-error", False) is False
-
     shard_steps = shards["steps"]
-    test_steps = [
-        step for step in shard_steps
-        if step.get("name") == "Run repository test shard"
-    ]
+    test_steps = [step for step in shard_steps if step.get("name") == "Run repository test shard"]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
         "python -m scripts.ci_parallel_shard --jobs 6 --index "
-        "${{ matrix.index }}"
+        "${{ matrix.index }} --processes 4"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
-    for name in (
-        "Verify Paper direct pinned MCP SDK",
-        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-        "Compile source",
-        "Validate shell scripts",
-    ):
-        steps = [step for step in shard_steps if step.get("name") == name]
-        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+    owners = {'source_qualification': ['Verify Paper direct pinned MCP SDK',
+                          'Verify Paper Studio prepare guard',
+                          'Compile source',
+                          'Validate shell scripts',
+                          'Verify native application admission unittest contracts',
+                          'Verify closed application transport in isolated root fixtures',
+                          'Checkout paired Brain production owner fixture',
+                          'Verify actual Brain Fabric and production inference composition'],
+ 'source_qualification_fabric': ['Verify private Fabric HTTP compatibility and incumbent backend '
+                                 'lifetime'],
+ 'source_qualification_native': ['Verify native application admission and dispatch custody']}
+    for qualification_id, names in owners.items():
+        qualification = jobs[qualification_id]
+        assert qualification["permissions"] == {"contents": "read"}
+        assert qualification["needs"] == shards["needs"] == ["pr_scope"]
+        assert qualification["timeout-minutes"] == 30
+        assert qualification.get("continue-on-error", False) is False
+        assert [step["name"] for step in qualification["steps"][9:]] == names
+        for name in names:
+            steps = [step for step in qualification["steps"] if step.get("name") == name]
+            assert len(steps) == 1 and "if" not in steps[0]
+            assert not any(step.get("name") == name for step in shard_steps)
+            assert sum(step.get("name") == name for other in owners
+                       for step in jobs[other]["steps"][9:]) == 1
+        assert all(step.get("continue-on-error", False) is False for step in qualification["steps"])
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
@@ -916,13 +928,13 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "source_qualification", "source_qualification_fabric", "source_qualification_native", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
     assert job["name"] == "test"
     assert job["runs-on"] == "ubuntu-latest"
     assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards", "source_qualification", "source_qualification_fabric", "source_qualification_native"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -930,8 +942,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert gate["env"]["QUALIFICATION_STATUS"] == "${{ needs.source_qualification.result }}"
+    assert gate["env"]["FABRIC_QUALIFICATION_STATUS"] == "${{ needs.source_qualification_fabric.result }}"
+    assert gate["env"]["NATIVE_QUALIFICATION_STATUS"] == "${{ needs.source_qualification_native.result }}"
     assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
+    assert '[ "$QUALIFICATION_STATUS" != success ]' in gate["run"]
+    assert '[ "$FABRIC_QUALIFICATION_STATUS" != success ]' in gate["run"]
+    assert '[ "$NATIVE_QUALIFICATION_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]
     assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]

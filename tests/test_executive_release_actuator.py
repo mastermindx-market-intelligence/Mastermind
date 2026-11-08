@@ -1255,7 +1255,12 @@ def test_process_concurrency_serializes_start_and_generation_cas(tmp_path):
         process.join(10)
         assert process.exitcode == 0
     start_results = [queue.get(timeout=2) for _ in starters]
-    assert all(kind == "ok" for kind, _ in start_results)
+    assert all(kind == "ok" for kind, _ in start_results), {
+        "phase": "concurrent_start",
+        "journal_refusals": sorted(
+            value for kind, value in start_results if kind == "error"
+        ),
+    }
     assert all(value == start_results[0][1] for _, value in start_results)
 
     workers = [

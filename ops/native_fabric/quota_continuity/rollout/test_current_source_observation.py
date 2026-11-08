@@ -2103,6 +2103,57 @@ class CustodyGraphGuardTests(Host):
         self.assertEqual(body["reason"], "changed_during_read", body)
         self.assertEqual(body["files"], [])
 
+    def test_root_sticky_signature_preserves_binding_and_permission_identity(self):
+        # Simulate kernel metadata changed by unrelated /tmp siblings without
+        # changing its inode, owner, group or permission bits. Never broaden the
+        # exception to ordinary user-owned custody directories or pointer leaves.
+        parent=os.path.realpath(tempfile.gettempdir())
+        info=os.stat(parent)
+        if (info.st_uid != 0 or not (info.st_mode & stat.S_ISVTX)
+                or not (info.st_mode & stat.S_IWOTH)):
+            self.skipTest("host has no root-owned world-writable sticky temp dir")
+        fields=("st_dev","st_ino","st_mode","st_uid","st_gid",
+                "st_size","st_mtime_ns","st_ctime_ns","st_nlink")
+        values={field:getattr(info,field) for field in fields}
+        def signature(**changes):
+            class Entry:pass
+            entry=Entry()
+            for key,value in (values | changes).items():setattr(entry,key,value)
+            return cso.chain_identity(entry)
+        fixed=signature()
+        for field in ("st_size","st_mtime_ns","st_ctime_ns","st_nlink"):
+            self.assertEqual(signature(**{field:values[field]+1}), fixed, field)
+        for field in ("st_dev","st_ino","st_uid","st_gid"):
+            self.assertNotEqual(signature(**{field:values[field]+1}), fixed, field)
+        self.assertNotEqual(signature(st_mode=values["st_mode"] ^ stat.S_IXUSR),fixed)
+
+    def test_root_sticky_ancestor_unrelated_churn_does_not_invalidate_custody(self):
+        # The shared /tmp is deliberately root-owned and sticky; other tests
+        # create siblings while this process inspects a private Git worktree.
+        # The Reader still holds and verifies every directory inode and mode,
+        # and its strict terminal, pointer and source-leaf identities remain.
+        if os.path.islink(tempfile.gettempdir()):
+            self.skipTest("the caller-supplied temp root is a symlink; Reader refuses it")
+        parent=os.path.realpath(tempfile.gettempdir())
+        info=os.stat(parent)
+        if info.st_uid != 0 or not (info.st_mode & stat.S_ISVTX):
+            self.skipTest("host has no root-owned sticky shared temporary root")
+        reader=cso.Reader()
+        wt=cso.validate_absolute_custody(self.worktree)
+        gd=cso.validate_absolute_custody(self.wt_git_dir)
+        cd=cso.validate_absolute_custody(self.wt_common_dir)
+        before=cso.custody_graph_state(reader, wt, gd, cd)
+        fds, edges=reader.walk_chain(wt)
+        try:
+            with tempfile.TemporaryDirectory(prefix="cso-unrelated-"):
+                # A newly created sibling changes /tmp size/mtime/ctime/nlink;
+                # that is not a mutation of the bound custody chain.
+                reader._reverify_chain(fds, edges)
+                self.assertEqual(cso.custody_graph_state(reader, wt, gd, cd), before)
+        finally:
+            for fd in reversed(fds):
+                os.close(fd)
+
     def test_guard_catches_ancestor_rename_restore(self):
         # Rename an ancestor of the resolved git_dir/common_dir away and back
         # after discovery: no terminal identity moves, so only the held FULL

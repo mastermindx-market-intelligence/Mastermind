@@ -282,6 +282,9 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 # process qualifier changed CURRENT. Never relabel old95.
                 'ext/linux_process_identity.py': (
                     fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt'),
+                # Preserve exactly the old95 observer bytes in the disposable inverse.
+                'ext/current_source_observation.py': (
+                    fixture.parent / 'native_historical_payloads/current_source_observation.py.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()

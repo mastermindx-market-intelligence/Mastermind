@@ -939,3 +939,90 @@ def test_descriptor_schema_dispatch_drift_cannot_skip_newmode_guard(tmp_path, mo
         m.Maintenance(SUCCESSOR, m.digest(descriptor), f.config)
     assert not (bundle/'run-started.json').exists()
     assert not requalified  # refused dispatch drift, not a replacement validator
+
+
+def _guard_initial_named_delta(monkeypatch, target, field):
+    """Perturb one named observation at the acquisition boundary, not the FD."""
+    real_os = m.os
+    target_info = real_os.stat(target, follow_symlinks=False)
+    target_identity = (target_info.st_dev, target_info.st_ino)
+    changed, opened = [], []
+
+    class BoundaryOS:
+        def __getattr__(self, name):
+            return getattr(real_os, name)
+
+        def open(self, *args, **kwargs):
+            fd = real_os.open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        def stat(self, *args, **kwargs):
+            info = real_os.stat(*args, **kwargs)
+            if not changed and (info.st_dev, info.st_ino) == target_identity:
+                changed.append(field)
+                fields = {name: getattr(info, name) for name in dir(info)
+                          if name.startswith('st_')}
+                fields[field] = (fields[field] ^ 0o020 if field == 'st_mode'
+                                 else fields[field] + 1)
+                return SimpleNamespace(**fields)
+            return info
+
+    monkeypatch.setattr(m, 'os', BoundaryOS())
+    return changed, opened, real_os
+
+
+@pytest.mark.parametrize('field', ['st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns'])
+def test_guard_initial_ancestor_metadata_churn_keeps_custody(tmp_path, monkeypatch, field):
+    ancestor = tmp_path/'ancestor'
+    ancestor.mkdir()
+    changed, opened, real_os = _guard_initial_named_delta(monkeypatch, ancestor, field)
+    with m._UnstartedPreproofGuard() as guard:
+        guard._hold(ancestor, directory=True, exact=False)
+        assert changed == [field]
+        assert guard.nodes[ancestor][4] is False
+        guard.check()
+    assert opened
+    for fd in opened:
+        with pytest.raises(OSError):
+            real_os.fstat(fd)
+
+
+@pytest.mark.parametrize('kind,field', [
+    *(('ancestor', field) for field in
+      ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid')),
+    *((kind, field) for kind in ('exact-directory', 'leaf', 'non-exact-file')
+      for field in ('st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')),
+])
+def test_guard_initial_boundary_refuses_custody_and_exact_metadata_drift(
+        tmp_path, monkeypatch, kind, field):
+    target = tmp_path/'target'
+    directory = kind in ('ancestor', 'exact-directory')
+    if directory:
+        target.mkdir()
+    else:
+        target.write_bytes(b'immutable fixture')
+    exact = kind in ('exact-directory', 'leaf')
+    changed, opened, real_os = _guard_initial_named_delta(monkeypatch, target, field)
+    with pytest.raises(m.MaintenanceError, match='retained supersession entry is unsafe'):
+        with m._UnstartedPreproofGuard() as guard:
+            guard._hold(target, directory=directory, exact=exact)
+    assert changed == [field] and opened
+    for fd in opened:
+        with pytest.raises(OSError):
+            real_os.fstat(fd)
+
+
+def test_guard_ancestor_promotion_retains_the_original_exact_snapshot(tmp_path):
+    ancestor = tmp_path/'ancestor'
+    ancestor.mkdir()
+    with m._UnstartedPreproofGuard() as guard:
+        guard._hold(ancestor, directory=True, exact=False)
+        original = guard.nodes[ancestor][1]
+        (ancestor/'new-sibling').mkdir()
+        os.utime(ancestor, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000))
+        guard.check()  # Ordinary ancestor metadata is allowed to change.
+        with pytest.raises(m.MaintenanceError, match='retained supersession identity changed'):
+            guard._hold(ancestor, directory=True, exact=True)
+        assert guard.nodes[ancestor][1] is original
+        assert guard.nodes[ancestor][4] is True

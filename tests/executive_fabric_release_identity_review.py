@@ -401,8 +401,11 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # PR #1329 accepted-V2 carry: the same complete account-pattern token and
 # attended worker UID/GID bounds move with the qualified maintenance source.
 # Both owning constructs remain byte-identical; no new identity exemption.
+# CI parallel qualification: ordinary-ancestor acquisition now follows the
+# existing custody contract; the three tokens and owning ASTs remain exact.
+# No new identity exemption, account bound or scanner change.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": 'febdc61cc241058c8b5e896290e62e0acc342ddf08010fbd36a6e24399748f56',
+    "sha256": 'a6cb3edacfa509333087e8013d34ce7408ff6df81df503b5e0559eb93e0ad64f',
     "sites": ((111, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1861, 46, 49, 'int', '400'), (1861, 66, 69, 'int', '500')),
 }
 

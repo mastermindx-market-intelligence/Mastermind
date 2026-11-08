@@ -127,6 +127,14 @@ by the workflow's complete matrix and fail-closed fan-in. The ordinary
 `gate --env /path/to/venv` command above still invokes the full discovery
 gate and records `proof.gate`.
 
+Serial execution remains the default (`processes: 0`). An explicit workflow
+input of `processes: 4` passes `--processes 4` to each canonical shard;
+locally, use `gate --env DIR --shard-index N --processes 4`. Four precollection
+children require one canonical shard and cannot be combined with `--subset`.
+Their selected-module union and requested process mode must match the shard
+plan before its receipt can qualify. This option retains `proof.shard` and
+the same six-shard aggregate; it does not create a full `proof.gate` receipt.
+
 
 Refuses first (before anything else, including any subprocess call) if the
 environment's interpreter is no longer CPython 3.12, or if a prior receipt

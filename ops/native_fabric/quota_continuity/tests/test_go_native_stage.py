@@ -105,6 +105,13 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+ADMISSION_PARENT_ROWS = (
+    (builder.GO_OBSERVER_PREIMAGE_SHA256,
+     "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"),
+    (builder.GO_OBSERVER_SUCCESSOR_SHA256,
+     "8a7e89dd92cd4c8252ac03188670985f9d76d498a8710a120b1a8a5adfa25cb7"),
+)
+
 def before_source_successors(manifest):
     return builder.before_qualification_quiescence(
         builder.before_host_pull_integrity(builder.before_sparse_index_advice(manifest)))
@@ -118,7 +125,8 @@ def before_admission_integrity(manifest):
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
         previous.update(builder.ADMISSION_INTEGRITY_PREIMAGES)
-        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256
+        expected_parent = dict(ADMISSION_PARENT_ROWS)[previous["ext/current_source_observation.py"]]
+        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == expected_parent
     return previous
 
 
@@ -147,6 +155,10 @@ def before_census_runtime(manifest):
 
 def before_original_artifact_recovery(manifest):
     prior = before_census_runtime(manifest)
+    # The frozen 106-member predecessor predates the current observer.
+    assert prior["ext/current_source_observation.py"] in {
+        builder.GO_OBSERVER_PREIMAGE_SHA256, builder.GO_OBSERVER_SUCCESSOR_SHA256}
+    prior["ext/current_source_observation.py"] = builder.GO_OBSERVER_PREIMAGE_SHA256
     assert prior["ext/original_delivery_collector.py"] in {
         "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
         "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"}
@@ -205,6 +217,8 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     for name, digest in builder.GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS.items():
         assert default["ext/" + name] == digest
         del historical["ext/" + name]
+    assert default["ext/current_source_observation.py"] == builder.GO_OBSERVER_SUCCESSOR_SHA256
+    assert historical["ext/current_source_observation.py"] == builder.GO_OBSERVER_PREIMAGE_SHA256
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
@@ -220,6 +234,23 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
         raw = (builds.application / "native-code-stage" / path).read_bytes()
         assert g.digest(raw) == expected == inventory["files"][path]["sha256"]
         assert len(raw) == inventory["files"][path]["bytes"]
+
+
+def test_go_base_observer_only_exact_successor_and_frozen_preimage(builds):
+    current = before_admission_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert current["ext/current_source_observation.py"] == builder.GO_OBSERVER_SUCCESSOR_SHA256
+    for value in (builder.GO_OBSERVER_SUCCESSOR_SHA256, builder.GO_OBSERVER_PREIMAGE_SHA256):
+        manifest = dict(current)
+        manifest["ext/current_source_observation.py"] = value
+        original = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == original, "projection must not mutate the caller"
+    for value in ("f" * 64, "", "e" * 64):
+        malformed = dict(current)
+        malformed["ext/current_source_observation.py"] = value
+        with pytest.raises(ValueError, match="observer"):
+            builder.validate_go_base_manifest(malformed, captured)
 
 
 def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member(builds):
@@ -702,6 +733,10 @@ def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(buil
     assert len(current) == 107
     assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
     previous = before_request_refusal_task(current)
+    # This frozen remote-cwd predecessor also predates the xdist-safe observer.
+    assert previous["ext/current_source_observation.py"] in {
+        builder.GO_OBSERVER_PREIMAGE_SHA256, builder.GO_OBSERVER_SUCCESSOR_SHA256}
+    previous["ext/current_source_observation.py"] = builder.GO_OBSERVER_PREIMAGE_SHA256
     assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "c7cf946bc1d8f13ef7b512d071d85097e1ddc58979af76bf367a7707aa90617d"
     for manifest in (current, previous):
         before = dict(manifest)
@@ -735,17 +770,25 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
-    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    previous = before_admission_integrity(current)
-    assert previous != current
-    assert {name for name in current if current[name] != previous[name]} == set(builder.ADMISSION_INTEGRITY_DIGESTS)
-    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256
-    for manifest in (current, previous):
-        unchanged = dict(manifest)
-        builder.validate_go_base_manifest(manifest, captured)
-        assert manifest == unchanged
+    for observer, expected_parent_sha in ADMISSION_PARENT_ROWS:
+        exact = dict(current)
+        exact["ext/current_source_observation.py"] = observer
+        unchanged = dict(exact)
+        previous = dict(exact)
+        previous.update(builder.ADMISSION_INTEGRITY_PREIMAGES)
+        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == expected_parent_sha
+        assert {name for name in exact if exact[name] != previous[name]} == set(builder.ADMISSION_INTEGRITY_DIGESTS)
+        assert previous["ext/current_source_observation.py"] == observer
+        assert builder.before_admission_integrity(exact) == previous
+        assert exact == unchanged
+        captured = {name: exact["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+        for manifest in (exact, previous):
+            before = dict(manifest)
+            builder.validate_go_base_manifest(manifest, captured)
+            assert manifest == before
     for output in (builds.default, builds.application, builds.http):
         manifest = json.loads((output / "native-manifest.json").read_bytes())
+        assert manifest["ext/current_source_observation.py"] == builder.GO_OBSERVER_SUCCESSOR_SHA256
         for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
             assert manifest[name] == digest
             assert g.digest((output / "native-code-stage" / name).read_bytes()) == digest
@@ -755,44 +798,49 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
 
 @pytest.mark.parametrize("corruption", [
     "old-task", "old-runtime", "foreign-task", "foreign-runtime", "missing-task",
-    "missing-runtime", "extra-member", "foreign-parent", "different-valid-parent",
+    "missing-runtime", "extra-member", "foreign-observer", "foreign-parent", "different-valid-parent",
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    # Isolate the admission cohort after both exact source-successor proofs.
-    current = before_source_successors(
+    # Isolate source successors while retaining both exact observer histories.
+    built_current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
-    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    bad = dict(current)
-    if corruption in ("old-task", "old-runtime"):
-        name = "ext/fabric_task.py" if corruption == "old-task" else "ext/lane_runtime.py"
-        bad[name] = builder.ADMISSION_INTEGRITY_PREIMAGES[name]
-    elif corruption in ("foreign-task", "foreign-runtime"):
-        name = "ext/fabric_task.py" if corruption == "foreign-task" else "ext/lane_runtime.py"
-        bad[name] = "f" * 64
-    elif corruption in ("missing-task", "missing-runtime"):
-        del bad["ext/fabric_task.py" if corruption == "missing-task" else "ext/lane_runtime.py"]
-    elif corruption == "extra-member":
-        bad["ext/foreign.py"] = "f" * 64
-    elif corruption == "foreign-parent":
-        bad["pool"] = "f" * 64
-    elif corruption == "different-valid-parent":
-        bad["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
-    else:
-        bad = (before_original_artifact_recovery(current)
-               if corruption == "historical106" else before_participant_cohort(current))
-        if corruption == "historical102":
-            for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
-                           builder.GO_POST_FAILURE_PREIMAGES):
-                bad.update({"ext/" + name: digest for name, digest in cohort.items()})
-            for name in builder.GO_POST_FAILURE_ADDITIONS:
-                del bad["ext/" + name]
-        builder.validate_go_base_manifest(bad, captured)
-        bad.update(builder.ADMISSION_INTEGRITY_DIGESTS)
-    unchanged = dict(bad)
-    with pytest.raises(ValueError, match="admission integrity"):
-        builder.validate_go_base_manifest(bad, captured)
-    assert bad == unchanged
+    for observer, _ in ADMISSION_PARENT_ROWS:
+        current = dict(built_current)
+        current["ext/current_source_observation.py"] = observer
+        captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+        bad = dict(current)
+        if corruption in ("old-task", "old-runtime"):
+            name = "ext/fabric_task.py" if corruption == "old-task" else "ext/lane_runtime.py"
+            bad[name] = builder.ADMISSION_INTEGRITY_PREIMAGES[name]
+        elif corruption in ("foreign-task", "foreign-runtime"):
+            name = "ext/fabric_task.py" if corruption == "foreign-task" else "ext/lane_runtime.py"
+            bad[name] = "f" * 64
+        elif corruption in ("missing-task", "missing-runtime"):
+            del bad["ext/fabric_task.py" if corruption == "missing-task" else "ext/lane_runtime.py"]
+        elif corruption == "extra-member":
+            bad["ext/foreign.py"] = "f" * 64
+        elif corruption == "foreign-observer":
+            bad["ext/current_source_observation.py"] = "f" * 64
+        elif corruption == "foreign-parent":
+            bad["pool"] = "f" * 64
+        elif corruption == "different-valid-parent":
+            bad["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
+        else:
+            bad = (before_original_artifact_recovery(current)
+                   if corruption == "historical106" else before_participant_cohort(current))
+            if corruption == "historical102":
+                for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                               builder.GO_POST_FAILURE_PREIMAGES):
+                    bad.update({"ext/" + name: digest for name, digest in cohort.items()})
+                for name in builder.GO_POST_FAILURE_ADDITIONS:
+                    del bad["ext/" + name]
+            builder.validate_go_base_manifest(bad, captured)
+            bad.update(builder.ADMISSION_INTEGRITY_DIGESTS)
+        unchanged = dict(bad)
+        with pytest.raises(ValueError, match="admission integrity"):
+            builder.validate_go_base_manifest(bad, captured)
+        assert bad == unchanged
 
 
 def test_admission_integrity_forward_delta_is_reversible_and_source_exact(tmp_path):

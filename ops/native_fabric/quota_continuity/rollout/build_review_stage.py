@@ -93,6 +93,10 @@ GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_
 # Actual102 closure after protected51e9 and application A3 composition: the B dependencies
 # are unchanged; remote_sub retains the protected fast-observation and terminal-replay fixes.
 GO_BASE_MANIFEST_SHA256 = "395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429"
+# The current-source observer is a reviewed, SHA-bound successor only.
+# Never mutate the frozen102 base or loosen its final whole-manifest digest.
+GO_OBSERVER_PREIMAGE_SHA256 = "42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18"
+GO_OBSERVER_SUCCESSOR_SHA256 = "c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a"
 GO_BASE_PICKER_SHA256 = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
 # The sparse-config data successor is additive to this exact executor.
 GO_BASE_EXECUTOR_SHA256 = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
@@ -222,6 +226,8 @@ GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155a
 # bytes. Future APPLICATION or policy cohorts must compose this exact delta,
 # not relabel their unrelated parent as this captured generation.
 ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+# Compose the same exact admission pair with the source-observer successor.
+ADMISSION_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256 = "8a7e89dd92cd4c8252ac03188670985f9d76d498a8710a120b1a8a5adfa25cb7"
 ADMISSION_INTEGRITY_PREIMAGES = {
     "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
     "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
@@ -235,6 +241,7 @@ ADMISSION_INTEGRITY_DIGESTS = {
 # Reviewed current-quiescence read/guard changes only Broker in exact raw107.
 # Validate the whole parent; never normalize a mixed or unrelated source set.
 QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_OBSERVER_PARENT_SHA256 = "eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7"
 QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
 QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
 
@@ -246,13 +253,18 @@ def before_qualification_quiescence(manifest):
     if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
         return previous
     previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
-    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: QUALIFICATION_QUIESCENCE_PARENT_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: QUALIFICATION_QUIESCENCE_OBSERVER_PARENT_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
         raise ValueError("qualification quiescence parent closure differs")
     return previous
 
 
 def before_admission_integrity(manifest):
-    """Validate one exact forward cohort without mutating caller identity."""
+    """Validate the exact admission pair over either bound observer history."""
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
     manifest = before_qualification_quiescence(manifest)
@@ -264,15 +276,22 @@ def before_admission_integrity(manifest):
         raise ValueError("native admission integrity cohort is incomplete or foreign")
     previous = dict(manifest)
     previous.update(ADMISSION_INTEGRITY_PREIMAGES)
-    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: ADMISSION_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
         raise ValueError("native admission integrity parent closure differs")
     return previous
 
 
-# The complete host-pull repair composes only on the current protected107
-# admission-integrity closure. This inverse is a validation view; emitted
-# manifests and staged payloads keep the repaired source identities.
+# The complete host-pull repair composes only on the exact protected107
+# admission-integrity closure for either bound observer history. This inverse
+# is a validation view; emitted manifests and staged payloads keep the repaired
+# source identities.
 HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256 = "eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7"
 HOST_PULL_INTEGRITY_PREIMAGES = {
     "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
     "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
@@ -315,7 +334,12 @@ def before_host_pull_integrity(manifest):
         raise ValueError("native host-pull integrity cohort is incomplete or foreign")
     previous = dict(manifest)
     previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
-    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256:
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: HOST_PULL_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
         raise ValueError("native host-pull integrity parent closure differs")
     return previous
 
@@ -323,6 +347,7 @@ def before_host_pull_integrity(manifest):
 # One exact command-scoped advice setting extends the complete accepted72
 # closure. This inverse is used only for historical validation, never capture.
 SPARSE_INDEX_ADVICE_PARENT_SHA256 = "45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18"
+SPARSE_INDEX_ADVICE_OBSERVER_PARENT_SHA256 = "2c395c2a259e1027b5fe9243667ee0cd2dfc66c1cdc055dc19897950e91371a3"
 SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
 SPARSE_INDEX_ADVICE_EXECUTOR_SHA256 = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
 
@@ -334,7 +359,12 @@ def before_sparse_index_advice(manifest):
     if previous.get("ext/remote_sub_exec.py") != SPARSE_INDEX_ADVICE_EXECUTOR_SHA256:
         return previous
     previous["ext/remote_sub_exec.py"] = SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
-    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != SPARSE_INDEX_ADVICE_PARENT_SHA256:
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: SPARSE_INDEX_ADVICE_PARENT_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: SPARSE_INDEX_ADVICE_OBSERVER_PARENT_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
         raise ValueError("native sparse-index advice parent closure differs")
     return previous
 
@@ -476,6 +506,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
                            for name, digest in GO_PROTECTED_CUSTODY_PREIMAGES.items()})
     elif custody != GO_PROTECTED_CUSTODY_PREIMAGES:
         raise ValueError("native Go protected custody cohort changed")
+    # Project only this exact newly-reviewed observer to the frozen Go base.
+    # The original complete 102-member SHA-256 still rejects any other drift.
+    observer = historical["ext/current_source_observation.py"]
+    if observer == GO_OBSERVER_SUCCESSOR_SHA256:
+        historical["ext/current_source_observation.py"] = GO_OBSERVER_PREIMAGE_SHA256
+    elif observer != GO_OBSERVER_PREIMAGE_SHA256:
+        raise ValueError("native Go observer is not the exact protected source")
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 

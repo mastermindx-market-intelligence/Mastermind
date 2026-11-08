@@ -217,3 +217,75 @@ def test_digest_amendment_preserves_closed_selected_child_publication_bytes():
         capability_profile_digests={PRINCIPAL_PROFILE:'b'*64})
     assert compiler.canonical(prior) == frozen
     assert compiler.canonical(result.mcp_document()['selected_child_target']) == compiler.canonical(prior['selected_child_target'])
+
+@pytest.mark.parametrize("mode", ["legacy", "empty-map", "mission-map"])
+def test_cold_compiler_preserves_purity_without_transactional_imports(mode):
+    # A separate interpreter prevents this file's owner fixtures from warming
+    # transactional CLI imports and hiding application-owned import-time I/O.
+    import subprocess
+    import sys
+    import textwrap
+
+    prior = pure.prior_mcp_document()
+    digests = None if mode == "legacy" else {}
+    if mode == "mission-map":
+        prior["coo"] = _coo_block(prior)
+        prior["coo"]["missions"] = _mission_document("a" * 64)["coo"]["missions"]
+        from integrations.mastermind_executive_app.coo_binding import _digest
+        prior["coo"]["missions"][0]["principal_binding_digest"] = _digest(
+            prior["coo"]["binding"]["binding"])
+        digests = {PRINCIPAL_PROFILE: "b" * 64}
+    script = r'''
+    import importlib
+    import json
+    import sys
+    import pytest
+    from tests import test_os_gateway_publication as pure
+
+    payload = json.load(sys.stdin)
+    for name in ("integrations.studio_direct_mcp.private_service",
+                 "integrations.executive_mcp.schemas",
+                 "integrations.business_mcp_auth.contracts",
+                 "control_plane.executive_peer_identity"):
+        importlib.import_module(name)
+    transactional = ("ops.executive_os.mcp_component_update",
+                     "ops.executive_os.gateway_refresh_preflight")
+    before = {name: name in sys.modules for name in transactional}
+    assert not any(before.values()), before
+    calls = []
+    patch = pytest.MonkeyPatch()
+    try:
+        pure._guard_io(patch, calls, stat_too=True)
+        candidate = pure.m.compile_gateway_candidates(
+            pure.prior_mcp_bytes(payload["prior"]), pure.prior_plist_bytes(),
+            expected_release_sha=pure.NEW_RELEASE,
+            expected_bundle_digest=pure.BUNDLE_DIGEST,
+            qualified_publication_inputs=pure.qualified_inputs(),
+            capability_profile_digests=payload["digests"])
+        classification = pure.m.classify_postimages(
+            candidate, {a.path: a.content for a in candidate.artifacts},
+            publication_before_bytes=b"{}\n")
+        manifest = candidate.operation_manifest()
+        observed = tuple(calls)
+        after = {name: name in sys.modules for name in transactional}
+    finally:
+        patch.undo()
+    print(json.dumps({"calls": observed, "loaded_before": before, "loaded_after": after}))
+    assert observed == (), observed
+    assert not any(after.values()), after
+    assert classification["state"] == "MATCHED"
+    assert manifest["operation"] == "OS_GATEWAY_PUBLICATION"
+    if payload["digests"]:
+        for mission in candidate.mcp_document()["coo"]["missions"]:
+            assert mission["capability_profile_digest"] == payload["digests"][mission["capability_profile_id"]]
+    '''
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", textwrap.dedent(script)],
+        cwd=Path(__file__).resolve().parents[1],
+        input=json.dumps({"prior": prior, "digests": digests}),
+        text=True, capture_output=True, timeout=60, check=False)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    observed = json.loads(result.stdout)
+    assert observed["calls"] == []
+    assert not any(observed["loaded_before"].values())
+    assert not any(observed["loaded_after"].values())

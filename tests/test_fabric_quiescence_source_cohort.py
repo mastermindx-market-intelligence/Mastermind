@@ -24,7 +24,7 @@ class Cohort(unittest.TestCase):
         self.assertEqual({k for k in parent if parent[k]!=original[k]},{'ext/lease_broker.py'})
         self.assertEqual(parent['ext/lease_broker.py'],builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE)
         raw=(json.dumps(builder.before_host_pull_integrity(parent),sort_keys=True,indent=2)+'\n').encode()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),builder.QUALIFICATION_QUIESCENCE_PARENT_SHA256)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),"eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7")
         builder.before_admission_integrity(builder.before_host_pull_integrity(original))
         self.assertEqual(original,self.manifest)
 
@@ -91,30 +91,48 @@ class Cohort(unittest.TestCase):
 
 
     def test_both_exact_source_deltas_retain_their_separate_historical_parents(self):
-        current = dict(self.manifest)
-        base = dict(current)
-        base.update(builder.HOST_PULL_INTEGRITY_PREIMAGES)
-        base['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
-        host_only = dict(base, **builder.HOST_PULL_INTEGRITY_DIGESTS)
-        broker_only = dict(base)
-        broker_only['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_SHA256
-        for source, expected_sha in [
-            (base, '8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6'),
-            (host_only, 'a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3'),
-            (broker_only, '7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9'),
-            (current, '45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18'),
-        ]:
-            with self.subTest(cohort=expected_sha):
-                original = dict(source)
-                self.assertEqual(hashlib.sha256((json.dumps(source,sort_keys=True,indent=2)+'\n').encode()).hexdigest(),expected_sha)
-                q = builder.before_qualification_quiescence(source)
-                h = builder.before_host_pull_integrity(source)
-                self.assertLessEqual({k for k in q if q[k] != source[k]}, {'ext/lease_broker.py'})
-                self.assertLessEqual({k for k in h if h[k] != source[k]}, set(builder.HOST_PULL_INTEGRITY_PREIMAGES))
-                self.assertEqual(builder.before_host_pull_integrity(q), base)
-                self.assertEqual(builder.before_qualification_quiescence(h), base)
-                captured = {name: source['ext/'+name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-                builder.validate_go_base_manifest(source, captured)
+        # Frozen old-observer identities and their exact current-observer
+        # compositions are distinct, independently enumerated proof rows.
+        histories = [('42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18', ('8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6', 'a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3', '7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9', '45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18')), ('c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a', ('eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7', 'd8e17896581fcf5568157cae6dfb71b502cd5029364586f123240b5f05b8b7f1', 'f80fed5257def029c349edd5d11373cdd1107b1cdbe9266dbe7cca3af4e9a22f', '2c395c2a259e1027b5fe9243667ee0cd2dfc66c1cdc055dc19897950e91371a3'))]
+        for observer, expected in histories:
+            current = dict(self.manifest)
+            current["ext/current_source_observation.py"] = observer
+            base = dict(current)
+            base.update(builder.HOST_PULL_INTEGRITY_PREIMAGES)
+            base['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+            host_only = dict(base, **builder.HOST_PULL_INTEGRITY_DIGESTS)
+            broker_only = dict(base)
+            broker_only['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_SHA256
+            for source, expected_sha in zip((base, host_only, broker_only, current), expected):
+                with self.subTest(observer=observer, cohort=expected_sha):
+                    original = dict(source)
+                    self.assertEqual(hashlib.sha256((json.dumps(source,sort_keys=True,indent=2)+'\n').encode()).hexdigest(),expected_sha)
+                    q = builder.before_qualification_quiescence(source)
+                    h = builder.before_host_pull_integrity(source)
+                    self.assertLessEqual({k for k in q if q[k] != source[k]}, {'ext/lease_broker.py'})
+                    self.assertLessEqual({k for k in h if h[k] != source[k]}, set(builder.HOST_PULL_INTEGRITY_PREIMAGES))
+                    self.assertEqual(builder.before_host_pull_integrity(q), base)
+                    self.assertEqual(builder.before_qualification_quiescence(h), base)
+                    captured = {name: source['ext/'+name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+                    builder.validate_go_base_manifest(source, captured)
+                    self.assertEqual(source, original)
+
+    def test_source_successors_refuse_every_unbound_observer_without_mutation(self):
+        for observer in ("0" * 64, "", None):
+            source = dict(self.manifest)
+            if observer is None:
+                source.pop("ext/current_source_observation.py")
+            else:
+                source["ext/current_source_observation.py"] = observer
+            original = dict(source)
+            captured = {name: source["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+            with self.subTest(observer=observer):
+                with self.assertRaises(ValueError):
+                    builder.before_qualification_quiescence(source)
+                with self.assertRaises(ValueError):
+                    builder.before_host_pull_integrity(source)
+                with self.assertRaises(ValueError):
+                    builder.validate_go_base_manifest(source, captured)
                 self.assertEqual(source, original)
 
     def test_combined_parent_cannot_hide_partial_host_pull_or_foreign_broker(self):

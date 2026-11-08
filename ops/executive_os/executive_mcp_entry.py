@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+from typing import Any
 
 
 CONFIG_SCHEMA = 'mastermind.executive_mcp_install.v1'
@@ -28,6 +29,101 @@ _EXECUTIVE_TUNNEL_RESOURCE_RE = re.compile(
     r'^https://tunnel-service\.gateway\.unified-0\.internal\.api\.openai\.org/'
     r'v1/mcp/tunnel_[0-9a-f]{32}$'
 )
+
+
+# Pure configuration transformations shared by the publication compiler and
+# component updater, without initializing the transactional CLI import path.
+HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def _preserved_profile_ids(prior: dict[str, Any]) -> set[str]:
+    """The exact capability-profile ids of the preserved installed missions."""
+
+    block = prior.get("coo")
+    missions = block.get("missions") if isinstance(block, dict) else None
+    if not isinstance(missions, list):
+        return set()
+    return {row["capability_profile_id"] for row in missions
+            if isinstance(row, dict) and type(row.get("capability_profile_id")) is str}
+
+def _validate_capability_profile_map(
+    digests: Any, profile_ids: set[str],
+) -> dict[str, str]:
+    """The exact frozen map: one lowercase64hex digest per preserved profile.
+
+    The keys correspond EXACTLY to the relevant original preserved mission
+    profile ids: an extra entry, a missing entry or a malformed value is a
+    refusal, never a partial rewrite.
+    """
+
+    if type(digests) is not dict:
+        raise ValueError("capability profile digest map is not an object")
+    if set(digests) != set(profile_ids):
+        raise ValueError("capability profile digest map does not match the preserved missions")
+    for key, value in digests.items():
+        if type(key) is not str or not key:
+            raise ValueError("capability profile digest key is invalid")
+        if type(value) is not str or HEX64.fullmatch(value) is None:
+            raise ValueError("capability profile digest value is invalid")
+    return {key: digests[key] for key in sorted(digests)}
+
+def _apply_capability_profile_digests(
+    prior: dict[str, Any], proposed: dict[str, Any],
+    digests: dict[str, str] | None,
+) -> None:
+    """Re-derive the installed missions' capability-profile digests.
+
+    The exact replacement comes from the TARGET sealed release registry, so
+    a legitimate tool-projection change moves the mission's stored digest
+    with it. ONLY that one field changes: every other mission field,
+    principal action, scope and binding is preserved byte for byte, and no
+    principal realm or permission is created.
+
+    ``None`` is the LEGACY no-rewrite compilation: it reproduces the
+    original behaviour byte for byte and is what a marker without the frozen
+    map member recovers with.  A supplied map is the frozen map of the
+    original transaction and is validated against the preserved missions
+    before a single field is rewritten.
+    """
+
+    if digests is None:
+        # The legacy no-rewrite compilation: the installed digests stay
+        # exactly as they are.  This is the pre-C30 recovery behaviour and
+        # it is reproduced exactly, never approximated.
+        return
+    frozen = _validate_capability_profile_map(digests, _preserved_profile_ids(prior))
+    if not frozen:
+        # An installation without a preserved mission profile has nothing to
+        # rewrite.  The source-only behaviour is preserved byte for byte.
+        return
+    prior_block = prior.get("coo")
+    proposed_block = proposed.get("coo")
+    if not isinstance(prior_block, dict) or not isinstance(proposed_block, dict):
+        raise ValueError("candidate changed the installed COO block")
+    prior_missions = prior_block.get("missions")
+    missions = proposed_block.get("missions")
+    if not isinstance(prior_missions, list) or not isinstance(missions, list):
+        raise ValueError("candidate changed the installed mission set")
+    if len(missions) != len(prior_missions):
+        raise ValueError("candidate changed the installed mission set")
+    for row, prior_row in zip(missions, prior_missions):
+        if not isinstance(row, dict) or not isinstance(prior_row, dict):
+            raise ValueError("candidate changed the installed mission set")
+        profile_id = row.get("capability_profile_id")
+        digest = frozen.get(profile_id) if type(profile_id) is str else None
+        if digest is None:
+            continue
+        if row.get("capability_profile_digest") != prior_row.get("capability_profile_digest"):
+            raise ValueError("candidate changed an installed capability-profile digest")
+        row["capability_profile_digest"] = digest
+    left = copy.deepcopy(proposed_block)
+    right = copy.deepcopy(prior_block)
+    for block in (left, right):
+        for mission in block.get("missions") or []:
+            if isinstance(mission, dict):
+                mission["capability_profile_digest"] = None
+    if left != right:
+        raise ValueError("candidate changed an unrelated installed COO field")
 
 
 def validate_additional_resources(raw):

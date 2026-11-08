@@ -583,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d'
+    assert hashlib.sha256(current_raw).hexdigest()=='28e4c5049a99f28cbb43459ad07e9b2b5bad8a28a3ff0228c15a84360fc16d1f'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
@@ -599,7 +599,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
-        'ext/linux_process_identity.py',
+        'ext/linux_process_identity.py', 'ext/current_source_observation.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
         'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     # P8.T1.S7's reviewed diagnostic boundary changes exactly these four
@@ -620,14 +620,15 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # and the application A members in the exact historical diff.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
-    # The procfs fallback and atomic load sampling change only the current lane runtime.
+    # Procfs fallback and atomic load sampling change only the current runtime.
     census_changed={'ext/lane_runtime.py'}
     assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
     assert current['ext/lane_runtime.py']=='b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b'
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
-    # Census fallback advances exactly one additional historical member.
-    assert sum(before[p]==current[p] for p in before)==59
-    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
+    expected_changed=changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
+    assert {p for p in before if before[p]!=current[p]}==expected_changed
+    # 37 authentically changed historic95 members; 58 unchanged, no exceptions.
+    assert sum(before[p]==current[p] for p in before)==58
+    for name in added|expected_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
@@ -951,8 +952,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
     # PR qualification adds two jobs, but full-mode H1 security checks and
     # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','source_qualification','source_qualification_fabric','source_qualification_native','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards','source_qualification','source_qualification_fabric','source_qualification_native']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
@@ -986,7 +987,7 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_sysconfig.py',
         'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
         'tests/test_paid_provider_entry_linux.py']
-    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}'
+    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4'
     # Only full pytest may reuse the exact prior proof; both H1 gates above
     # still execute on shard two before the proof/pytest steps.
     assert full[0][1].get('if') == "${{ steps.previous_ci.outputs.reuse != 'true' }}"
