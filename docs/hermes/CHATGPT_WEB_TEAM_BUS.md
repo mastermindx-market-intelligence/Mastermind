@@ -37,7 +37,11 @@ The shared OS UI may later present this exact tool flow in a chat-like team
 picker. A plugin with an MCP Apps component can render such a picker but must
 call the SAME authenticated tools; it must not maintain its own messages.
 
-## Exact immediately reusable ChatGPT tool flow
+## Source-qualified ChatGPT tool flow
+
+Use this flow after the installed host advertises the native tools and the
+existing owner has enrolled the selected role. The current live mismatch below
+must be resolved first; source availability alone cannot supply a valid target.
 
 1. **Select:** Call `session_targets({"kind":"hermes_meta"})` or
    `session_targets({"kind":"hermes_secretary"})`. A missing/empty role is
@@ -59,7 +63,7 @@ call the SAME authenticated tools; it must not maintain its own messages.
    bounded execution profile and exact validation/write scope. It is
    provider-neutral and does not promise DeepSeek execution.
 
-These are the existing installed tool contracts in
+These are the protected source contracts in
 `integrations/executive_mcp/web_ceo_sessions.py`,
 `integrations/session_bridge/return_tools.py`, and
 `integrations/session_bridge/installed.py`. The thin Python helper
@@ -113,6 +117,33 @@ carrying the same original tool/key and recovery guidance.
   subscription/source exists, but events do not automatically wake a finished
   ChatGPT conversation. Native always-on agents may be real callback
   consumers through the existing subscribed owner after activation.
+
+## Control adoption and installed-consumer proof
+
+The existing `ops/executive_os/control_component_update.py` owns a bounded
+Control-only source update through `service-control.sh`. Its
+`plan-control-component --expected-sha <qualified-release-sha>` action is
+read-only; an eligible plan yields the exact digest required by the original
+apply/reconcile path. The candidate, predecessor, interpreter, private
+configuration, autonomy state and live-runtime conditions remain that owner's
+checks. A source commit or copied MCP package does not replace this admission.
+
+The 2026-11-08 plan against the staged `036e8d26cb2b158856f1250b2dfc9cca9700f28a`
+release returned `REFUSED / control_component_worker_live` with no plan digest
+or update effect. Worker was running on the original `b4a5a8925c6c` generation.
+Do not stop or disarm that Worker merely to make this plan eligible.
+The original 09b/call5913 protected-result disposition also remains a prerequisite
+to dependent installation, as recorded in programme
+[#1893](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1893#issuecomment-6722142596).
+Neither a component-only path nor a different carrier releases that hold.
+
+After lawful original-result disposition and eligible adoption by the existing
+release owner, verify the actual Control source and a grounded
+`executive_state` read. Then verify the installed MCP schema advertises the
+native target kinds, discover actual enrolled Meta/Secretary targets, and
+exercise the original SEND/reply journey in the table below. A successful empty
+legacy inventory proves only that projection; it does not prove enrollment.
+Each installed effect and result retains its original operation and receipt.
 
 ## Acceptance (the product journey, not just source presence)
 
