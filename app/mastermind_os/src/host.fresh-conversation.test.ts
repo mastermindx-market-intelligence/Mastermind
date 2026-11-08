@@ -67,3 +67,23 @@ it("keeps lost-Keep status Executive-only while new turn preflight requires live
  await expect(e.host.freshConversation!.request("consume_status",recovery.consume_request,signal)).resolves.toEqual(recovery.consume_status);
  expect(e.invoke.mock.calls.filter(([name])=>name==="executive_fresh_conversation")).toHaveLength(2);
 });
+
+it("carries native-v2 through the same host and native command, preserving Workspace and auth withdrawal",async()=>{
+ const e=await setup(),signal=new AbortController().signal;
+ const selected={work_ref:fixture.request.work_ref,operation_key:"mmos-native-create-"+"a".repeat(40)};
+ const stop={...selected,stop_key:"original-stop",turn_id:"original-native-turn",binding_digest:"b".repeat(64)};
+ const preview={...selected,message:"x".repeat(131072)};
+ await e.host.freshConversation!.request("preview",preview,signal,"native-v2");
+ expect(e.invoke.mock.calls.at(-1)).toEqual(["executive_fresh_conversation",{operation:"preview",arguments:preview,contract:"native-v2"}]);
+ await e.host.freshConversation!.request("stop",stop,signal,"native-v2");
+ e.revokeWorkspace();
+ await expect(e.host.freshConversation!.request("stop",stop,signal,"native-v2")).rejects.toThrow();
+ await e.host.freshConversation!.request("stop_status",{...selected,stop_key:stop.stop_key},signal,"native-v2");
+ expect(e.invoke.mock.calls.filter(([name])=>name==="executive_fresh_conversation")).toHaveLength(3);
+ const held=await setup(true);
+ const pending=held.host.freshConversation!.request("turn_status",{...selected,turn_key:"original-turn"},signal,"native-v2");
+ const rejected=expect(pending).rejects.toThrow();
+ held.events.get("mastermind-executive-auth-state")!({payload:{generation:2,available:false}});
+ held.finish({unknown:true});await rejected;
+ expect(held.invoke.mock.calls.filter(([name])=>name==="executive_fresh_conversation")).toHaveLength(1);
+});

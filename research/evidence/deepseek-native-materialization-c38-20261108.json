@@ -1,0 +1,226 @@
+{
+  "closed_lanes": [
+    "paid Fabric/VPS denial",
+    "installed receipt/config-read denial",
+    "administrative branch-protection read403",
+    "foreign worktree GC/repack",
+    "active service restart forbidden"
+  ],
+  "do_not_redo": [
+    "accepted Hermes2180 journey",
+    "C21 physical native canary",
+    "old C33 full candidate unchanged layout",
+    "official Node candidate download/verification"
+  ],
+  "governing_pin": "03512c5799a0f281a117be0d58babdd65101a46c",
+  "hosted_c37": {
+    "ci": {
+      "full_gate": "not passed",
+      "run": 42453859093
+    },
+    "dsh_acp": {
+      "conclusion": "success",
+      "run": 42453859071
+    },
+    "dsh_governed_mcp": {
+      "conclusion": "success",
+      "run": 42453859085
+    },
+    "mastermind_os": {
+      "conclusion": "success",
+      "run": 42453859056
+    },
+    "next_repairs": [
+      "remove integration imports from sealed pure Control contracts without weakening existing checks",
+      "join native v2 public edge routes with exact separately bounded branch",
+      "repair source-linked historical fixtures and current classification metadata; preserve original behavior assertions"
+    ],
+    "rwe": {
+      "full_gate": "not passed",
+      "lock_preparation": "success",
+      "realized_environments_reached_pytest": true,
+      "run": 42453859074
+    }
+  },
+  "implementation": [
+    "Protected blob reads preserve exact binary bytes using existing command-scoped Git trust and gc.auto=0.",
+    "Native layout binds final package/Node coordinates before sealing; null state remains with original Worker and no attended plist is created.",
+    "Original stage-only installer composes sealed source, optional ACP and optional native artifacts without selection, configuration or service activation.",
+    "Native materialization derives destinations/digest from pinned original Worker config and enrollment; holds source and destination descriptors, bounds copy, rejects unsafe closure, publishes by exclusive rename and preserves per-target outcomes.",
+    "Read-only reconciliation accepts no replacement inputs, rechecks nested package/Node identities and retains original private stages.",
+    "Stage qualification carries a distinct schema and cannot become installed attestation capability.",
+    "Partial installer failure retains source/config/ACP observations; missing native output remains unobserved without retry authority.",
+    "Actual isolated-Python invocation imports through its exact source root before loading package modules."
+  ],
+  "next_action": "C39 repair actual sealed-runtime layering and native public-edge gaps plus exact hosted CI fixture regressions in this same operation.",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "pr": 2177,
+  "protected_source": "036e8d26cb2b158856f1250b2dfc9cca9700f28a",
+  "publication_scope": {
+    "installed": false,
+    "new_session_owner": false,
+    "production_accepted": false,
+    "provider_calls": 0,
+    "services_restarted": false
+  },
+  "qualification": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_native_deepseek_materialization.py",
+        "tests/test_native_deepseek_materialization_cli.py",
+        "tests/test_dsh_native_layout.py",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_attestation_publication.py",
+        "tests/test_executive_install_source_policy.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_executive_worker_acp_profile.py"
+      ],
+      "base_sha": "ebefb290f1c4d772490bf4424e0c1a938ee72b0b",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T06:45:31.855746+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "9600bcc6abae473d99177fe14e85e5b49a467cb96a24421b1a313964b9455d24",
+      "path": "/private/tmp/mmx-dsh-c38-boundary-tests-20261108-pro1.json",
+      "sha256": "7e0f873897b4193ea3f5ba09da3351b74c2a9a42249e570071644b5e73c0bfb5",
+      "source_inputs": 7193,
+      "started_at": "2026-11-08T06:45:12.978369+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_native_deepseek_materialization.py"
+      ],
+      "base_sha": "ebefb290f1c4d772490bf4424e0c1a938ee72b0b",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T06:46:19.937786+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "c23631568efc27f830a2a9114ef37b051aa3dca04d3225975aa1310d7f8e7b7d",
+      "path": "/private/tmp/mmx-dsh-c38-material-tests-20261108-pro2.json",
+      "sha256": "fdfe478045864c86333eb25647452a3b5eaa6319537db801eddbde667e4edb06",
+      "source_inputs": 7193,
+      "started_at": "2026-11-08T06:46:17.631915+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_native_deepseek_materialization.py",
+        "tests/test_native_deepseek_materialization_cli.py",
+        "tests/test_dsh_native_layout.py",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_attestation_publication.py",
+        "tests/test_executive_install_source_policy.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_executive_worker_acp_profile.py",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_executive_release_stage_only.py",
+        "tests/test_os_release_assets.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_executive_release_identity_review.py"
+      ],
+      "base_sha": "ebefb290f1c4d772490bf4424e0c1a938ee72b0b",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T06:50:56.137854+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "a6ff92b27d354657d79a02d7cdbc6cd4c92fc93a8631b66c0219098308f4b3cb",
+      "path": "/private/tmp/mmx-dsh-c38-composed-tests-20261108-pro1.json",
+      "sha256": "13168c0c4a0095ef4acbea35384a9d75ff7aafa44f57f0a0b6eb46b0e3ff518a",
+      "source_inputs": 7193,
+      "started_at": "2026-11-08T06:47:24.108442+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_native_deepseek_materialization_cli.py",
+        "tests/test_native_deepseek_materialization.py",
+        "tests/test_dsh_native_layout.py",
+        "tests/test_native_deepseek_attestation_publication.py",
+        "tests/test_dsh_native_worker_package.py"
+      ],
+      "base_sha": "ebefb290f1c4d772490bf4424e0c1a938ee72b0b",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T06:53:23.172710+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "130ccab23bb5ae079d2b386faf71ffb958ff1dd852a9d440ea5216abd7da7f95",
+      "path": "/private/tmp/mmx-dsh-c38-isolated-cli-tests-20261108-pro1.json",
+      "sha256": "a31e8cdc909a3f9ed3e512559cc94d22db710d1b2bbdab66ebdfe0732d62e765",
+      "source_inputs": 7193,
+      "started_at": "2026-11-08T06:53:15.985002+00:00"
+    }
+  ],
+  "recorded_at": "2026-11-08T06:54:27.768848+00:00",
+  "remaining_production_holds": [
+    "protected source acceptance",
+    "original Worker layout/enrollment read evidence",
+    "root Node/package/ACP custody and original attestation receipt",
+    "original Worker account/realm/quota/host admission and routing",
+    "signed-in packaged DeepSeek create/history/send/original answer/logout/reconnect/uncertain-send/receipt-first Stop/same-Session resume/tool settlement"
+  ],
+  "schema": "mastermind.deepseek.native_materialization_evidence/v1",
+  "source_parent": "ebefb290f1c4d772490bf4424e0c1a938ee72b0b",
+  "source_review": {
+    "concrete_repairs": [
+      "held stage FD",
+      "qualified Node identity before rename",
+      "deep final reconciliation",
+      "four reserved coordinates and protected owner namespaces",
+      "empty/duplicate shell options",
+      "reset inherited ACP return",
+      "retain partial outcome envelope",
+      "isolated Python CLI bootstrap"
+    ],
+    "method": "root self-check plus source-only native child judgment; no child edits/tests/runtime"
+  },
+  "source_sha256": {
+    "integrations/deepseek_harness/native_materialization.py": "3df9bf0c8f03d9f5c8f0b3364868b23933e94ff13e3046ce8f2f06c74ebbde96",
+    "integrations/deepseek_harness/package_attended.py": "8013ecf3686518d5d812524465179761fe70a8626b66a7d519436e9675ad03ad",
+    "integrations/deepseek_harness/runtime_compat/native_access_package.py": "a8f839aa2c8fb114985392179043cdc539aef301f9785c698ee3f9234622c92d",
+    "integrations/deepseek_harness/runtime_compat/native_acp_package.py": "24be6ba5431a83fadd2abd519f8f70151d0ce36a9c39134d9e769d6169ad7d5f",
+    "ops/executive_os/install.sh": "45904c2b8c04d665706dce01ac41edb804253b28cd327bf2582de5bba5fd044e",
+    "ops/executive_os/install_source_policy.py": "423f9f05cea1ba374822ea07cb03aa8db932b17bfc7841fc08e8afde48b6be9c",
+    "tests/executive_fabric_release_identity_review.py": "d46b4128f316b9ef7cbd5100f93b6b0299de5a10ae5350fe717a0df27933374d",
+    "tests/test_dsh_native_layout.py": "0402939a58f419f5cd26439316b3847d21e30365865ff8bb981b969056a09bdf",
+    "tests/test_executive_install_source_policy.py": "97ef5aacd4181b379795c97312d753f5bb396197580b03eecfe4f2e1171338a2",
+    "tests/test_native_deepseek_materialization.py": "9dccd5e914b00bf55db819650ce86fbade37430842306944b1fc504c7290a0ab",
+    "tests/test_native_deepseek_materialization_cli.py": "42a72ebecde70726314c4943459b4e7e837be5d671073dd76e2b6b4cbcd1580d"
+  },
+  "test_results": {
+    "composed_staging_and_identity": "696 passed",
+    "counts_overlap": true,
+    "initial_boundary": "214 passed, 9 failed: inert subprocess fixture omitted DEVNULL; original assertions retained",
+    "isolated_cli_and_changed_producers": "91 passed; includes five real -I -S -B entrypoint subprocesses",
+    "materialization_after_fixture_repair": "23 passed"
+  }
+}

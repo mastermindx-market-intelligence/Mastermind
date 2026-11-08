@@ -1,0 +1,390 @@
+{
+  "closed_lanes": [
+    "No replay of installed config/live runtime directory denials.",
+    "No repeat of paid Fabric/VPS explicit denial.",
+    "No retry of Git GC/repack or foreign worktree index access.",
+    "No unchanged retry of installed Executive backend_unavailable read."
+  ],
+  "diagnostics": [
+    "Initial focused attestation run passed before later source joins.",
+    "Worker pro1: new config fixture had unreviewed empty supplementary groups; corrected to original reviewed set.",
+    "Worker pro2-pro4: original temporary fixtures inherited GID0, caller GID20; group checks correctly refused.",
+    "Restored all original subscription/Codex test source; final tests use one owned private TMPDIR owned by the original test process.",
+    "Worker pro5 passed before exact deepseek-account selector correction.",
+    "Worker pro6 is final source qualification with identical recorded inputs."
+  ],
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "input_maps": {
+    "09b611a662f47dc79313318f049064799e3506f6e154a503a3d74576c6bd23f1": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-09b611a662f47dc79313318f049064799e3506f6e154a503a3d74576c6bd23f1.json",
+      "sha256": "d6ddf64739e9e575d372c1060ed3eb9d8091a8a3a052f38249139aec78797548"
+    },
+    "1f8263757b969b6207136d6fee164f5e785a0960651299ad112137fc21da21a1": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-1f8263757b969b6207136d6fee164f5e785a0960651299ad112137fc21da21a1.json",
+      "sha256": "782ee933703c0adc65aae480d40b799c51daf0d68d66532438b11accdf863e0f"
+    },
+    "3b0fa4ceadfa2423943a693459c70b1ae4fe3e9e30241d6c4800d33fc833b2a0": {
+      "files": 1120,
+      "path": "research/evidence/deepseek-native-worker-inputs-3b0fa4ceadfa2423943a693459c70b1ae4fe3e9e30241d6c4800d33fc833b2a0.json",
+      "sha256": "18aa95b35ec5c8810ba17532636a5d8c83d3ee3ae4d7f71f0c0f70e6d71d91fb"
+    },
+    "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b": {
+      "files": 1623,
+      "path": "research/evidence/deepseek-native-worker-inputs-844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b.json",
+      "sha256": "494433c882e81cddfea26ce7e5d3aa160c732b84583b502abb011bb07c0eae84"
+    },
+    "863eec33c440eedd6361138a4fcd432c5e64337b1c184d16a4a1d4493c908844": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-863eec33c440eedd6361138a4fcd432c5e64337b1c184d16a4a1d4493c908844.json",
+      "sha256": "c11670d88654d047c46b1385789e3d03e0febd89069aba1e3f7653e0e2c6a3f6"
+    },
+    "aeddc2387d09732e36f74e41d1a730ed676310fde2007be2243d856c298707a1": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-aeddc2387d09732e36f74e41d1a730ed676310fde2007be2243d856c298707a1.json",
+      "sha256": "fdad4ea2c4b5c082463f223fed8d3ea5cf5d141283c50f6fc2614581d66a91dc"
+    },
+    "b848156f04f922f6e64c973a389a200c31bbcc21060440088d11cf02a9251ff9": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-b848156f04f922f6e64c973a389a200c31bbcc21060440088d11cf02a9251ff9.json",
+      "sha256": "579b79c2ca4bde808a692f992c56824ede43e31a3717f45351a169131516c131"
+    },
+    "faaefeb6a8bc198faabaa85d9d81445df0ef70cddb4ef6bb9e974199a0ee6fcc": {
+      "files": 1424,
+      "path": "research/evidence/deepseek-native-worker-inputs-faaefeb6a8bc198faabaa85d9d81445df0ef70cddb4ef6bb9e974199a0ee6fcc.json",
+      "sha256": "c98c5a5f405658114cf978f8b36cf4af8ad00702b908744224ddfeabf26c66a1"
+    }
+  },
+  "operation": "deepseek-mastermind-chat-20261106-c2",
+  "parent_source": "e768c5d528c0f7522ff17bffa8d82fe87a6a1ef4",
+  "post_commit_guard_diagnostics": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_ceo_submit_armed_composition.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-committed-guard-20261107-pro1.xml"
+      ],
+      "correction": "Omit numeric host UID/GID from source projection; preserve exact original receipts and their hashes; original guard unchanged",
+      "finished": "2026-11-07T21:39:52.701122+00:00",
+      "inputs_after": "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b",
+      "inputs_before": "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b",
+      "inputs_unchanged": true,
+      "log_sha256": "9361d572366e909929656b3a511037691f991e9fd35eddff526204bb8a826c35",
+      "prefix": "/private/tmp/mmx-dsh-c25-committed-guard-20261107-pro1",
+      "receipt_sha256": "302e8e3b2e41733fbfec45f5a95cc8e298ee13a8aa7e639dfd3aee19cd79e6c6",
+      "result": "121 passed; evidence projection exposed two numeric host UID literals forbidden by original protected source guard",
+      "returncode": 1,
+      "source_sha": "6010962b3a1a8c5771171c53c4ed2fdf03fcaa16",
+      "started": "2026-11-07T21:39:16.617087+00:00"
+    }
+  ],
+  "pr": 2177,
+  "production": {
+    "hermes_or_accepted_canary_repeated": false,
+    "installed": false,
+    "installed_account_observed": false,
+    "native_entry_built": false,
+    "new_conversation_or_session_owner": false,
+    "provider_calls": 0,
+    "service_restarts": 0,
+    "signed_in_packaged_deepseek_accepted": false
+  },
+  "qualified_result": {
+    "passed": 348,
+    "subtests_passed": 2,
+    "unchanged_inputs": 1424
+  },
+  "receipt_projection_policy": "Raw test receipts remain exact at their original M2 paths and SHA-256. Committed projections omit numeric host UID/GID; no configured principal is implied.",
+  "recorded_at": "2026-11-07T21:38:41.891997+00:00",
+  "remaining": [
+    "Build/qualify fixed same-process native_worker.mjs through full original Web/ACP/Agent/Session composition.",
+    "Implement actual owner enforcement and truthful capability/confinement/account observations.",
+    "Qualify ACP0.12.1 transitive wheel/import closure under original installed Python -I -S -B via existing installer.",
+    "Recover original installed Worker/quota/host/account/source binding; enable canonical profile/router through original owners.",
+    "Run signed-in packaged DeepSeek authentication/history/send/original-answer/reconnect/Stop/resume/eligible-tool journey.",
+    "Record actual installed source/service routing/deployment and protected-source/hosted-CI receipts before claiming acceptance."
+  ],
+  "review_corrections": [
+    "Bound receipt before hashing; bound root package before source inventory.",
+    "Join exact protected Node path/hash before version probe.",
+    "Repeat protected source qualification after entry and final package observations.",
+    "Bind all nominal public fields to original receipt and installed Worker release.",
+    "Require all original native host/access/session/ACP and company peer exports.",
+    "Use actual deepseek-account provider registration from original owner."
+  ],
+  "schema": "mastermind.dsh_native_worker_source_evidence/v1",
+  "source_files": {
+    "control_plane/codex_provider_realm.py": "4f08d0eab66744177b4e6bd1ec72cc65872c8bbb96651f0e190ff60b394ed9ef",
+    "control_plane/native_provider_attestation.py": "fcbad76b36c1ace537f511df7caccc2d97354c7657a8350daf33fb266ffaf152",
+    "integrations/deepseek_harness/package_attended.py": "5aeba85bc76387649ac859db5499cfd1694c21f7c431f27a10a66f64f0f67c8a",
+    "ops/executive_os/provider_worker_slots.py": "b1e005d389ee5bd9ddf7168500b416610e10f4ba573d02ef7d669b40f75b1cf8",
+    "scripts/executive_os_phase1c_worker.py": "931484305461f641813558f2035554e4e07d2c37b26e6c62eba95d910684f8d3",
+    "tests/test_deepseek_attended_export.py": "a93d499a6a6148dbabc4af1ff013fb2297ec645e39afaa4d62a4ab35836e1cd9",
+    "tests/test_native_deepseek_attestation.py": "55a84c42aafd187699f6df3ed2e52d6f0dd43f80cc5eaa6393a46b13f9a2ecfe",
+    "tests/test_native_deepseek_worker_factory.py": "2ebcbf42b57e4f5566facf4b29dce7767dfce2d6b2021c20b5e3c27f2f92872c",
+    "tests/test_native_provider_realm_owner.py": "7ed69770aa4020dac77e3b58476c6fab0123d8da1bf6577a54b559547b8771bd"
+  },
+  "test_receipts": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_provider_attestation.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-attestation-20261107-pro1.xml"
+      ],
+      "finished": "2026-11-07T21:27:32.134630+00:00",
+      "inputs_after": "3b0fa4ceadfa2423943a693459c70b1ae4fe3e9e30241d6c4800d33fc833b2a0",
+      "inputs_before": "3b0fa4ceadfa2423943a693459c70b1ae4fe3e9e30241d6c4800d33fc833b2a0",
+      "inputs_unchanged": true,
+      "log_sha256": "d6e83555ed56f9f09b730ffa9555bdbc08128aa4da3202460f07ca1602f231de",
+      "prefix": "/private/tmp/mmx-dsh-c25-attestation-20261107-pro1",
+      "pytest_summary": "60 passed in 1.39s",
+      "qualification": false,
+      "receipt_sha256": "72be6dcd61a7af2ec273479523a9624e9577b4e9108c0efc374b39b8ac6553fc",
+      "returncode": 0,
+      "started": "2026-11-07T21:27:29.667147+00:00",
+      "status": "passed"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro1.xml"
+      ],
+      "finished": "2026-11-07T21:30:31.358266+00:00",
+      "inputs_after": "faaefeb6a8bc198faabaa85d9d81445df0ef70cddb4ef6bb9e974199a0ee6fcc",
+      "inputs_before": "faaefeb6a8bc198faabaa85d9d81445df0ef70cddb4ef6bb9e974199a0ee6fcc",
+      "inputs_unchanged": true,
+      "log_sha256": "f94bae50084e8ea767297df6682936a4083fc7b75d61bb395a3a26a80626d272",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro1",
+      "pytest_summary": "1 failed, 38 passed in 4.14s",
+      "qualification": false,
+      "receipt_sha256": "37941c7186bcc7098cd63c200fd6e25b1049ea4d54ada70c3df18ba88b50b8c0",
+      "returncode": 1,
+      "started": "2026-11-07T21:30:25.670759+00:00",
+      "status": "diagnostic-failure"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro2.xml"
+      ],
+      "finished": "2026-11-07T21:31:39.713087+00:00",
+      "inputs_after": "863eec33c440eedd6361138a4fcd432c5e64337b1c184d16a4a1d4493c908844",
+      "inputs_before": "863eec33c440eedd6361138a4fcd432c5e64337b1c184d16a4a1d4493c908844",
+      "inputs_unchanged": true,
+      "log_sha256": "c3219ef827216e6e5e5623c0b7baf057557a07f7320f6c1b2652ffd353db6bb7",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro2",
+      "pytest_summary": "1 failed, 177 passed in 3.71s",
+      "qualification": false,
+      "receipt_sha256": "92e0f32a01fe5475138a82e50d4c04fd610c3fa83975cf932bfe56d89bc375c6",
+      "returncode": 1,
+      "started": "2026-11-07T21:31:34.905880+00:00",
+      "status": "diagnostic-failure"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro3.xml"
+      ],
+      "finished": "2026-11-07T21:32:44.435797+00:00",
+      "inputs_after": "b848156f04f922f6e64c973a389a200c31bbcc21060440088d11cf02a9251ff9",
+      "inputs_before": "b848156f04f922f6e64c973a389a200c31bbcc21060440088d11cf02a9251ff9",
+      "inputs_unchanged": true,
+      "log_sha256": "2ac459eb2f7c48d4da33d6545e4e2fa19e6336f5ccfe6a1cd1468f237afd50ac",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro3",
+      "pytest_summary": "1 failed, 271 passed, 2 subtests passed in 7.63s",
+      "qualification": false,
+      "receipt_sha256": "9642accc83ddae58394e8f28711418abe974f3c9d54ecd2f2ab0f730adc59b02",
+      "returncode": 1,
+      "started": "2026-11-07T21:32:35.672715+00:00",
+      "status": "diagnostic-failure"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro4.xml"
+      ],
+      "finished": "2026-11-07T21:34:08.312946+00:00",
+      "inputs_after": "aeddc2387d09732e36f74e41d1a730ed676310fde2007be2243d856c298707a1",
+      "inputs_before": "aeddc2387d09732e36f74e41d1a730ed676310fde2007be2243d856c298707a1",
+      "inputs_unchanged": true,
+      "log_sha256": "309ca5f2290c5ba94bab4c139a49ce1db1811612d4f547b1fee00b33b0dda200",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro4",
+      "pytest_summary": "1 failed, 282 passed, 2 subtests passed in 6.87s",
+      "qualification": false,
+      "receipt_sha256": "b611dba729918e7b3db7a79dd62d2384f8f7a9cb197019d5a97ccf8e0fa8b9c5",
+      "returncode": 1,
+      "started": "2026-11-07T21:34:00.544546+00:00",
+      "status": "diagnostic-failure"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro5.xml"
+      ],
+      "finished": "2026-11-07T21:35:21.878275+00:00",
+      "inputs_after": "1f8263757b969b6207136d6fee164f5e785a0960651299ad112137fc21da21a1",
+      "inputs_before": "1f8263757b969b6207136d6fee164f5e785a0960651299ad112137fc21da21a1",
+      "inputs_unchanged": true,
+      "log_sha256": "5a614135337b4c206e29644e9c4e20d3c69c1d522db647cb25998d7ce45d4d40",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro5",
+      "pytest_summary": "348 passed, 2 subtests passed in 7.32s",
+      "qualification": false,
+      "receipt_projection_omissions": [
+        "temporary_directory.uid",
+        "temporary_directory.gid"
+      ],
+      "receipt_sha256": "96d91527cc911f4c4de12f97b1932101a01d4f2861776a649b2e2e6893872960",
+      "returncode": 0,
+      "started": "2026-11-07T21:35:13.664525+00:00",
+      "status": "passed",
+      "temporary_directory": {
+        "ownership": "original test process UID/GID; exact numeric observation retained in the SHA-bound raw receipt",
+        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro5-fixtures"
+      }
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_native_deepseek_attestation.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_native_provider_attestation.py",
+        "tests/test_native_provider_realm_owner.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_native_claude_worker_factory.py",
+        "tests/test_provider_worker_slots.py",
+        "tests/test_subscription_worker_config.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_capability_profile.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_executive_codex_attestation_receipt.py",
+        "tests/test_native_realm_broker_guard.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-worker-20261107-pro6.xml"
+      ],
+      "finished": "2026-11-07T21:36:22.705779+00:00",
+      "inputs_after": "09b611a662f47dc79313318f049064799e3506f6e154a503a3d74576c6bd23f1",
+      "inputs_before": "09b611a662f47dc79313318f049064799e3506f6e154a503a3d74576c6bd23f1",
+      "inputs_unchanged": true,
+      "log_sha256": "c1e28a333db6ece19067b259a2785302550f7b99c08a81e2ee0625f70fede9b4",
+      "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro6",
+      "pytest_summary": "348 passed, 2 subtests passed in 7.30s",
+      "qualification": true,
+      "receipt_projection_omissions": [
+        "temporary_directory.uid",
+        "temporary_directory.gid"
+      ],
+      "receipt_sha256": "f92b84184f83953422ba9850b3ce254841a056cfc31a035ab56d1e68ccf113c2",
+      "returncode": 0,
+      "started": "2026-11-07T21:36:14.542376+00:00",
+      "status": "passed",
+      "temporary_directory": {
+        "ownership": "original test process UID/GID; exact numeric observation retained in the SHA-bound raw receipt",
+        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro6-fixtures"
+      }
+    }
+  ]
+}

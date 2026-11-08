@@ -574,13 +574,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '3a08b8031a710276afb98622998835afdd4f87b9fee35138889e2eebd9c821f0',
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '9fbc7f6da35610e3709897c00414bd4c739f0de32d5130b06eef508c8695d85a',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6975, 35, 37, 'int', '80'),
-           (6976, 50, 55, 'int', '0o755'),
-           (7844, 41, 46, 'int', '0o644'),
-           (8625, 64, 69, 'int', '0o644'),
-           (10037, 41, 46, 'int', '0o644'))}
+           (6996, 35, 37, 'int', '80'),
+           (6997, 50, 55, 'int', '0o755'),
+           (7865, 41, 46, 'int', '0o644'),
+           (8658, 64, 69, 'int', '0o644'),
+           (10105, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -723,7 +723,7 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
-REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
+REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': '7213ad3122ca5038b759f1aeb02fbb97fc2bec990dd2d660f9bad7c247e73385', 'sites': ((98, 39, 42, 'int', '404'),)}
 
 # fixed HTTP unavailable status. Exact full postimage and literal sites only.
 # 2026-11-06 source audit: the fixed planning/execution pair shares the original
@@ -739,7 +739,7 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f42e9664f61b44c34bf4200193ba3210aef27acbff05e617c68031ee4b402b19', 'sites': ((3710, 68, 71, 'int', '503'), (3715, 69, 72, 'int', '503'), (3719, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'a22a1e221c33b390fe0fd5044292c14ebe08e47d709880e1b1e4bd15b8b28e3c', 'sites': ((3714, 68, 71, 'int', '503'), (3719, 69, 72, 'int', '503'), (3723, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -795,7 +795,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6b141c941fac4ebdb8f8f1fa6a48c6ff1d86deb9159e313ce68f460a6998e5c9', 'sites': ((1724, 26, 31, 'int', '0o700'),)}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '620ad25157234c9fc2f92c495cca9384cecc1ce443ead9643772af9e820ea4f0', 'sites': ((1818, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -833,17 +833,7 @@ REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.
-REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
- 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
-           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
-           (170, 19, 22, 'int', '459'),
-           (171, 19, 22, 'int', '459'),
-           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
-           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
-           (182, 19, 22, 'int', '460'),
-           (183, 19, 22, 'int', '460'),
-           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
-           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': 'b1e005d389ee5bd9ddf7168500b416610e10f4ba573d02ef7d669b40f75b1cf8', 'sites': ((170, 20, 44, 'str', '"_mastermind_alibaba_01"'), (171, 21, 45, 'str', '"_mastermind_alibaba_01"'), (172, 19, 22, 'int', '459'), (173, 19, 22, 'int', '459'), (182, 20, 44, 'str', '"_mastermind_minimax_01"'), (183, 21, 45, 'str', '"_mastermind_minimax_01"'), (184, 19, 22, 'int', '460'), (185, 19, 22, 'int', '460'), (290, 12, 36, 'str', '"_mastermind_alibaba_01"'), (298, 12, 36, 'str', '"_mastermind_minimax_01"'))}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.

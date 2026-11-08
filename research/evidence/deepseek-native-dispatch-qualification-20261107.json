@@ -1,0 +1,227 @@
+{
+  "behavior": [
+    "Native model and reasoning selection retains original SDK request/Agent/Session/selection identity and checks immediately before the original assignment after discovery.",
+    "Post-assignment withdrawal rejects the response without rollback, retry, or another setter.",
+    "Runtime captures root admission, callback, signal and runtime in one plain immutable binding to avoid Cordis service-field proxy identity drift.",
+    "Passive exact-provider registration observes original registration/adapter/owner/root runtime; immutable registration metadata and original owner survive replacement correctly.",
+    "Original Agent preparation and final header append recheck the resolved route and original Agent/Session currentness.",
+    "LLM facts keep original request identity separate from projected options and closed resolved configuration. Request metadata never becomes native call-config facts.",
+    "Native adapter write permits originate in the original runtime, bind exact adapter/options, and are claimed once before authority callbacks. Structural permits, mismatches and replays refuse.",
+    "DeepSeek retains that write check through its original request and retry loop, checks after extension/header preparation and immediately before Messages fetch.",
+    "Original HTTP-success extension settlement is preserved after send authority withdrawal.",
+    "Native lifetime withdrawal is ABORTED, not retryable TRANSPORT.",
+    "Native attachment-bearing requests refuse before route projection/auth/upload; ACP native composition advertises no image capability. Ordinary host/image/file behavior remains.",
+    "Original package preparation includes exact attribution package metadata. Strict checker retains original project options and current-source identity with unchanged dependency declarations."
+  ],
+  "c30_active_candidate": {
+    "path": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/.cache/native-c28",
+    "qualified": false,
+    "source_sha256": {
+      "packages/credentials/deepseek-account-platform/src/index.ts": "0134c89caa934922254f312738f781d08aa423eb6a97c4967831f05ac86f1d49",
+      "packages/credentials/deepseek-account/src/index.ts": "c39e0359eb1b9661b54aa803dfe6890a0e340c2a2de030becc0c2e4d14560b70",
+      "packages/llm/llm-deepseek-account/src/catalog.ts": "581e89962070fcc1bda81eb5a77a8200bb0d16f14bbd2e55e3ff1138e6e691b6",
+      "packages/llm/llm-deepseek-account/src/index.ts": "f5b1b9a86c02e6bfab3c0be46b12caaabf36ac2e025ffcee4b067d59f51be6d9",
+      "packages/llm/llm-deepseek-account/src/listing.ts": "650db47550036bfd47183cd1de1c417fcba4e25e80bece7d8d051ace627fa052",
+      "packages/llm/llm-deepseek/src/adapter.ts": "a1b6c4ffd02e1f91cf39efcab4e1ce032c7d30d9332f5eed013da279dd60db6d",
+      "packages/llm/llm-deepseek/src/types.ts": "8b132d2e7db838edc16135442cc35fe04c22e6644fc77f579b72762951f459ee"
+    },
+    "tracked_package_applied": false
+  },
+  "canonical_archive": {
+    "comment_id": 6707499732,
+    "path": "research/evidence/deepseek-native-handoff-c28-20261107.md",
+    "sha256": "37b58f087dc91d0c792d62ae26e4bc2c750c3af978c1de0639944fdf62c46dea"
+  },
+  "diagnostics_preserved": [
+    "Initial model suite210passed/2fixturefailures: actual Agent deep matching and stale spy-instance history; fixed fixture identity/mocks,12newtargetedcasespassed.",
+    "Initial expanded LLM/ACP imports found missing package.json attribution metadata; original metadata added to exact source closure.",
+    "Early strict checks mixed source/declaration identities, then pulled vendor sources under consumer options. Final checker maps original dependency output paths and exact changed source; no compiler flag or diagnostic is suppressed.",
+    "Positive native cases exposed Cordis wrapping of standalone captured function/service fields; immutable binding corrected.",
+    "Source-only judgment found mutable exposed registration, structural/mismatched permit acceptance, old runtime passive observation and retryable abort classification; all corrected with regressions.",
+    "Closed native config projection corrected metadata leakage in observed config. Final type issue was explicit normalization of polymorphic this; runtime owner semantics preserved."
+  ],
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "external_provider_calls": 0,
+  "governing_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "holds": [
+    "C30 original account/credential lifetime and catalog final-write qualification",
+    "fixed same-process native_worker.mjs and truthful owner facts",
+    "original enabled Worker/quota/host/account/profile/router binding",
+    "actual root dependency/package custody",
+    "signed-in packaged DeepSeek journey with recovery/Stop/resume/eligible tool settlement",
+    "original installed backend readiness remains unobserved; last exact read backend_unavailable; closed lanes not retried"
+  ],
+  "installed": false,
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "parent_source_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+  "production_armed": false,
+  "production_sessions_created": 0,
+  "recorded_at": "2026-11-07T23:53:14.242604+00:00",
+  "schema": "mastermind.dsh_native_dispatch_qualification.v1",
+  "service_restarts": 0,
+  "source_sha256": {
+    "integrations/deepseek_harness/runtime_compat/check-native-host.mjs": "a37e2a3407d08c49c9cc9a1ce380e84867ab42c855887e8a7b60d71ae051b95b",
+    "integrations/deepseek_harness/runtime_compat/native-access-source.json": "74e0b6d9402c37e26e1f58d4e1807a5759f016a4a606424eb7247ae73f0beace",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6936e972d306e31adcdc770e1db7cdc34515f3cd9b45a62ad51af24de1f35bef",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "f364be9e03ab7627b75cfbba72c745a19b8ba04cf9439344a7f0f96eecb336e3",
+    "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "ce364a7835fbc2b3e028a1a4877f48cb9b8a4fe810a947742264ad20d7de3279",
+    "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "294011e6038b3d0f247d8fa892a6d447cab4fbc6a92e165a23fbeb1aadcfddcc",
+    "integrations/deepseek_harness/runtime_compat/native-host-source.json": "160f8fd9698072d2f0a708af2bad244efdc09aa65780b8612fa2a7f41a865e33",
+    "integrations/deepseek_harness/runtime_compat/native-llm-admission.test.ts": "992b0b1e4125940d6502479a78e12ba084062d5f016688b13415517b2bee40e1",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "7635e33655639e2ea5854c64abf7acfd6379bddd6685de5e9c53a71a597fc6dd",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "0c8abd30cf99c1320ae65e70a061768053915d9ec9cd13fe4d67413d3fc51c02",
+    "integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "ebe1c956e15ce150eb7881bdeca10f46cfb51ffcaa300d69509566a50bc51025",
+    "integrations/deepseek_harness/runtime_compat/vitest.host-admission.config.mts": "d49d3e7327b49c0d0266b414451884ed6ff4e32995f24b95f4a8cb401bea17c7",
+    "integrations/deepseek_harness/runtime_compat/vitest.native-llm.config.mts": "04f2a63e3fe6651fc371abcdbf68200a6fd42560dcdd653ae2554f4d27e0d570",
+    "tests/executive_identity_review.py": "ea812b6dd0eff18df36868b74782de6e44ffb63a18b4c12ffbcd2b31df9af615",
+    "tests/test_ceo_submit_armed_composition.py": "8c3ed49159d3498091f95371ecfaad6741a71d99ebb3c0faafbead670d115009"
+  },
+  "strict_diagnostics": 0,
+  "strict_projects": [
+    "Agent",
+    "AgentLoop",
+    "LLM",
+    "DeepSeek",
+    "ACP"
+  ],
+  "tests": [
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.host-admission.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c29-host-final-20261107-pro1.xml"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:48:57.208360+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "host",
+      "log_sha256": "9d3fc070b6aeeb94e1a8f7a7b0dd2b00d4f577be7ebd3a567325462ea9e668f5",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-host-final-20261107-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "952c49b9bc9d7d7db15ddc2b95918834d253a84e7d1c73758c84802d9b0fc2a3",
+      "started_at": "2026-11-07T23:48:49.956402+00:00",
+      "tests_passed": 208
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.acp-lifecycle.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c29-acp-final-20261107-pro3.xml"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:49:08.504500+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "acp",
+      "log_sha256": "e57fc453e5e6f284c62bc7633829c7fd75ced32fbe1f2313d336fbc08fdba5cd",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-acp-final-20261107-pro3.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "d517aa72a83fec74403cb9e0a011ba029e242a4032a7c6f048f272169cedef17",
+      "started_at": "2026-11-07T23:48:51.961669+00:00",
+      "tests_passed": 214
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.native-llm.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c29-llm-final-20261107-pro2.xml"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:51:20.065319+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "llm",
+      "log_sha256": "5e37b169e020f711c24fad32c761d3d3789a27a04b1961f53378495ad541c353",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-llm-final-20261107-pro2.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "af9aa8abcc52c77f409fee13306a135b0c4a621662d03e738514b7bac7db7736",
+      "started_at": "2026-11-07T23:51:13.961899+00:00",
+      "tests_passed": 225
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "--junitxml=/private/tmp/mmx-dsh-c29-package-final-20261107-pro1.xml"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:49:12.087059+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "package",
+      "log_sha256": "3a105b429c566a6ab228658f80ae3094d2be8b3cd71c1dc02ddbcc5dceba360f",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-package-final-20261107-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "7610bd1bb4902ad2d0f45b4d8d55e429e71071d2e6651a563f1a35fef80e3894",
+      "started_at": "2026-11-07T23:49:00.221285+00:00",
+      "tests_passed": 54
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-host.mjs"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:48:51.970562+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "host_types",
+      "log_sha256": "75314c37b1117ae85e3dbabc60978930f6f310b20cec52ddac76404c429e9401",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-types-20261107-pro6.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "f258982dd280d442ef42d80f75f97ccfe185749d97be265d468621e1474e7c8c",
+      "started_at": "2026-11-07T23:48:47.729171+00:00"
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs"
+      ],
+      "base_sha": "661e4efcc2d809c76d906fa6c4acebedfad57a94",
+      "completed_at": "2026-11-07T23:51:19.376517+00:00",
+      "input_count": 7094,
+      "inputs_unchanged": true,
+      "kind": "acp_types",
+      "log_sha256": "3c347b934ed1bfa53b6e76c5c643fd5b2321a01ee6c96636e159f14a7fbe1a0a",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c29-acp-types-20261107-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "3d8ff2da35b07b3d8b00ac0d67cfabb84ac9214bb4df5f3bb9178c359a24e5f9",
+      "started_at": "2026-11-07T23:51:17.735579+00:00"
+    }
+  ],
+  "tests_passed": 701
+}

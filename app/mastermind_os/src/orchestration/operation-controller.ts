@@ -53,7 +53,7 @@ import {
 
 // ── Frozen UI-local contract types ────────────────────────────────────────────
 
-export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept" | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
+export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept" | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn" | "conversation_resume" | "conversation_stop";
 
 export interface CommandIntent {
   readonly kind: OperationKind;
@@ -103,6 +103,11 @@ export type MaybePromise<T> = T | Promise<T>;
 // ── Port / store interfaces ───────────────────────────────────────────────────
 
 export interface FiniteCommandPort {
+  /** Optional complete group: subordinate Stop remains attached to its original parent. */
+  prepareControl?(parent:OperationPointer,intent:CommandIntent):OperationPointer;
+  submitControl?(parent:OperationPointer,control:OperationPointer,intent:CommandIntent,signal:AbortSignal):Promise<EffectReceipt>;
+  readControlOperation?(parent:OperationPointer,control:OperationPointer,signal:AbortSignal):Promise<EffectReceipt>;
+
   context(): OwnerContext | null;
   /** Synchronous and effect-free; must not mint or select runtime/provider IDs. */
   prepare(intent: CommandIntent): OperationPointer;
@@ -128,6 +133,11 @@ export interface FiniteCommandPort {
    * distinction.
    */
   reconcileOperation?(
+    pointer: OperationPointer,
+    signal: AbortSignal,
+  ): Promise<EffectReceipt>;
+  /** Explicit original native-call observation; no reserve, submit or new key. */
+  reconcileNativeOperation?(
     pointer: OperationPointer,
     signal: AbortSignal,
   ): Promise<EffectReceipt>;
@@ -163,7 +173,17 @@ export interface FiniteCommandPort {
  * in {@link completeOrchestratorCommandBinding} rejects bindings that
  * expose those aliases.
  */
+
+export type PendingControlRead =
+  | {readonly matched:true;readonly control:OperationPointer|null}
+  | {readonly matched:false};
+
 export interface PendingPointerStore {
+  /** One subordinate control in the same durable row; it never replaces the parent. */
+  readControl?(principalScope:string,parent:OperationPointer,signal?:AbortSignal):MaybePromise<PendingControlRead>;
+  attachControlIfEqual?(principalScope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):MaybePromise<boolean>;
+  clearControlIfEqual?(principalScope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):MaybePromise<boolean>;
+
   read(
     principalScope: string,
     signal?: AbortSignal,
@@ -271,7 +291,7 @@ export interface UnknownState {
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept", "project_source_write", "instruction_pause", "conversation_create", "conversation_consume", "conversation_turn"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept", "project_source_write", "instruction_pause", "conversation_create", "conversation_consume", "conversation_turn", "conversation_resume", "conversation_stop"]);
 
 /**
  * Closed set of source kinds for which an explicit
@@ -417,6 +437,10 @@ export class OperationController {
 
   private _inflight: Promise<OperationState> | null = null;
   private _activeAbort: AbortController | null = null;
+  private _controlState:OperationState={status:"idle",pointer:null,reason:"IDLE"};
+  private _controlInflight:Promise<OperationState>|null=null;
+  private _controlAbort:AbortController|null=null;
+
 
   /**
    * Controller-local monotonic counter. Bumped when a new operation starts and
@@ -433,6 +457,108 @@ export class OperationController {
     private readonly _port: FiniteCommandPort,
     private readonly _store: PendingPointerStore,
   ) {}
+
+
+  /** Subordinate presentation only; the parent foreground state is unchanged. */
+  getControlState():OperationState{return this._controlState;}
+  beginControl(parent:OperationPointer,intent:CommandIntent):Promise<OperationState>{
+    return this._controlAction(parent,intent);
+  }
+  recoverControl(parent:OperationPointer):Promise<OperationState>{
+    return this._controlAction(parent);
+  }
+  private _controlAction(parent:OperationPointer,intent?:CommandIntent):Promise<OperationState>{
+    if(this._controlInflight)return this._controlInflight;
+    const ctx=this._port.context(),read=this._store.readControl,attach=this._store.attachControlIfEqual,
+      clear=this._store.clearControlIfEqual,prepare=this._port.prepareControl,submit=this._port.submitControl,
+      recover=this._port.readControlOperation;
+    const idle=(reason:SafeReason):OperationState=>({status:"idle",pointer:null,reason});
+    if(!ctx)return Promise.resolve(this._controlState=idle("OWNER_ABSENT"));
+    if(!read||!attach||!clear||!prepare||!submit||!recover)
+      return Promise.resolve(this._controlState=idle("LOCAL_UNAVAILABLE"));
+    if(!isValidPointer(parent)||!["conversation_create","conversation_turn"].includes(parent.kind)||
+      intent!==undefined&&(!isValidIntent(intent)||intent.kind!=="conversation_stop"))
+      return Promise.resolve(this._controlState=idle("INVALID_PAYLOAD"));
+    const original=Object.freeze({operationKey:parent.operationKey,kind:parent.kind,targetKey:parent.targetKey});
+    const epoch=this._epoch,scope=ctx.principalScope,generation=ctx.generation,abort=new AbortController();
+    let pointer:OperationPointer|null=null;
+    const current=()=>{
+      if(this._epoch!==epoch||abort.signal.aborted)return false;
+      const owner=this._port.context();
+      if(!owner||owner.principalScope!==scope||owner.generation!==generation){
+        this.invalidate();return false;
+      }
+      if(this._store.readControl!==read||this._store.attachControlIfEqual!==attach||
+        this._store.clearControlIfEqual!==clear||this._port.prepareControl!==prepare||
+        this._port.submitControl!==submit||this._port.readControlOperation!==recover){
+        abort.abort();this._controlState=idle("EPOCH_CHANGED");return false;
+      }
+      return true;
+    };
+    const lookup=async()=>{
+      const value:unknown=await read.call(this._store,scope,original,abort.signal);
+      if(!isPlainObject(value)||typeof value.matched!=="boolean"||
+        (value.matched?Object.keys(value).length!==2||!("control"in value)||
+          value.control!==null&&(!isValidPointer(value.control)||value.control.kind!=="conversation_stop"):
+          Object.keys(value).length!==1))throw Error("LOCAL_UNAVAILABLE");
+      return value as PendingControlRead;
+    };
+    const hold=(reason:SafeReason):OperationState=>pointer?
+      {status:"unknown",pointer,reason}:idle(reason);
+    const run=async():Promise<OperationState>=>{
+      try{
+        const stored=await lookup();if(!current())return this._controlState;
+        if(!stored.matched)return this._controlState=idle("PENDING_POINTER");
+        if(stored.control!==null){
+          pointer=Object.freeze({...stored.control});
+          if(intent!==undefined)return this._controlState={status:"checking",pointer,reason:"PENDING_POINTER"};
+        }else{
+          if(intent===undefined)return this._controlState=idle("RECOVER_NO_POINTER");
+          const prepared=prepare.call(this._port,original,intent);
+          if(!isValidPointer(prepared)||prepared.kind!=="conversation_stop"||prepared.targetKey!==intent.targetKey)
+            return this._controlState=idle("MALFORMED_POINTER");
+          pointer=Object.freeze({operationKey:prepared.operationKey,kind:prepared.kind,targetKey:prepared.targetKey});
+          if(!current())return this._controlState;
+          const attached=await attach.call(this._store,scope,original,pointer,abort.signal);
+          if(!current())return this._controlState;
+          if(attached!==true){
+            if(attached!==false)throw Error("LOCAL_UNAVAILABLE");
+            const existing=await lookup();if(!current())return this._controlState;
+            if(existing.matched&&existing.control!==null){
+              pointer=Object.freeze({...existing.control});
+              return this._controlState={status:"checking",pointer,reason:"PENDING_POINTER"};
+            }
+            return this._controlState={status:"refused",pointer:null,reason:"PENDING_POINTER"};
+          }
+        }
+        if(!current())return this._controlState;
+        this._controlState={status:intent===undefined?"checking":"submitting",pointer:pointer!,reason:intent===undefined?"CHECKING":"SUBMITTING"};
+        const receipt=await (intent===undefined?recover.call(this._port,original,pointer!,abort.signal):
+          submit.call(this._port,original,pointer!,intent,abort.signal));
+        if(!current())return this._controlState;
+        if(!isValidReceipt(receipt)||receipt.operationKey!==pointer!.operationKey||receipt.kind!==pointer!.kind||
+          receipt.targetKey!==pointer!.targetKey||receipt.missionSelection!==undefined||receipt.advance!==undefined)
+          return this._controlState=hold("MALFORMED_RECEIPT");
+        // Only the qualified original APPLIED receipt, mapped by the port to
+        // accepted, can release this attachment. Refusal/ABSENT/UNKNOWN retain it.
+        if(receipt.disposition!=="accepted")return this._controlState=hold("UNKNOWN_RECEIPT");
+        const cleared=await clear.call(this._store,scope,original,pointer!,abort.signal);
+        if(!current())return this._controlState;
+        return this._controlState=cleared===true?{status:"accepted",pointer:null,reason:"ACCEPTED"}:hold("UNKNOWN_RECEIPT");
+      }catch{
+        if(!current())return this._controlState;
+        return this._controlState=hold(pointer?"TRANSPORT_ERROR":"LOCAL_UNAVAILABLE");
+      }
+    };
+    let resolve!:(state:OperationState)=>void,reject!:(error:unknown)=>void;
+    const inflight=new Promise<OperationState>((done,failed)=>{resolve=done;reject=failed;});
+    // Separate latch, installed before the first await. Never change the
+    // parent's epoch, active abort, tracked pointer or foreground promise.
+    this._controlInflight=inflight;this._controlAbort=abort;
+    const release=()=>{if(this._controlInflight===inflight){this._controlInflight=null;this._controlAbort=null;}};
+    void run().then(state=>{release();resolve(state);},error=>{release();reject(error);});
+    return inflight;
+  }
 
   getState(): OperationState {
     return this._state;
@@ -497,7 +623,7 @@ export class OperationController {
     }
 
     // Sync in-flight check: the slot may already be held by a prior begin/recover.
-    if (this._inflight) return this._busy();
+    if (this._inflight || this._controlInflight) return this._busy();
 
     const scope = ctx.principalScope;
     const generation = ctx.generation;
@@ -602,10 +728,18 @@ export class OperationController {
    * through the existing exact compare-clear.
    */
   async recover(
-    options?: { readonly reconcileSource?: boolean },
+    options?: { readonly reconcileSource?: boolean; readonly reconcileNative?: boolean; readonly expectedPointer?: OperationPointer },
   ): Promise<OperationState> {
     const ctx = this._port.context();
     if (!ctx) return this._idle("OWNER_ABSENT");
+    // An explicit gesture may already have selected an original hint. Capture
+    // that identity before awaiting the durable store, so a later hint cannot
+    // become the target of the earlier gesture.
+    const selected = options?.expectedPointer;
+    if (selected !== undefined && !isValidPointer(selected)) return this._idle("MALFORMED_POINTER");
+    const expected = selected === undefined ? null : Object.freeze({
+      operationKey: selected.operationKey, kind: selected.kind, targetKey: selected.targetKey,
+    });
 
     if (this._inflight) {
       const tracked = this._tracked;
@@ -618,6 +752,7 @@ export class OperationController {
       }
       return this._busy();
     }
+    if(this._controlInflight)return this._busy();
 
     const scope = ctx.principalScope;
     const generation = ctx.generation;
@@ -631,6 +766,10 @@ export class OperationController {
       if (!read.pointer) return this._idle("RECOVER_NO_POINTER");
 
       const pointer = read.pointer;
+      if (expected !== null && (pointer.operationKey !== expected.operationKey ||
+          pointer.kind !== expected.kind || pointer.targetKey !== expected.targetKey)) {
+        return this._retain(this._track(pointer, scope, generation, epoch, abort), "PENDING_POINTER");
+      }
       // Recovery is read-only unless the caller explicitly asked for a source
       // reconcile, the stored kind is in the closed source set, and the port
       // actually exposes the optional observer. Everything else — a default
@@ -641,6 +780,15 @@ export class OperationController {
       if (options?.reconcileSource === true && RECONCILABLE_SOURCE_KINDS.has(pointer.kind)) {
         try {
           const candidate = this._port.reconcileOperation;
+          if (typeof candidate === "function") reconcile = candidate;
+        } catch {
+          reconcile = null;
+        }
+      }
+      if (options?.reconcileNative === true &&
+          (pointer.kind === "conversation_create" || pointer.kind === "conversation_turn")) {
+        try {
+          const candidate = this._port.reconcileNativeOperation;
           if (typeof candidate === "function") reconcile = candidate;
         } catch {
           reconcile = null;
@@ -741,6 +889,8 @@ export class OperationController {
 
     // Bump epoch before abort so a synchronous rejection cannot publish.
     this._epoch++;
+    this._controlAbort?.abort();
+    this._controlState={status:"idle",pointer:null,reason:"CLEARED"};
     if (this._inflight) {
       this._activeAbort?.abort();
       // _inflight stays set until the run settles; clearing here would let a
@@ -831,6 +981,8 @@ export class OperationController {
       ctx.generation !== generation
     ) {
       this._epoch++;
+      this._controlAbort?.abort();
+      this._controlState={status:"idle",pointer:null,reason:"EPOCH_CHANGED"};
       this._activeAbort?.abort();
       this._tracked = null;
       this._idle("EPOCH_CHANGED");

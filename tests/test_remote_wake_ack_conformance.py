@@ -17,20 +17,28 @@ import asyncio
 import copy
 import dataclasses
 import hashlib
+import json
 import os
 import ssl
 import threading
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from control_plane import codex_operator_adapter, executive_worker_broker, wake_dispatcher
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.executive_worker_broker import BrokerPolicy, PeerCredentials
-from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION, OperationId
 from control_plane.operator_harness_wire import to_wire
+from control_plane.operator_materialization_receipt import (
+    build_operator_materialization_receipt,
+    persist_operator_materialization_receipt,
+    read_operator_materialization_receipt,
+    requested_profile_digest,
+)
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from control_plane.remote_worker_transport import BrokerTransportBinding, TransportEffect, TransportError
@@ -426,6 +434,42 @@ def _build_core(tmp_path: Path) -> RemoteWakeChain:
         workspace_root=roots[0], run_root=roots[1], provider_home=roots[2],
         allowed_supplementary_gids=frozenset(set(os.getgroups()) - {os.getgid()}),
     )
+    # Reuse the immutable original Runtime admission; never call start/resume
+    # merely to seed this already-owned remote protocol fixture.
+    principal = runtime.operator_harness.admitted_principal_observation(generation)
+    assert principal is not None
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT provider_session_id, observed_attestation_json "
+            "FROM process_generations WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        ).fetchone()
+    assert row is not None
+    assert principal.attempt_id == epoch.attempt_id
+    assert principal.worker_id == generation.worker_id
+    assert principal.process_generation_id == generation.process_generation_id
+    assert principal.provider_session_id == row["provider_session_id"] == str(binding.native_handle)
+    operation = OperationId(f"ohf-op:start:{sealed.attempt_id}")
+    materialization = build_operator_materialization_receipt(
+        operation_command_id=operation.command_id, operation_kind="start_session",
+        attempt_id=epoch.attempt_id, worker_id=epoch.worker_id,
+        session_epoch_id=epoch.session_epoch_id,
+        process_generation_id=generation.process_generation_id,
+        generation_number=generation.generation_number,
+        requested_profile_digest=requested_profile_digest(to_wire(profile)),
+        provider_session_id=row["provider_session_id"], process_identity=to_wire(process),
+        observed_attestation=json.loads(row["observed_attestation_json"]),
+        process_credentials={"process_identity": dict(principal.process_identity),
+            "os_principal_name": principal.os_principal_name,
+            "os_principal_uid": principal.os_principal_uid},
+        provider_home_identity=dict(principal.provider_home_identity),
+        created_at=datetime.fromtimestamp(principal.observed_at_ms / 1000, timezone.utc).isoformat(),
+    )
+    materialization = persist_operator_materialization_receipt(
+        policy.run_root, materialization, expected_owner_uid=policy.worker_uid)
+    assert read_operator_materialization_receipt(
+        policy.run_root, operation.command_id,
+        expected_owner_uid=policy.worker_uid) == materialization
     peer_calls = []
 
     def synthetic_peer(sock):
@@ -439,6 +483,8 @@ def _build_core(tmp_path: Path) -> RemoteWakeChain:
     broker._operator_run = executive_worker_broker._BrokerOperatorRun(
         adapter=adapter, requested=profile, epoch=epoch, generation=generation,
         provider_session_id=str(binding.native_handle),
+        materialization_operation=operation,
+        materialization_receipt=materialization,
     )
     chain = RemoteWakeChain(
         admitted, target, registry, binding, obligation,

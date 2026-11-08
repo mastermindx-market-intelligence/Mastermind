@@ -408,6 +408,28 @@
         }
       }
     },
+    "operator.dsh.native-conversation.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "c6d47d76037bd58d40c724d6bf5c22c41a306a85ef9c1e6d4641a9db78e07176",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "The native DeepSeek Session uses its admitted Worker adapter, not the Claude Agent SDK; no SDK grant or provider identity is inherited.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "The native DeepSeek conversation profile is owned by the original Worker and is not a Claude CLI MCP projection.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "The native DeepSeek conversation profile is not enrolled in Claude Desktop Local or its MCP surface.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "The native DeepSeek Session is not a Claude inline subagent and inherits no Claude context, permissions or tool namespace.",
+          "status": "unsupported"
+        }
+      }
+    },
     "sealed.worker.claude.readonly.no-extensions.v1": {
       "package_generation_digests": {},
       "profile_digest": "421b642a6a4ae978efffbe311023dd3495adc54cbc00e86bf5f6254be3dd5555",

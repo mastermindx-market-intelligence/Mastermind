@@ -1,0 +1,2728 @@
+--- a/apps/cli/src/profile-boot.ts
++++ b/apps/cli/src/profile-boot.ts
+@@ -226,8 +226,9 @@
+   patchFiles: readonly string[],
+   fromDefaultProfile?: string,
+   resolvedProfile?: ResolvedProfileRuntime,
++  userLayer = true,
+ ): Promise<ComposedProfile> {
+-  const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile)
++  const profile = resolvedProfile?.profile ?? prepareProfile(name, userLayer, fromDefaultProfile)
+   if (resolvedProfile !== undefined) writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+   const resolutionOptions = { installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR, profile }
+   const resolution = await createRuntimeResolution(resolutionOptions)
+@@ -259,6 +260,14 @@
+   args: readonly string[]
+   /** Application-owned package runtime, scoped to plugin package operations. */
+   packageManager?: ProfileContext['packageManager']
++  /**
++   * Synchronous runtime-only host initialization before any config-tree entry.
++   * Install requirements and deferred hooks here; injected services do not yet
++   * exist. A returned Promise is refused rather than awaited during tree boot.
++   */
++  initializeHost?: (ctx: Context) => void
++  /** Runtime-only installed profile policy, checked before any config-tree evaluation. */
++  nativeProfileAdmission?: ProfileContext['nativeProfileAdmission']
+ }
+ 
+ /**
+@@ -289,9 +298,20 @@
+     if (failures.length > 1) throw new AggregateError(failures, 'dsh: profile cleanup failed')
+   })()
+   try {
++    const nativeProfileAdmission = options.nativeProfileAdmission
++    if (nativeProfileAdmission !== undefined && (nativeProfileAdmission.userLayer !== false
++      || typeof nativeProfileAdmission.check !== 'function')) {
++      throw new Error('native installed profile policy required')
++    }
+     const composed = await composeProfile(
+       options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile,
++      nativeProfileAdmission === undefined,
+     )
++    const checked: unknown = nativeProfileAdmission?.check(composed.profile, composed.resolution)
++    if (checked !== undefined) {
++      void Promise.resolve(checked).catch(() => {})
++      throw new Error('native profile admission must be synchronous')
++    }
+     const appReady = createAppReady()
+     const shutdown = createProcessShutdown(dispose)
+     const signalShutdown = new AbortController()
+@@ -313,6 +333,7 @@
+     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)
+     const profileContext: ProfileContext = {
+       name: options.profile,
++      ...nativeProfileAdmission === undefined ? {} : { nativeProfileAdmission },
+       ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
+       dir: composed.profile.dir, patchPath: composed.profile.patchPath,
+       installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
+@@ -326,6 +347,12 @@
+       // Before any config-tree entry mounts, so plugins resolve all launch-time
+       // environment values from the same immutable launch snapshot.
+       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)
++      const initialized: unknown = options.initializeHost?.(hostCtx)
++      if (initialized !== undefined) {
++        // Contain a mistaken async initializer while the original root unwinds.
++        void Promise.resolve(initialized).catch(() => {})
++        throw new Error('profile host initialization must be synchronous')
++      }
+       await hostCtx.plugin(PluginPackages, {
+         resolution: composed.resolution,
+       })
+--- a/packages/api/gateway/src/index.ts
++++ b/packages/api/gateway/src/index.ts
+@@ -471,6 +471,16 @@
+     return cancellableStream(source, prepared.endpoint, prepared.invocation)
+   }
+ 
++  /** Company launch holds stock-owner commands before lookup or event ownership. */
++  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
++    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
++      && endpoint !== 'remoteAccess/follow') {
++      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
++        action: endpoint, reason: 'owner-restricted',
++      })
++    }
++  }
++
+   private async dispatchRpc(
+     endpoint: string,
+     payload: unknown,
+@@ -480,6 +490,7 @@
+     if (endpoint === REMOTE_EVENT_RESULT_ENDPOINT) {
+       try {
+         assertPeerLive(peer, endpoint)
++        this.assertOwnerRoute(peer, endpoint)
+         requireInteractions(peer, endpoint)
+         // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+         if (peer.principal.kind !== 'owner') {
+@@ -518,6 +529,7 @@
+       // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
+       releaseUplink(uplink)
+       assertPeerLive(peer, endpoint)
++      this.assertOwnerRoute(peer, endpoint)
+       requireInteractions(peer, endpoint)
+       return this.openRemoteEvents(payload, signal, peer)
+     }
+@@ -779,6 +791,7 @@
+   ): Promise<PreparedInvocation> {
+     const endpoint = endpointOf(request.namespace, request.method)
+     assertPeerLive(request.peer, endpoint)
++    this.assertOwnerRoute(request.peer, endpoint)
+     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
+     assertExactArguments(request.args, descriptor, endpoint)
+     const validated = validateArguments(descriptor, request.args, endpoint)
+--- a/packages/api/remote-access/src/index.ts
++++ b/packages/api/remote-access/src/index.ts
+@@ -12,7 +12,7 @@
+ import {
+   Remote,
+   TypertRemoteService,
+-  principalOf,
++  readOwnerAccessRestriction,
+   type Principal,
+   type PrincipalMap,
+   type RemoteAccessResource,
+@@ -129,15 +129,18 @@
+   private readonly followers = new Set<AccessFollower>()
+   /** Aborted when this instance unloads; every open snapshot generation ends with it. */
+   private readonly lifetime = new AbortController()
++  /** Sticky launch restriction; removing a child consumer cannot restore owner access. */
++  readonly ownerRestricted: boolean
+ 
+   /** @param ctx - owning Host plugin Context. */
+   constructor(ctx: Context) {
+     super(ctx, 'remoteAccess')
++    this.ownerRestricted = readOwnerAccessRestriction(ctx)
+     ctx.effect(() => () => { this.lifetime.abort() }, 'remoteAccess: snapshot generations')
+     // Every index the webServer renders belongs to the owner; snapshotFor documents non-owner pages.
+     ctx.inject(['webServer'], (webCtx) => {
+       webCtx.on('webserver/index-inject', (table) => {
+-        table.push({ kind: 'global', name: REMOTE_ACCESS_SNAPSHOT_KEY, value: OWNER_BASELINE })
++        table.push({ kind: 'global', name: REMOTE_ACCESS_SNAPSHOT_KEY, value: this.snapshotFor(OWNER) })
+       })
+     })
+   }
+@@ -152,6 +155,7 @@
+    */
+   registerPolicy<K extends Exclude<keyof PrincipalMap, 'owner'>>(kind: K, policy: RemoteAccessPolicy<PrincipalMap[K]>): () => void {
+     const policies = this.policies
++    if ((kind as string) === 'owner') throw new Error('remote access: owner policy registration is forbidden')
+     if (policies.has(kind)) throw new Error(`remote access: principal kind ${JSON.stringify(kind)} already has a policy`)
+     const entry: PolicyEntry = { kind, policy }
+     const dispose = this.ctx.effect(() => {
+@@ -199,7 +203,8 @@
+   decide(request: RemoteAccessRequest<Principal>): RemoteAccessDecision {
+     const { principal, action } = request
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner' || action === FOLLOW_ACTION) return ALLOW
++    if (action === FOLLOW_ACTION) return ALLOW
++    if (principal.kind === 'owner') return this.ownerRestricted ? NO_ALLOW : ALLOW
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return NO_ALLOW
+     const bindings = this.bindingsOf(entry, principal, action)
+@@ -234,8 +239,9 @@
+    */
+   allows(resource: RemoteAccessResource): boolean {
+     const invocation = this.ctx.invocation
+-    const principal = principalOf(invocation)
++    const principal = invocation?.peer.principal
+     if (invocation === undefined || principal === undefined) return true
++    if (principal.kind === 'owner') return !this.ownerRestricted
+     const action: RemoteAccessAction = `${invocation.request.namespace}/${invocation.request.method}`
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return false
+@@ -253,7 +259,8 @@
+    */
+   snapshotFor(principal: Principal): RemoteAccessBaseline {
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner') return OWNER_BASELINE
++    if (principal.kind === 'owner') return this.ownerRestricted
++      ? { type: 'baseline', owner: false, grants: [] } : OWNER_BASELINE
+     return { type: 'baseline', owner: false, grants: this.grantsFor(principal) }
+   }
+ 
+@@ -271,8 +278,8 @@
+   async *follow(signal: AbortSignal): AsyncIterable<RemoteAccessFrame> {
+     signal.throwIfAborted()
+     const generation = AbortSignal.any([signal, this.lifetime.signal])
+-    const principal = principalOf(this.ctx.invocation)
+-    if (principal === undefined) {
++    const principal = this.ctx.invocation?.peer.principal
++    if (principal === undefined || principal.kind === 'owner') {
+       yield this.snapshotFor(OWNER)
+       await abortion(generation)
+       return
+--- a/packages/boot/app-boot/src/profile-context.ts
++++ b/packages/boot/app-boot/src/profile-context.ts
+@@ -1,6 +1,6 @@
+ /** Launcher-owned profile locations and composition inputs. */
+ import { join } from 'node:path'
+-import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile } from './profile.ts'
++import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile, type RuntimeResolution } from './profile.ts'
+ import { loadOptionalPatches } from './index.ts'
+ import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
+ 
+@@ -11,9 +11,16 @@
+   readonly env: Readonly<Record<string, string>>
+ }
+ 
++/** Runtime-only installed native composition; never supplied by a profile/YAML row. */
++export interface NativeProfileAdmission {
++  readonly userLayer: false
++  check(profile: Profile, resolution?: RuntimeResolution): void
++}
++
+ /** Current profile facts; scheduling and mutation belong to their callers. */
+ export interface ProfileContext {
+   readonly name: string
++  readonly nativeProfileAdmission?: NativeProfileAdmission
+   /** Packaged applications supply their bundled runtime instead of a PATH executable. */
+   readonly packageManager?: ProfilePnpmInvocation
+   readonly dir: string
+@@ -62,6 +69,11 @@
+  */
+ export function readBundlePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+   const profile = initialProfile ?? loadProfileDirectory(binName, context.dir, context.installAnchor, { userLayer: false })
++  const checked: unknown = context.nativeProfileAdmission?.check(profile)
++  if (checked !== undefined) {
++    void Promise.resolve(checked).catch(() => {})
++    throw new Error('native profile admission must be synchronous')
++  }
+   return profile.layers.flatMap(layer => layer.patches)
+ }
+ 
+@@ -74,8 +86,10 @@
+ export function readProfilePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+   const patches = structuredClone([
+     ...readBundlePatches(binName, context, initialProfile),
+-    ...(initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? []),
+-    ...(loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? []),
++    ...(context.nativeProfileAdmission === undefined
++      ? initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? [] : []),
++    ...(context.nativeProfileAdmission === undefined
++      ? loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? [] : []),
+     ...context.overlays,
+   ])
+   const telemetryPatch = resolveTelemetryPatch(context.telemetryDisabledEnv,
+--- a/packages/client/connection/src/rpc-host.ts
++++ b/packages/client/connection/src/rpc-host.ts
+@@ -2,7 +2,7 @@
+ 
+ import { Context, Service } from '@deepseek-ai/cordis'
+ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+-import type { PeerId, PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol'
++import { readOwnerAccessRestriction, type PeerId, type PeerScope, type Principal } from '@deepseek-ai/dsh-typert-protocol'
+ import type { ConnectionInteractions } from './connect-protocol.ts'
+ import {
+   RpcId,
+@@ -72,6 +72,7 @@
+   readonly browserPeer: PeerScope
+   private readonly peers = new Map<PeerId, PeerRecord>()
+   private readonly owner: Context
++  private readonly ownerRestricted: boolean
+   private disposed = false
+   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
+   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+@@ -91,6 +92,7 @@
+   ) {
+     super(ctx, 'connection')
+     this.owner = ctx
++    this.ownerRestricted = readOwnerAccessRestriction(ctx)
+     this.browserPeer = new Peer(ctx, { principal: { kind: 'owner' } })
+     ctx.effect(() => async () => {
+       this.disposed = true
+@@ -218,7 +220,7 @@
+         if (route?.methods.has(request.method) === true) {
+           // Exact routes bypass Gateway access checks, so only the owner reaches them.
+           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))
+           return route.fetch(request)
+         }
+         const endpoint = endpointFromPath(channel, pathname)
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -8,6 +8,7 @@
+   Agent,
+   AgentCancelCause,
+   AgentEventDispatch,
++  AgentInputCapability,
+   AgentOptions,
+   AgentStatus,
+   CancelOptions,
+@@ -33,7 +34,7 @@
+ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+ import type { Context } from '@deepseek-ai/cordis'
+-import { ReactLoopInbox } from './inbox.ts'
++import { ReactLoopInbox, type InboxDriverWriters } from './inbox.ts'
+ import { RuntimeContextProjection } from './runtime-context.ts'
+ import { AssistantStreamAttempt } from './assistant-stream.ts'
+ import { SystemPromptProjection } from './runtime-context.ts'
+@@ -97,6 +98,7 @@
+ /** Drives one session through turn and step boundaries. */
+ export class ReactLoopAgent implements Agent {
+   readonly inbox: ReactLoopInbox
++  #inputWriters!: Readonly<InboxDriverWriters>
+   private phase: Phase
+   private activityDone: Promise<void> = Promise.resolve()
+ 
+@@ -124,12 +126,32 @@
+     public readonly id: SessionId,
+     public readonly options: AgentOptions,
+     public readonly session: Session,
++    input?: AgentInputCapability,
+   ) {
+     this.requestSurfaceGeneration = session.surface.contentGeneration
+     this.dispatch = agentEvents(loopCtx, this)
+     this.scope = createScope(loopCtx, this)
+     this.ctx = this.scope.ctx
+-    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch)
++    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch,
++      input === undefined ? undefined : (attempt, origin) => {
++        input.assertCurrent()
++        if (origin?.kind === 'context') {
++          origin.assertCurrent()
++        } else {
++          input.consume(Object.freeze({
++            ...attempt, agent: this, session,
++            ...origin === undefined ? {} : {
++              send: Object.freeze({
++                message: origin.message, requestedTarget: origin.requestedTarget, wakeup: origin.wakeup,
++              }),
++            },
++          }))
++        }
++        input.assertCurrent()
++        if (origin?.kind === 'context') origin.assertCurrent()
++      },
++      writers => { this.#inputWriters = writers },
++    )
+     /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
+     const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
+     this.phase = { kind: 'idle', lastTurn }
+@@ -156,7 +178,7 @@
+     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
+     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
+     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
+-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
++    this.#inputWriters.send(message, target, resolvedTarget, wakeup)
+     if (wakeup) this.wakeDriver(wakingAfterAbort)
+   }
+ 
+@@ -400,7 +422,8 @@
+   private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEndReason | null> {
+     /* v8 ignore next -- private callers establish the running phase before executing a step */
+     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": step outside running phase`)
+-    const { turn, step, abort: { signal } } = this.phase
++    const phase = this.phase
++    const { turn, step, abort: { signal } } = phase
+     signal.throwIfAborted()
+ 
+     const { assembly } = decision
+@@ -550,7 +573,12 @@
+         if (toolCalls.length === 0) return { kind: 'completed' }
+         const { concluded } = await executeToolCalls(
+           this.loopCtx, turn, step, toolCalls, signal,
+-          context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
++          context => this.#inputWriters.context(context, () => {
++            signal.throwIfAborted()
++            if (this.phase !== phase || phase.turn !== turn || phase.step !== step) {
++              throw new Error('native tool context no longer belongs to the original step')
++            }
++          }),
+         )
+         return concluded ? { kind: 'completed' } : null
+       } catch (error: unknown) {
+@@ -609,6 +637,12 @@
+       config = proposedConfig
+     }
+     signal.throwIfAborted()
++    const phase = this.phase, sequence = session.seq
++    const native = this.loopCtx.llm.requireNativePreparation({ agent: this, session, turn, step, signal }, config, preparedCall)
++    if (native && (this.phase !== phase || session.seq !== sequence)) {
++      throw new Error('native request preparation changed the original Agent or Session')
++    }
++    signal.throwIfAborted()
+     return { config, ...preparedCall === undefined ? {} : { preparedCall } }
+   }
+ 
+@@ -628,6 +662,14 @@
+       ...preparedCall === undefined ? {} : { adapterDefaults: preparedCall.adapterDefaults },
+       ...tools.length > 0 ? { tools } : {},
+     })
++    const phase = this.phase, sequence = session.seq
++    const native = this.loopCtx.llm.requireNativePreparation({
++      agent: this, session, turn: position.turn, step: position.step, signal,
++    }, config, preparedCall)
++    if (native && (this.phase !== phase || session.seq !== sequence)) {
++      throw new Error('native header admission changed the original Agent or Session')
++    }
++    signal.throwIfAborted()
+     const baseline = this.session.requestHeader()
+     const startsSeries = startsRequestSeries
+       || this.requestSurfaceGeneration !== surfaceGeneration
+--- a/packages/core/agent-loop/src/inbox.ts
++++ b/packages/core/agent-loop/src/inbox.ts
+@@ -10,12 +10,34 @@
+ import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
+ import type {
+   AgentEventDispatch,
++  AgentInputAttempt,
+   Inbox as InboxContract,
+   InboxState,
+   InboxTarget,
+   InboxWireState,
+ } from '@deepseek-ai/dsh-agent'
+ import { z } from 'zod'
++import { deepFreeze } from '@deepseek-ai/dsh-util-values'
++
++/** Frozen accessors are still executable; native grants require data-only input. */
++function nativeInputData(messages: UserMessage[]): UserMessage[] {
++  const pending: unknown[] = [messages]
++  const seen = new WeakSet<object>()
++  while (pending.length > 0) {
++    const value = pending.pop()
++    if (value === null || typeof value !== 'object' || seen.has(value)) continue
++    seen.add(value)
++    const prototype = Object.getPrototypeOf(value)
++    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
++      throw new Error('native input requires plain data')
++    }
++    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
++      if (!('value' in descriptor)) throw new Error('native input cannot contain accessors')
++      pending.push(descriptor.value)
++    }
++  }
++  return deepFreeze(messages)
++}
+ 
+ /** Wire validation for pending agent input reconstructed from durable inbox splices. */
+ export const inboxProjectionSchema = z.object({
+@@ -71,12 +93,40 @@
+  * @param session - session whose durable events store pending input.
+  * @param dispatch - agent-scoped notifications for Inbox lifecycle events.
+  */
++type InboxInsertion = Omit<AgentInputAttempt, 'agent' | 'session' | 'send'>
++type InboxInsertionOrigin =
++  | { readonly kind: 'send'; readonly message: UserMessage; readonly requestedTarget: InboxTarget; readonly wakeup: boolean }
++  | { readonly kind: 'context'; readonly assertCurrent: () => void }
++
++/** Private driver capabilities, handed directly to the original Agent constructor. */
++export interface InboxDriverWriters {
++  send(message: UserMessage, requestedTarget: InboxTarget, resolvedTarget: InboxTarget, wakeup: boolean): void
++  context(message: UserMessage, assertCurrent: () => void): void
++}
++
+ export class ReactLoopInbox implements InboxContract {
++  readonly #admitInput: ((attempt: InboxInsertion, origin: InboxInsertionOrigin | undefined) => void) | undefined
++  #inserting = false
++
+   constructor(
+     private readonly projections: SessionProjectionRegistry,
+     private readonly session: Session,
+     private readonly dispatch: AgentEventDispatch,
+-  ) {}
++    admitInput?: (attempt: InboxInsertion, origin: InboxInsertionOrigin | undefined) => void,
++    bindDriver?: (writers: Readonly<InboxDriverWriters>) => void,
++  ) {
++    this.#admitInput = admitInput
++    bindDriver?.(Object.freeze<InboxDriverWriters>({
++      send: (message, requestedTarget, resolvedTarget, wakeup) => {
++        this.#mutate(resolvedTarget, Infinity, 0, [message], true,
++          Object.freeze({ kind: 'send', message, requestedTarget, wakeup }))
++      },
++      context: (message, assertCurrent) => {
++        this.#mutate('next-step', this.nextStep.length, 0, [message], true,
++          Object.freeze({ kind: 'context', assertCurrent }))
++      },
++    }))
++  }
+ 
+   /** Prompts awaiting individual turns. */
+   get nextTurn(): readonly UserMessage[] {
+@@ -107,8 +157,8 @@
+    * @returns next-step input followed by the queued turn, when requested.
+    */
+   claim(target: InboxTarget, turn: number): UserMessage[] {
+-    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
+-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
++    const claimed = this.#mutate('next-step', 0, this.nextStep.length, [], false)
++    if (target === 'next-turn') claimed.push(...this.#mutate('next-turn', 0, 1, [], false))
+     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+     return claimed
+   }
+@@ -170,7 +220,7 @@
+     deleteCount: number,
+     inserted: UserMessage[],
+   ): UserMessage[] {
+-    return this.mutate(target, start, deleteCount, inserted, true)
++    return this.#mutate(target, start, deleteCount, inserted, true)
+   }
+ 
+   /** Locate one pending identity across both owned lists. */
+@@ -194,14 +244,38 @@
+     return state
+   }
+ 
+-  /** Commit one normalized mutation and publish its live events. */
+-  private mutate(
++  /** Keep an authority callback or input accessor from borrowing an insertion in progress. */
++  #mutate(
+     target: InboxTarget,
+     start: number,
+     deleteCount: number,
+     inserted: UserMessage[],
+     discardRemoved: boolean,
++    origin?: InboxInsertionOrigin,
+   ): UserMessage[] {
++    if (this.#admitInput === undefined || inserted.length === 0) {
++      return this.#commit(target, start, deleteCount, inserted, discardRemoved, origin)
++    }
++    if (this.#inserting) throw new Error('native input admission is reentrant')
++    this.#inserting = true
++    try {
++      return this.#commit(target, start, deleteCount, inserted, discardRemoved, origin)
++    } finally {
++      this.#inserting = false
++    }
++  }
++
++  /** Commit one normalized mutation and publish its live events. */
++  #commit(
++    target: InboxTarget,
++    start: number,
++    deleteCount: number,
++    inserted: UserMessage[],
++    discardRemoved: boolean,
++    origin?: InboxInsertionOrigin,
++  ): UserMessage[] {
++    // A native authority sees exactly the immutable input later appended.
++    if (this.#admitInput !== undefined && inserted.length > 0) inserted = nativeInputData([...inserted])
+     const state = this.current()
+     const inbox = state[target]
+     const truncatedStart = Math.trunc(start)
+@@ -232,6 +306,13 @@
+       ...(outcome === undefined ? {} : { outcome }),
+     }
+     const removed = inbox.slice(actualStart, actualStart + actualDeleteCount)
++    if (this.#admitInput !== undefined && inserted.length > 0) {
++      const sessionSeq = this.session.seq
++      this.#admitInput(Object.freeze({
++        sessionSeq, target, start: actualStart, removedCount: actualDeleteCount, inserted,
++      }), origin)
++      if (this.session.seq !== sessionSeq) throw new Error('native input Session changed during admission')
++    }
+     const event = this.session.append('agent/inbox/spliced', splice)
+     if (discardRemoved) {
+       for (const message of removed) this.dispatch.emit('agent/inbox/discarded', { message })
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -8,6 +8,7 @@
+ 
+ import { Context, FiberState, Service } from '@deepseek-ai/cordis'
+ import { randomUUID } from 'node:crypto'
++import { isPromise } from 'node:util/types'
+ import z from '@deepseek-ai/schemastery'
+ import { z as zod } from 'zod'
+ import { brandString } from '@deepseek-ai/dsh-brand'
+@@ -15,6 +16,9 @@
+   Agent,
+   AgentFactory,
+   AgentHandle,
++  AgentInputCapability,
++  AgentLifecycleAdmission,
++  AgentLifecyclePermit,
+   AgentOptions,
+   AgentSetup,
+   CreateAgentOptions,
+@@ -22,9 +26,10 @@
+   SessionStartSource,
+   TurnBoundaryProjection,
+ } from '@deepseek-ai/dsh-agent'
++import { AGENT_LIFECYCLE_ADMISSION_KEY } from '@deepseek-ai/dsh-agent'
+ import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+ import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
+-import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
++import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+ import type {} from '@deepseek-ai/dsh-system-prompt'
+ import type {} from '@deepseek-ai/dsh-tools'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+@@ -360,7 +365,7 @@
+   readonly config: Config
+   private readonly ownership: FactoryOwnership
+   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
+-  private readonly runtime: { ctx: Context }
++  private readonly runtime: { ctx: Context; admission: AgentLifecycleAdmission | undefined }
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentLoop')
+@@ -373,7 +378,14 @@
+     // Register only after every config validation above has passed, so a
+     // rejected constructor leaves no projection unit behind.
+     const ownership = this.ownership = new FactoryOwnership(ctx.fiber)
+-    this.runtime = { ctx }
++    // Capture the requirement before declarative startup. Removing or replacing
++    // the provided service later must never restore a permissive factory.
++    const admission = ctx.root.get(AGENT_LIFECYCLE_ADMISSION_KEY)
++    if (admission !== undefined && (admission === null || typeof admission.admit !== 'function')) {
++      throw new Error('agent lifecycle admission requirement is invalid')
++    }
++    this.runtime = { ctx, admission: admission === undefined ? undefined
++      : Object.freeze({ admit: admission.admit.bind(admission) }) }
+     ctx.effect(function* () {
+       const unregisterTurnBoundary = ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
+       yield unregisterTurnBoundary
+@@ -419,6 +431,87 @@
+         return fiber.dispose
+       }, `agentLoop.resume(${id})`)
+     }
++  }
++
++  /** Capture one original operation permit before any native Session effect. */
++  private admitLifecycle(ownerCtx: Context, operation: 'create' | 'resume', id: SessionId): AgentLifecyclePermit | undefined {
++    const required = this.runtime.admission
++    if (required === undefined) return undefined
++    const admitted = required.admit(ownerCtx, operation, id)
++    if (isPromise(admitted)) {
++      void admitted.catch(() => {})
++      throw new Error('agent lifecycle admission must be synchronous')
++    }
++    if (admitted === null || typeof admitted !== 'object'
++      || !(admitted.signal instanceof AbortSignal) || typeof admitted.assertCurrent !== 'function') {
++      throw new Error('agent lifecycle admission permit is invalid')
++    }
++    const signal = admitted.signal
++    const check = admitted.assertCurrent.bind(admitted)
++    const suppliedInput = admitted.input
++    let input: AgentInputCapability | undefined
++    if (suppliedInput !== undefined) {
++      if (suppliedInput === null || typeof suppliedInput !== 'object'
++          || typeof suppliedInput.assertCurrent !== 'function' || typeof suppliedInput.consume !== 'function') {
++        throw new Error('agent input admission capability is invalid')
++      }
++      const current = suppliedInput.assertCurrent.bind(suppliedInput)
++      const consume = suppliedInput.consume.bind(suppliedInput)
++      const requireTrue = (callback: () => unknown): true => {
++        ownerCtx.fiber.assertActive()
++        signal.throwIfAborted()
++        const result = callback()
++        if (result !== true) {
++          if (isPromise(result)) void result.catch(() => {})
++          throw new Error('agent input admission is no longer current')
++        }
++        signal.throwIfAborted()
++        ownerCtx.fiber.assertActive()
++        return true
++      }
++      input = Object.freeze<AgentInputCapability>({
++        assertCurrent: () => requireTrue(current),
++        consume: (attempt) => requireTrue(() => consume(attempt)),
++      })
++      input.assertCurrent()
++    }
++    const permit: AgentLifecyclePermit = {
++      signal,
++      ...input === undefined ? {} : { input },
++      assertCurrent() {
++        ownerCtx.fiber.assertActive()
++        signal.throwIfAborted()
++        const current: unknown = check()
++        if (current !== true) {
++          if (isPromise(current)) void current.catch(() => {})
++          throw new Error('agent lifecycle admission is no longer current')
++        }
++        // A synchronous authority callback may retire the generation or owner.
++        signal.throwIfAborted()
++        ownerCtx.fiber.assertActive()
++        return true
++      },
++    }
++    permit.assertCurrent()
++    return Object.freeze(permit)
++  }
++
++  /** Native attachment cannot adopt input that has no original current enqueue owner. */
++  private requireNativeInboxEmpty(admission: AgentLifecyclePermit | undefined, events: () => readonly SessionEvent[]): void {
++    if (admission?.input === undefined) return
++    admission.input.assertCurrent()
++    let state = inboxProjectionDefinition.init()
++    for (const event of events()) state = inboxProjectionDefinition.apply(state, event)
++    if (state['next-turn'].length !== 0 || state['next-step'].length !== 0) {
++      throw new Error('native lifecycle cannot adopt pending input')
++    }
++    // No authority callback after this final read: it could append new input.
++  }
++
++  /** Keep the original caller cancellation as well as the host generation. */
++  private admittedSignal(signal: AbortSignal | undefined, permit: AgentLifecyclePermit | undefined): AbortSignal | undefined {
++    return permit === undefined ? signal
++      : signal === undefined ? permit.signal : AbortSignal.any([signal, permit.signal])
+   }
+ 
+   /** Report a contained declarative-start failure to identity-bound consumers. */
+@@ -502,7 +595,9 @@
+     callerSignal?: AbortSignal,
+     handle?: SessionHandle,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): PreparedAgent {
++    admission?.assertCurrent()
+     assertAgentOptions(options)
+     ownerCtx.fiber.assertActive()
+     // Every caller reaches prepare() synchronously from a service method
+@@ -601,7 +696,7 @@
+     const untrack = this.ownership.track(dispose)
+     try {
+       unfollowOwner = ownerCtx.effect(function* () {
+-        const created = machine = new ReactLoopAgent(loopCtx, id, options, session)
++        const created = machine = new ReactLoopAgent(loopCtx, id, options, session, admission?.input)
+         machineReady.resolve()
+         // Adopt the scope on its original fiber so it cannot unload before teardown.
+         // A loop already unloading during minting owns the provisional scope itself.
+@@ -631,6 +726,7 @@
+     /* v8 ignore stop */
+ 
+     const assertLive = (): void => {
++      admission?.assertCurrent()
+       if (!abort.signal.aborted) return
+       // Every fused abort source carries an Error reason: onCallerAbort and
+       // raceAbort wrap non-Error caller reasons, and the factory/lifecycle
+@@ -686,17 +782,21 @@
+    * @returns the published running agent.
+    */
+   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
++    const admission = this.admitLifecycle(this.ctx, 'create', id)
+     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
+-    const stored = await this.createStoredSession(preparation.session)
++    const stored = await this.createStoredSession(preparation.session, admission?.signal)
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
++      admission?.assertCurrent()
++      prepared = this.prepare(this.ctx, id, options, preparation.session, admission?.signal, stored?.handle, undefined, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return (await this.initializeAgent(prepared, async () => {
++      admission?.assertCurrent()
+       await this.appendUnstoredSuffix(stored, preparation.session)
++      admission?.assertCurrent()
+       return await prepared.publish('startup')
+     })).agent
+   }
+@@ -748,6 +848,8 @@
+    * @returns the published handle.
+    */
+   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
++    const admission = this.admitLifecycle(ownerCtx, 'create', options.sessionId)
++    const signal = this.admittedSignal(options.signal, admission)
+     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
+       ...options.seed === undefined ? {} : { seed: options.seed },
+       ...options.meta === undefined ? {} : { meta: options.meta },
+@@ -756,13 +858,15 @@
+     const published = (async () => {
+       let stored: StoredSession | undefined
+       try {
++        // oxlint-disable-next-line typescript/no-deprecated -- Reuse the original durable Inbox fold.
++        this.requireNativeInboxEmpty(admission, () => preparation.session.snapshotEvents())
+         // raceAbortCall normalizes a pre-aborted or mid-create abort and
+         // closes a handle that finishes creating after abandonment.
+-        stored = options.signal === undefined
++        stored = signal === undefined
+           ? await this.createStoredSession(preparation.session)
+           : await raceAbortCall(
+-            () => this.createStoredSession(preparation.session, options.signal),
+-            options.signal,
++            () => this.createStoredSession(preparation.session, signal),
++            signal,
+             options.sessionId,
+             (abandoned) => { void abandoned?.handle.close().catch(() => {}) },
+           )
+@@ -776,10 +880,11 @@
+         preparation,
+         options.agentOptions ?? {},
+         options.setup,
+-        options.signal,
++        signal,
+         'startup',
+         stored,
+         options.parentAgent,
++        admission,
+       )
+     })()
+     this.ownership.trackWrapper(published)
+@@ -797,20 +902,29 @@
+     source: SessionStartSource,
+     stored?: StoredSession,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): Promise<AgentHandle> {
+     using ownedPreparation = preparation
+     const session = ownedPreparation.session
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent)
++      admission?.assertCurrent()
++      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return await this.initializeAgent(prepared, async () => {
+       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
++      admission?.assertCurrent()
+       setupCommit?.commit()
++      admission?.assertCurrent()
++      // oxlint-disable-next-line typescript/no-deprecated -- Reuse the original durable Inbox fold.
++      this.requireNativeInboxEmpty(admission, () => session.snapshotEvents())
+       await this.appendUnstoredSuffix(stored, session)
++      admission?.assertCurrent()
++      // oxlint-disable-next-line typescript/no-deprecated -- Recheck setup writes across the persistence await.
++      this.requireNativeInboxEmpty(admission, () => session.snapshotEvents())
+       return await prepared.publish(source)
+     })
+   }
+@@ -855,6 +969,8 @@
+     options: ResumeAgentOptions,
+   ): Promise<AgentHandle> {
+     const id = options.resumeSessionId
++    const admission = this.admitLifecycle(ownerCtx, 'resume', id)
++    const signal = this.admittedSignal(options.signal, admission)
+     const published = (async () => {
+       // The open and read may outlive their owner: race them against caller
+       // cancellation, owner-fiber unload, and factory teardown so a
+@@ -864,7 +980,7 @@
+         ownerAbort.abort(new Error(`agent "${id}" setup aborted: owner disposed during setup`))
+       }, `agentLoop.resume-load(${id})`)
+       const fused = AbortSignal.any([
+-        ...options.signal === undefined ? [] : [options.signal],
++        ...signal === undefined ? [] : [signal],
+         ownerAbort.signal,
+         this.ownership.signal,
+       ])
+@@ -875,6 +991,7 @@
+         try {
+           // Taking write ownership FIRST excludes a concurrent resume of the
+           // same id (in this process, a live agent's handle holds the claim).
++          admission?.assertCurrent()
+           handle = await raceAbortCall(
+             () => persistence.open(id, 'write', { signal: fused }),
+             fused,
+@@ -885,11 +1002,15 @@
+           // back the physically valid log; an interrupted final turn receives
+           // synthetic closers (missing tool errors, step/end, turn/end) that
+           // are appended through the same handle as an ordinary batch.
++          admission?.assertCurrent()
+           const coldRead = await handle.read(0, undefined, { signal: fused })
+           fused.throwIfAborted()
++          admission?.assertCurrent()
+           const persisted = coldRead.events
++          this.requireNativeInboxEmpty(admission, () => persisted)
+           const closers = interruptedTurnClosers(persisted)
+           if (closers.length > 0) await handle.append(closers)
++          admission?.assertCurrent()
+           preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
+             seed: [...persisted, ...closers],
+             meta: structuredClone(handle.header),
+@@ -911,10 +1032,11 @@
+           preparation,
+           options.agentOptions ?? {},
+           options.setup,
+-          options.signal,
++          signal,
+           'resume',
+           owned,
+           options.parentAgent,
++          admission,
+         )
+       } finally {
+         preparation?.[Symbol.dispose]()
+--- a/packages/core/agent/src/index.ts
++++ b/packages/core/agent/src/index.ts
+@@ -11,9 +11,9 @@
+ import { isPromise } from 'node:util/types'
+ import { scopeTarget } from '@deepseek-ai/dsh-scope'
+ import type { Scoped } from '@deepseek-ai/dsh-scope'
+-import type { SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
++import type { Session, SessionEvent, SessionId, SessionLogOffset, UserMessage } from '@deepseek-ai/dsh-session'
+ import { installTurnArchiveAdmission } from './archive-admission.ts'
+-import type { Agent } from './types.ts'
++import type { Agent, InboxTarget } from './types.ts'
+ import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
+ 
+ export * from './runtime-types.ts'
+@@ -27,7 +27,59 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     agents: AgentRegistry
+-  }
++    /** Runtime-only host requirement, installed before any Agent factory mounts. */
++    agentLifecycleAdmission?: AgentLifecycleAdmission
++  }
++}
++
++/** Runtime-only key; no declarative plugin configuration can install a grant. */
++export const AGENT_LIFECYCLE_ADMISSION_KEY = 'agentLifecycleAdmission'
++
++/**
++ * A permit from the original host operation. Its signal belongs to the original
++ * process generation, not a transient request. The factory adds it to its
++ * existing cancellation and teardown chain; it creates no new lifecycle owner.
++ */
++export interface AgentLifecyclePermit {
++  readonly signal: AbortSignal
++  /** Recheck the original operation and exact caller; only literal true admits. */
++  assertCurrent(): true
++  /** Retained input authority for this native generation; absent for ordinary hosts. */
++  readonly input?: AgentInputCapability
++}
++
++/** The final original Inbox insertion, with provenance from its private driver path. */
++export interface AgentInputAttempt {
++  readonly agent: Agent
++  readonly session: Session
++  readonly sessionSeq: Session['seq']
++  readonly target: InboxTarget
++  readonly start: number
++  readonly removedCount: number
++  readonly inserted: readonly UserMessage[]
++  readonly send?: {
++    readonly message: UserMessage
++    readonly requestedTarget: InboxTarget
++    readonly wakeup: boolean
++  }
++}
++
++/** Runtime-only capability subordinate to the original native operation owner. */
++export interface AgentInputCapability {
++  /** Generation/lifetime check that remains meaningful after create/resume returns. */
++  assertCurrent(): true
++  /** Consume one exact external input once, before the durable append. */
++  consume(attempt: AgentInputAttempt): true
++}
++
++/** Programmatic host admission before Session preparation or writer acquisition. */
++export interface AgentLifecycleAdmission {
++  /**
++   * The registry passes the actual caller Context, including its fiber/scope.
++   * Cordis may shadow the Context object; match the original caller fiber, not
++   * object equality with the factory or an untraced plugin Context.
++   */
++  admit(ownerCtx: Context, operation: 'create' | 'resume', sessionId: SessionId): AgentLifecyclePermit
+ }
+ 
+ /**
+--- a/packages/core/tools/src/index.ts
++++ b/packages/core/tools/src/index.ts
+@@ -5,7 +5,7 @@
+  */
+ 
+ import type {} from '@deepseek-ai/dsh-working-directory'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+ import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
+@@ -138,6 +138,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     tools: ToolRuntime
++    nativeToolAdmission?: NativeToolAdmission
+   }
+ 
+   interface Events {
+@@ -715,6 +716,7 @@
+ interface ToolView {
+   /** Visible definitions after restrictions, scoped shadowing, and transport insertion. */
+   readonly visible: ReadonlyMap<string, ToolDefinition>
++  readonly registrations: ReadonlyMap<string, NativeToolRegistration>
+   /** Pre-restriction capability names used by prompt-order validation. */
+   readonly knownNames: ReadonlySet<string>
+   /** Current global names that a scoped restriction may name. */
+@@ -733,7 +735,7 @@
+ 
+ /** One scope's complete tool-registry contribution. */
+ class ToolLayer implements ScopeLayer {
+-  readonly tools: NamedEntries<ToolDefinition>
++  readonly tools: NamedEntries<NativeToolRegistration>
+   readonly restrictions = new AnonymousEntries<CompiledToolRestriction>()
+   readonly guards = new AnonymousEntries<ToolGuard>()
+   /**
+@@ -805,7 +807,147 @@
+  * Tool registry and execution pipeline. Scoped registrations shadow globals;
+  * one visibility resolver feeds presentation, lookup, and dispatch.
+  */
++
++/** Runtime-only native ceiling over the original registry's effective definitions. */
++export interface NativeToolAdmission {
++  readonly signal: AbortSignal
++  check(facts: NativeToolAdmissionFacts): boolean
++}
++export interface NativeToolAdmissionFacts {
++  readonly phase: 'view' | 'dispatch'
++  readonly runtime: ToolRuntime
++  readonly scope: ScopeKey | undefined
++  readonly definition: ToolDefinition
++  readonly registrationIdentity: object
++  readonly ownerIdentity: Context['fiber']
++  readonly execute: ToolDefinition['execute']
++  readonly execution?: ToolRunContext
++  /** Original caller cancellation, before an around-wrapper can replace exec.signal. */
++  readonly originalCallerSignal?: AbortSignal
++}
++export interface ToolRegistrationObservation {
++  readonly schema: Readonly<ToolSchema>
++  readonly definition: ToolDefinition
++  readonly registrationIdentity: object
++  readonly ownerIdentity: Context['fiber']
++  readonly execute: ToolDefinition['execute']
++  assertCurrent(): true
++}
++type NativeToolRegistration = {
++  readonly definition: ToolDefinition
++  readonly owner: Context['fiber']
++  readonly execute: ToolDefinition['execute'] | undefined
++}
++
++function nativeExecuteValue(definition: ToolDefinition): ToolDefinition['execute'] {
++  const descriptor = Object.getOwnPropertyDescriptor(definition, 'execute')
++  if (descriptor === undefined || !('value' in descriptor) || typeof descriptor.value !== 'function') {
++    throw new HarnessError('native tool callback must be an own data property', 'NATIVE_AUTHORITY')
++  }
++  return descriptor.value as ToolDefinition['execute']
++}
++
+ export class ToolRuntime extends Service {
++
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    runtime: ToolRuntime
++    admission: NativeToolAdmission
++    check: NativeToolAdmission['check']
++    signal: AbortSignal
++  }> | undefined
++
++  private nativeAdmits(
++    phase: 'view' | 'dispatch', scope: ScopeKey | undefined, definition: ToolDefinition,
++    execution?: ToolRunContext, capturedExecute?: ToolDefinition['execute'], originalCallerSignal?: AbortSignal,
++  ): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return true
++    const registration = this.rawView(scope).registrations.get(definition.name)
++    if (registration === undefined && phase === 'view') return false
++    if (registration === undefined) throw new HarnessError('native tool registration absent', 'NATIVE_AUTHORITY')
++    const execute = capturedExecute ?? nativeExecuteValue(definition)
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      execution?.signal.throwIfAborted()
++      originalCallerSignal?.throwIfAborted()
++      const current = binding.root.get('tools')
++      const original = current === undefined ? undefined
++        : (current as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? current
++      if (original !== binding.runtime || binding.root.get('nativeToolAdmission') !== binding.admission
++          || binding.admission.check !== binding.check || binding.admission.signal !== binding.signal
++          || this.rawView(scope).registrations.get(definition.name) !== registration
++          || this.rawView(scope).visible.get(definition.name) !== definition
++          || nativeExecuteValue(definition) !== execute || registration.execute !== execute) {
++        throw new HarnessError('native tool owner changed', 'NATIVE_AUTHORITY')
++      }
++      registration.owner.assertActive()
++    }
++    requireOwner()
++    const allowed: unknown = binding.check.call(binding.admission, Object.freeze({
++      phase, runtime: binding.runtime, scope, definition, registrationIdentity: registration,
++      ownerIdentity: registration.owner, execute,
++      ...execution === undefined ? {} : { execution },
++      ...originalCallerSignal === undefined ? {} : { originalCallerSignal },
++    }))
++    if (allowed !== true && allowed !== false) {
++      if (allowed instanceof Promise) void allowed.catch(() => {})
++      throw new HarnessError('native tool check must be synchronous', 'NATIVE_AUTHORITY')
++    }
++    requireOwner()
++    if (!allowed && phase === 'dispatch') {
++      throw new HarnessError('native tool dispatch refused', 'NATIVE_AUTHORITY')
++    }
++    return allowed
++  }
++
++  /** Passive source-owner observation; it never grants visibility or dispatch. */
++  observeRegistration(name: string, scope?: ScopeKey): ToolRegistrationObservation | undefined {
++    const definition = this.rawView(scope).visible.get(name)
++    if (definition === undefined) return undefined
++    const registration = this.rawView(scope).registrations.get(name)
++    if (registration === undefined) return undefined
++    const root = this.ctx.root
++    const owner: ToolRuntime = this
++    const original = (owner as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? owner
++    const execute = nativeExecuteValue(definition)
++    const schema = deepFreeze(this.schemaOf(definition, true))
++    const contract = JSON.stringify([schema, snapshotJsonValue(definition.output.schema)])
++    return Object.freeze({
++      schema, definition, registrationIdentity: registration, ownerIdentity: registration.owner, execute,
++      assertCurrent: (): true => {
++        const requireOwner = (): void => {
++          const live = root.get('tools')
++          const runtime = live === undefined ? undefined
++            : (live as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? live
++          if (runtime !== original || this.rawView(scope).registrations.get(name) !== registration
++              || this.rawView(scope).visible.get(name) !== definition
++              || nativeExecuteValue(definition) !== execute
++              || (this.nativeBinding !== undefined && registration.execute !== execute)) {
++            throw new HarnessError('observed tool registration changed', 'NATIVE_AUTHORITY')
++          }
++          registration.owner.assertActive()
++        }
++        requireOwner()
++        if (JSON.stringify([this.schemaOf(definition, true), snapshotJsonValue(definition.output.schema)]) !== contract) {
++          throw new HarnessError('observed tool schema changed', 'NATIVE_AUTHORITY')
++        }
++        requireOwner()
++        return true
++      },
++    })
++  }
++
++  private view(scope?: ScopeKey): ToolView {
++    const view = this.rawView(scope)
++    if (this.nativeBinding === undefined) return view
++    const visible = new Map<string, ToolDefinition>()
++    for (const [name, definition] of view.visible) {
++      if (this.nativeAdmits('view', scope, definition)) visible.set(name, definition)
++    }
++    return { ...view, visible }
++  }
++
+   static inject = ['systemPrompt']
+ 
+   static Config: z<Config> = z.object({
+@@ -849,6 +991,14 @@
+ 
+   constructor(ctx: Context, config: Config = {}) {
+     super(ctx, 'tools')
++    const admission = ctx.root.get('nativeToolAdmission')
++    if (admission !== undefined) {
++      const check = admission.check, signal = admission.signal
++      if (typeof check !== 'function' || !(signal instanceof AbortSignal)) {
++        throw new HarnessError('native tool admission is invalid', 'NATIVE_AUTHORITY')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, runtime: this, admission, check, signal })
++    }
+     this.ptcContext = ctx
+     // The schema already defaulted an omitted mode; the ?? narrows the
+     // optional-input type for direct (non-Loader) construction in tests.
+@@ -1090,7 +1240,10 @@
+     }
+     return this.layers.effect(
+       this.ctx,
+-      layer => layer.tools.insert(name, definition),
++      layer => layer.tools.insert(name, Object.freeze({
++        definition, owner: this.ctx.fiber,
++        execute: this.nativeBinding === undefined ? undefined : nativeExecuteValue(definition),
++      })),
+       { label: 'tools.register()' },
+     )
+   }
+@@ -1183,7 +1336,7 @@
+    * @param scope - the viewing scope (the agent), or undefined for the global view.
+    * @returns the complete derived view for that scope.
+    */
+-  private view(scope?: ScopeKey): ToolView {
++  private rawView(scope?: ScopeKey): ToolView {
+     // Scope-chain layers, farthest ancestor first, the exact scope last.
+     const layers = this.layers.chainLayers(scope)
+     // Chain-blind on purpose: this is the ONE layer whose registrations the
+@@ -1192,27 +1345,33 @@
+     const own = this.layers.peek(scope)
+     // Inherited surface, nearest ancestor last: a nearer scope's same-name
+     // entry shadows a farther one, and the global layer is the farthest.
+-    const inherited = new Map<string, ToolDefinition>(this.layers.global.tools.entries())
++    const inherited = new Map<string, NativeToolRegistration>(this.layers.global.tools.entries())
+     for (const layer of layers) {
+       if (layer === own) continue
+-      for (const [name, definition] of layer.tools.entries()) inherited.set(name, definition)
++      for (const [name, registration] of layer.tools.entries()) inherited.set(name, registration)
+     }
+     const visible = new Map<string, ToolDefinition>()
++    const registrations = new Map<string, NativeToolRegistration>()
+     const knownNames = new Set<string>()
+     const restrictableNames = new Set<string>()
+-    for (const [name, definition] of inherited) {
++    for (const [name, registration] of inherited) {
++      const { definition } = registration
+       knownNames.add(name)
+       restrictableNames.add(name)
+       // Restrictions intersect across the whole chain: any scope on it may
+       // mask an inherited name for everything nested inside it.
+-      if (layers.every(layer => layer.admits(name))) visible.set(name, definition)
++      if (layers.every(layer => layer.admits(name))) {
++        visible.set(name, definition)
++        registrations.set(name, registration)
++      }
+     }
+     // The scope's own registrations last, shadowing an inherited name and
+     // outside the filter above.
+     if (own !== undefined) {
+-      for (const [name, definition] of own.tools.entries()) {
++      for (const [name, registration] of own.tools.entries()) {
+         knownNames.add(name)
+-        visible.set(name, definition)
++        visible.set(name, registration.definition)
++        registrations.set(name, registration)
+       }
+     }
+     // Presentation infrastructure is resolved last and outside capability
+@@ -1223,7 +1382,7 @@
+     if (this.modeFor(scope) !== 'native') {
+       visible.set(RUN_CODE_NAME, this.requirePtcTransport())
+     }
+-    return { visible, knownNames, restrictableNames }
++    return { visible, registrations, knownNames, restrictableNames }
+   }
+ 
+   /**
+@@ -1585,8 +1744,15 @@
+     try {
+       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
+       if (!tool) throw new ToolNotFoundError(exec.name)
++      const execute = tool.execute
++      if (this.nativeBinding !== undefined && state.bodyInvoked) {
++        throw new HarnessError('native tool body already invoked', 'NATIVE_AUTHORITY')
++      }
++      this.nativeAdmits('dispatch', exec.agent, tool, exec, execute, state.callerSignal)
++      // The native check contains the final registration/callback/currentness
++      // recheck. Invoke that captured callback with no intervening extension.
+       state.bodyInvoked = true
+-      const returned = await tool.execute(exec.arguments, exec)
++      const returned = await execute.call(tool, exec.arguments, exec)
+       const result = this.createSuccessResult(exec, tool, returned)
+       return isAborted(signal)
+         ? toolAbortedResult(result)
+--- a/packages/credentials/deepseek-account-platform/src/index.ts
++++ b/packages/credentials/deepseek-account-platform/src/index.ts
+@@ -4,10 +4,10 @@
+ import type {} from '@deepseek-ai/dsh-host-webserver'
+ import { arch, platform, release } from 'node:os'
+ import { promises as streamPromises } from 'node:stream'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import Schema from '@deepseek-ai/schemastery'
+ import { z } from 'zod'
+-import { DeepSeekAccount, installAccountTaskCancellation, mergePlatformCookies, platformClientHeaders, platformWireLocale, type AccountBonusBatch, type AccountBonusOrderId, type AccountClientMetadata, type AccountDetails, type AccountUserId, type AccountView, type PlatformSession, type SignInAttemptId, type SignInAttemptView } from '@deepseek-ai/dsh-deepseek-account'
++import { DeepSeekAccount, installAccountTaskCancellation, mergePlatformCookies, platformClientHeaders, platformWireLocale, type AccountBonusBatch, type AccountBonusOrderId, type AccountClientMetadata, type AccountDetails, type AccountUserId, type AccountView, type InferenceCredential, type LocalInferenceAccountSnapshot, type PlatformSession, type SignInAttemptId, type SignInAttemptView } from '@deepseek-ai/dsh-deepseek-account'
+ import { credentialKey } from '@deepseek-ai/dsh-credentials'
+ import type { AuthorizationSession } from '@deepseek-ai/dsh-authorization'
+ import { profile, readAccountDetail, readUnnotifiedBonuses, sendBonusNotified } from './details.ts'
+@@ -369,9 +369,9 @@
+       requestHeaders }
+   }
+ 
+-  private async readCurrentGrant(lifetime: AbortController): Promise<z.infer<typeof grant> | null> {
++  private async readCurrentGrant(lifetime: AbortController, credentials: Context['credentials'] = this.ctx.credentials): Promise<z.infer<typeof grant> | null> {
+     if (this.closed) return null
+-    const record = await this.ctx.credentials.readRecord(KEY)
++    const record = await credentials.readRecord(KEY)
+     if (record === undefined || lifetime.signal.aborted) return null
+     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
+     const parsed = grant.safeParse(record.payload)
+@@ -379,6 +379,65 @@
+     // A private origin override must never forward a grant issued by another environment.
+     if (parsed.data.issuer !== this.origin) throw new PlatformAuthError('protocol')
+     return parsed.data
++  }
++
++  /** Reuse the original inference eligibility predicate for every local grant view. */
++  private inferenceGrantEligible(stored: z.infer<typeof grant>): boolean {
++    const issuer = new URL(stored.issuer)
++    if (stored.token.startsWith('dsh_mock_')) return false
++    if (this.inferenceOrigin === 'https://api.deepseek.com') {
++      if (['localhost', '127.0.0.1', '[::1]'].includes(issuer.hostname)) return false
++    } else if (issuer.origin !== this.origin) return false
++    return true
++  }
++
++  private async captureInferenceGrant(url: string): Promise<{
++    readonly stored: z.infer<typeof grant>
++    readonly signal: AbortSignal
++    isCurrent(): boolean
++  } | undefined> {
++    if (this.closed || this.removing !== undefined) return undefined
++    const destination = new URL(url)
++    if (destination.origin !== this.inferenceOrigin || destination.username || destination.password) return undefined
++    const lifetime = this.detailsLifetime
++    const identity = <T extends object>(value: T): T =>
++      (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++    const capturedCredentials = this.ctx.credentials
++    const credentials = identity(capturedCredentials)
++    const isCurrent = (): boolean => !this.closed && this.removing === undefined
++      && this.detailsLifetime === lifetime && !lifetime.signal.aborted
++      && identity(this.ctx.credentials) === credentials
++    if (!isCurrent()) return undefined
++    const stored = await this.readCurrentGrant(lifetime, capturedCredentials)
++    // The public caller checks again after this method's own promise resolves.
++    if (stored === null || !isCurrent() || !this.inferenceGrantEligible(stored)) return undefined
++    return { stored, signal: lifetime.signal, isCurrent }
++  }
++
++  override async resolveInferenceCredential(url: string): Promise<InferenceCredential | undefined> {
++    const captured = await this.captureInferenceGrant(url)
++    if (captured === undefined || !captured.isCurrent()) return undefined
++    const result: InferenceCredential = Object.freeze({
++      token: captured.stored.token,
++      signal: captured.signal,
++      assertCurrent: (): true => {
++        if (!captured.isCurrent()) throw new PlatformAuthError('protocol')
++        return true
++      },
++    })
++    return captured.isCurrent() ? result : undefined
++  }
++
++  override async getLocalInferenceSnapshot(): Promise<LocalInferenceAccountSnapshot | null> {
++    const captured = await this.captureInferenceGrant(this.inferenceOrigin)
++    if (captured === undefined || !captured.isCurrent()) return null
++    const cached = this.lastProfile
++    const userId = cached?.token === captured.stored.token ? cached.profile.value.id || null : null
++    const isCurrent = (): boolean => captured.isCurrent() && this.lastProfile === cached
++      && (cached?.token === captured.stored.token ? cached.profile.value.id || null : null) === userId
++    const result = Object.freeze({ inferenceOrigin: this.inferenceOrigin, userId, isCurrent,
++      isInferenceCurrent: captured.isCurrent })
++    return isCurrent() ? result : null
+   }
+ 
+   override async resolveToken(url: string): Promise<string | undefined> {
+@@ -390,13 +449,9 @@
+     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
+     const result = grant.safeParse(record.payload)
+     if (!result.success) throw new PlatformAuthError('storage')
+-    // Development grants cannot authenticate production model or file requests.
+-    const issuer = new URL(result.data.issuer)
+-    if (result.data.token.startsWith('dsh_mock_')) return undefined
+-    if (this.inferenceOrigin === 'https://api.deepseek.com') {
+-      if (['localhost', '127.0.0.1', '[::1]'].includes(issuer.hostname)) return undefined
+-    } else if (issuer.origin !== this.origin) return undefined
+-    return result.data.token
++    // Keep the original ordinary-origin behavior; native capture also binds
++    // the exact configured issuer through readCurrentGrant.
++    return this.inferenceGrantEligible(result.data) ? result.data.token : undefined
+   }
+ 
+   override async startSignIn(client: AccountClientMetadata, callbackOrigin: string, loginSource: 'web' | 'desktop'): Promise<AccountView> {
+--- a/packages/credentials/deepseek-account/src/index.ts
++++ b/packages/credentials/deepseek-account/src/index.ts
+@@ -26,6 +26,21 @@
+   readonly embeddedPageDist?: string
+   /** Host-only deployment request headers; the consuming client adds its own dynamic identity, and neither reaches renderer bootstrap. */
+   readonly requestHeaders?: Readonly<Record<string, string>>
++}
++
++/** Original local grant lifetime; Host-only and never exposed by account RPC. */
++export interface InferenceCredential {
++  readonly token: string
++  readonly signal: AbortSignal
++  assertCurrent(): true
++}
++/** Passive local inference eligibility, not remote authentication acceptance. */
++export interface LocalInferenceAccountSnapshot {
++  readonly inferenceOrigin: string
++  readonly userId: AccountUserId | null
++  isCurrent(): boolean
++  /** Original inference grant lifetime, independent of passive profile cache refresh. */
++  isInferenceCurrent(): boolean
+ }
+ 
+ /** Account operations; only Host consumers can obtain a request credential. */
+@@ -98,6 +113,14 @@
+    * @returns stored token, or undefined for other origins or a signed-out account.
+    */
+   abstract resolveToken(url: string): Promise<string | undefined>
++  /** Host-only native credential capture; unsupported owners fail closed. */
++  resolveInferenceCredential(_url: string): Promise<InferenceCredential | undefined> {
++    return Promise.resolve(undefined)
++  }
++  /** Read no network, device or new login state; unsupported owners report unknown. */
++  getLocalInferenceSnapshot(): Promise<LocalInferenceAccountSnapshot | null> {
++    return Promise.resolve(null)
++  }
+   /**
+    * Remove an inference-rejected token only while it still matches the stored login.
+    * @param token - token captured by the rejected inference request.
+--- a/packages/interaction/user-approval/src/index.ts
++++ b/packages/interaction/user-approval/src/index.ts
+@@ -5,7 +5,7 @@
+  */
+ 
+ import { randomUUID } from 'node:crypto'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import { createUserMessage, type ToolCallId } from '@deepseek-ai/dsh-llm'
+@@ -24,6 +24,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     approval: ApprovalService
++    nativeApprovalCeiling?: { readonly signal: AbortSignal; readonly policy: 'never'; assertCurrent(): true }
+   }
+ }
+ 
+@@ -148,12 +149,52 @@
+  * changes to the model through the runtime-context snapshot and switch notices.
+  */
+ export class ApprovalService extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: ApprovalService
++    ceiling: NonNullable<Context['nativeApprovalCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('approval')
++      const owner = current === undefined ? undefined
++        : (current as ApprovalService & { [symbols.original]?: ApprovalService })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeApprovalCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.policy !== 'never') throw new Error('native approval ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native approval ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   static Config: z<Config> = z.object({
+     policy: z.union(['ask', 'never'] as const).default('ask'),
+   })
+ 
+   constructor(ctx: Context, public config: Config) {
+     super(ctx, 'approval')
++    const ceiling = ctx.root.get('nativeApprovalCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.policy !== 'never') {
++        throw new Error('native approval ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+ 
+     const effective = (agent: Agent): ApprovalPolicy => this.effectivePolicy(agent.session)
+ 
+@@ -182,6 +223,7 @@
+    * @param policy - the new effective policy.
+    */
+   setPolicy(agent: Agent, policy: ApprovalPolicy): void {
++    if (this.requireNativeCeiling() && policy !== 'never') throw new Error('native approval ceiling cannot widen')
+     const previous = this.effectivePolicy(agent.session)
+     if (previous === policy) return
+     setApprovalPolicy(agent.session, policy)
+@@ -213,6 +255,7 @@
+    *   append commit point.
+    */
+   async request(req: ApprovalRequest): Promise<ApprovalOutcome> {
++    this.requireNativeCeiling()
+     const session = req.agent.session
+     if (!hasOpenTurn(session)) {
+       throw new Error(
+@@ -240,8 +283,14 @@
+    * @param session - the exact accepted session whose policy applies.
+    * @returns the policy every ask for this session resolves under right now.
+    */
++  /** Observe the rule used by the original decision boundary, including a retained native ceiling. */
++  policyFor(session: Session): ApprovalPolicy {
++    return this.effectivePolicy(session)
++  }
++
+   private effectivePolicy(session: Session): ApprovalPolicy {
+-    return this.overrideOf(session) ?? this.config.policy ?? 'ask'
++    const policy = this.overrideOf(session) ?? this.config.policy ?? 'ask'
++    return this.requireNativeCeiling() ? 'never' : policy
+   }
+ 
+   /**
+@@ -272,7 +321,13 @@
+     // ahead of any gate LISTENER, so a listener-shaped gate cannot keep the
+     // documented promise that 'never' rejects deterministically regardless
+     // of registration order — only the service's own request path can.
+-    if (this.effectivePolicy(session) === 'never') return 'rejected'
++    try {
++      if (this.effectivePolicy(session) === 'never') return 'rejected'
++    } catch (error: unknown) {
++      // An already opened audit pair still settles after native retirement.
++      if (this.nativeBinding !== undefined) return 'cancelled'
++      throw error
++    }
+     // Enter the promise chain BEFORE dispatching: a listener that throws
+     // SYNCHRONOUSLY (before its first await) must land in the same rejection
+     // path as an async one — `Promise.resolve(call())` would let it escape
+--- a/packages/llm/llm-deepseek-account/src/catalog.ts
++++ b/packages/llm/llm-deepseek-account/src/catalog.ts
+@@ -1,5 +1,7 @@
+ /** Credential-scoped `/models` cache with single-flight loads, background refresh, and last-known-good retention. */
+ import { createHash } from 'node:crypto'
++import { LlmError } from '@deepseek-ai/dsh-llm'
++import type { InferenceCredential } from '@deepseek-ai/dsh-deepseek-account'
+ import { deadline } from '@deepseek-ai/dsh-timeout'
+ import type { CatalogSettings } from './config.ts'
+ import { LISTING_TIMEOUT } from './listing.ts'
+@@ -10,9 +12,9 @@
+   /** Current endpoint settings, re-read on every access. */
+   readonly settings: () => CatalogSettings
+   /** The account token allowed for `url`, or `undefined` while signed out. */
+-  readonly token: (url: string) => Promise<string | undefined>
++  readonly token: (url: string) => Promise<string | InferenceCredential | undefined>
+   /** Perform one listing request authenticated with `token`; `signal` carries the {@link LISTING_TIMEOUT} request deadline. */
+-  readonly load: (url: string, token: string, signal: AbortSignal) => Promise<ModelListing>
++  readonly load: (url: string, token: string, signal: AbortSignal, credential?: InferenceCredential) => Promise<ModelListing>
+   /** Wall clock used for listing age. */
+   readonly now: () => number
+   /** Report a loaded listing. */
+@@ -45,6 +47,8 @@
+ /** One account route's listing cache; each endpoint and credential pair has its own scope. */
+ export class AccountModelCatalog {
+   private scope: string | undefined
++  /** Retained with this original scope, not compared with each freshly wrapped credential. */
++  private nativeCredential: InferenceCredential | undefined
+   private listing: ModelListing | undefined
+   /** Settle time of the latest load in this scope; `undefined` before the first one settles. */
+   private settledAt: number | undefined
+@@ -62,6 +66,9 @@
+    * @returns the signed-in state and listing of the current scope.
+    */
+   current(): CatalogView {
++    if (this.nativeCredential !== undefined && !this.admitted(this.generation, this.nativeCredential)) {
++      return { signedIn: false, listing: undefined }
++    }
+     return { signedIn: this.scope !== undefined, listing: this.listing }
+   }
+ 
+@@ -74,14 +81,35 @@
+    */
+   async view(signal?: AbortSignal): Promise<CatalogView> {
+     const settings = this.dependencies.settings()
+-    const token = await this.dependencies.token(settings.url)
++    const authorization = await this.dependencies.token(settings.url)
++    const credential = typeof authorization === 'object' ? authorization : undefined
++    const token = typeof authorization === 'string' ? authorization : authorization?.token
++    const observedGeneration = this.generation, retained = this.nativeCredential
++    const previousCurrent = retained === undefined || this.admitted(observedGeneration, retained)
++    if (credential !== undefined && !this.admitted(observedGeneration, credential)) {
++      throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++    }
+     signal?.throwIfAborted()
+     if (this.closed) return this.current()
++    if ((credential !== undefined || retained !== undefined) && this.generation !== observedGeneration) {
++      throw new LlmError('The original native catalog scope changed.', 'NATIVE_AUTHORITY')
++    }
+     const scope = token === undefined ? undefined : `${settings.url}\n${createHash('sha256').update(token).digest('hex')}`
+-    if (scope !== this.scope) this.rescope(scope)
++    if (scope !== this.scope || !previousCurrent || (retained === undefined && credential !== undefined)) {
++      this.rescope(scope, credential)
++    }
+     if (token !== undefined) {
+-      if (this.settledAt === undefined) await abandonable(this.start(settings, token), signal)
+-      else if (this.dependencies.now() - this.settledAt >= settings.maxAgeMs) void this.start(settings, token)
++      if (this.settledAt === undefined) await abandonable(this.start(settings, token, credential), signal)
++      else {
++        const generation = this.generation, stale = this.dependencies.now() - this.settledAt >= settings.maxAgeMs
++        if (credential !== undefined && !this.admitted(generation, credential)) {
++          throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++        }
++        if (stale) void this.start(settings, token, credential)
++      }
++    }
++    if (credential !== undefined && !this.admitted(this.generation, credential)) {
++      throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
+     }
+     return this.current()
+   }
+@@ -93,38 +121,77 @@
+     this.request?.abort()
+   }
+ 
+-  private rescope(scope: string | undefined): void {
+-    this.request?.abort()
++  private admitted(generation: number, credential: InferenceCredential | undefined): boolean {
++    if (this.closed || generation !== this.generation) return false
++    if (credential !== undefined) {
++      try {
++        credential.signal.throwIfAborted()
++        const allowed: unknown = credential.assertCurrent()
++        if (allowed !== true) {
++          if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++            void Promise.resolve(allowed).catch(() => {})
++          }
++          return false
++        }
++        credential.signal.throwIfAborted()
++      } catch { return false }
++    }
++    return !this.closed && generation === this.generation
++  }
++
++  private rescope(scope: string | undefined, credential?: InferenceCredential): void {
++    const previous = this.request
++    const native = credential !== undefined || this.nativeCredential !== undefined
++    if (!native) previous?.abort()
+     this.scope = scope
++    this.nativeCredential = credential
+     this.listing = undefined
+     this.settledAt = undefined
+     this.inflight = undefined
+     this.failing = false
+     this.generation += 1
+-  }
+-
+-  private start(settings: CatalogSettings, token: string): Promise<void> {
++    // Native abort listeners may dispose/reenter. There are no state writes
++    // after that callback boundary, and start/view recheck the original scope.
++    if (native) previous?.abort()
++  }
++
++  private start(settings: CatalogSettings, token: string, credential?: InferenceCredential): Promise<void> {
+     if (this.inflight !== undefined) return this.inflight
++    if (credential !== undefined && !this.admitted(this.generation, credential)) {
++      return Promise.reject(new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY'))
++    }
+     this.generation += 1
+     const generation = this.generation
+     const request = new AbortController()
+     this.request = request
+-    const limit = deadline(request.signal, settings.timeoutMs, LISTING_TIMEOUT)
+-    const run = this.dependencies.load(settings.url, token, limit.signal)
++    const signal = credential === undefined ? request.signal : AbortSignal.any([request.signal, credential.signal])
++    const limit = deadline(signal, settings.timeoutMs, LISTING_TIMEOUT)
++    const load = credential === undefined
++      ? this.dependencies.load(settings.url, token, limit.signal)
++      : Promise.resolve().then(() => {
++        if (!this.admitted(generation, credential)) {
++          throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++        }
++        return this.dependencies.load(settings.url, token, limit.signal, credential)
++      })
++    const run = load
+       .then((listing) => {
+-        if (generation !== this.generation) return
++        const settledAt = this.dependencies.now()
++        const message = `model listing from ${settings.url} loaded ${listing.entries.length} model(s), skipped ${listing.skipped} row(s)`
++        if (!this.admitted(generation, credential)) return
+         this.listing = listing
+-        this.settledAt = this.dependencies.now()
++        this.settledAt = settledAt
+         this.failing = false
+-        this.dependencies.info(`model listing from ${settings.url} loaded ${listing.entries.length} model(s), skipped ${listing.skipped} row(s)`)
++        this.dependencies.info(message)
+       }, (error: unknown) => {
+-        if (generation !== this.generation) return
+-        if (!this.failing) {
+-          const fallback = this.listing === undefined ? 'using the bundled catalog' : 'keeping the previous catalog'
+-          this.dependencies.warn(`model listing from ${settings.url} failed (${String(error)}); ${fallback}`)
+-        }
+-        this.settledAt = this.dependencies.now()
++        const warn = !this.failing
++        const fallback = this.listing === undefined ? 'using the bundled catalog' : 'keeping the previous catalog'
++        const message = `model listing from ${settings.url} failed (${String(error)}); ${fallback}`
++        const settledAt = this.dependencies.now()
++        if (!this.admitted(generation, credential)) return
++        this.settledAt = settledAt
+         this.failing = true
++        if (warn) this.dependencies.warn(message)
+       })
+       .finally(() => {
+         limit[Symbol.dispose]()
+--- a/packages/llm/llm-deepseek-account/src/index.ts
++++ b/packages/llm/llm-deepseek-account/src/index.ts
+@@ -1,8 +1,8 @@
+ /** Account-token authentication, the account model listing, and version gating for the DeepSeek account route. */
+ import type {} from '@deepseek-ai/cordis-plugin-loader'
+-import type { Context } from '@deepseek-ai/cordis'
++import { symbols, type Context } from '@deepseek-ai/cordis'
+ import { ACCOUNT_QUOTA_EXCEEDED_CODE, APP_IDENTITY, LlmError, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+-import type {} from '@deepseek-ai/dsh-deepseek-account'
++import type { InferenceCredential } from '@deepseek-ai/dsh-deepseek-account'
+ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+ import { catalogModelInfo, registerDeepSeekProvider, resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
+@@ -52,11 +52,73 @@
+   settings()
+   const supported = resolveAdapterOptions({}).models
+   const account = () => ctx.get('deepseekAccount')
++  const nativeAdmission = ctx.root.get('nativeLlmAdmission')
++  const nativeCheck = nativeAdmission?.check, nativeSignal = nativeAdmission?.signal
++  const nativeRequired = nativeAdmission !== undefined
++  const identity = <T extends object>(value: T | undefined): T | undefined =>
++    value === undefined ? undefined : (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++  const captureNativeCredential = async (
++    url: string, owner = account(),
++  ): Promise<InferenceCredential | undefined> => {
++    const original = identity(owner)
++    if (owner === undefined || original === undefined) return undefined
++    const resolve = original.resolveInferenceCredential
++    if (typeof resolve !== 'function') {
++      throw new LlmError('The account owner does not supply native credential currentness.', 'NATIVE_AUTHORITY')
++    }
++    let credential: InferenceCredential | undefined
++    try { credential = await resolve.call(owner, url) }
++    catch (cause) {
++      throw new LlmError('The original account credential could not be retained.',
++        nativeSignal?.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause })
++    }
++    if (credential === undefined || nativeAdmission === undefined || nativeSignal === undefined) return undefined
++    const token = credential.token, accountSignal = credential.signal, method = credential.assertCurrent
++    if (typeof token !== 'string' || token.length === 0 || !(accountSignal instanceof AbortSignal)
++        || typeof method !== 'function') {
++      throw new LlmError('The account owner supplied no native credential lifetime.', 'NATIVE_AUTHORITY')
++    }
++    const check = method.bind(credential)
++    const signal = AbortSignal.any([nativeSignal, accountSignal])
++    const requireOwner = (): void => {
++      signal.throwIfAborted()
++      if (ctx.root.get('nativeLlmAdmission') !== nativeAdmission
++          || nativeAdmission.check !== nativeCheck || nativeAdmission.signal !== nativeSignal
++          || identity(account()) !== original || original.resolveInferenceCredential !== resolve
++          || credential!.token !== token || credential!.signal !== accountSignal
++          || credential!.assertCurrent !== method) {
++        throw new LlmError('The original account credential owner changed.', 'NATIVE_AUTHORITY')
++      }
++    }
++    const assertCurrent = (): true => {
++      try {
++        requireOwner()
++        const allowed: unknown = check()
++        if (allowed !== true) {
++          if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++            void Promise.resolve(allowed).catch(() => {})
++          }
++          throw new LlmError('The original account credential is no longer current.', 'NATIVE_AUTHORITY')
++        }
++        requireOwner()
++        return true
++      } catch (cause) {
++        if (cause instanceof LlmError) throw cause
++        throw new LlmError('The original account credential retired.',
++          signal.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause })
++      }
++    }
++    assertCurrent()
++    return Object.freeze({ token, signal, assertCurrent })
++  }
+   const resolveAuth = async (connection: ResolvedDeepSeekOptions): Promise<DeepSeekRequestAuth> => {
+-    const token = await account()?.resolveToken(connection.baseURL)
++    const owner = account()
++    const credential = nativeRequired ? await captureNativeCredential(connection.baseURL, owner) : undefined
++    const token = nativeRequired ? credential?.token : await owner?.resolveToken(connection.baseURL)
+     if (token === undefined) throw new LlmError('Sign in to DeepSeek to use the account provider. The request destination must allow account authentication.', 'ACCOUNT_SIGN_IN_REQUIRED')
+     return {
+       headers: { [TOKEN_HEADER]: token },
++      ...credential === undefined ? {} : { signal: credential.signal, assertCurrent: credential.assertCurrent },
+       onRequestError: async (error) => {
+         if (!(error instanceof LlmError)) return error
+         if (error.code === QUOTA_EXCEEDED_CODE) {
+@@ -64,7 +126,7 @@
+         }
+         if (error.failure.status !== 401) return error
+         const rejected = new LlmError(error.message, 'ACCOUNT_TOKEN_INVALID', { ...error.failure, cause: error })
+-        try { await account()?.rejectToken(token) }
++        try { await owner?.rejectToken(token) }
+         catch (_credentialRemovalFailed) { /* Storage failure cannot replace the inference failure. */ }
+         return rejected
+       },
+@@ -72,8 +134,8 @@
+   }
+   const catalog = new AccountModelCatalog({
+     settings: () => settings().catalog,
+-    token: async url => account()?.resolveToken(url),
+-    load: (url, token, signal) => requestModelListing(url, { [TOKEN_HEADER]: token }, signal),
++    token: async url => nativeRequired ? captureNativeCredential(url) : account()?.resolveToken(url),
++    load: (url, token, signal, credential) => requestModelListing(url, { [TOKEN_HEADER]: token }, signal, credential),
+     now: () => Date.now(),
+     info: (message) => { console.info(LOG_TAG, message) },
+     warn: (message) => { console.warn(LOG_TAG, message) },
+--- a/packages/llm/llm-deepseek-account/src/listing.ts
++++ b/packages/llm/llm-deepseek-account/src/listing.ts
+@@ -149,16 +149,21 @@
+  */
+ export async function requestModelListing(
+   url: string, headers: Readonly<Record<string, string>>, signal: AbortSignal,
++  native?: { readonly signal: AbortSignal; assertCurrent(): true },
+ ): Promise<ModelListing> {
+   let response: Response
+   let text: string
+   try {
+-    response = await fetch(url, {
++    const request: RequestInit = {
+       method: 'GET', redirect: 'error', signal,
+       headers: { ...attributionHeaders(), accept: 'application/json', ...headers },
+-    })
++    }
++    native?.assertCurrent()
++    signal.throwIfAborted()
++    response = await fetch(url, request)
+     text = await response.text()
+   } catch (error) {
++    if (error instanceof LlmError && error.code === 'NATIVE_AUTHORITY') throw error
+     const expired = timeoutOf(signal, LISTING_TIMEOUT)
+     if (expired !== undefined) {
+       throw new LlmError(`DeepSeek model listing request to ${url} timed out after ${expired.timeoutMs} ms`, 'TIMEOUT', { cause: error })
+--- a/packages/llm/llm-deepseek/src/adapter.ts
++++ b/packages/llm/llm-deepseek/src/adapter.ts
+@@ -1,7 +1,7 @@
+ /** Direct Messages transport with one cancellable lifecycle per model request. */
+ 
+-import { attributionHeaders, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+-import type { GenerateOptions, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
++import { attributionHeaders, claimNativeLlmWritePermit, contentHasImage, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
++import type { GenerateOptions, ImageAttachmentAccessResolver, NativeLlmWritePermit, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
+ import type { DeepSeekLlmApiJson } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+ import { modelInfo } from './model-info.ts'
+@@ -21,6 +21,7 @@
+ /** DeepSeek provider using Messages content and native thinking replay. */
+ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
+   private readonly files: DeepSeekFileStore
++  private readonly nativeRequired: boolean
+   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
+     const attachments = this.dependencies.resolveAttachments?.()
+     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
+@@ -28,6 +29,7 @@
+ 
+   constructor(private readonly dependencies: DeepSeekAdapterOptions<C>) {
+     super()
++    this.nativeRequired = dependencies.nativeRequired === true
+     this.files = dependencies.resolveFiles?.() ?? new DeepSeekFileStore()
+   }
+ 
+@@ -50,23 +52,28 @@
+   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+     const connection = await this.connection(signal)
+     this.dependencies.admit?.(connection, model)
+-    return { model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) }
+-  }
+-  stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
++    return { model: modelInfo(connection, provider, model), stream: (options, native) => this.generate(options, connection, native) }
++  }
++  stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk> {
+     const connection = this.dependencies.options()
+     this.dependencies.admit?.(connection, options.model)
+-    return this.generate(options, connection)
++    return this.generate(options, connection, native)
+   }
+ 
+   private connection(signal: AbortSignal | undefined): Promise<C> {
+     return this.dependencies.connect?.(signal) ?? Promise.resolve(this.dependencies.options())
+   }
+ 
+-  private async * generate(options: GenerateOptions, connection: C): AsyncGenerator<StreamChunk> {
++  private async * generate(options: GenerateOptions, connection: C, native?: NativeLlmWritePermit): AsyncGenerator<StreamChunk> {
++    if (this.nativeRequired && native === undefined) {
++      throw new LlmError("native request requires its original runtime witness", "NATIVE_AUTHORITY")
++    }
++    const requireNativeWrite = native === undefined ? undefined : claimNativeLlmWritePermit(native, this, options)
+     const consumer = new AbortController()
+-    const signal = options.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, options.signal])
++    const signals = [consumer.signal, ...options.signal === undefined ? [] : [options.signal], ...native === undefined ? [] : [native.signal]]
++    const signal = signals.length === 1 ? consumer.signal : AbortSignal.any(signals)
+     using watchdog = idleWatchdog(signal, connection.streamIdleTimeoutMs, 'MESSAGES_IDLE')
+-    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() })
++    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() }, native, requireNativeWrite)
+     try {
+       while (true) {
+         const next = await watchdog.next(iterator)
+@@ -75,6 +82,7 @@
+       }
+     } catch (error) {
+       if (timeoutOf(watchdog.signal, 'MESSAGES_IDLE') !== undefined) throw new LlmError('DeepSeek Messages stream idle timeout', 'TIMEOUT', { cause: error })
++      if (native?.signal.aborted) throw new LlmError('Native request authority retired', 'ABORTED', { cause: error })
+       if (options.signal?.aborted) throw new LlmError('DeepSeek Messages request aborted', 'ABORTED', { cause: error })
+       if (error instanceof LlmError) throw error
+       throw new LlmError('DeepSeek Messages transport failed', 'TRANSPORT', { cause: error })
+@@ -89,13 +97,23 @@
+   }
+ 
+   private async * request(
+-    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void,
++    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void, native?: NativeLlmWritePermit, requireNativeWrite?: () => true,
+   ): AsyncGenerator<StreamChunk> {
+     signal.throwIfAborted()
++    if (native !== undefined) {
++      requireNativeWrite!()
++      if (options.messages.some(message => contentHasImage(message.content))) {
++        throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++      }
++    }
+     const { messages, versions } = await prepareImages(
+       options.messages, connection, options.model, this.dependencies.resolveAttachments?.(), this.imageAccess, signal,
+     )
+     const auth = await this.dependencies.resolveAuth(connection)
++    if (native !== undefined && (!(auth.signal instanceof AbortSignal) || typeof auth.assertCurrent !== 'function')) {
++      throw new LlmError('native account authentication lacks its original lifetime', 'NATIVE_AUTHORITY')
++    }
++    if (auth.signal !== undefined) signal = AbortSignal.any([signal, auth.signal])
+     try {
+       const files = new RequestFiles(this.files, {
+         baseURL: connection.baseURL, headers: auth.headers,
+@@ -135,7 +153,8 @@
+             ? [MESSAGES_TOOL_CHANGES_BETA]
+             : [],
+         ]
+-        const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
++        const url = `${messagesApiRoot(connection.baseURL)}/messages`
++        const request: RequestInit = {
+           method: 'POST', signal, body: extensions.payload, redirect: 'error',
+           headers: {
+             ...attributionHeaders(),
+@@ -147,7 +166,25 @@
+             ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
+             ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
+           },
+-        })
++        }
++        signal.throwIfAborted()
++        requireNativeWrite?.()
++        if (auth.assertCurrent !== undefined) {
++          try {
++            const allowed: unknown = auth.assertCurrent()
++            if (allowed !== true) {
++              if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++                void Promise.resolve(allowed).catch(() => {})
++              }
++              throw new Error('credential currentness was not affirmed')
++            }
++          } catch (error) {
++            throw new LlmError('Native account authority retired', auth.signal?.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause: error })
++          }
++        }
++        requireNativeWrite?.()
++        signal.throwIfAborted()
++        const response = await fetch(url, request)
+         if (!response.ok) {
+           const text = await response.text()
+           let raw: unknown
+@@ -166,13 +203,20 @@
+         return
+       }
+     } catch (error) {
++      // An extension wrapper may classify its aborted await as REQUEST_EXTENSION.
++      // Preserve actual HTTP failure settlement; cancellation before an HTTP
++      // result must not become an error that the original retry owner can replay.
++      const failure = native !== undefined && auth.signal?.aborted
++        && !(error instanceof LlmError && error.failure.status !== undefined)
++        ? new LlmError('Native account authority retired', 'ABORTED', { cause: error })
++        : error
+       if (auth.onRequestError !== undefined) {
+         let mapped: unknown
+-        try { mapped = await auth.onRequestError(error) }
+-        catch (_credentialUpdateFailed) { throw error }
++        try { mapped = await auth.onRequestError(failure) }
++        catch (_credentialUpdateFailed) { throw failure }
+         throw mapped
+       }
+-      throw error
++      throw failure
+     }
+   }
+ }
+--- a/packages/llm/llm-deepseek/src/host.ts
++++ b/packages/llm/llm-deepseek/src/host.ts
+@@ -26,6 +26,7 @@
+   const unacceptedRoutes = new Set<string>()
+   const adapter = new DeepSeekAdapter({
+     ...dependencies,
++    nativeRequired: ctx.root.get("nativeLlmAdmission") !== undefined,
+     resolveUserId: () => userId ??= getOrCreateAnonymousUserId(),
+     onReplayDegrade: ({ provider, model, reason }) => {
+       const key = `${provider}/${model}\u0000${reason}`
+--- a/packages/llm/llm-deepseek/src/types.ts
++++ b/packages/llm/llm-deepseek/src/types.ts
+@@ -83,6 +83,9 @@
+ 
+ /** Authentication captured by the provider for one request and its file operations. */
+ export interface DeepSeekRequestAuth {
++  /** Original account grant lifetime, required by native company requests. */
++  readonly signal?: AbortSignal
++  assertCurrent?(): true
+   /** Credential headers sent unchanged to the resolved endpoint. */
+   headers: Readonly<Record<string, string>>
+   /** Classify a failure using the captured credential; callback failure preserves the original error. */
+@@ -91,6 +94,8 @@
+ 
+ /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
+ export interface DeepSeekAdapterOptions<Connection extends DeepSeekConnectionOptions = DeepSeekConnectionOptions> {
++  /** Fixed host composition; native requests require the original runtime witness. */
++  nativeRequired?: boolean
+   /** Report unusable native Messages replay metadata without exposing content or signatures. */
+   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+   /** Report extension fields omitted from one request because the merged request failed to serialize. */
+--- a/packages/llm/llm/src/index.ts
++++ b/packages/llm/llm/src/index.ts
+@@ -6,7 +6,7 @@
+  * @module @deepseek-ai/dsh-llm
+  */
+ 
+-import { Context } from '@deepseek-ai/cordis'
++import { Context, FiberState, symbols } from '@deepseek-ai/cordis'
+ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+ import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+ import type {
+@@ -57,6 +57,8 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     llm: LlmRuntime
++    /** Host-only authority captured before the service mounts. */
++    nativeLlmAdmission?: NativeLlmAdmission
+   }
+ 
+   interface Events {
+@@ -191,12 +193,90 @@
+   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
+ }
+ 
++/** Closed native configuration projection, excluding request metadata/content. */
++function nativeCallConfig(config: LlmCallConfig): Readonly<LlmCallConfig> {
++  return deepFreeze({
++    provider: config.provider, model: config.model,
++    ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
++    ...config.temperature === undefined ? {} : { temperature: config.temperature },
++    ...config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens },
++    ...config.stop === undefined ? {} : { stop: [...config.stop] },
++  })
++}
++
++/** Original request owner before the Agent logs its resolved header. */
++export interface NativeLlmPreparationContext {
++  readonly agent: object
++  readonly session: object
++  readonly turn: number
++  readonly step: number
++  readonly signal: AbortSignal
++}
++export interface NativeLlmPreparationFacts extends NativeLlmPreparationContext {
++  readonly phase: 'prepare'
++  readonly runtime: LlmRuntime
++  readonly config: Readonly<LlmCallConfig>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++}
++export interface NativeLlmDispatchFacts {
++  readonly phase: 'dispatch' | 'write'
++  readonly runtime: LlmRuntime
++  readonly request: Readonly<GenerateOptions>
++  readonly options: Readonly<GenerateOptions>
++  readonly config: Readonly<LlmCallConfig>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++}
++/** Retained currentness, not another dispatch or retry authority. */
++export interface NativeLlmAdmission {
++  readonly signal: AbortSignal
++  check(facts: NativeLlmPreparationFacts | NativeLlmDispatchFacts): true
++}
++/** Runtime-only argument, never provider options, headers or log data. */
++export interface NativeLlmWritePermit {
++  readonly signal: AbortSignal
++  assertCurrent(): true
++}
++// Issuance belongs to this runtime module. A structural object is not a permit;
++// one original adapter invocation claims it once and retains its write check
++// through the adapter's own retry/settlement path.
++const nativeLlmPermits = new WeakMap<NativeLlmWritePermit, {
++  readonly adapter: LlmAdapter
++  readonly options: GenerateOptions
++  readonly requireCurrent: () => true
++  claimed: boolean
++}>()
++export function claimNativeLlmWritePermit(
++  permit: NativeLlmWritePermit, adapter: LlmAdapter, options: GenerateOptions,
++): () => true {
++  const issued = nativeLlmPermits.get(permit)
++  if (issued === undefined || issued.claimed || issued.adapter !== adapter || issued.options !== options) {
++    throw new LlmError('native write permit is not the original adapter invocation', 'NATIVE_AUTHORITY')
++  }
++  // Mark before calling authority so reentry cannot claim it twice. Refusal
++  // never restores the permit or creates a replacement attempt.
++  issued.claimed = true
++  issued.requireCurrent()
++  return issued.requireCurrent
++}
++
++export interface LlmRegistrationObservation {
++  readonly provider: Readonly<LlmProviderInfo>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++  assertCurrent(): true
++}
++
+ /** One adapter-owned model-resolution generation bound to its eventual stream call. */
+ export interface PreparedAdapterCall {
+   /** Exact model metadata from the same adapter generation as {@link stream}. */
+   readonly model: LlmResolvedModelInfo
+   /** Dispatch through that generation without re-reading dynamic connection facts. */
+-  stream(options: GenerateOptions): AsyncIterable<StreamChunk>
++  stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk>
+ }
+ 
+ /**
+@@ -290,7 +370,7 @@
+   async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+     return {
+       model: await this.resolveModel(provider, model, signal),
+-      stream: options => this.stream(options),
++      stream: (options, native) => this.stream(options, native),
+     }
+   }
+ 
+@@ -299,7 +379,7 @@
+    * @param options - the fully-assembled request; implementations must honor `options.signal`.
+    * @returns the chunk stream, obeying the adapter contract documented on `StreamChunk`.
+    */
+-  abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>
++  abstract stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk>
+ }
+ 
+ /**
+@@ -353,6 +433,16 @@
+  */
+ export class LlmRuntime extends TypertRemoteService {
+   private adapters = new Map<string, AdapterRegistration>()
++  // Cordis traces service/function fields; keep these captured identities inside
++  // one plain immutable value so caller scoping cannot wrap each identity again.
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    runtime: LlmRuntime
++    admission: NativeLlmAdmission
++    check: NativeLlmAdmission['check']
++    signal: AbortSignal
++  }> | undefined
++  private readonly nativePrepared = new WeakMap<PreparedLlmCall, AdapterRegistration>()
+   private directory = new Map<string, LlmConfigurableProvider>()
+   private discoveries = new Map<
+     string,
+@@ -361,6 +451,127 @@
+ 
+   constructor(ctx: Context) {
+     super(ctx, 'llm')
++    const admission = ctx.root.get('nativeLlmAdmission')
++    if (admission === undefined) {
++      this.nativeBinding = undefined
++    } else {
++      const check = admission.check, signal = admission.signal
++      if (typeof check !== 'function' || !(signal instanceof AbortSignal)) {
++        throw new LlmError('native LLM admission is invalid', 'NATIVE_AUTHORITY')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, runtime: this, admission, check, signal })
++    }
++  }
++
++  /** Passive exact-provider observation from the existing registry. */
++  observeRegistration(provider: string): LlmRegistrationObservation | undefined {
++    const registration = this.adapters.get(provider)
++    if (registration === undefined) return undefined
++    const root = this.nativeBinding?.root ?? this.ctx.root
++    const owner: LlmRuntime = this
++    const original = (owner as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? owner
++    return Object.freeze({
++      provider: Object.freeze({ ...registration.provider }),
++      registrationIdentity: registration,
++      adapterIdentity: registration.adapter,
++      ownerIdentity: registration.owner,
++      assertCurrent: (): true => {
++        const current = root.get('llm')
++        const runtime = current === undefined ? undefined
++          : (current as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? current
++        if (runtime !== original) throw new LlmError('observed LLM runtime changed', 'NATIVE_AUTHORITY')
++        this.requireRegistration(registration)
++        return true
++      },
++    })
++  }
++
++  private requireRegistration(registration: AdapterRegistration): void {
++    if (this.adapters.get(registration.provider.id) !== registration
++        || registration.owner.state === FiberState.UNLOADING
++        || registration.owner.state === FiberState.DISPOSED
++        || registration.owner.state === FiberState.FAILED) {
++      throw new LlmError('native LLM registration is no longer current', 'NATIVE_AUTHORITY')
++    }
++  }
++
++  private requireNative(facts: NativeLlmPreparationFacts | NativeLlmDispatchFacts, registration: AdapterRegistration): void {
++    const binding = this.nativeBinding
++    const admission = binding?.admission, check = binding?.check, lifetime = binding?.signal
++    if (admission === undefined || check === undefined || lifetime === undefined) {
++      throw new LlmError('native LLM authority is absent', 'NATIVE_AUTHORITY')
++    }
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      const runtime = this.nativeBinding!.root.get('llm')
++      const original = runtime === undefined ? undefined
++        : (runtime as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? runtime
++      if (this.nativeBinding!.root.get('nativeLlmAdmission') !== admission
++          || admission.check !== check || admission.signal !== lifetime || original !== this.nativeBinding!.runtime) {
++        throw new LlmError('native LLM authority owner changed', 'NATIVE_AUTHORITY')
++      }
++      this.requireRegistration(registration)
++      if (facts.phase === 'prepare') facts.signal.throwIfAborted()
++      else {
++        facts.request.signal?.throwIfAborted()
++        if (!callConfigEquals(facts.options, facts.config)) {
++          throw new LlmError('native LLM request config changed', 'NATIVE_AUTHORITY')
++        }
++      }
++    }
++    requireCurrent()
++    const allowed: unknown = check.call(admission, facts)
++    if (allowed !== true) {
++      if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++        void Promise.resolve(allowed).catch(() => {})
++      }
++      throw new LlmError('native LLM request authority refused', 'NATIVE_AUTHORITY')
++    }
++    requireCurrent()
++  }
++
++  /** Check discovery completion before original input/header admission. */
++  requireNativePreparation(
++    context: NativeLlmPreparationContext,
++    config: LlmCallConfig,
++    prepared: PreparedLlmCall | undefined,
++  ): boolean {
++    if (this.nativeBinding?.admission === undefined) return false
++    const registration = prepared === undefined ? undefined : this.nativePrepared.get(prepared)
++    if (registration === undefined || prepared === undefined || !callConfigEquals(config, prepared.config)) {
++      throw new LlmError('native request lacks its original prepared registration', 'NATIVE_AUTHORITY')
++    }
++    this.requireNative(Object.freeze({
++      ...context, phase: 'prepare', runtime: this.nativeBinding!.runtime,
++      config: nativeCallConfig(config), registrationIdentity: registration,
++      adapterIdentity: registration.adapter, ownerIdentity: registration.owner,
++    }), registration)
++    return true
++  }
++
++  private nativeWritePermit(
++    request: GenerateOptions, options: GenerateOptions,
++    config: LlmCallConfig, registration: AdapterRegistration,
++  ): NativeLlmWritePermit | undefined {
++    if (this.nativeBinding?.admission === undefined) return undefined
++    // The native company attachment ceiling is text-only. Inspect original
++    // content before projection can replace durable attachment facts with text.
++    if (request.messages.some(message => contentHasImage(message.content) || contentHasFile(message.content))) {
++      throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++    }
++    deepFreeze(options)
++    const common = {
++      runtime: this.nativeBinding!.runtime, request, options, config: nativeCallConfig(config),
++      registrationIdentity: registration, adapterIdentity: registration.adapter, ownerIdentity: registration.owner,
++    }
++    this.requireNative(Object.freeze({ ...common, phase: 'dispatch' }), registration)
++    const requireCurrent = (): true => {
++      this.requireNative(Object.freeze({ ...common, phase: 'write' }), registration)
++      return true
++    }
++    const permit = Object.freeze({ signal: this.nativeBinding!.signal, assertCurrent: requireCurrent })
++    nativeLlmPermits.set(permit, { adapter: registration.adapter, options, requireCurrent, claimed: false })
++    return permit
+   }
+ 
+   /** Notify topology observers without letting one broken listener veto the commit. */
+@@ -402,12 +613,13 @@
+     // The routes this registration currently holds; `replace` rewrites it, and
+     // the disposer releases whatever it holds at disposal time.
+     const owned = new Set<string>()
++    const owner = this.ctx.fiber
+     // The disposer has run: `owned` being empty cannot say so on its own,
+     // because `replace([])` legally leaves a live registration holding none.
+     let released = false
+     const dispose = this.ctx.effect(function* (this: LlmRuntime) {
+       if (providers.length === 0) throw new LlmError('an adapter must register at least one provider', 'INVALID_ADAPTER')
+-      this.commitRoutes(owned, this.prepareRoutes(providers, adapter, owned))
++      this.commitRoutes(owned, this.prepareRoutes(providers, adapter, owned, owner))
+       yield () => {
+         released = true
+         for (const provider of owned) this.adapters.delete(provider)
+@@ -424,7 +636,7 @@
+       if (released) {
+         throw new LlmError('a disposed adapter registration cannot replace its routes', 'REGISTRATION_DISPOSED')
+       }
+-      this.commitRoutes(owned, this.prepareRoutes(next, adapter, owned))
++      this.commitRoutes(owned, this.prepareRoutes(next, adapter, owned, owner))
+     }
+     return handle
+   }
+@@ -434,7 +646,7 @@
+    * registration already holds as available. Nothing is mutated: a rejected
+    * candidate leaves the registry exactly as it was.
+    */
+-  private prepareRoutes(providers: string[], adapter: LlmAdapter, owned: ReadonlySet<string>): AdapterRegistration[] {
++  private prepareRoutes(providers: string[], adapter: LlmAdapter, owned: ReadonlySet<string>, owner: Context['fiber']): AdapterRegistration[] {
+     const unique = new Set<string>()
+     const registrations: AdapterRegistration[] = []
+     for (const provider of providers) {
+@@ -449,11 +661,12 @@
+       unique.add(provider)
+       const retryPolicy = adapter.providerRetryPolicy(provider)
+         ?? resolveRetryPolicy(undefined, `llm: provider "${provider}" retryPolicy`)
+-      registrations.push({
++      registrations.push(Object.freeze({
+         adapter,
+-        provider: { id: info.id, name: info.name },
++        owner,
++        provider: Object.freeze({ id: info.id, name: info.name }),
+         retryPolicy,
+-      })
++      }))
+     }
+     return registrations
+   }
+@@ -982,7 +1195,7 @@
+         : {},
+     })
+     let dispatched = false
+-    return Object.freeze({
++    const prepared: PreparedLlmCall = Object.freeze({
+       config: resolvedConfig,
+       retryPolicy: registration.retryPolicy,
+       adapterDefaults,
+@@ -1007,10 +1220,12 @@
+           registration,
+           config: resolvedConfig,
+           modelInfo,
+-          dispatch: options => adapterCall.stream(options),
++          dispatch: (options, native) => adapterCall.stream(options, native),
+         })
+       },
+     })
++    if (this.nativeBinding?.admission !== undefined) this.nativePrepared.set(prepared, registration)
++    return prepared
+   }
+ 
+   private registration(provider: string): AdapterRegistration {
+@@ -1067,16 +1282,20 @@
+   ): AsyncGenerator<StreamChunk> {
+     let iterator: AsyncIterator<StreamChunk>
+     try {
++      if (this.nativeBinding !== undefined
++          && options.messages.some(message => contentHasImage(message.content) || contentHasFile(message.content))) {
++        throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++      }
+       const registration = prepared?.registration ?? this.registration(options.provider)
+       const adapter = registration.adapter
+       let modelInfo: LlmResolvedModelInfo
+       let resolvedConfig: LlmCallConfig
+-      let dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
++      let dispatch: (options: GenerateOptions, native?: NativeLlmWritePermit) => AsyncIterable<StreamChunk>
+       if (prepared === undefined) {
+         const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal)
+         modelInfo = this.normalizeModelInfo(registration, options.model, adapterCall.model)
+         resolvedConfig = this.resolveCallWithInfo(options, modelInfo).config
+-        dispatch = options => adapterCall.stream(options)
++        dispatch = (options, native) => adapterCall.stream(options, native)
+       } else {
+         modelInfo = prepared.modelInfo
+         resolvedConfig = prepared.config
+@@ -1115,7 +1334,9 @@
+         }
+         if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions)
+       }
+-      const stream = dispatch(this.forAdapter(projectedOptions, adapter))
++      const finalOptions = this.forAdapter(projectedOptions, adapter)
++      const native = this.nativeWritePermit(options, finalOptions, resolvedConfig, registration)
++      const stream = dispatch(finalOptions, native)
+       iterator = stream[Symbol.asyncIterator]()
+     } catch (error: unknown) {
+       yield adapterFailureChunk(error, options.signal)
+@@ -1171,6 +1392,7 @@
+     options: GenerateOptions,
+     prepared?: PreparedDispatch,
+   ): AsyncIterable<StreamChunk> {
++    if (this.nativeBinding?.admission !== undefined) deepFreeze(options)
+     return this.ctx.waterfall(
+       this,
+       'llm/stream',
+@@ -1203,6 +1425,7 @@
+ }
+ 
+ interface AdapterRegistration {
++  readonly owner: Context['fiber']
+   readonly adapter: LlmAdapter
+   readonly provider: LlmProviderInfo
+   readonly retryPolicy: ResolvedRetryPolicy
+@@ -1212,7 +1435,7 @@
+   readonly registration: AdapterRegistration
+   readonly config: LlmCallConfig
+   readonly modelInfo: LlmResolvedModelInfo
+-  readonly dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
++  readonly dispatch: (options: GenerateOptions, native?: NativeLlmWritePermit) => AsyncIterable<StreamChunk>
+ }
+ 
+ export default LlmRuntime
+--- a/packages/sandbox/sandbox-policy/src/index.ts
++++ b/packages/sandbox/sandbox-policy/src/index.ts
+@@ -21,7 +21,7 @@
+  */
+ 
+ import { isAbsolute } from 'node:path'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import { z as zod } from 'zod'
+ import z from '@deepseek-ai/schemastery'
+ import type {} from '@deepseek-ai/dsh-agent'
+@@ -58,6 +58,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     sandboxPolicy: SandboxPolicyService
++    nativeSandboxCeiling?: { readonly signal: AbortSignal; readonly mode: 'read-only'; assertCurrent(): true }
+   }
+ }
+ 
+@@ -108,6 +109,37 @@
+  * mode log and immutable cwd travel together to every enforcing capability.
+  */
+ export class SandboxPolicyService extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: SandboxPolicyService
++    ceiling: NonNullable<Context['nativeSandboxCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('sandboxPolicy')
++      const owner = current === undefined ? undefined
++        : (current as SandboxPolicyService & { [symbols.original]?: SandboxPolicyService })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeSandboxCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.mode !== 'read-only') throw new Error('native sandboxPolicy ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native sandboxPolicy ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   // Inline schema call: the config catalog walks `static Config` statically.
+   static Config: z<Config> = z.object({
+     mode: z.union(['read-only', 'workspace-write', 'danger-full-access'] as const).default('read-only'),
+@@ -124,6 +156,15 @@
+   readonly workspaceRoot: string
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'sandboxPolicy')
++    const ceiling = ctx.root.get('nativeSandboxCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.mode !== 'read-only') {
++        throw new Error('native sandboxPolicy ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+     // schemastery (static Config) already filled `mode`; the cast records that
+     // runtime fact. `workspaceRoot` has NO schema default, so its fallback to
+     // the process cwd is real branching, resolved absolute either way.
+@@ -163,9 +204,12 @@
+    */
+   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
+     const { session } = request
++    const mode = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
++    const workspaceRoot = resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot)
++    const native = this.requireNativeCeiling()
+     return {
+-      mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
+-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
++      mode: native ? 'read-only' : mode,
++      workspaceRoot,
+       ...session === undefined ? {} : { sessionId: session.id },
+     }
+   }
+--- a/packages/skill/skill/src/index.ts
++++ b/packages/skill/skill/src/index.ts
+@@ -10,7 +10,7 @@
+  * @module @deepseek-ai/dsh-skill
+  */
+ 
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import type {} from '@deepseek-ai/dsh-llm'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+ import { NamedEntries, ScopedLayers, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
+@@ -283,6 +283,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     skills: SkillRegistry
++    nativeSkillCeiling?: { readonly signal: AbortSignal; readonly mode: 'disabled'; assertCurrent(): true }
+   }
+ 
+   interface Events {
+@@ -354,6 +355,37 @@
+  * on demand.
+  */
+ export class SkillRegistry extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: SkillRegistry
++    ceiling: NonNullable<Context['nativeSkillCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('skills')
++      const owner = current === undefined ? undefined
++        : (current as SkillRegistry & { [symbols.original]?: SkillRegistry })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeSkillCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.mode !== 'disabled') throw new Error('native skills ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native skills ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   static Config: Schema<Config> = z.object({
+     collectCacheMaxEntries: z.number().default(DEFAULT_COLLECT_CACHE_ENTRIES),
+   })
+@@ -372,6 +404,15 @@
+ 
+   constructor(ctx: Context, config: Config = {}) {
+     super(ctx, 'skills')
++    const ceiling = ctx.root.get('nativeSkillCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.mode !== 'disabled') {
++        throw new Error('native skills ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+     this.collectCacheMaxEntries = config.collectCacheMaxEntries ?? DEFAULT_COLLECT_CACHE_ENTRIES
+     assertPositiveInteger('collectCacheMaxEntries', this.collectCacheMaxEntries)
+   }
+@@ -479,6 +520,8 @@
+    * @returns sorted summaries plus discovery-completeness state.
+    */
+   async snapshot(options: SkillViewOptions = {}): Promise<SkillCatalogSnapshot> {
++    throwIfAborted(options.signal)
++    if (this.requireNativeCeiling()) return { skills: [], complete: true }
+     const collected = await this.collect(options)
+     return {
+       skills: [...collected.entries.values()]
+@@ -498,6 +541,8 @@
+    * @returns the full skill, including body content, or `undefined`.
+    */
+   async get(name: string, options: SkillViewOptions = {}): Promise<SkillDefinition | undefined> {
++    throwIfAborted(options.signal)
++    if (this.requireNativeCeiling()) return undefined
+     if (!isSkillName(name)) return undefined
+     const collected = await this.collect(options)
+     throwIfAborted(options.signal)
+--- a/packages/typert/protocol/src/index.ts
++++ b/packages/typert/protocol/src/index.ts
+@@ -20,6 +20,23 @@
+ export { createTypertRemoteInfo, isTypertRemoteMethod } from './remote-info.ts'
+ export { principalOf } from './principal.ts'
+ export type { RemoteAccessResource, RemoteAccessResourceKind, RemoteAccessResourceOf } from './remote-access.ts'
++
++/** Runtime-only host hold: company hosts do not inherit browser-owner privilege. */
++export const OWNER_ACCESS_RESTRICTION_KEY = 'remoteAccessOwnerRestricted'
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Installed on the root before tree boot; never a public or declarative grant. */
++    remoteAccessOwnerRestricted?: true
++  }
++}
++
++/** Read the original host root, ignoring child service-isolation labels. */
++export function readOwnerAccessRestriction(ctx: Context): boolean {
++  const required: unknown = ctx.root.get(OWNER_ACCESS_RESTRICTION_KEY)
++  if (required !== undefined && required !== true) throw new Error('invalid host owner access restriction')
++  return required === true
++}
+ 
+ const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+ 
+--- a/vendor/loader/src/config/entry.ts
++++ b/vendor/loader/src/config/entry.ts
+@@ -116,6 +116,7 @@
+ 
+   /** Merge new options, restart as needed, and persist through the parent tree. */
+   async update(options: Partial<EntryOptions>, create = false, force = false) {
++    this.loader.nativeUpdate(this, options, create)
+     const legacy = { ...this.options }
+ 
+     // step 1: update options
+--- a/vendor/loader/src/config/tree.ts
++++ b/vendor/loader/src/config/tree.ts
+@@ -110,6 +110,7 @@
+ 
+   /** Import a plugin module from a specifier or `cordis:` builtin. */
+   import(name: string, getOuterStack?: () => string[]) {
++    name = this.ctx.loader.nativeResolve(this, name)
+     if (name.startsWith('cordis:')) {
+       return this.ctx.loader.builtins[name.slice(7)]
+     }
+--- a/vendor/loader/src/index.ts
++++ b/vendor/loader/src/index.ts
+@@ -1,4 +1,4 @@
+-import { Context, FiberState, Inject, Service, type Fiber } from '@deepseek-ai/cordis'
++import { Context, FiberState, Inject, Service, symbols, type Fiber } from '@deepseek-ai/cordis'
+ import { defineProperty, isNullable, type Dict } from '@deepseek-ai/cosmokit'
+ import { ModuleLoader } from './internal.ts'
+ import { Entry, type EntryOptions } from './config/entry.ts'
+@@ -43,6 +43,7 @@
+ 
+   interface Context {
+     loader: Loader
++    nativeLoaderAdmission?: NativeLoaderAdmission
+   }
+ 
+   interface EnvData {
+@@ -52,6 +53,13 @@
+   interface Fiber {
+     entry?: Entry
+   }
++}
++
++/** A qualified native launch can freeze the original tree and admit exact module URLs. */
++export interface NativeLoaderAdmission {
++  readonly signal: AbortSignal
++  update(entry: Entry, options: Partial<EntryOptions>, create: boolean): void
++  resolve(tree: EntryTree, name: string): string
+ }
+ 
+ /** Loader config and dependency intercept namespace. */
+@@ -85,6 +93,58 @@
+   public internal = ModuleLoader.fromInternal()
+ 
+   public builtins: Dict<any> = Object.create(null)
++
++  private nativeBinding: {
++    owner: Loader; root: Context; admission: NativeLoaderAdmission;
++    signal: AbortSignal; update: NativeLoaderAdmission['update']; resolve: NativeLoaderAdmission['resolve']
++  } | null | undefined
++
++  /** Capture once at the first original tree operation, after host initialization. */
++  private nativeOwner() {
++    const identity = (value: Loader): Loader =>
++      (value as Loader & { [symbols.original]?: Loader })[symbols.original] ?? value
++    if (this.nativeBinding === undefined) {
++      const admission = this.ctx.root.get('nativeLoaderAdmission')
++      this.nativeBinding = admission === undefined ? null : {
++        owner: identity(this), root: this.ctx.root, admission,
++        signal: admission.signal, update: admission.update, resolve: admission.resolve,
++      }
++    }
++    const held = this.nativeBinding
++    if (held === null) return null
++    held.signal.throwIfAborted()
++    const current = held.root.get('loader')
++    if (current === undefined || identity(current) !== held.owner
++      || held.root.get('nativeLoaderAdmission') !== held.admission
++      || held.admission.signal !== held.signal || held.admission.update !== held.update
++      || held.admission.resolve !== held.resolve) throw new Error('native Loader owner changed')
++    return held
++  }
++
++  /** Before options are changed or !!js disabled/config expressions can execute. */
++  nativeUpdate(entry: Entry, options: Partial<EntryOptions>, create: boolean): void {
++    const held = this.nativeOwner()
++    if (held === null) return
++    const result: unknown = held.update.call(held.admission, entry, options, create)
++    if (result !== undefined) {
++      void Promise.resolve(result).catch(() => {})
++      throw new Error('native Loader update admission must be synchronous')
++    }
++    if (this.nativeOwner() !== held) throw new Error('native Loader owner changed')
++  }
++
++  /** Resolve once through the original active resolver, then import that exact URL. */
++  nativeResolve(tree: EntryTree, name: string): string {
++    const held = this.nativeOwner()
++    if (held === null) return name
++    const result: unknown = held.resolve.call(held.admission, tree, name)
++    if (typeof result !== 'string' || result.length === 0) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native Loader module admission must be synchronous')
++    }
++    if (this.nativeOwner() !== held) throw new Error('native Loader owner changed')
++    return result
++  }
+ 
+   constructor(ctx: Context, public config: Loader.Config = {}) {
+     super(ctx)

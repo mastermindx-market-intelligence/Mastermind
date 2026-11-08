@@ -2351,11 +2351,15 @@ def inspect_linked_worktree(
         or published_pull_request > 2_147_483_647
     ):
         raise WorkspaceError("published pull request is invalid")
-    cleanliness = observe_launch_cleanliness(
-        lambda arguments: _run_bytes(
-            ["git", *arguments], cwd=destination, env=git_observation_env(env)
-        )
-    )
+    def inspect_git(arguments):
+        # Status needs dirty presence, including ignored files, not every path
+        # inside dependency/build directories. The release and project-manifest
+        # paths retain their full untracked inventories.
+        if status_direct_registration and arguments == LAUNCH_CLEAN_UNTRACKED_ARGS:
+            arguments = ("ls-files", "--others", "--directory", "--no-empty-directory", "-z")
+        return _run_bytes(["git", *arguments], cwd=destination, env=git_observation_env(env))
+
+    cleanliness = observe_launch_cleanliness(inspect_git)
     if cleanliness.dirty:
         return LinkedWorkspaceReleaseReceipt(
             source_repository=str(source),

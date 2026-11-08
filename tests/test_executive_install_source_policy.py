@@ -212,7 +212,7 @@ def test_git_uses_exact_command_scoped_safe_directory(
     trusted = str(repo.resolve())
     assert result.stdout == "ok\n"
     assert calls == [[
-        "/usr/bin/git", "--no-optional-locks",
+        "/usr/bin/git", "--no-optional-locks", "-c", "gc.auto=0",
         "-c", f"safe.directory={trusted}",
         "-C", trusted, "rev-parse", "HEAD",
     ]]
@@ -439,7 +439,7 @@ def test_slow_complete_clean_status_remains_usable_without_skipping_source_check
         assert result["protected_master_sha"] == protected
     assert len(observed) == 1  # Completion is not an automatic retry.
     argv, options = observed[0]
-    assert argv == ["/usr/bin/git", "--no-optional-locks", "-c",
+    assert argv == ["/usr/bin/git", "--no-optional-locks", "-c", "gc.auto=0", "-c",
                     f"safe.directory={repo.resolve()}", "-C", str(repo.resolve()),
                     *_COMPLETE_STATUS_ARGS]
     assert options["stdin"] == subprocess.DEVNULL
@@ -504,3 +504,28 @@ def test_slow_nonzero_status_is_not_clean_or_retried(tmp_path, monkeypatch):
     with pytest.raises(InstallSourcePolicyError, match="could not inspect source checkout"):
         source_policy.validate_acceptance_source(source_repo=repo, expected_sha=protected)
     assert len(observed) == 1
+
+
+def test_exact_source_blob_preserves_binary_newlines_and_command_scoped_ownership(tmp_path, monkeypatch):
+    repo, _, _ = _repo_with_accepted_ancestor(tmp_path)
+    name = "source with spaces.bin"
+    original = b"first\r\nsecond\n\x80\x00last\r"
+    (repo/name).write_bytes(original)
+    _git(repo, "add", name)
+    _git(repo, "commit", "-qm", "exact byte fixture")
+    head = _git(repo, "rev-parse", "HEAD")
+    config = (repo/".git/config").read_bytes()
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    assert source_policy.read_source_blob(repo, head, name) == original
+    assert (repo/".git/config").read_bytes() == config
+
+
+@pytest.mark.parametrize("relative", ["../state.txt", "/state.txt", "a/../state.txt", "./state.txt",
+                                      "a//state.txt", "a:state.txt", "a\\state.txt", "a\nstate.txt"])
+def test_source_blob_rejects_unqualified_path_before_git(tmp_path, monkeypatch, relative):
+    monkeypatch.setattr(source_policy, "_git",
+        lambda *args, **kwargs: pytest.fail("unsafe blob path must not spawn Git"))
+    with pytest.raises(InstallSourcePolicyError):
+        source_policy.read_source_blob(tmp_path, "a"*40, relative)

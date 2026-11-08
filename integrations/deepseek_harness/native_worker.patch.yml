@@ -1,0 +1,25 @@
+# Native Worker composition over the original Web host; no Agent preset owner.
+- id: tools
+  config:
+    mode: native
+- id: sandbox-policy
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.cwd()
+- id: approval
+  config:
+    policy: never
+- id: tool-fs
+  disabled: false
+  config:
+    read: true
+    readImage: false
+    write: false
+    edit: false
+- id: tool-fs-search
+  disabled: false
+  config:
+    sampleOverCapGlobResults: false
+# Auxiliary title inference has no original native turn permit.
+- id: session-title-llm
+  disabled: true

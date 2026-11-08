@@ -26,6 +26,8 @@ HERMES_SECRETARY_HOST_SCHEMA = "mastermind.hermes_secretary_host_binding/v1"
 CONVERSATION_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v5"
 HERMES_META_HOST_SCHEMA = "mastermind.hermes_meta_host_binding/v1"
 HERMES_HOST_READ_SCHEMA = "mastermind.hermes_role_metadata_host_binding/v1"
+NATIVE_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v6"
+NATIVE_OPERATOR_HOST_SCHEMA = "mastermind.dsh_native_operator_host_binding/v1"
 MAX_CONFIG_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BINDING_FIELDS = frozenset(field.name for field in dataclasses.fields(FabricHostBinding))
@@ -247,8 +249,80 @@ def _remote_transports(values, bindings):
     return MappingProxyType(transports)
 
 
+
+@dataclasses.dataclass(frozen=True)
+class NativeOperatorHostSelection:
+    """Expected facts for the existing native Worker on the enrolled host.
+
+    This slot grants no capability or account authority. Runtime and the original
+    launch observation still compare the selected profile and actual process.
+    """
+    registration: object
+    binding: object
+    transport: object
+
+    @classmethod
+    def from_document(cls, value, observation):
+        from control_plane.native_conversation_binding import NativeConversationRegistration
+        from control_plane.operator_harness_wire import workspace_identity, OperatorHarnessWireError
+        from control_plane.remote_attempt_transport import RemoteOperatorHostBinding, RemoteAttemptTransportError
+        from control_plane.native_conversation_result import native_operator_capabilities, DSH_NATIVE_HARNESS_KIND
+        fields = {'schema', 'registration', 'harness_binary_digest', 'harness_version',
+                  'expected_config_digest', 'workspace'}
+        registration_fields = {field.name for field in dataclasses.fields(NativeConversationRegistration)}
+        if (type(value) is not dict or set(value) != fields
+                or value['schema'] != NATIVE_OPERATOR_HOST_SCHEMA
+                or type(value['registration']) is not dict
+                or set(value['registration']) != registration_fields
+                or any(type(item) is not str for item in value['registration'].values())
+                or type(observation) is not HermesHostObservationBinding):
+            raise FabricCompositionError('Native operator selection differs from its closed schema')
+        try:
+            registration = NativeConversationRegistration(**value['registration'])
+            if registration.host_ref != observation.host_ref:
+                raise ValueError('native selection differs from enrolled host')
+            workspace = workspace_identity(value['workspace'])
+            _absolute_path(workspace.workspace_path)
+            if (workspace.workspace_path.startswith('//')
+                    or type(workspace.base_sha) is not str
+                    or re.fullmatch(r'[0-9a-f]{40}', workspace.base_sha) is None
+                    or any(type(getattr(workspace, name)) is not int or getattr(workspace, name) < 0
+                           for name in ('device', 'inode', 'uid', 'gid'))
+                    or workspace.inode == 0):
+                raise ValueError('native workspace identity is malformed')
+            for name in ('harness_binary_digest', 'expected_config_digest'):
+                if type(value[name]) is not str or _SHA256.fullmatch(value[name]) is None:
+                    raise ValueError('native expected digest is malformed')
+            binding = RemoteOperatorHostBinding(
+                host_ref=registration.host_ref, worker_id=registration.worker_id,
+                transport=observation.transport.binding,
+                worker_source_config_digest=registration.worker_source_config_digest,
+                provider='acp', harness_kind=DSH_NATIVE_HARNESS_KIND,
+                harness_binary_digest=value['harness_binary_digest'],
+                harness_version=value['harness_version'],
+                expected_config_digest=value['expected_config_digest'], workspace=workspace,
+                capabilities=native_operator_capabilities())
+        except (TypeError, ValueError, OperatorHarnessWireError, RemoteAttemptTransportError) as exc:
+            raise FabricCompositionError('Native operator expected host facts are invalid') from exc
+        return cls(registration, binding, observation.transport)
+
+
 def _composition_parts(raw):
     document = _document(raw)
+    if type(document) is dict and document.get('schema_version') == NATIVE_CONFIG_SCHEMA_VERSION:
+        expected = {'schema_version', 'bindings', 'remote_transports',
+                    'hermes_role_metadata_read', 'hermes_secretary_conversation',
+                    'hermes_meta_conversation', 'native_conversation'}
+        if set(document) != expected:
+            raise FabricCompositionError('Native composition differs from its closed schema')
+        legacy = {key: value for key, value in document.items() if key != 'native_conversation'}
+        legacy['schema_version'] = CONVERSATION_CONFIG_SCHEMA_VERSION
+        bindings, transports, observation, secretary, meta, _ = _composition_parts(
+            json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
+        native = NativeOperatorHostSelection.from_document(document['native_conversation'], observation)
+        if any(binding.worker_id == native.registration.worker_id for binding in bindings):
+            raise FabricCompositionError('Native operator cannot replace a Fabric Worker')
+        return bindings, transports, observation, secretary, meta, native
     if type(document) is dict and document.get('schema_version') == CONVERSATION_CONFIG_SCHEMA_VERSION:
         expected = {'schema_version', 'bindings', 'remote_transports',
                     'hermes_role_metadata_read', 'hermes_secretary_conversation',
@@ -258,7 +332,7 @@ def _composition_parts(raw):
         meta = HermesMetaHostBinding.from_document(document['hermes_meta_conversation'])
         legacy = {key: value for key, value in document.items() if key != 'hermes_meta_conversation'}
         legacy['schema_version'] = SECRETARY_CONFIG_SCHEMA_VERSION
-        bindings, transports, observation, secretary, _ = _composition_parts(
+        bindings, transports, observation, secretary, _, _ = _composition_parts(
             json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
         if (type(observation) is not HermesHostObservationBinding
                 or meta.host_ref != observation.host_ref
@@ -266,7 +340,7 @@ def _composition_parts(raw):
                 or meta.expected_host_binding_sha256 != observation.expected_host_binding_sha256
                 or meta.expected_implementation_sha != observation.expected_implementation_sha):
             raise FabricCompositionError('Meta and observation require the same qualified host source')
-        return bindings, transports, observation, secretary, meta
+        return bindings, transports, observation, secretary, meta, None
     if type(document) is dict and document.get('schema_version') == SECRETARY_CONFIG_SCHEMA_VERSION:
         expected = {'schema_version', 'bindings', 'remote_transports',
                     'hermes_role_metadata_read', 'hermes_secretary_conversation'}
@@ -275,7 +349,7 @@ def _composition_parts(raw):
         secretary = HermesSecretaryHostBinding.from_document(document['hermes_secretary_conversation'])
         legacy = {key: value for key, value in document.items() if key != 'hermes_secretary_conversation'}
         legacy['schema_version'] = HOST_READ_CONFIG_SCHEMA_VERSION
-        bindings, transports, observation, _, _ = _composition_parts(
+        bindings, transports, observation, _, _, _ = _composition_parts(
             json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
         if (type(observation) is not HermesHostObservationBinding
                 or secretary.host_ref != observation.host_ref
@@ -283,7 +357,7 @@ def _composition_parts(raw):
                 or secretary.expected_host_binding_sha256 != observation.expected_host_binding_sha256
                 or secretary.expected_implementation_sha != observation.expected_implementation_sha):
             raise FabricCompositionError('Secretary and observation require the same qualified host source')
-        return bindings, transports, observation, secretary, None
+        return bindings, transports, observation, secretary, None, None
     if type(document) is dict and document.get('schema_version') == HOST_READ_CONFIG_SCHEMA_VERSION:
         if (set(document) != {'schema_version', 'bindings', 'remote_transports', 'hermes_role_metadata_read'}
                 or type(document['bindings']) is not list
@@ -297,7 +371,7 @@ def _composition_parts(raw):
         if any(key[0] == observation.host_ref and transport.binding != observation.transport.binding
                for key, transport in transports.items()):
             raise FabricCompositionError('Conflicting transports for the same observation host are forbidden')
-        return bindings, transports, observation, None, None
+        return bindings, transports, observation, None, None, None
     if type(document) is dict and document.get('schema_version') == REMOTE_CONFIG_SCHEMA_VERSION:
         if (set(document) not in (
                     {'schema_version', 'bindings', 'remote_transports'},
@@ -325,8 +399,8 @@ def _composition_parts(raw):
             except RoleStatusError as exc:
                 raise FabricCompositionError('Hermes observation requires exact source pins') from exc
             observation = MappingProxyType(dict(value))
-        return bindings, transports, observation, None, None
-    return _bindings(raw), MappingProxyType({}), None, None, None
+        return bindings, transports, observation, None, None, None
+    return _bindings(raw), MappingProxyType({}), None, None, None, None
 
 def _composition(raw):
     """Preserve the incumbent four-part validation interface for every version."""
@@ -345,6 +419,7 @@ class FabricBindingSource:
     _hermes_role_metadata_read: Mapping | HermesHostObservationBinding | None = dataclasses.field(default=None, repr=False, compare=False)
     _hermes_secretary_conversation: HermesSecretaryHostBinding | None = dataclasses.field(default=None, repr=False, compare=False)
     _hermes_meta_conversation: HermesMetaHostBinding | None = dataclasses.field(default=None, repr=False, compare=False)
+    _native_conversation: NativeOperatorHostSelection | None = dataclasses.field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_path(cls, path: str | Path, expected_sha256: str) -> "FabricBindingSource":
@@ -354,10 +429,10 @@ class FabricBindingSource:
             raise FabricCompositionError("Fabric composition requires a filesystem path")
         fixed_path = _absolute_path(str(path))
         raw, identity = _read_pinned(fixed_path, expected_sha256)
-        bindings, remote_index, observation, secretary, meta = _composition_parts(raw)
+        bindings, remote_index, observation, secretary, meta, native = _composition_parts(raw)
         return cls(fixed_path, expected_sha256, bindings, identity,
                    MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}),
-                   remote_index, observation, secretary, meta)
+                   remote_index, observation, secretary, meta, native)
 
     def require_current(self) -> None:
         _, identity = _read_pinned(self.path, self.expected_sha256)
@@ -367,6 +442,50 @@ class FabricBindingSource:
     @property
     def has_execution_bindings(self) -> bool:
         return bool(self.bindings or self._remote_index)
+
+    @property
+    def has_native_operator_binding(self) -> bool:
+        return self._native_conversation is not None
+
+    def native_conversation_selection(self) -> NativeOperatorHostSelection | None:
+        self.require_current()
+        selection = self._native_conversation
+        if selection is not None:
+            selection.transport.require_current()
+        return selection
+
+    def native_conversation_composition(self):
+        from control_plane.native_conversation_binding import NativeConversationHostComposition
+        selection = self.native_conversation_selection()
+        if selection is None:
+            return None
+        def current():
+            if self.native_conversation_selection() is not selection:
+                raise FabricCompositionError('Native operator selection was replaced')
+        def read_client(*, job_id, attempt_id, worker_id, session_epoch_id, process_generation_id):
+            # A nonowning transport to the existing installed Worker. Runtime
+            # supplies historical identity; no active claim or adapter is made.
+            from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+            current()
+            if worker_id != selection.registration.worker_id:
+                raise FabricCompositionError('Native READ Worker differs from installed selection')
+            client = RemoteWorkerBrokerClient(selection.binding.transport,
+                dict(host_ref=selection.registration.host_ref, job_id=job_id,
+                     attempt_id=attempt_id, worker_id=worker_id, operation_id=attempt_id),
+                allowed_operations=frozenset({"ohf-native-read-binding", "ohf-native-read"}),
+                bound_payload_identity=dict(session_epoch_id=session_epoch_id,
+                                            process_generation_id=process_generation_id))
+            current()
+            return client
+        return NativeConversationHostComposition(
+            selection.registration, current, self.expected_sha256, read_client)
+
+    def remote_operator_binding(self, host_ref: str, worker_id: str):
+        selection = self.native_conversation_selection()
+        if (selection is None or type(host_ref) is not str or type(worker_id) is not str
+                or (host_ref, worker_id) != (selection.registration.host_ref, selection.registration.worker_id)):
+            raise FabricCompositionError('Exact native operator host/worker is not installed')
+        return selection.binding
 
     def __call__(self, host_ref: str, worker_id: str) -> FabricHostBinding:
         self.require_current()

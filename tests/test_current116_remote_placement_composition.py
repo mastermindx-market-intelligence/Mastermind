@@ -10,7 +10,7 @@ import shutil
 import pytest
 
 from ops.native_fabric.provider_plans import compose
-from provider_plan_fixed_parent import materialize_fixed_parent
+from provider_plan_fixed_parent import materialize_fixed_parent, materialize_fixed_sequence38
 from test_provider_plan_remote_mode_boundary import router
 
 PROFILE = "current116-remote-placement"
@@ -20,15 +20,7 @@ PROFILE = "current116-remote-placement"
 def current_source(tmp_path_factory):
     root = tmp_path_factory.mktemp("public-sequence38")
     previous = materialize_fixed_parent(root / "sequence37")
-    current = root / "sequence38"
-    compose.compose(previous, current)
-    profile = json.loads((compose.HERE / "remote_placement/profile.json").read_text())
-    files = json.loads((current / "FILES.json").read_text())
-    assert files == profile["base_files"] and len(files) == 116
-    # Inert descriptor over independently hash-qualified public source bytes.
-    (current / "RELEASE.json").write_text(json.dumps({
-        "digest": profile["base_selection"]["generation"], "files": files}))
-    return current
+    return materialize_fixed_sequence38(root / "sequence38", previous)
 
 
 @pytest.fixture

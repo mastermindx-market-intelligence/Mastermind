@@ -69,7 +69,9 @@ async def test_control_selected_endpoint_crosses_real_mtls_and_fixed_unix(case, 
             writer.close()
             await writer.wait_closed()
     fixture.unix_server.close(); await fixture.unix_server.wait_closed()
-    fixture.broker_socket.unlink()
+    # Newer asyncio owns socket cleanup on server.close(); older runtimes
+    # leave the fixture path behind. Both precede this replacement listener.
+    fixture.broker_socket.unlink(missing_ok=True)
     fixture.unix_server = await asyncio.start_unix_server(broker_reply, path=str(fixture.broker_socket))
     transport = BrokerTransportBinding(endpoint=('localhost', fixture.endpoint[1]),
         ca_path=fixture.config.ca_path, client_cert_path=fixture.control_cert,

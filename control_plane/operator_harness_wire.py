@@ -26,6 +26,10 @@ from control_plane.executive_orchestration_principal import (
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.native_conversation_result import (
+    NativeConversationResultError, NativeConversationResultObservation,
+    NativeConversationBeginObservation,
+)
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
     AttentionTurnObservation,
@@ -79,6 +83,8 @@ T = TypeVar("T")
 def to_wire(value: Any) -> Any:
     """Return recursively JSON-compatible data without changing semantics."""
 
+    if isinstance(value, (NativeConversationResultObservation, NativeConversationBeginObservation)):
+        return value.to_wire()
     if dataclasses.is_dataclass(value):
         return {
             field.name: to_wire(getattr(value, field.name))
@@ -540,3 +546,10 @@ __all__ = [
     "turn_start_observation",
     "workspace_identity",
 ]
+
+
+def native_conversation_result_observation(value: Any) -> NativeConversationResultObservation:
+    try:
+        return NativeConversationResultObservation.from_wire(value)
+    except NativeConversationResultError as exc:
+        raise OperatorHarnessWireError("native conversation observation is invalid") from exc

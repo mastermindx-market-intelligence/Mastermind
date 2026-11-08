@@ -1,0 +1,149 @@
+{
+  "archive": {
+    "asset_manifest_sha256": "b38eb38a0c67f45b9c0292f173506c1be93033f55f35f86b5b4685caa3ee6f15",
+    "files": 12,
+    "protocol_sha256": "2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41",
+    "recipe_sha256": "25c346a61d9448cc666787558fbafebd84dcdf4ffd5e44629df5d739d52aff23",
+    "source": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb"
+  },
+  "base_sha": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb",
+  "hosted_c33": {
+    "frontend": {
+      "job_id": 128636222406,
+      "later_archive_build": "failed: omitted original company protocol leaf",
+      "test_files_passed": 412,
+      "tests_passed": 7010,
+      "tests_skipped": 12,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42449750190/job/128636222406"
+    },
+    "native_macos": {
+      "build_identity": "ci-native-42449750190-1",
+      "conclusion": "success",
+      "installed": false,
+      "integrated_source": "009dbffef5a73062e7050cbeaea8b58e92b1d2b0",
+      "job_id": 128636222705,
+      "protected_base": "d8c89a44bf896a623467cb303a29e46dea19cf9a",
+      "signing": "unsigned",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42449750190/job/128636222705"
+    },
+    "python_collection": {
+      "cause": "ACP SDK absent from canonical development extras",
+      "job_ids": [
+        128636265171,
+        128636265127
+      ],
+      "run_id": 42449750258
+    }
+  },
+  "installed": false,
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "provider_acceptance": false,
+  "remaining_source": [
+    "default canonical native capability and route",
+    "finite root attestation publication and final layout",
+    "first native selection through original Control component transaction"
+  ],
+  "runs": {
+    "acp_collection": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/harness_convergence/test_dsh_fullapp_company_profile.py",
+        "tests/harness_convergence/test_dsh_native_operator_profile.py"
+      ],
+      "base_sha": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T05:21:28.672348+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "9eee2f2add1a8127659af1841e23018718b43c683883a76dc066b1fd0c101623",
+      "receipt_path": "/private/tmp/mmx-dsh-c34-acp-collection-20261108-pro1.json",
+      "receipt_sha256": "f34c1c824ff81145918c74c0b528011c09cfebe21d8da11737d659cde968dee1",
+      "result": "3 tests collected; not execution",
+      "source_inputs": 7113,
+      "started_at": "2026-11-08T05:21:26.609333+00:00"
+    },
+    "committed_c33_guard": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_ceo_submit_armed_composition.py"
+      ],
+      "base_sha": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T05:12:19.186060+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "68e5967f8c7732f841ab80576f3604186993d6253a9ae9344429000a1d8c3b7d",
+      "receipt_path": "/private/tmp/mmx-dsh-c33-committed-guard-20261108-pro1.json",
+      "receipt_sha256": "5a60b1f94021ec2d1494ad5019e8d3ccc8cf12e473b90cd3a444f5fbebf587ae",
+      "result": "337 passed",
+      "source_inputs": 7113,
+      "started_at": "2026-11-08T05:11:04.376578+00:00"
+    },
+    "exact_archive_build": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-c",
+        "from pathlib import Path\nimport os,subprocess,json,hashlib\nfrom ops.executive_os.os_release_assets import _archive\nfrom ops.executive_os.executive_mcp_entry import build_os_asset_manifest\nw=Path(\"/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2\")\nout=Path(\"/private/tmp/mmx-dsh-c34-os-archive-20261108-pro1\")\nout.mkdir(mode=0o700)\n_archive(w,\"a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb\",out)\nprotocol=\"integrations/deepseek_harness/company_plugin/src/protocol.ts\"\nassert hashlib.sha256((out/protocol).read_bytes()).hexdigest()==\"2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41\"\nassert [p.relative_to(out).as_posix() for p in (out/\"integrations\").rglob(\"*\") if p.is_file()]==[protocol]\nuc=out/\".npm-user-config\";gc=out/\".npm-global-config\";uc.touch(exist_ok=False);gc.touch(exist_ok=False)\nnode=Path(\"/opt/homebrew/Cellar/node/26.5.0/bin/node\")\nnpm=Path(\"/opt/homebrew/bin/npm\").resolve(strict=True)\nenv={\"PATH\":str(node.parent)+\":/usr/bin:/bin\",\"HOME\":str(out),\"LC_ALL\":\"C\",\"npm_config_userconfig\":str(uc),\"npm_config_globalconfig\":str(gc),\"npm_config_cache\":str(out/\".npm-cache\"),\"VITE_MM_DSH_APP_URL\":\"https://chat.mastermind-x.com/\"}\nfor args in ([\"ci\",\"--ignore-scripts\",\"--no-audit\",\"--no-fund\"],[\"run\",\"build\"]):\n subprocess.run([str(node),str(npm),*args],cwd=out/\"app/mastermind_os\",env=env,check=True,timeout=300)\nmanifest=build_os_asset_manifest(out)\np=out/\"asset-manifest.json\";p.write_text(json.dumps(manifest,indent=2,sort_keys=True)+\"\\n\")\nprint(json.dumps({\"archive_source\":\"a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb\",\"recipe_owner_sha256\":hashlib.sha256((w/\"ops/executive_os/os_release_assets.py\").read_bytes()).hexdigest(),\"manifest\":str(p),\"manifest_sha256\":hashlib.sha256(p.read_bytes()).hexdigest(),\"files\":len(manifest[\"files\"]),\"installed\":False}))\n"
+      ],
+      "base_sha": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T05:21:39.668938+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "d32b74b4f8e2ae2a917108702819d0fae8ca65ba5c35cc3b0459b86c1ce82be2",
+      "receipt_path": "/private/tmp/mmx-dsh-c34-archive-build-20261108-pro1.json",
+      "receipt_sha256": "83864b6e397e1022c085c057fa11da0fdf222ef7c50d1ed86a9ce5f2d26b39e5",
+      "result": "npm ci, production build and original 12-file asset manifest passed",
+      "source_inputs": 7113,
+      "started_at": "2026-11-08T05:21:23.718307+00:00"
+    },
+    "focused": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_os_release_assets.py",
+        "tests/test_native_macos_ci.py",
+        "tests/test_dsh_native_tool_updates.py"
+      ],
+      "base_sha": "a5c1e6d9dc6319c6db5f94913c36fa10904eb1cb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T05:23:05.065210+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "1fd4b9e02faff8e8d6af2a6febf45749414b24abac032c1d2726fe4ff2717a07",
+      "receipt_path": "/private/tmp/mmx-dsh-c34-archive-tests-20261108-pro1.json",
+      "receipt_sha256": "e02e65781168a2f60cacc5e3197a1473164fec1b48717208962f61a3e95b3c72",
+      "result": "228 passed",
+      "source_inputs": 7113,
+      "started_at": "2026-11-08T05:21:23.278645+00:00"
+    }
+  },
+  "schema": "mastermind.deepseek_native_ci_repair_evidence/v1",
+  "service_started_or_restarted": false,
+  "source_sha256": {
+    ".github/workflows/mastermind-os.yml": "fe898884606f49f59c7a424a08386607c3bdddd1a373e8f8fcd29f429e0ffe8c",
+    "ops/executive_os/os_release_assets.py": "25c346a61d9448cc666787558fbafebd84dcdf4ffd5e44629df5d739d52aff23",
+    "pyproject.toml": "bd6298c5610437797bfeaeefad39adcf434deec08c89c15921da0e663ec1e5a4",
+    "tests/test_native_macos_ci.py": "b2ea2c26a0e3f73021613c6a44a5a970d154f202bb9352f6f3215dbe8cb611d5",
+    "tests/test_os_release_assets.py": "a2a9c9701bebba2fc1b481bf955d3e35e084fcd43d61e2ecee7e4ddbb4b9b49d"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "mastermind.dsh_fullapp_runtime_source.v1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "source_sha256": {
+    "packages/core/tools/src/index.ts": "398bcdeb221e450d088510830b77d99a513e65ab31e40ade71688a19cdf5e6aa",
+    "packages/core/tools/src/json-schema.ts": "13deffdfd34539e23706b0fde235991da45b2f07c5c18dbbf3ca734c1da0c788",
+    "packages/core/tools/src/presentation.ts": "2e729538403ef924430187df13ec5e140de95e0ea41a8225093dba644c1f2b6a",
+    "packages/core/tools/src/ptc-calls.ts": "c27670b601c3e5a053b3d954ee5173dae9791798c5390584425b84ccd66517e6",
+    "packages/core/tools/src/ptc.ts": "6f7fbc75413f53196fbf5c7d78884939cb12905b2a5f09741d03d632b84d7ab4",
+    "packages/core/tools/src/py-types.ts": "e7dd6de16ea8b832bc927f48187218d2d31d5f063dd06aeaae12b85dd453c9e1",
+    "packages/core/tools/src/schema.ts": "096f679e38626cc52536b8ecb9eef4c551c1a8a095c8e84f7a3b6156ee533653",
+    "packages/core/tools/src/testing.ts": "8b7bf72750d885c1acb52e99ccac9e42542cc5efcb581098ad3507e83ca0a651",
+    "packages/core/tools/src/ts-types.ts": "1211fbc8ee3ae7817e64629da9c587acdf31aafafbea6c07880d9e012871ea09",
+    "packages/core/tools/src/types.ts": "26c2c9ac831526d9bcefe5ee3b9b1a6a8ca313d43efffe579670366790539bb6",
+    "packages/mcp/mcp-client/src/connection.ts": "06dc1b3a1297b8b23f6ac5c44f3ba6740716c76db71c28cfb8f14d6c0340030e",
+    "packages/mcp/mcp-client/src/index.ts": "f279bd88743ca73b0d9834915d1bb31e455e21c87f4990808cfd55b273db4d1c",
+    "packages/mcp/mcp-client/src/server-context.ts": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a",
+    "packages/mcp/mcp-client/src/tools.ts": "59203150bda479a990afcdaf60483a35a836887926892e1074e02d0294c01af9",
+    "packages/mcp/mcp-client/src/transport.ts": "6f3fca685af3d5654c476e95db24e1245dc1fa021a0bd7f477ce4ad997e1c8f6"
+  },
+  "donor_lock_sha256": "4637cca3b89c4c8d5a147321710e597aa62ec2444a3772ab542be5690893dfe4",
+  "production_armed": false,
+  "patches": [
+    {
+      "file": "strict-dispatch-binding.patch",
+      "sha256": "8631b18a10c736bcfd97d5e35287c793fe861373523bc31116b21c38522161ae",
+      "outputs": {
+        "packages/core/tools/src/index.ts": "5474d5ce07294fbbbe7a319b3268c910efde600532362500ac9c66116cf06b7e"
+      }
+    },
+    {
+      "file": "mcp-generation-admission.patch",
+      "sha256": "1233c8fc06e9bb509b4a42a37da2bdd5fee719adc75e75708921e184ba04dbe5",
+      "outputs": {
+        "packages/mcp/mcp-client/src/tools.ts": "65b84c7da4ca9b0fbff9c7d4d4f786a16cd67b8058644fc3cdc814000bbcb29c",
+        "packages/mcp/mcp-client/src/connection.ts": "0d7b5010cb5e8561b31f98432ea33becb9518cfcfda59ccbabdb723133850f55",
+        "packages/mcp/mcp-client/src/index.ts": "4bb212cfe4f1bed061bf6583113e52ce06c2c1fea9c2920b50226edd32175c69",
+        "packages/mcp/mcp-client/src/transport.ts": "b084ba6b91d3ee23e095ead96d5bc416fa4b117405a7246df4181061e4c4b0e5"
+      }
+    }
+  ]
+}

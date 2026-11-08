@@ -1,14 +1,15 @@
 """Native terminalization must not wait for slow subscribed HTTPS notification.
 
-This is an isolated Executive source seam with fake Runtime and supervisor.
-It does NOT run any native work, JWT issuance, Runtime write or network I/O.
+This is an isolated Executive source seam with a temporary Runtime and fake
+supervisor. It records original Job/Attempt evidence, but does not run native
+work, issue JWTs or perform network I/O.
 """
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from control_plane.executive_runtime import AttemptStatus
+from control_plane.executive_runtime import Runtime
 from control_plane.executive_service import ExecutiveControlService, _NativeOperatorDispatch
 
 
@@ -34,7 +35,7 @@ def _canonical_reply():
     })
 
 
-def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
+def test_verified_native_reply_can_terminalize_while_callback_remains_pending(tmp_path):
     async def scenario():
         callback_entered = asyncio.Event()
         release_callback = asyncio.Event()
@@ -42,18 +43,20 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
         terminal_projection = asyncio.Event()
         calls = []
 
-        retained = SimpleNamespace(lease=SimpleNamespace(
-            attempt=SimpleNamespace(attempt_id="attempt-001"),
-            lease_token="lease-test-only",
-        ), job=SimpleNamespace(root_job_id="root-001"))
-        current_attempt = SimpleNamespace(attempt_id="attempt-001",status=AttemptStatus.RUNNING)
-        runtime = SimpleNamespace(
-            attempts=SimpleNamespace(get_attempt=lambda key: current_attempt),
-            jobs=SimpleNamespace(get_job=lambda key: SimpleNamespace(job_id=key)),
-        )
+        runtime = Runtime.at(tmp_path / "runtime")
+        runtime.workers.register_worker("worker-01", provider="codex", account_label="test",
+            worker_type="codex", quota_classes=["default"])
+        job = runtime.jobs.create_job("Original callback scheduling fixture")
+        lease = runtime.attempts.claim_job(job.job_id, worker_id="worker-01", quota_class="default")
+        assert lease is not None
+        retained = SimpleNamespace(lease=lease, job=job, native_result=None)
+        # Route the real, unmarked legacy creation record through the current
+        # immutable JOB_CREATED guard; a Runtime-like object cannot prove it.
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        assert read_creation_restriction(runtime, job) is None
 
         class Supervisor:
-            async def start_retained_native_job(self, job, *, command_id):
+            async def start_retained_native_job(self, job, *, command_id, _active_turn_observer=None):
                 calls.append("start")
                 return retained
 
@@ -80,6 +83,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
                 return _canonical_reply()
 
         class DummyService:
+            _native_initial_turn_observer = ExecutiveControlService._native_initial_turn_observer
             _service_state = "READY"
             _closing = False
             _dispatch_errors = {}
@@ -107,7 +111,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
                 return None
 
             async def _project_terminal_return(self, job_id, *, expected_attempt_id):
-                assert job_id == "job-001" and expected_attempt_id == "attempt-001"
+                assert job_id == job.job_id and expected_attempt_id == lease.attempt.attempt_id
                 calls.append("terminal-projected")
                 terminal_projection.set()
 
@@ -134,15 +138,18 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
         continuation=loop.create_future()
         continuation.set_result("read-ref-001")
         dispatch=_NativeOperatorDispatch(
-            job_id="job-001",command_id="command-001",
+            job_id=job.job_id,command_id="command-001",
             started=start,continuation=continuation,source=OriginalSource(),
         )
         owner._native_operator_dispatch=dispatch
         task=asyncio.create_task(
             ExecutiveControlService._run_native_operator_dispatch(owner,dispatch))
-        owner._dispatch_tasks["job-001"]=task
+        owner._dispatch_tasks[job.job_id]=task
         try:
+            await asyncio.wait_for(callback_entered.wait(),timeout=0.5)
+            assert not release_callback.is_set()
             await asyncio.wait_for(terminal_projection.wait(),timeout=0.5)
+            await asyncio.wait_for(task,timeout=1)
             assert finished_native.is_set()
             assert start.done()
             assert owner._service_state=="READY" and not owner._dispatch_errors
@@ -150,8 +157,6 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending():
             assert "callback-finished" not in calls
             assert len(owner._physical_workers)==1
             release_callback.set()
-            await asyncio.wait_for(task,timeout=1)
-            await asyncio.wait_for(callback_entered.wait(),timeout=1)
             for pending in tuple(owner._physical_workers):
                 await asyncio.wait_for(pending,timeout=1)
             assert "callback-finished" in calls

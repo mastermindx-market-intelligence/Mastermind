@@ -1,0 +1,75 @@
+{
+  "fences": {
+    "os_assets_py": "PR2175 untouched",
+    "pr1870": "untouched",
+    "publication": "No root commit/push/install"
+  },
+  "frontier": [
+    "Supervisor consumer of explicit idle disposition and native result union remains implementation work",
+    "G2 terminal conversation completion must use original Attempt owner with native result contract",
+    "Authenticated Send/resume/Stop, native frame delegation, installed observation/tool producer and signed-in production proof remain owed"
+  ],
+  "installed": false,
+  "production_accepted": false,
+  "proved": [
+    "Existing generation-operation INTENT binds exact latest flushed G1 NativeConversationResultRef before stop",
+    "Same original idle-close INTENT prevents racing TX5 and second close, including unknown outcomes",
+    "Exact physical PROVEN_DEAD/RELEASED and provider Session are required; APPLIED retains original Executive reservation truthfully",
+    "Same stop observation reaches original reconcile owner; closed G1 cannot authorize fresh work",
+    "Actual Runtime reopen and expired lease takeover preserve same Attempt/Session; stale fence refuses; G2 resume preserves G1 result",
+    "Ordinary cleanup without native idle disposition still releases; no G3 and no G2 idle disposition added",
+    "Lost close return reconciles original physical target without redispatch"
+  ],
+  "provider_calls": 0,
+  "qualification": {
+    "changed_inputs": [],
+    "installed": false,
+    "log": "/private/tmp/mmx-dsh-c14-idle-final-20261107.log",
+    "log_sha256": "b7dee23c5b0bdea31c1d8ae048f013874efa279f477dccaba3f25c872d457efb",
+    "provider_calls": 0,
+    "returncode": 0,
+    "schema": "mastermind.source_qualification.v1",
+    "seconds": 13.18,
+    "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+    "source_sha256": {
+      "config/executive_dsh_native_conversation_capabilities.json": "b2a04c939683afdb36ea0a2c4bbfcdbdcb5141150772853dc1ee28ab4fb50612",
+      "control_plane/executive_agent_capabilities.py": "57f65be34637d23b400b331dc0b0b4f82ed7cdae3a5460f788a053840167d9da",
+      "control_plane/executive_operator_harness_port.py": "87d50043a34cf227679072c35407a736b646b18fa6945b989d9aac18bab59f5a",
+      "control_plane/executive_runtime.py": "2c5975c010b0f7cbf8bc7f29c9a00aa5bef01bddf9d9a5b9a24315cae21b796b",
+      "control_plane/native_conversation_result.py": "e2a119124d9b0147cd3704aaf80909fa916f7750759857a8ec83b355c6ef92b9",
+      "control_plane/operator_harness_contract.py": "97ec936b68be3da98a662505de351c672bc83a5bfc5491f40b491a070ca1707f",
+      "control_plane/operator_harness_orchestrator.py": "3e897b044792119ffb173e96b07f25e237795b32a6e49804309c6da919e840fe",
+      "integrations/deepseek_harness/native_protocol.py": "5fa551591226b7539efb07eb1fc3f28170921f4d51ea8f06c1cf7ab80604376c",
+      "tests/test_dsh_native_idle_close.py": "84f1e47b1c67eee2cefe6bdf7b45d91754c77424707bc27b7812868806acd6fc",
+      "tests/test_dsh_native_runtime_binding.py": "eaec42c3deafcb5c9c1e99da25456f3f6597455ec5ce739e283084464251cbd4",
+      "tests/test_dsh_native_runtime_result.py": "f47c7783e2d634c011bd786062c8e3ce4a45c77a9cfe18954e89409d0c84eaf6",
+      "tests/test_dsh_native_runtime_resume.py": "c5b07335f89994e2e3b720447871235c74f80757cfce799543009ad64769fb15",
+      "tests/test_interactive_tx5_runtime.py": "1857ed664b625df33a228255f39de91b8fe8515e7473026ac1d521fa36c6ad69",
+      "tests/test_ohf_p1b_runtime_orchestrator.py": "82609fbc34d99bfbea663094b91fde0fd13ec99415f676c501ed743365dd870b"
+    },
+    "source_unchanged": true,
+    "summary": {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "skipped": "0",
+      "tests": "86",
+      "time": "11.575",
+      "timestamp": "2026-11-07T04:10:08.266367-07:00"
+    },
+    "tests": [
+      "tests/test_dsh_native_idle_close.py",
+      "tests/test_dsh_native_runtime_resume.py",
+      "tests/test_dsh_native_runtime_result.py",
+      "tests/test_ohf_p1b_runtime_orchestrator.py",
+      "tests/test_interactive_tx5_runtime.py"
+    ],
+    "xml": "/private/tmp/mmx-dsh-c14-idle-final-20261107.xml"
+  },
+  "schema": "mastermind.deepseek.native_idle_custody_evidence.v1",
+  "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+  "source_pr": 2177,
+  "status": "SOURCE_QUALIFIED_NOT_INSTALLED",
+  "test_seams": "Native profile explicitly inert in tests; physical provider observation supplied by inert adapter. No installed authority or real provider claimed."
+}

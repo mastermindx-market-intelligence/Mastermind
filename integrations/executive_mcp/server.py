@@ -107,6 +107,15 @@ _OS_FRESH_CONVERSATION_ROUTES = (
     "/os/executive/conversation/consume", "/os/executive/conversation/turn",
     "/os/executive/conversation/turn/status", "/os/executive/conversation/turn/read",
     "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
+    "/os/executive/conversation/v2/preview", "/os/executive/conversation/v2/create",
+    "/os/executive/conversation/v2/status", "/os/executive/conversation/v2/read",
+    "/os/executive/conversation/v2/recover", "/os/executive/conversation/v2/turn/recover",
+    "/os/executive/conversation/v2/consume", "/os/executive/conversation/v2/consume/status",
+    "/os/executive/conversation/v2/turn/preview", "/os/executive/conversation/v2/turn",
+    "/os/executive/conversation/v2/turn/status", "/os/executive/conversation/v2/turn/read",
+    "/os/executive/conversation/v2/resume/preview", "/os/executive/conversation/v2/resume",
+    "/os/executive/conversation/v2/resume/status", "/os/executive/conversation/v2/stop",
+    "/os/executive/conversation/v2/stop/status",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
@@ -985,6 +994,16 @@ class OsStaticApp:
                     or not 0 < len(value[0]) <= 4 * 1024 * 1024 or value[1] != expected.get(path)):
                 raise ValueError("fixed OS asset bytes and MIME required")
         self._assets = dict(assets)
+        from integrations.deepseek_harness.embedding import qualified_chat_origin
+        chat_origin = qualified_chat_origin(assets["/os/"][0])
+        self._headers = dict(_OS_RESPONSE_HEADERS)
+        if chat_origin is not None:
+            # The exact origin comes from the existing sealed/hash-verified
+            # index. Never authorize wildcard frames or request-supplied URLs.
+            self._headers["Content-Security-Policy"] = self._headers["Content-Security-Policy"].replace(
+                f"frame-src 'self' {_OS_AUTH0_ORIGIN};",
+                f"frame-src 'self' {_OS_AUTH0_ORIGIN} {chat_origin};",
+            )
         self.paths = frozenset((*self._assets, "/os/", "/os/auth/callback"))
 
     @staticmethod
@@ -1030,7 +1049,7 @@ class OsStaticApp:
             return
         key = "/os/" if path == "/os/auth/callback" else path
         body, mime = self._assets[key]
-        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else _OS_RESPONSE_HEADERS
+        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else self._headers
         headers = {**policy_headers, "Content-Type": mime}
         await Response(body, headers=headers)(scope, receive, send)
 

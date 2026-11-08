@@ -1,0 +1,242 @@
+{
+  "base_commit": "618a775edc7d3d96ef6b15d39f270f0ff57acf13",
+  "installed_authority": false,
+  "native_fixture": {
+    "authority": "explicit laboratory callbacks, not installed Executive",
+    "new": {
+      "actual_process": {
+        "boot_id": "7ED78369-2C27-4290-8E4B-A7AD01647AD0",
+        "pgid": 69625,
+        "pid": 69625,
+        "process_start_identity": "1794045598.683518"
+      },
+      "closed_writer_state": "RELEASED",
+      "currentness_checks": 11,
+      "native": {
+        "actual_session_id": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+        "agent_creates": 1,
+        "company_page_observed": true,
+        "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+        "http": {
+          "foreign_origin": 403,
+          "held_file": 403,
+          "index": 200,
+          "owner_baseline_held": true,
+          "title": true,
+          "unauthenticated": 401
+        },
+        "interrupted_history": true,
+        "interrupted_seq": 14,
+        "isolated_native_home": true,
+        "lifecycle": true,
+        "mode": "new",
+        "model_calls": 1,
+        "model_stream_settled": true,
+        "native_close_settled": true,
+        "native_signal_aborted": true,
+        "native_start_source": "startup",
+        "pre_admission_absent": true,
+        "pre_ready_owner_denied": true,
+        "production_armed": false,
+        "reader_retirement_keeps_owner": true,
+        "recovered_interrupted": false,
+        "root_teardown_settled": true,
+        "schema": "mastermind.dsh_native_company_profile_proof.v1",
+        "shared_agent": true,
+        "shared_session": true,
+        "stream_partial": true
+      },
+      "result": {
+        "attempt_id": "attempt-native-fixture",
+        "native_claim": {
+          "messageId": "cd8099ba-6323-448e-81f1-c16bc4d4d812",
+          "nativeTurn": 1,
+          "operationId": "ohf-op:fixture-native-turn-new",
+          "requestId": 2,
+          "schema": "mastermind.dsh.native_prompt_claim.v1",
+          "sessionId": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+          "throughSeq": 5
+        },
+        "native_terminal": {
+          "claim": {
+            "messageId": "cd8099ba-6323-448e-81f1-c16bc4d4d812",
+            "nativeTurn": 1,
+            "operationId": "ohf-op:fixture-native-turn-new",
+            "requestId": 2,
+            "schema": "mastermind.dsh.native_prompt_claim.v1",
+            "sessionId": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+            "throughSeq": 5
+          },
+          "observedLastTurn": 1,
+          "observedTurnCount": 1,
+          "operationId": "ohf-op:fixture-native-turn-new",
+          "requestId": 2,
+          "schema": "mastermind.dsh.native_prompt_terminal.v1",
+          "throughSeq": 16
+        },
+        "process_generation_id": "generation-native-new",
+        "provider_native_turn_id": "1",
+        "provider_session_id": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+        "provider_turn_artifact_digest": "511012959cd1f8089cf47c187d6deb8fde4a7b33cd3b72098f37e4b46ad29548",
+        "schema_version": "mastermind.dsh_native_conversation_result/v1",
+        "session_epoch_id": "epoch-native-fixture",
+        "stop_reason": "cancelled",
+        "turn_id": "turn-native-new"
+      },
+      "turn_writer_state": "HELD"
+    },
+    "production_armed": false,
+    "provider_calls": 0,
+    "resume": {
+      "actual_process": {
+        "boot_id": "7ED78369-2C27-4290-8E4B-A7AD01647AD0",
+        "pgid": 69787,
+        "pid": 69787,
+        "process_start_identity": "1794045601.668445"
+      },
+      "closed_writer_state": "RELEASED",
+      "currentness_checks": 7,
+      "native": {
+        "actual_session_id": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+        "agent_creates": 1,
+        "company_page_observed": true,
+        "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+        "http": {
+          "foreign_origin": 403,
+          "held_file": 403,
+          "index": 200,
+          "owner_baseline_held": true,
+          "title": true,
+          "unauthenticated": 401
+        },
+        "interrupted_history": false,
+        "interrupted_seq": null,
+        "isolated_native_home": true,
+        "lifecycle": true,
+        "mode": "resume",
+        "model_calls": 1,
+        "model_stream_settled": true,
+        "native_close_settled": true,
+        "native_signal_aborted": false,
+        "native_start_source": "resume",
+        "pre_admission_absent": true,
+        "pre_ready_owner_denied": true,
+        "production_armed": false,
+        "reader_retirement_keeps_owner": true,
+        "recovered_interrupted": true,
+        "root_teardown_settled": true,
+        "schema": "mastermind.dsh_native_company_profile_proof.v1",
+        "shared_agent": true,
+        "shared_session": true,
+        "stream_partial": true
+      },
+      "result": {
+        "attempt_id": "attempt-native-fixture",
+        "native_claim": {
+          "messageId": "648127d6-8bda-4010-afe8-2f59f5f914fe",
+          "nativeTurn": 2,
+          "operationId": "ohf-op:fixture-native-turn-resume",
+          "requestId": 2,
+          "schema": "mastermind.dsh.native_prompt_claim.v1",
+          "sessionId": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+          "throughSeq": 20
+        },
+        "native_terminal": {
+          "claim": {
+            "messageId": "648127d6-8bda-4010-afe8-2f59f5f914fe",
+            "nativeTurn": 2,
+            "operationId": "ohf-op:fixture-native-turn-resume",
+            "requestId": 2,
+            "schema": "mastermind.dsh.native_prompt_claim.v1",
+            "sessionId": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+            "throughSeq": 20
+          },
+          "observedLastTurn": 2,
+          "observedTurnCount": 1,
+          "operationId": "ohf-op:fixture-native-turn-resume",
+          "requestId": 2,
+          "schema": "mastermind.dsh.native_prompt_terminal.v1",
+          "throughSeq": 27
+        },
+        "process_generation_id": "generation-native-resume",
+        "provider_native_turn_id": "2",
+        "provider_session_id": "cfc47265-8ade-40e4-948d-a3950b4f557e",
+        "provider_turn_artifact_digest": "3ca6fcf07d76c9de07d12e5d591442779f02ef95b539a13cb5c67519989d911d",
+        "schema_version": "mastermind.dsh_native_conversation_result/v1",
+        "session_epoch_id": "epoch-native-fixture",
+        "stop_reason": "end_turn",
+        "turn_id": "turn-native-resume"
+      },
+      "turn_writer_state": "HELD"
+    },
+    "schema": "mastermind.dsh_native_ohf_adapter_fixture.v1"
+  },
+  "native_fixture_sha256": "0ab3633122308ab9ce96eb9f032e3b5fb262e29724aa4f13617a9120867c4485",
+  "production_accepted": false,
+  "qualification": {
+    "base_commit": "618a775edc7d3d96ef6b15d39f270f0ff57acf13",
+    "command": [
+      "/private/tmp/mmx-deepseek-chat-test-20261106-c2/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_dsh_native_operator.py",
+      "tests/test_dsh_native_result.py",
+      "tests/test_dsh_native_protocol.py",
+      "tests/test_dsh_native_result_transport.py",
+      "tests/test_operator_harness_wire.py",
+      "tests/test_remote_operator_harness_adapter.py",
+      "tests/test_executive_operator_broker.py",
+      "tests/test_dsh_native_capability_profile.py",
+      "tests/test_executive_agent_capabilities.py",
+      "tests/test_executive_claude_principal_capabilities.py",
+      "tests/test_ohf_p1b_runtime.py",
+      "tests/test_interactive_tx5_runtime.py",
+      "tests/test_executive_os_phase1fc.py",
+      "tests/test_executive_finite_guards.py",
+      "tests/harness_convergence/test_dsh_native_operator_profile.py",
+      "--basetemp=/private/tmp/mmx-dsh-c9-c10-composed-20261107",
+      "--junitxml=/private/tmp/mmx-dsh-c9-c10-composed-20261107.xml"
+    ],
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 502
+    },
+    "installed_authority": false,
+    "junit_sha256": "848e11c4aa7de5f135ea5a6b0aa3f4595776955c2ee0b13e371ba8c2ccf5887c",
+    "log_sha256": "f5b74cb4336cc2f1a2e68e79077b18f0ceb520b22f51a214ccab242763240bf1",
+    "provider_calls": 0,
+    "return_code": 0,
+    "schema": "mastermind.dsh_native_composed_qualification.v1",
+    "seconds": 106.07,
+    "source_sha256": {
+      "config/executive_dsh_native_conversation_capabilities.json": "b2a04c939683afdb36ea0a2c4bbfcdbdcb5141150772853dc1ee28ab4fb50612",
+      "control_plane/executive_agent_capabilities.py": "57f65be34637d23b400b331dc0b0b4f82ed7cdae3a5460f788a053840167d9da",
+      "control_plane/executive_runtime.py": "dca071bb541ff77590331f706524d3639f2cde0736e109d991ab758e7483f453",
+      "control_plane/executive_worker_broker.py": "3fb018d33e1f483421388998324f38aea4fd7b0653cc63e0159cebb6d9965033",
+      "control_plane/native_conversation_result.py": "e1171a4b4ba06683294dfc16280ef357e992684566e66b3119581576c1554454",
+      "control_plane/operator_harness_wire.py": "65c58bc3ec991ce5db24eaa5f96129854c8daa9df7f84ea2b5cbfcd64e3c9e93",
+      "control_plane/remote_operator_harness_adapter.py": "75bbdd15af0c9b5a6eab2e1c79cf33c27087049fe4ddb65b26bcf5402bbb7bd7",
+      "integrations/deepseek_harness/native_connection.py": "89106293992784976c8563d50817423a7bad7e7f9ec7a1057e32866ca20a3685",
+      "integrations/deepseek_harness/operator_adapter.py": "84d918b27c92ff9dd13a03fd20f68c45c1433d333db69442eafb7d873b7ece36",
+      "integrations/deepseek_harness/runtime_compat/native-company-profile-fixture.mjs": "2d9bd075c3ddcd0de1ddff5e11e160204f41669e2e9b76c009f32e97157d83fb",
+      "tests/harness_convergence/test_dsh_native_operator_profile.py": "bc9b9b8d9d2e6fec23747069d242919f53c3a84f8b71a5f58fb2f712dc637f71",
+      "tests/test_dsh_native_capability_profile.py": "65b6b73bc71962dbea42b4e0ae85eeab7dc8b02c2f734ee2216970c73a1dc886",
+      "tests/test_dsh_native_operator.py": "5004f7c8838f185783a883cf7f6c5c8e180149301b70faf43b4d2f9a1100d89f",
+      "tests/test_dsh_native_result.py": "d347ba6df887758f6919425ebd3929dfd224355df9ae5d1f20e3b70e9b6220ce",
+      "tests/test_dsh_native_result_transport.py": "d8671d24782659664e8be30f0c5f54120ebe4847081715e9ff9c5c8a65e9a30a"
+    },
+    "source_unchanged": true,
+    "state": "TERMINAL"
+  },
+  "remaining": [
+    "Runtime native result seal and exact immutable interactive contract selection",
+    "retained generation/cold-resume and authenticated foreground consumer joins",
+    "installed current company authority, actual account/confinement/capability producer and eligible governed tools",
+    "signed-in production end-to-end proof, current hosted checks, qualified source release"
+  ],
+  "schema": "mastermind.dsh_native_operator_qualification.v1",
+  "scope": "Original full native process, retained OHF adapter, distinct result codec/broker transport, disabled profile and unchanged TX5 validation extraction"
+}

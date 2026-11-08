@@ -23,6 +23,7 @@ OLD_SOURCE = "a" * 40
 NEW_SOURCE = "b" * 40
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge as edge, os_public_edge_transition as transition
+from tests.test_os_public_edge_transition import native_branch, NATIVE_PATHS
 
 def _digest(seed: str) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()
@@ -135,7 +136,7 @@ def test_legacy_three_branch_transition():
     assert plan["bindings"]["final_fullconfig_sha256"] == transition._sha256(_final(cfg))
     final = _final(cfg)
     inner = _inner_of(final)
-    assert len(inner) == 4
+    assert len(inner) == 5
     assert inner[0]["match"][0]["path"] == sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
     assert inner[1]["match"][0]["path"] == list(edge.POST_ROUTES)
     assert inner[1]["handle"][0] == _body(64000)
@@ -143,12 +144,14 @@ def test_legacy_three_branch_transition():
     assert inner[2]["handle"][0] == _body(edge.SOURCE_MAX_BODY)
     assert (inner[2]["handle"][1]["headers"]["request"]["set"]["Host"] == [edge.HOST]
             and inner[2]["match"][0] == {"method": ["POST"], "path": list(edge.SOURCE_POST_ROUTES)})
-    assert inner[3] == {"handle": [{"handler": "static_response", "abort": True}]}
+    assert inner[-2] == native_branch(port=RELAY, group="group_0")
+    assert inner[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
     assert final["apps"]["http"]["servers"]["srv1"] == cfg["apps"]["http"]["servers"]["srv1"]
     prepare = _prepare(cfg)
     assert _inner_of(prepare)[0]["match"][0]["path"] == sorted(
         set(edge.GET_ROUTES) | set(CURRENT_ROUTES) | set(CANDIDATE_ROUTES))
     assert _inner_of(prepare)[2] == transition._source_branch(RELAY, "group_0")
+    assert _inner_of(prepare)[-2] == native_branch(port=RELAY, group="group_0")
     assert plan["get_routes"]["final"] == sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
     assert plan["post_routes"] == list(edge.POST_ROUTES)
     assert plan["source_post_routes"] == list(edge.SOURCE_POST_ROUTES)
@@ -160,13 +163,14 @@ def test_legacy_five_branch_mcp_transition():
     cfg = _fullconfig(_inner(RELAY, get_paths, list(edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES), mcp=True))
     final = _final(cfg)
     inner = _inner_of(final)
-    assert len(inner) == 6
+    assert len(inner) == 7
     assert inner[2] == transition._source_branch(RELAY, "group_0")
     assert inner[3]["match"][0]["path"] == list(edge.COMPLETE_MCP_METADATA_ROUTES)
     assert inner[4]["match"][0]["path"] == list(edge.COMPLETE_MCP_ROUTES)
     assert inner[4]["handle"][0] == _body(edge.MCP_MAX_BODY)
     assert inner[4]["handle"][1] == _proxy(RELAY, "127.0.0.1")
-    assert inner[5] == {"handle": [{"handler": "static_response", "abort": True}]}
+    assert inner[-2] == native_branch(port=RELAY, group="group_0")
+    assert inner[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
     assert inner[0]["match"][0]["path"] == sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
 
 
@@ -176,9 +180,11 @@ def test_current_four_branch_source_transition():
     final = _final(cfg, current=CANDIDATE_MANIFEST, candidate=CANDIDATE_MANIFEST)
     inner = _inner_of(final)
     original = _inner_of(cfg)
-    assert len(inner) == 4
+    assert len(inner) == 5
     assert inner[0]["match"][0]["path"] == sorted(set(edge.GET_ROUTES) | set(CANDIDATE_ROUTES))
-    assert inner[1:] == original[1:]
+    expected_tail = copy.deepcopy(original[1:])
+    expected_tail.insert(-1, native_branch(port=RELAY, group="group_0"))
+    assert inner[1:] == expected_tail
 
 
 def test_current_six_branch_idempotent_transition():
@@ -251,7 +257,7 @@ def test_get_route_coherence():
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + (
         "/os/executive/company-priorities",
     )
-    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in profiles
+    assert (edge.PRE_MODEL_CONFIGURATION_GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in profiles
     assert not set(edge.SOURCE_POST_ROUTES) & set(edge.POST_ROUTES)
     template = edge._TEMPLATE.read_text(encoding="utf-8")
     get_line = "path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__"
@@ -380,15 +386,19 @@ def test_stage_transition_and_prepare_check():
 
 def test_template_branch_layout_and_loopback():
     template = edge._TEMPLATE.read_text(encoding="utf-8")
-    assert template.count("__RELAY_PORT__") == 5 and template.count("__ASSET_PATHS__") == 1
+    assert template.count("__RELAY_PORT__") == 6 and template.count("__ASSET_PATHS__") == 1
     assert template.count("path " + " ".join(edge.POST_ROUTES) + "\n") == 1
     assert template.count("path " + " ".join(edge.SOURCE_POST_ROUTES) + "\n") == 1
     assert template.count("path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__\n") == 1
+    assert len(NATIVE_PATHS) == 17
+    assert template.count("path " + " ".join(NATIVE_PATHS) + "\n") == 1
+    assert template.count("@nativepost {\n      method POST\n") == 1
+    assert template.count("max_size 524288") == 1
     blocks = template.split("handle ")
-    assert sum(1 for block in blocks if "Host mcp.mastermind-x.com" in block) == 4
+    assert sum(1 for block in blocks if "Host mcp.mastermind-x.com" in block) == 5
     assert sum(1 for block in blocks if "Host 127.0.0.1\n" in block) == 1
     for header in transition._STRIPPED_REQUEST_HEADERS:
-        assert template.count("header_up -" + header) == 5
+        assert template.count("header_up -" + header) == 6
     with tempfile.TemporaryDirectory() as directory:
         original, target = edge._TEMPLATE, Path(directory).resolve() / "tampered.template"
         payload = template.replace("path " + " ".join(edge.SOURCE_POST_ROUTES) + "\n", "")

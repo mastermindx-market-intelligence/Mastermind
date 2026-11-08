@@ -52,6 +52,8 @@ _READ_ONLY_OPERATIONS = frozenset(
         "attended-secret-canary",
         "ohf-identity",
         "ohf-materialization-status",
+        "ohf-native-begin-status",
+        "ohf-native-read-binding", "ohf-native-read",
     }
 )
 _BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
@@ -486,10 +488,20 @@ class RemoteWorkerBrokerClient:
         except TransportValidationError as exc:
             raise TransportError("request_invalid", TransportEffect.NO_EFFECT) from exc
 
+        native_read = operation in {"ohf-native-read-binding", "ohf-native-read"}
+        deadline = (asyncio.get_running_loop().time() + min(6.0, effective_timeout)) if native_read else None
+        def remaining():
+            if deadline is None:
+                return effective_timeout
+            value = deadline - asyncio.get_running_loop().time()
+            if value <= 0:
+                raise asyncio.TimeoutError()
+            return value
+
         modifying = not self._operation_is_observational(operation, payload)
         try:
             reader, writer = await asyncio.wait_for(
-                self._open_connection(), timeout=effective_timeout
+                self._open_connection(), timeout=remaining()
             )
         except (asyncio.TimeoutError, OSError, ssl.SSLError, TransportValidationError) as exc:
             raise TransportError("unavailable", TransportEffect.NO_EFFECT) from exc
@@ -506,17 +518,18 @@ class RemoteWorkerBrokerClient:
                 raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
             if before_write is not None:
                 try:
-                    if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                    if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn", "ohf-native-read-binding", "ohf-native-read"}
                             or not callable(before_write)
                             or before_write(operation, json.loads(encoded)["broker_request"]) is not None):
                         raise ValueError("invalid local foreground guard")
                 except Exception:
                     raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+            remaining()  # one total native READ budget, including the physical write
             write_started = True
             writer.write(frame)
-            await asyncio.wait_for(writer.drain(), timeout=effective_timeout)
+            await asyncio.wait_for(writer.drain(), timeout=remaining())
             response = await asyncio.wait_for(
-                self._read_response(reader), timeout=effective_timeout
+                self._read_response(reader), timeout=remaining()
             )
             validated = validate_response(response, request)
             outcome = validated["outcome"]
@@ -533,6 +546,7 @@ class RemoteWorkerBrokerClient:
                     TransportEffect.EFFECT_UNKNOWN if modifying else TransportEffect.NO_EFFECT
                 )
                 raise TransportError("response_invalid", classification)
+            remaining()
             return dict(broker_response)
         except TransportError:
             raise
@@ -555,8 +569,16 @@ class RemoteWorkerBrokerClient:
             raise TransportError("response_unavailable", classification) from exc
         finally:
             writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
+            if native_read:
+                # This finite observation owns no reply writes. An SSL close
+                # must not add an unbounded second wait after the read deadline.
+                with suppress(Exception):
+                    transport = getattr(writer, "transport", None)
+                    if transport is not None:
+                        transport.abort()
+            else:
+                with suppress(Exception):
+                    await writer.wait_closed()
 
     def request_sync(
         self,

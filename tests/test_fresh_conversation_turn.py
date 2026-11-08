@@ -12,6 +12,7 @@ from tests.test_fresh_conversation import cleanup
 
 
 def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path, rsa_key, monkeypatch):
+    monkeypatch.setattr("control_plane.executive_service._NATIVE_CONTINUATION_WAIT_SECONDS", 2.0)
     async def run():
         app, token, wt, service, runtime, request, adapters, calls, sink = await mounted(tmp_path, rsa_key, monkeypatch)
         request = {**request, "operation_key": os.environ.get("S34_CREATE_OPERATION_KEY", request["operation_key"])}
@@ -237,6 +238,7 @@ def test_interrupted_second_turn_is_original_unknown_never_resent(tmp_path, rsa_
 
 
 def test_pending_same_key_and_distinct_key_cannot_dispatch_another_turn(tmp_path,rsa_key,monkeypatch):
+    monkeypatch.setattr("control_plane.executive_service._NATIVE_CONTINUATION_WAIT_SECONDS", 2.0)
     async def run():
         import threading
         app,token,wt,service,runtime,request,adapters,calls,sink=await mounted(tmp_path,rsa_key,monkeypatch)

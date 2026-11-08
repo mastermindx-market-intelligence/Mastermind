@@ -19,7 +19,7 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -41,7 +41,8 @@ def _require_sha(value: str, label: str) -> str:
     return value
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _git(repo: Path, *args: str, check: bool = True,
+         binary: bool = False) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     repo = Path(repo)
     try:
         canonical = repo.resolve(strict=True)
@@ -63,6 +64,8 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
                 "/usr/bin/git",
                 "--no-optional-locks",
                 "-c",
+                "gc.auto=0",
+                "-c",
                 f"safe.directory={trust_value}",
                 "-C",
                 trust_value,
@@ -71,7 +74,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=not binary,
             timeout=_COMPLETE_STATUS_TIMEOUT_SECONDS if args == _COMPLETE_STATUS_ARGS else 15,
             check=False,
         )
@@ -80,6 +83,25 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     if check and completed.returncode != 0:
         raise InstallSourcePolicyError("could not inspect source checkout")
     return completed
+
+
+def read_source_blob(repo: Path, source_sha: str, relative: str) -> bytes:
+    """Read exact immutable bytes through the incumbent command-scoped trust.
+
+    The caller still owns protected-head/clean-source admission. This helper
+    neither fetches nor accepts a branch name, path alias or persistent trust.
+    """
+    _require_sha(source_sha, "source blob SHA")
+    if (type(relative) is not str or not relative
+            or str(PurePosixPath(relative)) != relative
+            or PurePosixPath(relative).is_absolute()
+            or ".." in PurePosixPath(relative).parts
+            or any(ord(char) < 32 or char in (":", chr(92), chr(127)) for char in relative)):
+        raise InstallSourcePolicyError("source blob path is not canonical")
+    data = _git(repo, "show", source_sha + ":" + relative, binary=True).stdout
+    if type(data) is not bytes or len(data) > 64 * 1024 * 1024:
+        raise InstallSourcePolicyError("source blob exceeds its byte contract")
+    return data
 
 
 def _require_checkout(

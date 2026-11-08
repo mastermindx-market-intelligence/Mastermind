@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+from typing import NamedTuple
 
 ROOT = Path("/Library/Application Support/MastermindExecutive")
 CONFIG = ROOT / "config/os-public-tunnel.json"
@@ -113,16 +114,88 @@ APPLICATION_ROLE_TARGETS = tuple(remote + ":127.0.0.1:4142" for remote in APPLIC
 APPLICATION_ROLE_REGEXES = (APPLICATION_REMOTE_REGEX, r"^R:127\.0\.0\.2:50142$", r"^R:127\.0\.0\.3:50142$")
 
 
-def application_launch_spec(config: dict, credential: bytes) -> tuple[str, list[str], dict[str, str]]:
-    """Closed APPLICATION compiler; purpose, host, destination and port are fixed.
+class ApplicationPurpose(NamedTuple):
+    """Only the two source-defined application purposes may reach the owner."""
 
-    The configuration carries no port, host, executable, command or credential
-    selector: the reverse listener, the native target, the server endpoint and
-    the hash-addressed binary path are all source constants. Only the observed
-    binary digest and the independently pinned server fingerprint are supplied.
-    """
+    purpose: str
+    schema_stem: str
+    operation_prefix: str
+    audience: str
+    relay_port: int
+    target_port: int
+    label: str
+    path_stem: str
+    entry: str
+
+    @property
+    def client_schema(self):
+        return "mastermind." + self.schema_stem + ".v1"
+
+    @property
+    def control_schema(self):
+        return "mastermind." + self.schema_stem + "_control.v1"
+
+    @property
+    def bundle_schema(self):
+        return "mastermind." + self.schema_stem + "_server_bundle.v1"
+
+    @property
+    def receipt_schema(self):
+        return "mastermind." + self.schema_stem + "_receipt.v1"
+
+    @property
+    def remote_address(self):
+        return "R:127.0.0.1:%d" % self.relay_port
+
+    @property
+    def remote_regex(self):
+        return r"^R:127\.0\.0\.1:%d$" % self.relay_port
+
+    @property
+    def reverse_target(self):
+        return self.remote_address + ":127.0.0.1:%d" % self.target_port
+
+    @property
+    def import_closure(self):
+        common = (self.entry, "ops/executive_os/os_tunnel_entry.py",
+                  "ops/executive_os/application_tunnel_control.py",
+                  "control_plane/fs_security.py")
+        if self is FABRIC_APPLICATION:
+            return common
+        return common + ("ops/executive_os/application_tunnel_entry.py",
+                         "ops/executive_os/deepseek_tunnel_control.py")
+
+    @property
+    def template_path(self):
+        # One existing parameter-free transport template, selected by source.
+        return "ops/executive_os/com.mastermind.executive.fabric-application-tunnel.plist.template"
+
+
+FABRIC_APPLICATION = ApplicationPurpose(
+    "fabric-application-transport", "application_tunnel", "app-tunnel-",
+    APPLICATION_AUDIENCE, APPLICATION_RELAY_PORT, APPLICATION_TARGET_PORT,
+    "com.mastermind.executive.fabric-application-tunnel", "application-tunnel",
+    "ops/executive_os/application_tunnel_entry.py",
+)
+DEEPSEEK_APPLICATION = ApplicationPurpose(
+    "deepseek-attended-transport", "deepseek_tunnel", "dsh-tunnel-",
+    "mastermind-deepseek-app", 4181, 4180,
+    "com.mastermind.executive.deepseek-tunnel", "deepseek-tunnel",
+    "ops/executive_os/deepseek_tunnel_entry.py",
+)
+
+
+def closed_application_purpose(purpose):
+    if purpose is not FABRIC_APPLICATION and purpose is not DEEPSEEK_APPLICATION:
+        raise ValueError("source-defined application purpose required")
+    return purpose
+
+
+def _application_launch_spec(config, credential, purpose):
+    purpose = closed_application_purpose(purpose)
     if (type(config) is not dict or set(config) != {"schema", "binary_sha256", "server_fingerprint"}
-            or config["schema"] not in (APPLICATION_SCHEMA, APPLICATION_ROLE_SCHEMA)
+            or config["schema"] not in ((purpose.client_schema, APPLICATION_ROLE_SCHEMA)
+                    if purpose is FABRIC_APPLICATION else (purpose.client_schema,))
             or type(config["binary_sha256"]) is not str
             or not re.fullmatch(r"[0-9a-f]{64}", config["binary_sha256"])
             or type(config["server_fingerprint"]) is not str
@@ -131,13 +204,23 @@ def application_launch_spec(config: dict, credential: bytes) -> tuple[str, list[
     if type(credential) is not bytes or not 32 <= len(credential) <= 1024:
         raise ValueError("application tunnel credential refused")
     auth = credential.decode("ascii", errors="strict").removesuffix("\n")
-    if not re.fullmatch(r"mastermind-fabric-app:[A-Za-z0-9_-]{32,128}", auth):
+    if not re.fullmatch(re.escape(purpose.audience) + r":[A-Za-z0-9_-]{32,128}", auth):
         raise ValueError("application tunnel credential refused")
     binary = str(ROOT / "transports/chisel" / config["binary_sha256"] / "chisel")
-    remotes = APPLICATION_ROLE_TARGETS if config["schema"] == APPLICATION_ROLE_SCHEMA else (APPLICATION_REVERSE_TARGET,)
+    remotes = APPLICATION_ROLE_TARGETS if config["schema"] == APPLICATION_ROLE_SCHEMA else (purpose.reverse_target,)
     argv = [binary, "client", "--fingerprint", config["server_fingerprint"],
             "--keepalive", "20s", SERVER, *remotes]
     return binary, argv, {"PATH": "/usr/bin:/bin", "LANG": "C", "AUTH": auth}
+
+
+def application_launch_spec(config: dict, credential: bytes) -> tuple[str, list[str], dict[str, str]]:
+    """The incumbent Fabric compiler keeps its exact fixed identity and reverse."""
+    return _application_launch_spec(config, credential, FABRIC_APPLICATION)
+
+
+def deepseek_launch_spec(config: dict, credential: bytes) -> tuple[str, list[str], dict[str, str]]:
+    """Closed DSH compiler: only its distinct identity and 4181 -> 4180 reverse."""
+    return _application_launch_spec(config, credential, DEEPSEEK_APPLICATION)
 
 
 def main() -> int:
@@ -159,4 +242,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

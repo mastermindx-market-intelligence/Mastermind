@@ -43,14 +43,18 @@ def prepared(tmp_path, monkeypatch, *, admitted=True):
     def quota_reader(worker_id, quota_class):
         calls.append((worker_id, quota_class))
         return quota
-    runtime = SimpleNamespace(workers=SimpleNamespace(get_quota_class=quota_reader))
+    def native_creator(job_id):
+        assert job_id == "JOB-claude-profile-fixture"
+        return None  # This original Claude fixture has no DeepSeek creator.
+    runtime = SimpleNamespace(workers=SimpleNamespace(get_quota_class=quota_reader),
+                              jobs=SimpleNamespace(get_native_conversation_binding=native_creator))
     def no_provider(*args):
         pytest.fail("profile resolution called a provider")
     supervisor = ExecutiveOperatorSupervisor(runtime, adapter_factory=no_provider,
                                             prompt_source=None)
     workspace = WorkspaceIdentity(str(tmp_path), "b" * 40, 1, 2, 459, 459)
     monkeypatch.setattr(supervisor, "_workspace_identity", lambda job: workspace)
-    job = SimpleNamespace(constraints=constraints, orchestration_role="plan",
+    job = SimpleNamespace(job_id="JOB-claude-profile-fixture", constraints=constraints, orchestration_role="plan",
                           requested_authorities=["READ"], allowed_write_paths=[],
                           validation_commands=[])
     lease = SimpleNamespace(attempt=SimpleNamespace(worker_id="claude8-native-01",

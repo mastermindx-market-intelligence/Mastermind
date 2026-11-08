@@ -29,6 +29,12 @@ ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
 CONTROL_AEAD_BUNDLE=""
+WORKER_ACP_BUNDLE=""
+WORKER_ACP_BUNDLE_DIGEST=""
+NATIVE_PACKAGE=""
+NATIVE_NODE=""
+NATIVE_WORKER_CONFIG=""
+NATIVE_WORKER_CONFIG_SHA256=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 HERMES_ATTENDED_SOURCE=""
@@ -402,6 +408,11 @@ while [ "$#" -gt 0 ]; do
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
+    --worker-acp-bundle) WORKER_ACP_BUNDLE="${2:-}"; shift 2 ;;
+    --native-package) [ -n "${2:-}" ] && [ -z "$NATIVE_PACKAGE" ] || usage; NATIVE_PACKAGE="${2:-}"; shift 2 ;;
+    --native-node) [ -n "${2:-}" ] && [ -z "$NATIVE_NODE" ] || usage; NATIVE_NODE="${2:-}"; shift 2 ;;
+    --native-worker-config) [ -n "${2:-}" ] && [ -z "$NATIVE_WORKER_CONFIG" ] || usage; NATIVE_WORKER_CONFIG="${2:-}"; shift 2 ;;
+    --native-worker-config-sha256) [ -n "${2:-}" ] && [ -z "$NATIVE_WORKER_CONFIG_SHA256" ] || usage; NATIVE_WORKER_CONFIG_SHA256="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --hermes-attended-source) HERMES_ATTENDED_SOURCE="${2:-}"; shift 2 ;;
     --hermes-attended-configuration) HERMES_ATTENDED_CONFIGURATION="${2:-}"; shift 2 ;;
@@ -455,6 +466,34 @@ validate_admin_checkout_staging_options() {
 }
 validate_release_staging_options || exit 65
 validate_admin_checkout_staging_options || exit 65
+# --- BEGIN Worker ACP staging guard ---
+# The native Worker dependency closure has only an unselected artifact effect.
+# It cannot silently enter a service/configuration/administrative transaction.
+if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+  [ "$STAGE_RELEASE_ONLY" = "1" ] && [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+    /bin/echo "Worker ACP bundle requires unselected release staging" >&2
+    exit 65
+  }
+  case "$WORKER_ACP_BUNDLE" in /*) ;; *) /bin/echo "Worker ACP bundle path must be absolute" >&2; exit 65 ;; esac
+fi
+# --- END Worker ACP staging guard ---
+# --- BEGIN native package staging guard ---
+# One optional finite artifact substep. Original Worker config/enrollment supplies
+# the destinations; these options never activate a service or replace its config.
+if [ -n "${NATIVE_PACKAGE:-}${NATIVE_NODE:-}${NATIVE_WORKER_CONFIG:-}${NATIVE_WORKER_CONFIG_SHA256:-}" ]; then
+  [ "$STAGE_RELEASE_ONLY" = "1" ] && [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] \
+    && [ -n "${NATIVE_PACKAGE:-}" ] && [ -n "${NATIVE_NODE:-}" ] \
+    && [ -n "${NATIVE_WORKER_CONFIG:-}" ] && [ -n "${NATIVE_WORKER_CONFIG_SHA256:-}" ] || {
+    /bin/echo "native artifacts require complete inputs and unselected release staging" >&2
+    exit 65
+  }
+  for native_input in "$NATIVE_PACKAGE" "$NATIVE_NODE" "$NATIVE_WORKER_CONFIG"; do
+    case "$native_input" in /*) ;; *) /bin/echo "native artifact inputs must be absolute" >&2; exit 65 ;; esac
+  done
+  case "$NATIVE_WORKER_CONFIG_SHA256" in *[!0-9a-f]*|'') /bin/echo "native config digest must be lowercase SHA256" >&2; exit 65 ;; esac
+  [ "${#NATIVE_WORKER_CONFIG_SHA256}" -eq 64 ] || exit 65
+fi
+# --- END native package staging guard ---
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -1320,6 +1359,16 @@ if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
       exit 65
     }
 fi
+if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+  WORKER_ACP_BUNDLE_DIGEST="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/worker_acp_profile.py" check-bundle \
+    --release-root "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" \
+    --bundle "$WORKER_ACP_BUNDLE" --operator-uid "$OPERATOR_UID")" || {
+      /bin/echo "Worker ACP bundle preflight refused before maintenance" >&2
+      exit 65
+    }
+  case "$WORKER_ACP_BUNDLE_DIGEST" in *[!0-9a-f]*|'') exit 65 ;; esac
+  [ "${#WORKER_ACP_BUNDLE_DIGEST}" -eq 64 ] || exit 65
+fi
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
 PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
@@ -1671,8 +1720,53 @@ fi
 
 # --- BEGIN stage-only dispatch ---
 if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
-  # No cleanup/service trap: an interrupted stage or publication is retained.
+  # No cleanup/service trap: interrupted stages/publications retain original paths.
+  WORKER_ACP_DEPENDENCIES=""
   stage_sealed_release || exit 65
+  if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+    WORKER_ACP_DEPENDENCIES="$("$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/worker_acp_profile.py" materialize \
+      --release-root "$RELEASE_ROOT" --bundle "$WORKER_ACP_BUNDLE" \
+      --operator-uid "$OPERATOR_UID" --expected-digest "$WORKER_ACP_BUNDLE_DIGEST")" || exit 65
+  fi
+  if [ -n "${NATIVE_PACKAGE:-}" ]; then
+    NATIVE_MATERIALIZATION="$("$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/integrations/deepseek_harness/package_attended.py" materialize-native \
+      --source-repo "$SOURCE_REPO" --source-sha "$EXPECTED_SHA" \
+      --worker-config "$NATIVE_WORKER_CONFIG" --worker-config-sha256 "$NATIVE_WORKER_CONFIG_SHA256" \
+      --native-package "$NATIVE_PACKAGE" --native-node "$NATIVE_NODE" --operator-uid "$OPERATOR_UID")" || {
+      # Preserve the settled ACP result even if the native return was lost.
+      # An unavailable native return grants no NONE claim or retry authority.
+      "$PYTHON_BINARY" -I -S -B - "$EXPECTED_SHA" "$SOURCE_REPO" \
+        "$NATIVE_WORKER_CONFIG" "$NATIVE_WORKER_CONFIG_SHA256" \
+        "${WORKER_ACP_DEPENDENCIES:-}" "$NATIVE_MATERIALIZATION" <<'MASTERMIND_NATIVE_STAGE_FAILURE'
+import hashlib
+import json
+import sys
+def observation(raw):
+    try:
+        value = json.loads(raw)
+        if type(value) is dict:
+            return value
+    except (ValueError, TypeError):
+        pass
+    return {"state": "OUTCOME_UNAVAILABLE", "effect_state": "UNOBSERVED",
+            "retry_allowed": False, "return_sha256": hashlib.sha256(raw.encode()).hexdigest()}
+print(json.dumps({"ok": False, "staged_unselected": True, "commit_sha": sys.argv[1],
+    "source_repo": sys.argv[2], "worker_config": sys.argv[3],
+    "worker_config_sha256": sys.argv[4],
+    "worker_acp_dependencies": observation(sys.argv[5]) if sys.argv[5] else None,
+    "native_materialization": observation(sys.argv[6]),
+    "selection_changed": False, "services_changed": False, "configs_changed": False,
+    "receipt_changed": False, "transaction_changed": False}, sort_keys=True))
+MASTERMIND_NATIVE_STAGE_FAILURE
+      exit 70
+    }
+    printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false,"worker_acp_dependencies":%s,"native_materialization":%s}\n' "$EXPECTED_SHA" "${WORKER_ACP_DEPENDENCIES:-null}" "$NATIVE_MATERIALIZATION"
+    exit 0
+  fi
+  if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+    printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false,"worker_acp_dependencies":%s}\n' "$EXPECTED_SHA" "$WORKER_ACP_DEPENDENCIES"
+    exit 0
+  fi
   printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
   exit 0
 fi

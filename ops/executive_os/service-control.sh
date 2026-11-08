@@ -33,6 +33,7 @@ usage() {
   /bin/echo "prepare-mcp-selected-child requires --expected-sha <40 lowercase hex characters> --work-ref <work reference> --root-job-id <job id> and one or more --child-job-id <job id>; no destination, output path, account, label, port or resource value is accepted" >&2
   /bin/echo "plan-control-component and reconcile-control-component require --expected-sha <40 lowercase hex>; apply-control-component additionally requires --plan-sha256 <64 lowercase hex>" >&2
   /bin/echo "plan-control-component and apply-control-component optionally accept the PAIRED --hermes-role-metadata-read-input <absolute canonical path> and --hermes-role-metadata-read-sha256 <64 lowercase hex>; both or neither" >&2
+  /bin/echo "The same verbs alternatively accept PAIRED --native-conversation-input and --native-conversation-sha256; one selection pair per transaction, no replacement input on reconcile" >&2
   exit 64
 }
 
@@ -793,7 +794,7 @@ valid_component_input_path() {
 
 control_component_args() {
   local verb="$1" flag value seen="" sha="" plan="" helper_verb
-  local hermes_input="" hermes_sha=""
+  local hermes_input="" hermes_sha="" native_input="" native_sha=""
   shift
   while [ "$#" -gt 0 ]; do
     flag="$1"
@@ -804,7 +805,7 @@ control_component_args() {
     case "$flag" in
       --expected-sha) ;;
       --plan-sha256) [ "$verb" = "apply-control-component" ] || return 1 ;;
-      --hermes-role-metadata-read-input|--hermes-role-metadata-read-sha256)
+      --hermes-role-metadata-read-input|--hermes-role-metadata-read-sha256|--native-conversation-input|--native-conversation-sha256)
         [ "$verb" = "plan-control-component" ] || [ "$verb" = "apply-control-component" ] || return 1
         ;;
       *) return 1 ;;
@@ -826,6 +827,14 @@ control_component_args() {
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         hermes_sha="$value"
         ;;
+      --native-conversation-input)
+        valid_component_input_path "$value" || return 1
+        native_input="$value"
+        ;;
+      --native-conversation-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        native_sha="$value"
+        ;;
       *)
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         plan="$value"
@@ -838,6 +847,11 @@ control_component_args() {
   if [ -n "$hermes_input" ] || [ -n "$hermes_sha" ]; then
     [ -n "$hermes_input" ] || return 1
     [ -n "$hermes_sha" ] || return 1
+  fi
+  if [ -n "$native_input" ] || [ -n "$native_sha" ]; then
+    [ -n "$native_input" ] || return 1
+    [ -n "$native_sha" ] || return 1
+    [ -z "$hermes_input" ] || return 1
   fi
   case "$verb" in
     plan-control-component) helper_verb="plan-control-component" ;;
@@ -852,6 +866,10 @@ control_component_args() {
   if [ -n "$hermes_input" ]; then
     CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-input "$hermes_input")
     CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-sha256 "$hermes_sha")
+  fi
+  if [ -n "$native_input" ]; then
+    CONTROL_COMPONENT_ARGV+=(--native-conversation-input "$native_input")
+    CONTROL_COMPONENT_ARGV+=(--native-conversation-sha256 "$native_sha")
   fi
   CONTROL_COMPONENT_EXPECTED_SHA="$sha"
   return 0

@@ -75,13 +75,22 @@ import {
   type FreshConversationPayload,
 } from "./fresh-conversation";
 
+import {attendedContractForKey,validateAttendedRequest,decodeAttendedResult,decodeAttendedPreview} from "./fresh-conversation-attended-contract";
+import {decodeFreshNativeResult,type FreshNativeResult} from "../fresh-conversation-reference";
+import type {NativeFreshTurnPreview} from "./native-fresh-result";
+import {nativeExact,nativeId,nativeWork} from "./native-fresh-request";
+import {conversationContractForKey} from "./fresh-conversation-contract";
+import type {FreshConversationContract} from "../../orchestration/fresh-conversation-transport";
+import {createNativeControlAdapter,type NativeControlTransport,type NativeControlBinding,type NativeControlAdapter} from "./native-conversation-controls";
+
 // ── Public contract ──────────────────────────────────────────────────────────
 
 /** Host-issued witness for the current sealed initial read of an original. */
 export interface FreshConversationOriginalRead {
   readonly selection: FreshConversationOriginalSelector;
   /** Producer-sealed initial result, re-verified against the actual locator. */
-  readonly result: FreshConversationPayload;
+  readonly result: FreshConversationPayload|FreshNativeResult;
+  readonly contract?: "native-v2";
   readonly locator: FreshConversationTurnLocator;
   /** Issued current witness; a false answer withholds new actions. */
   current(): boolean;
@@ -89,15 +98,16 @@ export interface FreshConversationOriginalRead {
 
 /** External transport seam. Every response stays an opaque raw envelope. */
 export interface FreshConversationAttendedTransport {
-  consume(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
-  consumeStatus(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
-  turnPreview(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
-  turn(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
-  turnStatus(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
-  turnRead(request: FreshConversationTurnRequest, signal: AbortSignal): Promise<unknown>;
+  consume(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  consumeStatus(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  turnPreview(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  turn(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  turnStatus(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  turnRead(request: FreshConversationTurnRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
 }
 
 export interface FreshConversationAttendedBindingOptions {
+  readonly nativeTransport?:NativeControlTransport;
   /** Live UI owner snapshot seam; snapshots are taken through this only. */
   readonly owner: () => OwnerContext | null;
   /**
@@ -116,6 +126,7 @@ export interface FreshConversationAttendedBindingOptions {
   readonly readInitial: (
     selection: FreshConversationOriginalSelector,
     signal: AbortSignal,
+    contract?:FreshConversationContract,
   ) => Promise<FreshConversationOriginalRead | null>;
 }
 
@@ -124,7 +135,7 @@ export interface PreparedFreshConversationTurn {
   /** Exactly the once-minted request; the intent never remints. */
   readonly request: FreshConversationTurnRequest;
   /** Actually decoded TURN_READY preview of the separate pure branch. */
-  readonly preview: FreshConversationTurnPreviewData;
+  readonly preview: FreshConversationTurnPreviewData|NativeFreshTurnPreview;
   /** Owner snapshot captured at preflight; compared, never an authority. */
   readonly owner: OwnerContext;
   /** Actual host read witness the request was minted against. */
@@ -132,6 +143,7 @@ export interface PreparedFreshConversationTurn {
 }
 
 export interface FreshConversationAttendedBinding {
+  readonly native?:NativeControlBinding;
   readonly controller: OperationController;
   readonly store: PendingPointerStore;
   context(): OwnerContext | null;
@@ -151,6 +163,7 @@ export interface FreshConversationAttendedBinding {
   readOriginalConsume(
     selection: FreshConversationOriginalSelector,
     signal: AbortSignal,
+    contract?:FreshConversationContract,
   ): Promise<unknown>;
   /** Readonly turnRead of the exact original turn key; returns the raw frame. */
   readOriginalTurn(
@@ -166,8 +179,8 @@ const CONSUME_KIND: OperationKind = "conversation_consume";
 const TURN_KIND: OperationKind = "conversation_turn";
 
 /** Ordinary client correlation keys only; minted by the shared 11af helper. */
-const CONSUME_KEY_PATTERN = /^mmos-conversation-consume-[0-9a-f]{40}$/;
-const TURN_KEY_PATTERN = /^mmos-conversation-turn-[0-9a-f]{40}$/;
+const CONSUME_KEY_PATTERN = /^mmos-(?:conversation|native)-consume-[0-9a-f]{40}$/;
+const TURN_KEY_PATTERN = /^mmos-(?:conversation|native)-turn-[0-9a-f]{40}$/;
 
 /**
  * Known public pre-effect producer codes that may close a submit as refused.
@@ -244,7 +257,8 @@ function sameOwner(a: OwnerContext | null, b: OwnerContext | null): boolean {
 }
 
 function isOriginalRead(value: unknown): value is FreshConversationOriginalRead {
-  if (!isPlainObject(value) || Object.keys(value).length !== 4) return false;
+  if (!isPlainObject(value) || Object.keys(value).length !== (value.contract==="native-v2"?5:4) ||
+    Object.hasOwn(value,"contract")&&value.contract!=="native-v2") return false;
   if (
     !Object.hasOwn(value, "selection") ||
     !Object.hasOwn(value, "result") ||
@@ -257,7 +271,7 @@ function isOriginalRead(value: unknown): value is FreshConversationOriginalRead 
   if (typeof read.current !== "function") return false;
   if (freshConversationOriginalSelector(read.selection) === null) return false;
   if (!isPlainObject(read.locator) || Object.keys(read.locator).length !== 4) return false;
-  if (!isPlainObject(read.result) || Object.keys(read.result).length !== 2) return false;
+  if (!isPlainObject(read.result) || Object.keys(read.result).length !== (read.contract==="native-v2"?3:2)) return false;
   return true;
 }
 
@@ -267,9 +281,18 @@ function isOriginalRead(value: unknown): value is FreshConversationOriginalRead 
  */
 function witnessDigest(read: FreshConversationOriginalRead): string | null {
   const selector = freshConversationOriginalSelector(read.selection);
-  if (selector === null || selector.work_ref !== read.locator.work_ref) return null;
+  if (selector === null || selector.work_ref !== read.locator.work_ref||
+    "operation_key"in selector&&conversationContractForKey(selector.operation_key)!==contractOf(read)) return null;
   if ("reference" in selector && selector.reference.root_job_id !== read.locator.root_job_id) {
     return null;
+  }
+  if(read.contract==="native-v2"){
+    try{
+      const locator=nativeExact(read.locator,["work_ref","root_job_id","job_id","attempt_id"]);
+      if(nativeWork(locator.work_ref)!==selector.work_ref)return null;
+      nativeId(locator.root_job_id);nativeId(locator.job_id);nativeId(locator.attempt_id);
+      return decodeFreshNativeResult(read.result).digest;
+    }catch{return null;}
   }
   const sealed = decodeFreshConversationInitialResult(read.result, {
     job_id: read.locator.job_id,
@@ -375,10 +398,11 @@ function detachRequest(request: FreshConversationTurnRequest): FreshConversation
 function consumeStatusRequest(
   selector: FreshConversationOriginalSelector,
   digest: string,
+  contract:FreshConversationContract="legacy-v1",
 ): FreshConversationTurnRequest | null {
   const base = selectorRequestBase(selector);
   if (base === null) return null;
-  return validateFreshConversationTurnRequest({ ...base, initial_digest: digest }, "consume_status");
+  return validateAttendedRequest({ ...base, initial_digest: digest }, "consume_status",contract);
 }
 
 function turnKeyRequest(
@@ -388,7 +412,21 @@ function turnKeyRequest(
 ): FreshConversationTurnRequest | null {
   const base = selectorRequestBase(selector);
   if (base === null) return null;
-  return validateFreshConversationTurnRequest({ ...base, turn_key: turnKey }, operation);
+  const contract=attendedContractForKey(turnKey);
+  return contract?validateAttendedRequest({ ...base, turn_key: turnKey }, operation,contract):null;
+}
+
+function contractOf(read:FreshConversationOriginalRead):FreshConversationContract{
+  return read.contract==="native-v2"?"native-v2":"legacy-v1";
+}
+function requestTransport(options:FreshConversationAttendedBindingOptions,method:keyof FreshConversationAttendedTransport,
+ request:FreshConversationTurnRequest,signal:AbortSignal,contract:FreshConversationContract):Promise<unknown>{
+ const call=options.transport[method];
+ return contract==="native-v2"?call.call(options.transport,request,signal,contract):call.call(options.transport,request,signal);
+}
+function readInitial(options:FreshConversationAttendedBindingOptions,selection:FreshConversationOriginalSelector,
+ signal:AbortSignal,contract:FreshConversationContract):Promise<FreshConversationOriginalRead|null>{
+ return contract==="native-v2"?options.readInitial(selection,signal,contract):options.readInitial(selection,signal);
 }
 
 // ── Intent payload (ephemeral; never transmitted, never persisted) ───────────
@@ -431,9 +469,10 @@ function intentPayload(intent: CommandIntent): AttendedPayload | null {
   }
   const witness: unknown = payload.witness;
   if (!isOriginalRead(witness)) return null;
-  const request = validateFreshConversationTurnRequest(
+  if(attendedContractForKey(key)!==contractOf(witness))return null;
+  const request = validateAttendedRequest(
     payload.request,
-    intent.kind === CONSUME_KIND ? "consume" : "turn",
+    intent.kind === CONSUME_KIND ? "consume" : "turn",contractOf(witness),
   );
   if (request === null) return null;
   if (requestTurnKey(request) !== null && requestTurnKey(request) !== key) return null;
@@ -459,7 +498,7 @@ function intentPayload(intent: CommandIntent): AttendedPayload | null {
  * kinds, and default recovery always stays on {@link readOperation}.
  */
 class FreshConversationAttendedCommandPort implements FiniteCommandPort {
-  constructor(private readonly _options: FreshConversationAttendedBindingOptions) {}
+  constructor(private readonly _options: FreshConversationAttendedBindingOptions,private readonly _native:NativeControlAdapter|null) {}
 
   context(): OwnerContext | null {
     return this._options.owner();
@@ -467,6 +506,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
 
   /** Synchronous and effect-free; a contract failure throws. */
   prepare(intent: CommandIntent): OperationPointer {
+    if(intent.kind==="conversation_stop"||intent.kind==="conversation_resume"){if(!this._native)throw closedError();return this._native.prepare(intent);}
     const payload = intentPayload(intent);
     if (payload === null) throw closedError();
     const live = this._options.owner();
@@ -490,6 +530,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     intent: CommandIntent,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
+    if(intent.kind==="conversation_stop"||intent.kind==="conversation_resume")return this._native?this._native.submit(pointer,intent,signal):unknownReceipt(pointer);
     const payload = intentPayload(intent);
     if (
       payload === null ||
@@ -516,8 +557,8 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     let raw: unknown;
     try {
       raw = isConsume
-        ? await transport.consume(payload.request, signal)
-        : await transport.turn(payload.request, signal);
+        ? await requestTransport(this._options,"consume",payload.request,signal,contractOf(payload.witness))
+        : await requestTransport(this._options,"turn",payload.request,signal,contractOf(payload.witness));
     } catch {
       // Thrown transport: the effect is unknown, never refused, never cleared.
       return unknownReceipt(pointer);
@@ -531,7 +572,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     ) {
       return unknownReceipt(pointer);
     }
-    return classifyEffect(raw, isConsume ? "consume" : "turn", payload.request, pointer);
+    return classifyEffect(raw, isConsume ? "consume" : "turn", payload.request, pointer,contractOf(payload.witness));
   }
 
   /**
@@ -546,6 +587,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     pointer: OperationPointer,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
+    if(pointer.kind==="conversation_stop"||pointer.kind==="conversation_resume")return this._native?this._native.readOperation(pointer,signal):unknownReceipt(pointer);
     if (pointer.kind === CONSUME_KIND) return this._readConsume(pointer, signal);
     if (pointer.kind === TURN_KIND) return this._readTurn(pointer, signal);
     return unknownReceipt(pointer);
@@ -570,23 +612,25 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     if (ownerBefore === null) return unknownReceipt(pointer);
     let read: FreshConversationOriginalRead | null;
     try {
-      read = await this._options.readInitial(selector, signal);
+      read = await readInitial(this._options,selector,signal,attendedContractForKey(pointer.operationKey)!);
     } catch {
       return unknownReceipt(pointer);
     }
     if (read === null || read.current() !== true ||
         freshConversationTarget(read.selection) !== pointer.targetKey) return unknownReceipt(pointer);
+    const contract=attendedContractForKey(pointer.operationKey);
+    if(!contract||contract!==contractOf(read))return unknownReceipt(pointer);
     const digest = witnessDigest(read);
     if (digest === null) return unknownReceipt(pointer);
     const ownerAfter = this._options.owner();
     if (ownerAfter === null || !sameOwner(ownerAfter, ownerBefore)) {
       return unknownReceipt(pointer);
     }
-    const request = consumeStatusRequest(selector, digest);
+    const request = consumeStatusRequest(selector, digest,contract);
     if (request === null) return unknownReceipt(pointer);
     let raw: unknown;
     try {
-      raw = await this._options.transport.consumeStatus(request, signal);
+      raw = await requestTransport(this._options,"consumeStatus",request,signal,contract);
     } catch {
       return unknownReceipt(pointer);
     }
@@ -594,7 +638,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     if (ownerFinal === null || !sameOwner(ownerFinal, ownerBefore)) {
       return unknownReceipt(pointer);
     }
-    const decoded = decodeFreshConversationTurnResult(raw, "consume_status", request);
+    const decoded = decodeAttendedResult(raw, "consume_status", request,contract);
     if (decoded === null || !decoded.ok) {
       // ABSENT and every producer error are holds, never pre-effect clearance.
       return unknownReceipt(pointer);
@@ -627,7 +671,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     if (ownerBefore === null) return unknownReceipt(pointer);
     let raw: unknown;
     try {
-      raw = await this._options.transport.turnStatus(request, signal);
+      raw = await requestTransport(this._options,"turnStatus",request,signal,attendedContractForKey(pointer.operationKey)!);
     } catch {
       return unknownReceipt(pointer);
     }
@@ -635,7 +679,7 @@ class FreshConversationAttendedCommandPort implements FiniteCommandPort {
     if (ownerAfter === null || !sameOwner(ownerAfter, ownerBefore)) {
       return unknownReceipt(pointer);
     }
-    const decoded = decodeFreshConversationTurnResult(raw, "turn_status", request);
+    const decoded = decodeAttendedResult(raw, "turn_status", request,attendedContractForKey(pointer.operationKey)!);
     if (decoded === null || !decoded.ok) {
       return unknownReceipt(pointer);
     }
@@ -666,8 +710,9 @@ function classifyEffect(
   operation: "consume" | "turn",
   request: FreshConversationTurnRequest,
   pointer: OperationPointer,
+  contract:FreshConversationContract,
 ): EffectReceipt {
-  const decoded = decodeFreshConversationTurnResult(raw, operation, request);
+  const decoded = decodeAttendedResult(raw, operation, request,contract);
   if (decoded === null) return unknownReceipt(pointer);
   if (!decoded.ok) {
     return REFUSAL_CODES.has(decoded.error.code)
@@ -691,7 +736,9 @@ function classifyEffect(
 export function createFreshConversationAttendedBinding(
   options: FreshConversationAttendedBindingOptions,
 ): FreshConversationAttendedBinding {
-  const port = new FreshConversationAttendedCommandPort(options);
+  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canModify,get transport(){if(!options.nativeTransport)throw closedError();return options.nativeTransport;}}):null;
+  const port = new FreshConversationAttendedCommandPort(options,native);
+  if(native)Object.assign(port,{reconcileNativeOperation:native.reconcileNativeOperation,prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
   const controller = new OperationController(port, options.store);
 
   /** New-action gate: issued current witness + live owner + Workspace. */
@@ -710,11 +757,11 @@ export function createFreshConversationAttendedBinding(
     if (digest === null) return null;
     const base = selectorRequestBase(read.selection);
     if (base === null) return null;
-    const key = mintFreshConversationCommandKey("conversation_consume");
+    const key = mintFreshConversationCommandKey("conversation_consume",contractOf(read));
     if (key === null || !CONSUME_KEY_PATTERN.test(key)) return null;
-    const request = validateFreshConversationTurnRequest(
+    const request = validateAttendedRequest(
       { ...base, initial_digest: digest },
-      "consume",
+      "consume",contractOf(read),
     );
     if (request === null) return null;
     return {
@@ -739,12 +786,12 @@ export function createFreshConversationAttendedBinding(
     if (digest === null) return null;
     const base = selectorRequestBase(read.selection);
     if (base === null) return null;
-    const key = mintFreshConversationCommandKey("conversation_turn");
+    const key = mintFreshConversationCommandKey("conversation_turn",contractOf(read));
     if (key === null || !TURN_KEY_PATTERN.test(key)) return null;
     // Exact message, actual digest, minted key; no preview digest yet.
-    const request = validateFreshConversationTurnRequest(
+    const request = validateAttendedRequest(
       { ...base, initial_digest: digest, message, turn_key: key },
-      "turn",
+      contractOf(read)==="native-v2"?"turn_preview":"turn",contractOf(read),
     );
     if (request === null || requestTurnKey(request) !== key) return null;
     return detachRequest(request);
@@ -760,10 +807,10 @@ export function createFreshConversationAttendedBinding(
     if (targetKey === null) return null;
     // The separate pure branch validates the turn-shaped request with its
     // own operation; the request is never submitted through it.
-    const validated = validateFreshConversationTurnRequest(request, "turn_preview");
+    const validated = validateAttendedRequest(request, "turn_preview",contractOf(read));
     if (validated === null) return null;
     const validatedTurnKey = requestTurnKey(validated);
-    if (validatedTurnKey === null || !TURN_KEY_PATTERN.test(validatedTurnKey)) return null;
+    if (validatedTurnKey === null || !TURN_KEY_PATTERN.test(validatedTurnKey)||attendedContractForKey(validatedTurnKey)!==contractOf(read)) return null;
     const requestSelector = selectorFromRequest(validated);
     if (requestSelector === null || freshConversationTarget(requestSelector) !== targetKey) {
       return null;
@@ -775,7 +822,7 @@ export function createFreshConversationAttendedBinding(
     if (owner === null || options.canModify() !== true) return null;
     let raw: unknown;
     try {
-      raw = await options.transport.turnPreview(detachRequest(validated), signal);
+      raw = await requestTransport(options,"turnPreview",detachRequest(validated),signal,contractOf(read));
     } catch {
       return null;
     }
@@ -788,7 +835,7 @@ export function createFreshConversationAttendedBinding(
     ) {
       return null;
     }
-    const decoded = decodeFreshConversationTurnPreviewResult(raw, validated);
+    const decoded = decodeAttendedPreview(raw, validated,contractOf(read));
     if (decoded === null || !decoded.ok) return null;
     const preview = decoded.data;
     if (
@@ -819,10 +866,12 @@ export function createFreshConversationAttendedBinding(
     if (!isOwnerContext(prepared.owner) || !isOriginalRead(prepared.witness)) return null;
     const preview: unknown = prepared.preview;
     if (!isPlainObject(preview)) return null;
-    const base = validateFreshConversationTurnRequest(prepared.request, "turn");
+    const contract=contractOf(prepared.witness);
+    const base = validateAttendedRequest(prepared.request, contract==="native-v2"?"turn_preview":"turn",contract);
     if (base === null) return null;
     const baseTurnKey = requestTurnKey(base);
-    if (baseTurnKey === null || !TURN_KEY_PATTERN.test(baseTurnKey)) return null;
+    if (baseTurnKey === null || !TURN_KEY_PATTERN.test(baseTurnKey)||attendedContractForKey(baseTurnKey)!==contract||
+      preview.schema!==(contract==="native-v2"?"mastermind.executive.fresh_conversation_turn_preview.v2":"mastermind.executive.fresh_conversation_turn_preview.v1")) return null;
     if (
       preview.state !== "TURN_READY" ||
       preview.effect !== "NONE" ||
@@ -869,9 +918,9 @@ export function createFreshConversationAttendedBinding(
     if (owner === null || options.canModify() !== true) return null;
     if (!sameOwner(owner, prepared.owner)) return null;
     // Same exact original key and actual preview digest; never a remint.
-    const request = validateFreshConversationTurnRequest(
+    const request = validateAttendedRequest(
       { ...base, preview_digest: preview.preview_digest },
-      "turn",
+      "turn",contract,
     );
     if (request === null || requestTurnKey(request) !== baseTurnKey) return null;
     return {
@@ -889,6 +938,7 @@ export function createFreshConversationAttendedBinding(
   async function readOriginalConsume(
     selection: FreshConversationOriginalSelector,
     signal: AbortSignal,
+    contract:FreshConversationContract="legacy-v1",
   ): Promise<unknown> {
     const selector = freshConversationOriginalSelector(selection);
     if (selector === null || freshConversationTarget(selector) === null) throw closedError();
@@ -896,21 +946,22 @@ export function createFreshConversationAttendedBinding(
     if (ownerBefore === null) throw closedError();
     let read: FreshConversationOriginalRead | null;
     try {
-      read = await options.readInitial(selector, signal);
+      read = await readInitial(options,selector,signal,contract);
     } catch {
       throw closedError();
     }
     if (read === null || read.current() !== true ||
         freshConversationTarget(read.selection) !== freshConversationTarget(selector)) throw closedError();
+    if(contract!==contractOf(read))throw closedError();
     const digest = witnessDigest(read);
     if (digest === null) throw closedError();
     const ownerAfter = options.owner();
     if (ownerAfter === null || !sameOwner(ownerAfter, ownerBefore)) throw closedError();
-    const request = consumeStatusRequest(selector, digest);
+    const request = consumeStatusRequest(selector, digest,contract);
     if (request === null) throw closedError();
     let raw: unknown;
     try {
-      raw = await options.transport.consumeStatus(request, signal);
+      raw = await requestTransport(options,"consumeStatus",request,signal,contract);
     } catch {
       throw closedError();
     }
@@ -934,7 +985,7 @@ export function createFreshConversationAttendedBinding(
     if (ownerBefore === null) throw closedError();
     let raw: unknown;
     try {
-      raw = await options.transport.turnRead(request, signal);
+      raw = await requestTransport(options,"turnRead",request,signal,attendedContractForKey(turnKey)!);
     } catch {
       throw closedError();
     }
@@ -946,6 +997,7 @@ export function createFreshConversationAttendedBinding(
   }
 
   return {
+    ...(native?{native:native.binding}:{}),
     controller,
     store: options.store,
     context: () => options.owner(),

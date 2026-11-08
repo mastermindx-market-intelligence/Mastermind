@@ -8,6 +8,7 @@ import pytest
 from ops.executive_os import os_public_edge as edge
 from ops.executive_os.os_public_edge_transition import prepare_config, final_config
 from tests.test_os_public_edge import manifest
+from tests.test_os_public_edge_transition import native_branch
 
 FIXTURE = Path(__file__).parent / "fixtures/project-controls-edge-41297.json"
 
@@ -27,6 +28,15 @@ def method_routes(config):
             for child in node: visit(child)
     visit(config)
     return found
+
+
+def add_expected_native_branch(config):
+    """Extend only the independently constructed expected historical fixture."""
+    inner = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["handle"][0]["routes"]
+    assert len(inner) == 6 and len(method_routes(config)) == 5
+    assert inner[-1] == {"handle": [{"abort": True, "handler": "static_response"}]}
+    assert inner[1]["group"] == "group5"
+    inner.insert(-1, native_branch(group="group5"))
 
 
 def test_only_four_fixed_reads_and_one_instruction_action_extend_the_actual_predecessor():
@@ -61,10 +71,12 @@ def test_real_2055_caddy_predecessor_preserves_all_non_route_configuration(maker
             list(edge.COMPLETE_MCP_METADATA_ROUTES)
             if route["match"][0]["method"] == ["GET"]
             else list(edge.COMPLETE_MCP_ROUTES))
+    add_expected_native_branch(expected)
     actual = maker(fullconfig=old, current_manifest=current, candidate_manifest=candidate, relay_port=49152)
     assert actual == expected
     assert old == predecessor()
-    assert len(method_routes(actual)) == 5  # no duplicate source/MCP handlers
+    assert len(method_routes(actual)) == 6  # one native branch; no duplicate source/MCP handlers
+    assert method_routes(actual)[-1] == native_branch(group="group5")
 
 
 @pytest.mark.parametrize("fault", ["old-get-new-post", "new-get-old-post", "new-source-cap"])

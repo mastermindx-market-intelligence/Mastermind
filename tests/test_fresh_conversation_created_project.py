@@ -152,6 +152,7 @@ def test_signed_created_n_preview_measures_complete_preeffect_callgraph(joined,t
             assert ready['ok'] and ready['data']['state']=='TURN_READY',ready
             assert runtime.events.list_events()==prior and adapters[0].begin_turn_calls==1
             turn_request={**turn_request,'preview_digest':ready['data']['preview_digest']}
+            monkeypatch.setattr('control_plane.executive_service._NATIVE_CONTINUATION_WAIT_SECONDS', 2.0)
             _,second=await post(app,'turn',turn_request,token,wt,timeout_seconds=300)
             assert second['ok'] and second['data']['state']=='RECORDED',second
             assert runtime.events.get_event_by_command_id(initial_seal.command_id)==initial_seal

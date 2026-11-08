@@ -43,11 +43,10 @@ import {
   type PendingPointerStore,
 } from "../../orchestration/operation-controller";
 import { CONVERSATION_CREATE_KEY_PREFIX } from "../../orchestration/indexeddb-pending-pointer-store";
-import {
-  decodeFreshConversationResult,
-  validateFreshConversationRequest,
-  type FreshConversationData,
-} from "./fresh-conversation";
+import {validateConversationRequest,decodeConversationResult,conversationContractForKey,
+  conversationCreateSettled,NATIVE_CREATE_PREFIX,type FreshConversationObservedData} from "./fresh-conversation-contract";
+import type {FreshConversationContract} from "../../orchestration/fresh-conversation-transport";
+import {createNativeControlAdapter,type NativeControlTransport,type NativeControlBinding} from "./native-conversation-controls";
 
 /** Exact wire selectors; ordinary client keys are never Runtime/session IDs. */
 export interface ConversationRequestSelection {
@@ -67,13 +66,16 @@ export interface ConversationCreateRequest extends ConversationRequestSelection 
 
 /** External transport seam. Every response stays an opaque raw envelope. */
 export interface FreshConversationTransport {
-  preview(request: ConversationPreviewRequest, signal: AbortSignal): Promise<unknown>;
-  create(request: ConversationCreateRequest, signal: AbortSignal): Promise<unknown>;
-  status(selection: ConversationRequestSelection, signal: AbortSignal): Promise<unknown>;
-  read(selection: ConversationRequestSelection, signal: AbortSignal): Promise<unknown>;
+  preview(request: ConversationPreviewRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  create(request: ConversationCreateRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  status(selection: ConversationRequestSelection, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
+  read(selection: ConversationRequestSelection, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
 }
 
 export interface FreshConversationBindingOptions {
+  readonly nativeTransport?:NativeControlTransport;
+  /** New drafts only; original stored keys always determine recovery syntax. */
+  readonly newContract?:FreshConversationContract;
   /** Live UI owner snapshot seam; snapshots are taken through this only. */
   readonly owner: () => OwnerContext | null;
   /**
@@ -94,15 +96,17 @@ export interface FreshConversationBindingOptions {
  * The shared Host/native/App implementation is owned by the Release integrator.
  */
 export interface FreshConversationBinding {
+  readonly native?:NativeControlBinding;
+  readonly newContract?:FreshConversationContract;
   readonly controller: OperationController;
   readonly store: PendingPointerStore;
   context(): OwnerContext | null;
   /** Synchronous, effect-free. Mint once for an explicit new draft, not recovery. */
   makePreviewRequest(workRef: string, message: string): ConversationPreviewRequest | null;
-  preview(request: ConversationPreviewRequest, signal: AbortSignal): Promise<unknown>;
+  preview(request: ConversationPreviewRequest, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
   /** Must preserve the request key and actual preview digest, distinct kind conversation_create. */
-  makeCreateIntent(request: ConversationPreviewRequest, preview: FreshConversationData): CommandIntent | null;
-  readOriginal(selection: ConversationRequestSelection, signal: AbortSignal): Promise<unknown>;
+  makeCreateIntent(request: ConversationPreviewRequest, preview: FreshConversationObservedData): CommandIntent | null;
+  readOriginal(selection: ConversationRequestSelection, signal: AbortSignal, contract?:FreshConversationContract): Promise<unknown>;
 }
 
 export interface ConversationProjectChoice {
@@ -129,9 +133,7 @@ export const FRESH_CONVERSATION_BINDING_CLOSED = "FRESH_CONVERSATION_BINDING_CLO
 const CONVERSATION_KIND: OperationKind = "conversation_create";
 
 /** Ordinary client keys only: the store's own conversation-create prefix. */
-const OPERATION_KEY_RE = new RegExp(
-  `^${CONVERSATION_CREATE_KEY_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[0-9a-f]{40}$`,
-);
+const OPERATION_KEY_RE = /^mmos-(?:conversation|native)-create-[0-9a-f]{40}$/;
 
 const WORK_REF_RE = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
@@ -191,9 +193,17 @@ function isOwnerContext(value: unknown): value is OwnerContext {
 
 /** Closed four-field create wire with the ordinary conversation-create key. */
 function isCreateRequest(value: unknown): value is ConversationCreateRequest {
-  if (validateFreshConversationRequest(value, "create") === null) return false;
+  if (validateConversationRequest(value, "create") === null) return false;
   const operationKey = (value as { operation_key?: unknown }).operation_key;
   return typeof operationKey === "string" && OPERATION_KEY_RE.test(operationKey);
+}
+
+function requestOriginal(options:FreshConversationBindingOptions,operation:"preview"|"create"|"status"|"read",
+  request:ConversationPreviewRequest|ConversationCreateRequest|ConversationRequestSelection,signal:AbortSignal):Promise<unknown>{
+  const contract=conversationContractForKey(request.operation_key);
+  if(!contract)throw closedError();
+  const method=options.transport[operation] as (request:ConversationPreviewRequest|ConversationCreateRequest|ConversationRequestSelection,signal:AbortSignal,contract?:FreshConversationContract)=>Promise<unknown>;
+  return contract==="native-v2"?method.call(options.transport,request,signal,contract):method.call(options.transport,request,signal);
 }
 
 interface CapturedCreatePayload {
@@ -216,7 +226,8 @@ function isCreatePayload(value: unknown): value is CapturedCreatePayload {
  * platform boundary is unavailable or misbehaves — no Math, time, default or
  * fixed-key fallback exists.
  */
-function mintOperationKey(): string | null {
+function mintOperationKey(contract:FreshConversationContract): string | null {
+  if(contract!=="legacy-v1"&&contract!=="native-v2")return null;
   const source: Crypto | undefined = globalThis.crypto;
   const getRandomValues = source?.getRandomValues;
   if (typeof getRandomValues !== "function") return null;
@@ -234,7 +245,7 @@ function mintOperationKey(): string | null {
     if (!Number.isInteger(byte) || byte < 0 || byte > 0xff) return null;
     hex += byte.toString(16).padStart(2, "0");
   }
-  const operationKey = `${CONVERSATION_CREATE_KEY_PREFIX}${hex}`;
+  const operationKey = `${contract==="native-v2"?NATIVE_CREATE_PREFIX:CONVERSATION_CREATE_KEY_PREFIX}${hex}`;
   return OPERATION_KEY_RE.test(operationKey) ? operationKey : null;
 }
 
@@ -305,7 +316,7 @@ class FreshConversationCommandPort implements FiniteCommandPort {
     }
     let raw: unknown;
     try {
-      raw = await this._options.transport.create(
+      raw = await requestOriginal(this._options,"create",
         {
           work_ref: request.work_ref,
           operation_key: request.operation_key,
@@ -354,7 +365,7 @@ class FreshConversationCommandPort implements FiniteCommandPort {
     if (before === null) return unknownReceipt(pointer);
     let raw: unknown;
     try {
-      raw = await this._options.transport.status(
+      raw = await requestOriginal(this._options,"status",
         { work_ref: pointer.targetKey, operation_key: pointer.operationKey },
         signal,
       );
@@ -365,7 +376,7 @@ class FreshConversationCommandPort implements FiniteCommandPort {
     if (after === null || !sameConversationOwner(after, before)) {
       return unknownReceipt(pointer);
     }
-    const decoded = decodeFreshConversationResult(raw, "status", {
+    const decoded = decodeConversationResult(raw, "status", {
       work_ref: pointer.targetKey,
       operation_key: pointer.operationKey,
     });
@@ -373,10 +384,7 @@ class FreshConversationCommandPort implements FiniteCommandPort {
       // ABSENT and every producer error are holds, never pre-effect clearance.
       return unknownReceipt(pointer);
     }
-    if (
-      decoded.data.state === "CREATED" ||
-      decoded.data.state === "SETTLED"
-    ) {
+    if (conversationCreateSettled(decoded.data)) {
       return receipt(pointer, "accepted", ACCEPTED_REASON);
     }
     return unknownReceipt(pointer);
@@ -388,17 +396,14 @@ class FreshConversationCommandPort implements FiniteCommandPort {
     request: ConversationCreateRequest,
     pointer: OperationPointer,
   ): EffectReceipt {
-    const decoded = decodeFreshConversationResult(raw, "create", {
-      work_ref: request.work_ref,
-      operation_key: request.operation_key,
-    });
+    const decoded = decodeConversationResult(raw, "create", request);
     if (decoded === null) return unknownReceipt(pointer);
     if (!decoded.ok) {
       return REFUSAL_CODES.has(decoded.error.code)
         ? receipt(pointer, "refused", decoded.error.code)
         : unknownReceipt(pointer);
     }
-    if (decoded.data.state === "CREATED" || decoded.data.state === "SETTLED") {
+    if (conversationCreateSettled(decoded.data)) {
       return receipt(pointer, "accepted", ACCEPTED_REASON);
     }
     return unknownReceipt(pointer);
@@ -413,6 +418,8 @@ export function createFreshConversationBinding(
   options: FreshConversationBindingOptions,
 ): FreshConversationBinding {
   const port = new FreshConversationCommandPort(options);
+  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canPreviewCreate,get transport(){if(!options.nativeTransport)throw closedError();return options.nativeTransport;}}):null;
+  if(native)Object.assign(port,{reconcileNativeOperation:native.reconcileNativeOperation,prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
   const controller = new OperationController(port, options.store);
 
   function makePreviewRequest(
@@ -421,11 +428,11 @@ export function createFreshConversationBinding(
   ): ConversationPreviewRequest | null {
     if (typeof workRef !== "string" || !WORK_REF_RE.test(workRef)) return null;
     if (typeof message !== "string") return null;
-    const operationKey = mintOperationKey();
+    const operationKey = mintOperationKey(options.newContract??"legacy-v1");
     if (operationKey === null) return null;
     const candidate = { work_ref: workRef, operation_key: operationKey, message };
     // Full wire validation of the exact request that will be sent.
-    const validated = validateFreshConversationRequest(candidate, "preview");
+    const validated = validateConversationRequest(candidate, "preview");
     if (validated === null || !("message" in validated)) return null;
     return validated;
   }
@@ -434,7 +441,7 @@ export function createFreshConversationBinding(
     request: ConversationPreviewRequest,
     signal: AbortSignal,
   ): Promise<unknown> {
-    const validated = validateFreshConversationRequest(request, "preview");
+    const validated = validateConversationRequest(request, "preview");
     if (validated === null || !("message" in validated)) throw closedError();
     const before = options.owner();
     if (before === null || options.canPreviewCreate() !== true) {
@@ -442,7 +449,7 @@ export function createFreshConversationBinding(
     }
     let raw: unknown;
     try {
-      raw = await options.transport.preview(validated, signal);
+      raw = await requestOriginal(options,"preview",validated, signal);
     } catch {
       throw closedError();
     }
@@ -460,13 +467,14 @@ export function createFreshConversationBinding(
 
   function makeCreateIntent(
     request: ConversationPreviewRequest,
-    previewData: FreshConversationData,
+    previewData: FreshConversationObservedData,
   ): CommandIntent | null {
-    const validated = validateFreshConversationRequest(request, "preview");
+    const validated = validateConversationRequest(request, "preview");
     if (validated === null || !("message" in validated)) return null;
     if (!OPERATION_KEY_RE.test(validated.operation_key)) return null;
     if (!isPlainObject(previewData)) return null;
-    if (previewData.state !== "PREVIEW_READY") return null;
+    if (previewData.state !== "PREVIEW_READY" || previewData.schema!==(conversationContractForKey(validated.operation_key)==="native-v2"
+      ?"mastermind.executive.fresh_conversation_data.v2":"mastermind.executive.fresh_conversation_data.v1")) return null;
     if (
       previewData.work_ref !== validated.work_ref ||
       previewData.operation_key !== validated.operation_key
@@ -496,13 +504,13 @@ export function createFreshConversationBinding(
     selection: ConversationRequestSelection,
     signal: AbortSignal,
   ): Promise<unknown> {
-    const validated = validateFreshConversationRequest(selection, "read");
+    const validated = validateConversationRequest(selection, "read");
     if (validated === null) throw closedError();
     const before = options.owner();
     if (before === null) throw closedError();
     let raw: unknown;
     try {
-      raw = await options.transport.read(
+      raw = await requestOriginal(options,"read",
         { work_ref: validated.work_ref, operation_key: validated.operation_key },
         signal,
       );
@@ -518,6 +526,8 @@ export function createFreshConversationBinding(
   }
 
   return {
+    ...(native?{native:native.binding}:{}),
+    newContract:options.newContract??"legacy-v1",
     controller,
     store: options.store,
     context: () => options.owner(),

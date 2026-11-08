@@ -224,3 +224,25 @@ def test_new_guard_is_in_existing_ci_gate():
 
     gate = resolve_gate(ROOT)
     assert "tests/test_claude_projection_parity.py" in gate["included"]
+
+
+def test_native_dsh_profile_is_unsupported_on_every_claude_surface(manifest):
+    profile_id = "operator.dsh.native-conversation.v1"
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / checker.POLICY, source_root=ROOT,
+    )
+    profile = registry.resolve(profile_id)
+    assert profile.enabled is True
+    assert profile.execution_surface == "dsh-native-web-acp"
+    assert profile.auth_realm == "dedicated-worker-account"
+    assert profile.skill_grants == ()
+    assert profile.mcp_servers == ()
+    assert profile.mcp_server_grants == ()
+    row = manifest["profiles"][profile_id]
+    assert row["profile_digest"] == profile.profile_digest
+    assert row["package_generation_digests"] == {}
+    assert set(row["surfaces"]) == set(checker.SURFACES)
+    for entry in row["surfaces"].values():
+        assert set(entry) == {"status", "reason"}
+        assert entry["status"] == "unsupported"
+        assert isinstance(entry["reason"], str) and entry["reason"].strip()

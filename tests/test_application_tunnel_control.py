@@ -75,8 +75,8 @@ def _commit_repository(root, files):
     return repo, commit, tree
 
 
-def _source_repository(root):
-    files = {name: (REPO / name).read_bytes() for name in SOURCE_FILES}
+def _source_repository(root, source_files=SOURCE_FILES):
+    files = {name: (REPO / name).read_bytes() for name in source_files}
     return _commit_repository(root, files)
 
 
@@ -88,17 +88,17 @@ def _upstream_repository(root):
     return repo, commit, tree, digests
 
 
-def _sealed_release(root, commit, tree):
+def _sealed_release(root, commit, tree, source_files=SOURCE_FILES):
     release = root
     release.mkdir(parents=True)
-    for name in SOURCE_FILES:
+    for name in source_files:
         target = release / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((REPO / name).read_bytes())
     for directory in sorted((p for p in release.rglob("*") if p.is_dir()), reverse=True):
         _own(directory, 0o755)
     _own(release, 0o755)
-    for name in SOURCE_FILES:
+    for name in source_files:
         _own(release / name, 0o444)
     release_manifest.create(release, commit, tree)
     return release
@@ -111,9 +111,11 @@ class FakeSystem:
                  client_version="1.12.0", server_version="1.12.0",
                  unit=None, listeners=(), processes=(), launchd=None,
                  bootstrap_returncode=0, bootout_returncode=0,
-                 label=control.LABEL, autoload=True, pid=5150):
+                 label=None, autoload=True, pid=5150,
+                 purpose=os_tunnel_entry.FABRIC_APPLICATION):
         self.calls = []
-        self.label = label
+        self.purpose = purpose
+        self.label = purpose.label if label is None else label
         self.autoload = autoload
         self.pid = pid
         self.client_sha = client_sha
@@ -133,7 +135,7 @@ class FakeSystem:
     def launchctl_bootstrap(self, plist):
         self.calls.append(("bootstrap", str(plist)))
         if self.bootstrap_returncode == 0 and self.autoload:
-            arguments = control._plist_arguments(Path(plist).read_bytes())
+            arguments = control._plist_arguments(Path(plist).read_bytes(), purpose=self.purpose)
             self._launchd[self.label] = (True, {"arguments": arguments, "pid": self.pid})
         return {"returncode": self.bootstrap_returncode, "stderr": ""}
 
@@ -156,7 +158,7 @@ class FakeSystem:
             if loaded and type(pid) is int and pid > 0 and info.get("pid") == pid:
                 return (expected[0].endswith("/chisel") and expected[1:] == [
                     "client", "--fingerprint", FINGERPRINT, "--keepalive", "20s",
-                    control.SERVER, control.REVERSE_TARGET])
+                    control.SERVER, self.purpose.reverse_target])
         return False
 
     def processes(self):
@@ -177,14 +179,17 @@ class FakeSystem:
 class Harness:
     """One real fixture: protected source, sealed release and upstream evidence."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, purpose=os_tunnel_entry.FABRIC_APPLICATION, host_root=None):
+        self.purpose = purpose
+        source_files = tuple(dict.fromkeys((*SOURCE_FILES, *purpose.import_closure,
+                                           purpose.template_path)))
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self.source, self.commit, self.tree = _source_repository(self.root / "source")
+        self.source, self.commit, self.tree = _source_repository(self.root / "source", source_files)
         self.upstream, self.upstream_commit, self.upstream_tree, self.upstream_files = \
             _upstream_repository(self.root / "upstream")
-        self.release = _sealed_release(self.root / "release", self.commit, self.tree)
-        self.paths = control.Paths.fixture(self.root / "host")
+        self.release = _sealed_release(self.root / "release", self.commit, self.tree, source_files)
+        self.paths = control.Paths.fixture(host_root or self.root / "host", purpose=purpose)
         for directory in (self.paths.executive_root, self.paths.executive_root / "config",
                           self.paths.plist.parent, self.paths.server_authfile.parent,
                           self.paths.server_binary.parent):
@@ -234,7 +239,7 @@ class Harness:
             "release_tree_sha": self.tree,
             "qualification_path": self.qualification_path,
             "paths": self.paths,
-            "system": FakeSystem(),
+            "system": FakeSystem(purpose=self.purpose),
         }
         arguments.update(overrides)
         return control.stage(**arguments)
@@ -246,7 +251,7 @@ class Harness:
         bundle_path = self.root / "bundle.json"
         bundle_path.write_bytes(raw)
         _own(bundle_path, 0o600)
-        system = FakeSystem(unit={"active": True, "main_pid": 4242,
+        system = FakeSystem(purpose=self.purpose, unit={"active": True, "main_pid": 4242,
                                   "argv": control._server_expected_argv(self.paths)})
         receipt = control.apply_server(bundle_path=bundle_path, expected_digest=expected,
                                        paths=self.paths, system=system)
@@ -876,7 +881,7 @@ def test_server_canonical_custody_follows_operation_not_bundle_directory(harness
     assert not list(harness.root.glob(".application-tunnel-*"))
 
 
-def test_server_drift_after_commit_is_never_overwritten(harness, monkeypatch):
+def test_server_additive_drift_is_observed_and_never_overwritten(harness, monkeypatch):
     request = _server_request(harness)
     control.apply_server(**request)
     doc = json.loads(harness.paths.server_authfile.read_bytes())
@@ -885,8 +890,10 @@ def test_server_drift_after_commit_is_never_overwritten(harness, monkeypatch):
     changed = harness.paths.server_authfile.read_bytes()
     monkeypatch.setattr(control, "_install", lambda *a, **kw: pytest.fail("foreign grant overwritten"))
     for action in (control.apply_server, control.reconcile_server):
-        with pytest.raises(ValueError, match="conflicts"):
-            action(**request)
+        receipt = action(**request)
+        assert receipt["authfile_observation"] == "OWN_GRANT_PRESENT_AUTHFILE_ADVANCED"
+        assert receipt["current_authfile_sha256"] == control.digest(changed)
+        assert receipt["server_reload_proven"] is False
     assert harness.paths.server_authfile.read_bytes() == changed
 
 

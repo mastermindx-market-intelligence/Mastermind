@@ -2,7 +2,9 @@ import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from "
 import type {OperationPointer,OperationState,OwnerContext} from "../../orchestration/operation-controller";
 import {NewConversationDraft} from "./NewConversationDraft";
 import {NewConversationOutcome} from "./NewConversationOutcome";
-import {decodeFreshConversationResult,decodeFreshConversationInitialResult,validateFreshConversationRequest,type FreshConversationData,type FreshConversationPayload,type FreshConversationLocator} from "./fresh-conversation";
+import {decodeFreshConversationInitialResult,type FreshConversationPayload,type FreshConversationLocator} from "./fresh-conversation";
+import {decodeConversationResult,validateConversationRequest,validConversationDraft,conversationContractForKey,type FreshConversationObservedData} from "./fresh-conversation-contract";
+import type {NativeFreshData} from "./native-fresh-result";
 import {sameConversationOwner,type ConversationPreviewRequest,type ConversationRequestSelection,type ConversationProjectChoice,type FreshConversationBinding} from "./fresh-conversation-binding";
 import {parseFreshConversationTarget} from "../../orchestration/fresh-conversation-target";
 import "./new-conversation-journey.css";
@@ -13,6 +15,20 @@ export interface FreshConversationInitialRead {
   readonly locator:FreshConversationLocator;
   /** Exact current readonly body/owner witness, never continuation authority. */
   current():boolean;
+}
+/** Current projection only; the consumer retains its separate sealed-initial witness. */
+export interface NativeFreshConversationObservation {
+ readonly selection:ConversationRequestSelection;
+ readonly data:NativeFreshData|null;
+ readonly binding:FreshConversationBinding;
+ readonly pendingParent:OperationPointer|null;
+ readonly creating:boolean;
+ readonly observing:boolean;
+ /** Latest live observation: exact object identity is required for controls. */
+ current():boolean;
+ /** Sealed initial identity under this same current original owner. */
+ initialCurrent():boolean;
+ refresh():Promise<void>;
 }
 export interface FreshConversationJourneyProps {
   locale:"en"|"zh-CN";
@@ -41,33 +57,40 @@ export interface FreshConversationJourneyProps {
   onBack:()=>void;
   /** Pure optional mount of separately qualified attended owner controls. */
   renderContinuation?:(read:FreshConversationInitialRead)=>ReactNode;
+  /** Same owner native branch, including ACTIVE before an initial result exists. */
+  renderNativeContinuation?:(observation:NativeFreshConversationObservation)=>ReactNode;
 }
 type Original=ConversationRequestSelection&{message?:string};
-type Preview={request:ConversationPreviewRequest;data:FreshConversationData;projectTitle:string|null;projectReadIdentity?:unknown};
+type Preview={request:ConversationPreviewRequest;data:FreshConversationObservedData;projectTitle:string|null;projectReadIdentity?:unknown};
 type View={scope:number;phase:"draft"|"preview"|"outcome";preview:Preview|null;original:Original|null;
-  projectTitle:string|null;data:FreshConversationData|null;operation:OperationState|null;
+  projectTitle:string|null;data:FreshConversationObservedData|null;operation:OperationState|null;
   retained:OperationPointer|null;lookup:boolean;other:boolean;discovering:boolean;busy:"preview"|"operation"|"read"|null;
-  opened:boolean;error:"unavailable"|"invalid"|"changed"|null};
+  observing:boolean;opened:boolean;error:"unavailable"|"invalid"|"changed"|null};
 const blank=(scope:number):View=>({scope,phase:"draft",preview:null,original:null,projectTitle:null,data:null,
- operation:null,retained:null,lookup:false,other:false,discovering:true,busy:null,opened:false,error:null});
+ operation:null,retained:null,lookup:false,other:false,discovering:true,busy:null,observing:false,opened:false,error:null});
 const ownerOf=(binding:FreshConversationBinding|null):OwnerContext|null=>{
  try{const value=binding?.context();return value?{...value}:null;}catch{return null;}
 };
 function selectionOf(pointer:OperationPointer|null):ConversationRequestSelection|null{
  if(!pointer?.targetKey)return null;
- if(pointer.kind==="conversation_consume"||pointer.kind==="conversation_turn"){
-  const key=pointer.kind==="conversation_consume"?/^mmos-conversation-consume-[0-9a-f]{40}$/:/^mmos-conversation-turn-[0-9a-f]{40}$/;
+ if(["conversation_consume","conversation_turn","conversation_resume","conversation_stop"].includes(pointer.kind)){
+  const suffix=pointer.kind.slice("conversation_".length);
+  const key=new RegExp("^mmos-(?:conversation|native)-"+suffix+"-[0-9a-f]{40}$");
   if(typeof pointer.operationKey!=="string"||!key.test(pointer.operationKey))return null;
   const original=parseFreshConversationTarget(pointer.targetKey);
   return original&&"operation_key"in original?{work_ref:original.work_ref,operation_key:original.operation_key}:null;
  }
  if(pointer.kind!=="conversation_create")return null;
- return validateFreshConversationRequest({work_ref:pointer.targetKey,operation_key:pointer.operationKey},"status")
+ return validateConversationRequest({work_ref:pointer.targetKey,operation_key:pointer.operationKey},"status")
   ?{work_ref:pointer.targetKey,operation_key:pointer.operationKey}:null;
 }
 const sameSelection=(a:ConversationRequestSelection,b:ConversationRequestSelection)=>a.work_ref===b.work_ref&&a.operation_key===b.operation_key;
-const canOpen=(data:FreshConversationData|null)=>!!data?.locator&&(
- data.state==="CREATED"&&data.session!==null||data.state==="SETTLED");
+const canOpen=(data:FreshConversationObservedData|null)=>!!data?.locator&&(
+ data.state==="CREATED"&&data.session!==null||data.state==="SETTLED"||
+ data.schema==="mastermind.executive.fresh_conversation_data.v2"&&data.state==="IDLE")&&
+ (data.schema!=="mastermind.executive.fresh_conversation_data.v2"||!!data.result);
+const samePointer=(a:OperationPointer|null,b:OperationPointer|null)=>!!a&&!!b&&
+ a.kind===b.kind&&a.operationKey===b.operationKey&&a.targetKey===b.targetKey;
 
 /** Presentation reconciliation over the incumbent controller/store. No new
  * operation lifecycle, persistent payload, session registry, polling or mount dispatch. */
@@ -83,6 +106,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  const latest=useRef(props);latest.current=props;
  const current=useRef(view);current.current=view;
  const root=useRef<HTMLDivElement>(null),ticket=useRef(0),readAbort=useRef<AbortController|null>(null);
+ const progressAbort=useRef<AbortController|null>(null),progressTicket=useRef(0),progressBusy=useRef(false);
  const committed=useRef({scope,binding:props.binding});
  const focus=useRef<{selector:string;from:Element|null}|null>(null);
  function patch(change:Partial<View>){const old=current.current;if(old.scope!==scope)return;
@@ -96,7 +120,8 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  function gestureFocus(selector:string,from:Element|null=document.activeElement){focus.current={selector,from};}
  useLayoutEffect(()=>{
   if(committed.current.scope!==scope){committed.current.binding?.controller.invalidate();
-   readAbort.current?.abort();ticket.current++;focus.current=null;committed.current={scope,binding:props.binding};}
+   readAbort.current?.abort();ticket.current++;progressAbort.current?.abort();progressTicket.current++;progressBusy.current=false;
+   focus.current=null;committed.current={scope,binding:props.binding};}
  },[scope,props.binding]);
  useLayoutEffect(()=>{
   const requested=focus.current;if(!requested||!props.active)return;
@@ -113,22 +138,22 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    if(!valid||!live(c))return;
    const pending=selectionOf(pointer),supplied=latest.current.originalLookup;
    const lookup=!pointer&&supplied&&sameConversationOwner(supplied.owner,c.owner)
-    ?validateFreshConversationRequest(supplied.selection,"status"):null;
+    ?validateConversationRequest(supplied.selection,"status"):null;
    const original=pending??(lookup?{work_ref:lookup.work_ref,operation_key:lookup.operation_key}:null);
    patch({discovering:false,retained:pointer,lookup:!!lookup,other:!!pointer&&!pending,
     original,phase:pointer||lookup?"outcome":"draft",operation:null});
   },()=>{if(valid&&live(c))patch({discovering:false,error:"unavailable",other:true});});
   return()=>{valid=false;};
  },[scope]);
- useEffect(()=>()=>{readAbort.current?.abort();committed.current.binding?.controller.invalidate();},[]);
+ useEffect(()=>()=>{readAbort.current?.abort();progressAbort.current?.abort();committed.current.binding?.controller.invalidate();},[]);
 
  async function readOriginal(c:Capture,original:Original){
   const raw=await c.binding.readOriginal({work_ref:original.work_ref,operation_key:original.operation_key},readAbort.current!.signal);
   if(!live(c)||readAbort.current?.signal.aborted)return null;
-  const decoded=decodeFreshConversationResult(raw,"read",original);
+  const decoded=decodeConversationResult(raw,"read",{work_ref:original.work_ref,operation_key:original.operation_key});
   if(!decoded?.ok||!decoded.data)return null;
   const data=decoded.data;
-  if(data.result!==null){
+  if(data.schema!=="mastermind.executive.fresh_conversation_data.v2"&&data.result!==null){
    if(!data.locator)return null;
    const result=decodeFreshConversationInitialResult(data.result,data.locator);
    if(!result)return null;
@@ -140,14 +165,14 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   if(current.current.busy||current.current.discovering||current.current.retained||current.current.other)return;
   const origin=document.activeElement,c=capture(),p=latest.current;
   if(!c||!p.workRef||!projectCurrent(p.workRef)||!sameConversationOwner(p.draftOwner,c.owner)){patch({error:"unavailable"});return;}
-  const syntax=validateFreshConversationRequest({work_ref:p.workRef,operation_key:"syntax-check",message:p.message},"preview");
+  const syntax=validConversationDraft(p.workRef,p.message,c.binding.newContract);
   if(!syntax){patch({error:"invalid"});return;}
   const previous=current.current.original;
   patch({busy:"preview",error:null,preview:null});
   const id=++ticket.current;readAbort.current?.abort();readAbort.current=new AbortController();
   try{
    const raw=previous?{work_ref:p.workRef,operation_key:previous.operation_key,message:p.message}:c.binding.makePreviewRequest(p.workRef,p.message);
-   const checked=validateFreshConversationRequest(raw,"preview");
+   const checked=validateConversationRequest(raw,"preview");
    if(!checked||!("message"in checked)){patch({busy:null,error:"unavailable"});return;}
    const request:ConversationPreviewRequest={work_ref:checked.work_ref,operation_key:checked.operation_key,message:checked.message};
    // Select the ordinary original key before any preview await; no effect or reservation.
@@ -158,7 +183,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    if(!live(c)||ticket.current!==id||readAbort.current.signal.aborted)return;
    if(latest.current.workRef!==request.work_ref||latest.current.message!==request.message||latest.current.projectReadIdentity!==p.projectReadIdentity||!projectCurrent(request.work_ref)){
     patch({busy:null,error:"changed"});return;}
-   const decoded=decodeFreshConversationResult(rawResult,"preview",request);
+   const decoded=decodeConversationResult(rawResult,"preview",request);
    if(!decoded?.ok||!decoded.data?.preview){patch({busy:null,error:"unavailable"});return;}
    gestureFocus(".new-conversation-preview h1",origin);
    patch({busy:null,phase:"preview",preview:{request,data:decoded.data,
@@ -179,14 +204,60 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    patch({operation:c.binding.controller.getState()});
    const state=await pending;if(!live(c))return;
    const retained="pointer"in state?state.pointer:null;
-   patch({operation:state,retained,busy:null});
-   if(state.status==="accepted"){
+   progressAbort.current?.abort();progressTicket.current++;progressBusy.current=false;
+   const retainedSelection=selectionOf(retained);
+   const foreign=!!retained&&(!retainedSelection||!sameSelection(retainedSelection,shown.request));
+   patch({operation:state,retained,busy:null,observing:false,other:foreign,...(foreign?{data:null}: {})});
+   if(foreign)return;
+   if(conversationContractForKey(shown.request.operation_key)==="native-v2"&&
+     (state.status==="accepted"||samePointer(retained,{kind:"conversation_create",operationKey:shown.request.operation_key,targetKey:shown.request.work_ref}))){
+    await observeNative(false,false);
+   }else if(state.status==="accepted"){
     readAbort.current=new AbortController();patch({busy:"read"});
     const data=await readOriginal(c,shown.request);if(live(c))patch({data,busy:null,error:data?null:"unavailable"});
    }
   }catch{if(live(c))patch({busy:null,operation:c.binding.controller.getState(),error:"unavailable"});}
  }
+ /** Read the original while its dispatch remains outstanding. This observation
+  * owns neither the parent promise nor its abort signal and never submits. */
+ async function observeNative(open=false,recover=true){
+  const c=capture(),v=current.current,original=v.original??selectionOf(v.retained);
+  if(!c||!original||conversationContractForKey(original.operation_key)!=="native-v2"||progressBusy.current||
+    v.discovering||v.other||v.phase!=="outcome"||v.busy&&v.busy!=="operation")return;
+  const selected={work_ref:original.work_ref,operation_key:original.operation_key};
+  const id=++progressTicket.current,abort=new AbortController(),store=c.binding.store,read=store.read;
+  progressAbort.current?.abort();progressAbort.current=abort;progressBusy.current=true;
+  patch({observing:true,error:null});
+  const valid=()=>live(c)&&!abort.signal.aborted&&progressTicket.current===id&&
+    c.binding.store===store&&store.read===read&&!!current.current.original&&sameSelection(current.current.original,selected);
+  try{
+   const pointer=await read.call(store,c.owner.principalScope,abort.signal);
+   if(!valid())return;
+   const originalPointer=selectionOf(pointer);
+   if(pointer&&(!originalPointer||!sameSelection(originalPointer,selected))){
+    patch({other:true,retained:pointer});return;
+   }
+   // A draft key selected before admission is not evidence of dispatch.
+   if(!pointer&&v.busy==="operation")return;
+   if(!pointer&&!v.lookup&&!v.data&&v.operation?.status!=="accepted")return;
+   latest.current.onOriginalKeySelected(selected);if(!valid())return;
+   if(recover&&pointer?.kind==="conversation_create"&&v.busy!=="operation"){
+    const state=await c.binding.controller.recover({reconcileNative:true,expectedPointer:pointer});if(!valid())return;
+    if(state.pointer&&!samePointer(state.pointer,pointer)){patch({other:true,retained:state.pointer});return;}
+    patch({operation:state,retained:state.pointer});
+   }else if(pointer)patch({retained:pointer});
+   const raw=await c.binding.readOriginal(selected,abort.signal);if(!valid())return;
+   const decoded=decodeConversationResult(raw,"read",selected);
+   if(!decoded?.ok||decoded.data.schema!=="mastermind.executive.fresh_conversation_data.v2"){
+    patch({error:"unavailable"});return;
+   }
+   patch({data:decoded.data,opened:(open||current.current.opened)&&canOpen(decoded.data),error:null});
+  }catch{if(valid())patch({error:"unavailable"});}
+  finally{if(progressTicket.current===id){progressBusy.current=false;if(live(c))patch({observing:false});}}
+ }
  async function check(open=false){
+  const key=current.current.original?.operation_key??selectionOf(current.current.retained)?.operation_key;
+  if(conversationContractForKey(key)==="native-v2"){await observeNative(open);return;}
   const origin=document.activeElement,c=capture(),v=current.current;if(!c||v.busy||v.discovering||v.other)return;
   const original=v.original??selectionOf(v.retained);if(!original){patch({error:"unavailable"});return;}
   patch({busy:"read",error:null});readAbort.current?.abort();readAbort.current=new AbortController();
@@ -215,7 +286,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   // Retire only a stale presentation hint after the incumbent owner cleared
   // its durable slot. This is not an effect verdict or a source request.
   const retained=current.current.retained,c=capture();
-  if(c&&retained&&(retained.kind==="conversation_consume"||retained.kind==="conversation_turn")){
+  if(c&&retained&&["conversation_consume","conversation_turn","conversation_resume","conversation_stop"].includes(retained.kind)){
    Promise.resolve().then(()=>c.binding.store.read(c.owner.principalScope)).then(pointer=>{
     if(live(c)&&!pointer&&current.current.retained===retained)patch({retained:null});
    },()=>{});
@@ -227,7 +298,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  async function refreshPendingOriginal(){
   const c=capture(),v=current.current,pointer=v.retained;
   if(!c||!latest.current.active||v.busy||v.discovering||!pointer||
-    (pointer.kind!=="conversation_consume"&&pointer.kind!=="conversation_turn"))return false;
+    !["conversation_consume","conversation_turn","conversation_resume","conversation_stop"].includes(pointer.kind))return false;
   const expected=selectionOf(pointer);
   if(!expected||!v.original||!sameSelection(v.original,expected))return false;
   const store=c.binding.store,read=store.read,context=c.binding.context,id=++ticket.current;
@@ -268,7 +339,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     }
     const supplied=latest.current.originalLookup;
     const lookup=!current.current.original&&supplied&&sameConversationOwner(supplied.owner,c.owner)
-     ?validateFreshConversationRequest(supplied.selection,"status"):null;
+     ?validateConversationRequest(supplied.selection,"status"):null;
     patch({discovering:false,retained:v.operation?.status==="unknown"?v.retained:null,other:false,error:null,
      ...(lookup?{original:{work_ref:lookup.work_ref,operation_key:lookup.operation_key},lookup:true}: {})});
    }catch{if(live(c)&&ticket.current===id)patch({discovering:false,other:true,error:"unavailable"});return;}
@@ -296,8 +367,8 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
   {view.lookup&&!view.operation?<p role="status">{t("An original conversation request is selected. Check its status to reopen it.","已选择原对话请求。请查询状态后重新打开。")}</p>:null}
   {view.phase==="outcome"&&!view.operation?<p>{t("Going back does not cancel the original request.","返回不会取消原请求。")}</p>:null}
   {view.other?<p role="status">{t("Another request needs its existing status controls before a new conversation can be created.","请先通过原有状态控件处理另一条请求，再创建新对话。")}</p>:null}{error}</>;
- const validDraft=!!props.workRef&&projectCurrent(props.workRef)&&!!validateFreshConversationRequest({work_ref:props.workRef,operation_key:"syntax-check",message:props.message},"preview");
- const draft=<NewConversationDraft locale={props.locale} projects={props.projects.filter(item=>projectCurrent(item.workRef))} projectsState={props.projectsState}
+ const validDraft=!!props.workRef&&projectCurrent(props.workRef)&&validConversationDraft(props.workRef,props.message,props.binding?.newContract);
+ const draft=<NewConversationDraft locale={props.locale} contract={props.binding?.newContract} projects={props.projects.filter(item=>projectCurrent(item.workRef))} projectsState={props.projectsState}
   workRef={props.workRef} onWorkRefChange={value=>{patch({preview:null,error:null});props.onWorkRefChange(value);}}
   message={ownsDraft?props.message:""} onMessageChange={value=>{patch({preview:null,error:null});props.onMessageChange(value);}}
   readOnly={!actualOwner||!!view.busy||view.other} onBack={back} feedback={feedback}
@@ -306,7 +377,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
  const prepared=view.preview;
  const initialRead=useMemo<FreshConversationInitialRead|null>(()=>{
   const data=view.data,original=view.original,c=capture();
-  if(!data?.result||!data.locator||!original||!c)return null;
+  if(!data?.result||data.schema==="mastermind.executive.fresh_conversation_data.v2"||!data.locator||!original||!c)return null;
   const selection={work_ref:original.work_ref,operation_key:original.operation_key};
   return {selection,result:data.result,locator:data.locator,current:()=>{
    const visible=current.current;
@@ -314,7 +385,31 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     !visible.busy&&visible.data===data&&!!visible.original&&sameSelection(visible.original,selection);
   }};
  },[scope,view.data,view.original?.work_ref,view.original?.operation_key,actualOwner?.principalScope,actualOwner?.generation]);
- const continuation=initialRead&&view.opened&&props.active?props.renderContinuation?.(initialRead):undefined;
+ const nativeObservation=useMemo<NativeFreshConversationObservation|null>(()=>{
+  const original=view.original,c=capture(),data=view.data;
+  if(!original||!c||view.other||view.discovering||conversationContractForKey(original.operation_key)!=="native-v2"||
+    view.retained&&(!selectionOf(view.retained)||!sameSelection(selectionOf(view.retained)!,original))||
+    data&&data.schema!=="mastermind.executive.fresh_conversation_data.v2")return null;
+  const selection={work_ref:original.work_ref,operation_key:original.operation_key};
+  const ownerCurrent=()=>root.current?.isConnected===true&&live(c)&&latest.current.active&&
+   !current.current.other&&!current.current.discovering&&current.current.phase==="outcome"&&
+   !!current.current.original&&sameSelection(current.current.original,selection);
+  return {selection,data,binding:c.binding,pendingParent:view.retained?.kind==="conversation_create"?view.retained:null,
+   creating:view.busy==="operation",observing:view.observing,refresh:()=>observeNative(false,false),current:()=>ownerCurrent()&&current.current.data===data,
+   initialCurrent:()=>{
+    const next=current.current.data,locator=data?.locator;
+    // A newly decoded status object retires control facts, but not the same
+    // immutable original answer. A different owner, selector, seal or locator
+    // still withdraws this witness immediately, including before React commits.
+    return ownerCurrent()&&!!data?.result&&!!locator?.job_id&&!!locator.attempt_id&&
+     next?.schema==="mastermind.executive.fresh_conversation_data.v2"&&next.result?.digest===data.result.digest&&
+     next.locator?.work_ref===locator.work_ref&&next.locator.root_job_id===locator.root_job_id&&
+     next.locator.job_id===locator.job_id&&next.locator.attempt_id===locator.attempt_id;
+   }};
+ },[scope,view.data,view.original?.work_ref,view.original?.operation_key,view.retained,view.busy,view.observing,view.other,view.discovering,props.binding]);
+ const continuation=nativeObservation&&props.active&&view.phase==="outcome"
+  ?props.renderNativeContinuation?.(nativeObservation)
+  :initialRead&&view.opened&&props.active?props.renderContinuation?.(initialRead):undefined;
  const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
   {view.phase==="draft"?draft:view.phase==="preview"&&prepared?
    <section className="new-conversation-preview"><header><h1>{t("Review new conversation","预览新对话")}</h1>
@@ -328,10 +423,11 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
     <p>{t("Creation still depends on the current conversation checks.","创建仍需通过当前的对话检查。")}</p>
     <details><summary>{t("Sources and access","来源与访问")}</summary><dl>{Object.entries(prepared.data.preview??{}).map(([key,value])=>
      <div key={key}><dt>{key}</dt><dd><code>{typeof value==="object"?JSON.stringify(value):String(value)}</code></dd></div>)}</dl></details>
-   </section>:<>{feedback}<NewConversationOutcome locale={props.locale} data={view.data} operationState={view.operation}
+   </section>:<>{feedback}<NewConversationOutcome locale={props.locale} contract={nativeObservation?"native-v2":"legacy-v1"} data={view.data} operationState={view.operation}
     awaitingCheck={(view.lookup||!!view.retained&&view.retained.kind!=="conversation_create")&&!view.data&&!view.operation&&!view.busy&&!view.error}
     originalMessage={view.original&&"message"in view.original?view.original.message??null:null} projectTitle={view.projectTitle}
-    opened={view.opened} busy={!!view.busy||view.discovering||view.other} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
+    opened={view.opened} busy={!!view.busy||view.discovering||view.other} observing={view.observing}
+    canObserveWhileCreating={!!nativeObservation&&view.busy==="operation"&&!view.other&&!view.discovering} activity={view.busy==="operation"?"creating":view.busy==="read"?"checking":null} canOpen={canOpen(view.data)&&!view.other&&!!actualOwner}
     onCheck={()=>void check()} onOpen={()=>void check(true)} onBack={back} continuation={continuation}/></>}
  </div>;
  return {panel,start,refreshPendingOriginal,hasUnresolvedOriginal:!!view.retained||view.other||view.busy==="operation"||view.discovering||view.operation?.status==="unknown"||view.lookup&&!canOpen(view.data)};

@@ -91,14 +91,17 @@ async def _bounded_receive_body(
     receive: Callable[[], Awaitable[Mapping[str, Any]]],
     *,
     deadline_seconds: float,
+    max_bytes: int = MAX_REQUEST_BYTES,
 ) -> bytes:
-    """Stream the body up to MAX_REQUEST_BYTES with a receive deadline.
+    """Stream the body up to the source-selected byte limit with a deadline.
 
     A duplicate header, a malformed JSON-RPC frame, or a non-finite number
     inside the body all close as invalid-input; the closed vocabulary is
     the same ``invalid_input`` code the existing app uses.
     """
 
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise _InvalidBody("invalid body byte limit")
     body = bytearray()
     total = 0
     frames = 0
@@ -124,8 +127,8 @@ async def _bounded_receive_body(
             if not isinstance(chunk, (bytes, bytearray)):
                 raise _InvalidBody("body chunk is not bytes")
             total += len(chunk)
-            if total > MAX_REQUEST_BYTES:
-                raise _InvalidBody("body exceeds 65536 bytes")
+            if total > max_bytes:
+                raise _InvalidBody(f"body exceeds {max_bytes} bytes")
             body.extend(chunk)
             if not event.get("more_body", False):
                 return bytes(body)

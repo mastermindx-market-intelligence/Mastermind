@@ -1,0 +1,118 @@
+{
+  "fences": {
+    "os_assets_py": "PR2175 untouched",
+    "pr1870": "untouched",
+    "publication": "No root commit/push/install; original managed carrier and incumbent package/access writer preserved"
+  },
+  "frontier": [
+    "Authenticated native v2 initial input/result/reference and Send/resume/Stop through existing owners",
+    "Installed native admission/observation producer and exact original company-frame delegation",
+    "Eligible governed-tool execution evidence, including separately delivered PR2210 seam only when its real owners are present",
+    "Protected source integration/CI/merge and signed-in production real-path acceptance"
+  ],
+  "installed": false,
+  "production_accepted": false,
+  "proved": [
+    "Original immutable native creator and exact latest flushed result select native completion; no planner envelope or one-shot COO expansion",
+    "All bounded physical generations, original closure observations and TX8 are validated before original Attempt terminal transaction releases quota",
+    "G2 may close with historical G1 latest result; physical target remains separately exact; no G3",
+    "All native graceful-stop dispositions including failed-turn containment retain original Executive custody until TX8; only explicit idle G1 is resumable",
+    "Original non-idle native close INTENT fences TX5 and TX10; unknown effects are reconciled without another Stop",
+    "New native useful-close reservation refuses cancellation; original committed INTENT can still record physical closure after cancellation",
+    "Supervisor continues original APPLIED, ABANDONED and terminal phases without replay; completed readback validates Job/Attempt/result/Event and quota no longer held by this Attempt",
+    "Cancellation uses original acknowledgment and permits unsealed unsuccessful followup history without asserting successful native completion",
+    "Generation-targeted TX8 checks latest target and positive physical evidence in its transaction; stale G1 and intervening UNKNOWN/HELD observations refuse while CURRENT custody remains repairable",
+    "Legacy no-option lifecycle semantics remain covered by original Supervisor/OHF/terminal regressions"
+  ],
+  "provider_calls": 0,
+  "qualification": {
+    "changed_inputs": [],
+    "installed": false,
+    "log": "/private/tmp/mmx-dsh-c16-terminal-final-20261107.log",
+    "log_sha256": "c892c3498f337dbfbbc879bb9e19c12d95ed788cdc6836b5813813447e7e8722",
+    "provider_calls": 0,
+    "returncode": 0,
+    "schema": "mastermind.source_qualification.v1",
+    "seconds": 81.05,
+    "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+    "source_sha256": {
+      "config/executive_dsh_native_conversation_capabilities.json": "b2a04c939683afdb36ea0a2c4bbfcdbdcb5141150772853dc1ee28ab4fb50612",
+      "control_plane/executive_agent_capabilities.py": "57f65be34637d23b400b331dc0b0b4f82ed7cdae3a5460f788a053840167d9da",
+      "control_plane/executive_coo_cycle.py": "8a59247fa41b596ea76e9b298048249da6719ad7ef682282352fcd400735819f",
+      "control_plane/executive_operator_harness_port.py": "c4417dcbe8d86379f7b3d548c381b98ca41c73cdf0e69d9b5ac12ea67af59a3b",
+      "control_plane/executive_operator_supervisor.py": "0a43ccec06a206f0324d8eb0837819a881ee43e0eb5067043c2e138fb8b01cd6",
+      "control_plane/executive_runtime.py": "d14fa906bcb56940088e9e4563b4eec092739a5b2a9867ffb3c5b200912a63ec",
+      "control_plane/native_conversation_result.py": "85bb47b87683e854e791faf21e4e74816910d019cd58e1b2204ef03221b646ec",
+      "control_plane/operator_harness_contract.py": "97ec936b68be3da98a662505de351c672bc83a5bfc5491f40b491a070ca1707f",
+      "control_plane/operator_harness_orchestrator.py": "51cee1400c079b7f101e1e91fdab04d7e089a772e422f79ed076152b7e1a18c6",
+      "control_plane/remote_operator_harness_adapter.py": "b948f1423ae65a54009adc0515e24d17de901cd78aed0f8dcbf3634419b83ee0",
+      "tests/test_dsh_native_idle_close.py": "dbef63a745be4bc88087fd360ecc0291819a17f5353cb86c1fca874b23897671",
+      "tests/test_dsh_native_runtime_binding.py": "eaec42c3deafcb5c9c1e99da25456f3f6597455ec5ce739e283084464251cbd4",
+      "tests/test_dsh_native_runtime_result.py": "549589d9308713c7fa02a05a4f8cc5c1c6964f564941de46c4740ce3ab584a71",
+      "tests/test_dsh_native_runtime_resume.py": "c5b07335f89994e2e3b720447871235c74f80757cfce799543009ad64769fb15",
+      "tests/test_dsh_native_supervisor_binding.py": "26bc46b97c3ab0f75dfd5e8f3734b9d268c3156e292d6c6997d479913c899fb7",
+      "tests/test_dsh_native_supervisor_conversation.py": "7884b76a2ebcd3982b8b9800732bde180622d91de576db324f864472db5cd1f6",
+      "tests/test_dsh_native_terminal.py": "77775037bbd2083c89fdd0862f669b078c55d790492f83b0613efcc32a00c1c8",
+      "tests/test_executive_operator_supervisor.py": "ff72353e5b15a1155fccaff1ad042a223bbf3ef523358615fa900d877cd9ebe4",
+      "tests/test_executive_os_phase1fc.py": "af410ead9b1f76bd82b9f4afa45451d121e6b2a2baa043937935fa692ff8ede4",
+      "tests/test_executive_terminal_return.py": "eb0b35aaf3c896b59f4e1723b525b4d07384f87a805627f6802a101c159071fc",
+      "tests/test_native_retained_runtime.py": "1ae8f6275f95b4a073bab33e9d8eafe8592ad338edf457a225e6c82fdf6c7185",
+      "tests/test_ohf_p1b_runtime.py": "7c8d21ee4b58fe60255138f833b99af0b201844603bbdcfdae47438ef1c7e837",
+      "tests/test_ohf_p1b_runtime_adversarial.py": "d1984101786166702678877a95478f01250b9eefe6cc6215d043210d1b097f2a",
+      "tests/test_ohf_p1b_runtime_orchestrator.py": "82609fbc34d99bfbea663094b91fde0fd13ec99415f676c501ed743365dd870b"
+    },
+    "source_unchanged": true,
+    "summary": {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "skipped": "0",
+      "tests": "365",
+      "time": "79.603",
+      "timestamp": "2026-11-07T04:45:46.391464-07:00"
+    },
+    "tests": [
+      "tests/test_dsh_native_terminal.py",
+      "tests/test_dsh_native_idle_close.py",
+      "tests/test_dsh_native_supervisor_conversation.py",
+      "tests/test_dsh_native_supervisor_binding.py",
+      "tests/test_dsh_native_runtime_result.py",
+      "tests/test_dsh_native_runtime_resume.py",
+      "tests/test_dsh_native_runtime_binding.py",
+      "tests/test_executive_operator_supervisor.py",
+      "tests/test_executive_terminal_return.py",
+      "tests/test_executive_os_phase1fc.py",
+      "tests/test_native_retained_runtime.py",
+      "tests/test_ohf_p1b_runtime.py",
+      "tests/test_ohf_p1b_runtime_orchestrator.py",
+      "tests/test_ohf_p1b_runtime_adversarial.py"
+    ],
+    "xml": "/private/tmp/mmx-dsh-c16-terminal-final-20261107.xml"
+  },
+  "regression_preimages": {
+    "cancellation_after_intent": {
+      "expected_failure": true,
+      "log": "/private/tmp/mmx-dsh-c16-cancel-preimage-20261107.log",
+      "sha256": "5f0537a74cf221edcaaa609408f88abb05714ec02b85556b8086d9d725f2e748"
+    },
+    "final_stop_reservation": {
+      "expected_failure": true,
+      "log": "/private/tmp/mmx-dsh-c16-final-crash-preimage-20261107.log",
+      "sha256": "8064173d69757d8a7b94eaebd4f75e580a09a632f96b00b1a9214f7357f80775"
+    },
+    "physical_observation_changed_before_tx8": {
+      "expected_failure": true,
+      "log": "/private/tmp/mmx-dsh-c16-tx8-race-preimage-20261107.log",
+      "sha256": "2ea9175bc281146d250a4f230da7d7cf7da5df1cce7fa1ba4eddc4b9b4a71cac"
+    }
+  },
+  "schema": "mastermind.deepseek.native_terminal_custody_evidence.v1",
+  "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+  "source_pr": 2177,
+  "status": "SOURCE_QUALIFIED_NOT_INSTALLED",
+  "supersedes": {
+    "native-idle-custody-20261107.json": "C16 extends retained custody to native containment closes; ordinary non-native no-disposition behavior remains unchanged."
+  },
+  "test_seams": "Actual Runtime, original transactions, immutable creators, leases, custody and Events. Native policy/input/provider/process observations use explicit inert fixture seams. No production enabling or installed authority is inferred."
+}

@@ -142,3 +142,63 @@ def test_same_control_path_drives_distinct_claimed_provider_profiles(tmp_path, m
         command_id=f'coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1'))
     assert outcome.attempt.status is AttemptStatus.COMPLETED and len(seen) == 1
     assert outcome.attempt.requested_execution_profile['provider'] == expected[0]
+
+
+
+def _native_composition():
+    from control_plane.native_conversation_binding import NativeConversationHostComposition, NativeConversationRegistration
+    return NativeConversationHostComposition(
+        NativeConversationRegistration("native-fixture", "dsh-native", "dsh.native.conversation",
+            "host-" + "d" * 64, "e" * 64), lambda: None)
+
+
+@pytest.mark.parametrize("fault", ["mapping", "missing_factory", "unarmed", "retired_source"])
+def test_native_host_composition_refuses_before_broker_or_socket(tmp_path, monkeypatch, fault):
+    from control_plane.native_conversation_binding import NativeConversationHostComposition
+    def forbidden(*a, **k):
+        pytest.fail("invalid native composition reached broker or socket")
+    monkeypatch.setattr(broker, "WorkerBrokerClient", forbidden)
+    monkeypatch.setattr(cli, "activate_launchd_socket", forbidden)
+    composition = _native_composition()
+    raw = {"coo_operator_harness_armed": fault != "unarmed"}
+    factory = None if fault == "missing_factory" else lambda *a, **k: None
+    if fault == "mapping":
+        composition = {"registration": composition.registration, "current": composition.current}
+    if fault == "retired_source":
+        composition = NativeConversationHostComposition(composition.registration, lambda: False)
+    with pytest.raises(cli.ServiceError, match="native conversation"):
+        cli._service_from_config(raw, native_conversation_composition=composition,
+            claimed_operator_adapter_factory=factory)
+
+
+def test_native_selection_binds_only_when_original_runtime_factory_is_called(tmp_path, monkeypatch):
+    from control_plane import native_conversation_binding as native
+    raw = cli.load_control_config(_write(tmp_path, _raw(tmp_path,
+        coo_autonomy_armed=True, coo_operator_harness_armed=True,
+        operator_harness_binary_digest="a" * 64, operator_harness_version="fixture-only")))
+    captured, bound, dispatched = {}, [], []
+    monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda *a, **k: object())
+    def service(config, **bindings):
+        captured.update(bindings)
+        return SimpleNamespace(config=config, runtime=None)
+    monkeypatch.setattr(cli, "ExecutiveControlService", service)
+    def original_claimed(*a, **k):
+        dispatched.append((a, k))
+        raise AssertionError("selection cannot dispatch")
+    composition = _native_composition()
+    def bind(actual, *, registration, current):
+        assert actual is result and actual.runtime is runtime
+        assert registration is composition.registration
+        assert current() is None
+        bound.append(actual)
+    monkeypatch.setattr(native, "bind_installed_native_conversation", bind)
+    result = cli._service_from_config(raw, autonomy_guard=lambda: None, initial_canary={},
+        native_conversation_composition=composition, claimed_operator_adapter_factory=original_claimed)
+    assert not bound and not dispatched and result.runtime is None
+    runtime = object()
+    result.runtime = runtime
+    supervisor = captured["operator_supervisor_factory"](runtime, object())
+    assert bound == [result] and not dispatched
+    assert supervisor._claimed_adapter_factory is original_claimed
+    assert supervisor.adapter_factory is None

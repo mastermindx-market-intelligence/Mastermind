@@ -1,0 +1,178 @@
+{
+  "canonical_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2177#issuecomment-6707499732",
+  "closed_lanes": [
+    "installed receipt/config-read denial",
+    "paid Fabric/VPS denial",
+    "administrative branch-protection read403",
+    "foreign-worktree GC/repack",
+    "active-service restart prohibited"
+  ],
+  "do_not_redo": [
+    "accepted Hermes2180/2228 installed journey",
+    "accepted C21 inert native canary"
+  ],
+  "governing_pin": "1981aea5122943ce59d7ebe9706ddf5a658b377d",
+  "hosted_c39": {
+    "acp": {
+      "conclusion": "success",
+      "run": 42459553327
+    },
+    "ci": {
+      "run": 42459553245,
+      "state": "in_progress"
+    },
+    "codeql": {
+      "run": 42459549642,
+      "state": "in_progress"
+    },
+    "head": "ba0dd5be56d1b37bb96800144898b7069a294a18",
+    "mcp": {
+      "conclusion": "success",
+      "run": 42459553222
+    },
+    "observation": "One bounded exact-head run/job snapshot; no completed failure jobs, no reruns or repeated old-run reads.",
+    "os": {
+      "conclusion": "success",
+      "run": 42459553241
+    },
+    "rwe": {
+      "run": 42459553278,
+      "state": "in_progress"
+    }
+  },
+  "next_action": "Publish this same carrier, verify exact merge parents/tree/readback, continue bounded native consumer readiness and existing permitted source/release path.",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "pr": 2177,
+  "prior_exact_head_gate": {
+    "disposition": "D7 source identity repaired and all12 D7 cases now pass in the C40 qualification.",
+    "head": "ba0dd5be56d1b37bb96800144898b7069a294a18",
+    "log_sha256": "adbc4a89239b211bdd05b73f3ab7c22647159ce752729d9835778a84a1f40996",
+    "receipt_path": "/private/tmp/mmx-dsh-c39-committed-head-tests-20261108-pro1.json",
+    "receipt_sha256": "a2ca80ea0451cfbdf4548ccd0e0557473e7686dfe63e776a3a5519de91dee420",
+    "result": "337 passed, 1 D7 failure; D8 and actual Linux git archive passed"
+  },
+  "protected_delta": {
+    "commits": [
+      "a82295edb8aa0c7560bf874f8f7469bf3c4bd9cf",
+      "ee9a15ddd7d65e6faabad07968323988ea0eddfb",
+      "1981aea5122943ce59d7ebe9706ddf5a658b377d"
+    ],
+    "paths": [
+      ".cursor/rules/reuse-first.mdc",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "docs/NATIVE_EXECUTION_BRIEF.md",
+      "docs/REUSE_FIRST_ENGINEERING.md",
+      "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md",
+      "docs/evidence/2026-11-07-mission-continuation-project-instructions.txt",
+      "docs/evidence/2026-11-07-reuse-first-project-instructions.txt",
+      "docs/hermes/REUSE_FIRST_PROFILE_ROLLOUT.md",
+      "docs/runbooks/web-long-horizon-instructions-rollout-2026-11-07.md",
+      "docs/sol_skills/ACTIVE_EXECUTION.md",
+      "docs/sol_skills/BOOTSTRAP_KERNEL.md",
+      "docs/sol_skills/INDEX.md",
+      "integrations/hermes_leadership/charters.py",
+      "integrations/hermes_secretary/README.md",
+      "integrations/hermes_secretary/native_dialogue_consumer.py",
+      "integrations/hermes_secretary/tests/test_native_dialogue_consumer.py",
+      "ops/native_fabric/provider_plans/compose.py",
+      "ops/native_fabric/provider_plans/remote_placement/README.md",
+      "ops/native_fabric/provider_plans/remote_placement/profile.json",
+      "skills/mastermind-worker-bootstrap/SKILL.md",
+      "tests/test_current116_remote_placement_composition.py",
+      "tests/test_hermes_leadership.py",
+      "tests/test_reuse_first_instructions.py"
+    ],
+    "previous": "036e8d26cb2b158856f1250b2dfc9cca9700f28a",
+    "qualified_fixture_adjustment": "tests/test_current116_remote_placement_composition.py",
+    "unchanged_from_protected": 23
+  },
+  "protected_merge_parent": "1981aea5122943ce59d7ebe9706ddf5a658b377d",
+  "publication_scope": "Prepared-source evidence only; no release, selection, deployment, service restart or new live Session.",
+  "qualification": {
+    "argv": [
+      "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-o",
+      "addopts=",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+      "tests/test_current116_remote_placement_composition.py",
+      "tests/test_provider_plan_remote_mode_boundary.py",
+      "tests/test_provider_plan_auto_routing.py",
+      "integrations/hermes_secretary/tests/test_native_dialogue_consumer.py",
+      "tests/test_session_bridge_native_reply.py",
+      "tests/test_hermes_leadership.py",
+      "tests/test_reuse_first_instructions.py"
+    ],
+    "base_sha": "ba0dd5be56d1b37bb96800144898b7069a294a18",
+    "changed_inputs": [],
+    "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+    "exit_code": 0,
+    "finished_at": "2026-11-08T07:45:47.391258+00:00",
+    "inputs_unchanged": true,
+    "log_sha256": "6b8ddc9c935eca80be1f46111004682cd73088b506b7f625a5723a6d44e2b938",
+    "receipt_path": "/private/tmp/mmx-dsh-c40-master-composition-tests-20261108-pro1.json",
+    "receipt_sha256": "4fc46289880c9c3a7169716970f94bfd01923c34ebf92464b5900fe3bc07a176",
+    "result": "157 passed, 28 subtests passed",
+    "source_inputs": 7218,
+    "started_at": "2026-11-08T07:45:22.174499+00:00"
+  },
+  "recorded_at": "2026-11-08T07:48:23.608777+00:00",
+  "remaining_production_holds": [
+    "accepted protected source and required exact-head CI",
+    "root-custodied native/Node/ACP package and original attestation",
+    "actual original Worker coordinates/enrollment/account/realm/quota/host admission",
+    "actual public/service routing",
+    "signed-in packaged DeepSeek create/history/send/recovery/logout/reconnect/uncertain-send/Stop/same-Session resume/tool-settlement acceptance"
+  ],
+  "repairs": [
+    {
+      "event_loop_ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+      "new_source_sha256": "4bd72faae71a79bc6279c8cb36ed0d0e431a812cab140e8842576e23d16197b6",
+      "old_source_sha256": "8aa8ba94aaf97f6e67e64c9a2201db742d67e7a854b49285c7d8b744b960a4dc",
+      "reason": "Only RetainedNativeReadResolver import moved to original Session Bridge owner; original AST pin and all mutation assertions preserved.",
+      "surface": "D7 exact installed event-loop classifier"
+    },
+    {
+      "current_realm_sha256": "4f08d0eab66744177b4e6bd1ec72cc65872c8bbb96651f0e190ff60b394ed9ef",
+      "generation": "296e522f5f236d764aa4ad1b9fa677d7eea32e6bdfe2fc97c0755c06a857908f",
+      "historical_realm_sha256": "07367ea8db85df09414a7668af8c3c2cfc9fae705a457816071da8177b232623",
+      "reason": "Reconstruct from sealed37 plus exactly five canonical hash-qualified members; verify all116 before inert descriptors. Both production profiles and every behavioral assertion preserved.",
+      "surface": "historical sequence38 fixture"
+    }
+  ],
+  "reuse_decision": "Retain the original protected composer, historical sequence37 fixture, original native-dialogue parent and existing publication/writer owners. No new control or lifecycle owner.",
+  "schema": "mastermind.deepseek_native_master_composition_evidence.v1",
+  "source_parent": "ba0dd5be56d1b37bb96800144898b7069a294a18",
+  "source_sha256": {
+    ".cursor/rules/reuse-first.mdc": "9f1e40b6301002b2307390c035e44b671028d488fc375519df98ca0f4cf6c9c5",
+    "AGENTS.md": "f44ee240cb10ea6d5a43c50749b1e79db1685f7caff9672b8bb1f0776bd40a35",
+    "CLAUDE.md": "226728596e43151cb49a46d3e79d0c911b0c0954bccefc3fb93343d134515506",
+    "docs/NATIVE_EXECUTION_BRIEF.md": "472bbf0ec6cc12bd19e28da9eb238a571494a8dae88ca0dba77a74f90f7ff20b",
+    "docs/REUSE_FIRST_ENGINEERING.md": "c040d1ce88f690afd851d1c66e2e7fb9c338ad150fd5f9af51c159f0c81be470",
+    "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md": "36ef89df71f9d09040e150c2da4c141d47d022747ec1a092fc0cfe3a8a865c39",
+    "docs/evidence/2026-11-07-mission-continuation-project-instructions.txt": "3c66c93c99f26c2639ab41ac527306fb70131fae806f2a23408233da06187b00",
+    "docs/evidence/2026-11-07-reuse-first-project-instructions.txt": "3c66c93c99f26c2639ab41ac527306fb70131fae806f2a23408233da06187b00",
+    "docs/hermes/REUSE_FIRST_PROFILE_ROLLOUT.md": "ec16130d28417b6df41c44e6f6479a48da5c82bd06e8b7a75cafac546898fd88",
+    "docs/runbooks/web-long-horizon-instructions-rollout-2026-11-07.md": "9101a778da566795f81a4e2c5b8c9cb5a3eeaa8677049413b2d765da49738a2d",
+    "docs/sol_skills/ACTIVE_EXECUTION.md": "ad73e25e53cbcb854564b7d684074c2cd07dce075b725c99e438704b518cca97",
+    "docs/sol_skills/BOOTSTRAP_KERNEL.md": "9ebcf15b54291f0b6f72635ae701a7fa7241f6f2ff9c13ad5607c4788cc1a8ec",
+    "docs/sol_skills/INDEX.md": "19c5959e2942d5aca3d825e8e8d8fbf5c4b58352935f6b045610299a52af3bdf",
+    "integrations/hermes_leadership/charters.py": "e60591f859daa00d3d0809d17a2adcf1babf7b394b22a18820554edb4fe6db40",
+    "integrations/hermes_secretary/README.md": "4588615268cdfd5ceebe106a87590f10e1e12f3b44afaf968841482d19afe2a9",
+    "integrations/hermes_secretary/native_dialogue_consumer.py": "cb10292220616fb68b47a3ee9decccb85fac4130eddfc192b82914c411908c60",
+    "integrations/hermes_secretary/tests/test_native_dialogue_consumer.py": "54d7b0db80e8d65a3bfd46e24d2c15dd74dec012a249ee9836b1e7ca03ae9ef9",
+    "ops/native_fabric/provider_plans/compose.py": "caa363ce4028304796506834ea4836a2a35bda15327a317e4a19db8f3d547f8f",
+    "ops/native_fabric/provider_plans/remote_placement/README.md": "b6617231dd68d4f65829740476f72e84cac136e87c6a5cae3437e79c1ae68f3a",
+    "ops/native_fabric/provider_plans/remote_placement/profile.json": "2c9010cdf653ce7a03b86193e161a7b45522132652b6f596b4c3b27dcf4ac596",
+    "skills/mastermind-worker-bootstrap/SKILL.md": "5caa690b505808ddb88184d83416296d211b60f1fdf17f15b09de9e3f1c755f5",
+    "tests/test_ceo_submit_armed_composition.py": "54a3ad78cc2465c4243e8f5c86f900c9fe879c4a2fb3446b4fcc1c191d5ded3e",
+    "tests/test_current116_remote_placement_composition.py": "37bf22cae2e689ba5a829a93aa317029f274837bbad9218b7d9efccc7e528d09",
+    "tests/test_hermes_leadership.py": "0b00d6b1a2d3ca0a31d9db47aca0974bd8379ef17be91c5caa977b18b83506da",
+    "tests/test_reuse_first_instructions.py": "c9f5a5abbe3a742a7706682e5cd2f2bcb685254655848ba1656fb9f7cb7ee843"
+  }
+}

@@ -31,7 +31,7 @@ const ROUTES: [(&str, &str); 10] = [
 
 /// Route path to operation name; exact literal match only.
 pub fn operation(path: &str) -> Option<&'static str> {
-    ROUTES.iter().find(|(p, _)| *p == path).map(|(_, o)| *o)
+    ROUTES.iter().chain(NATIVE_ROUTES.iter()).find(|(p, _)| *p == path).map(|(_, o)| *o)
 }
 
 /// Operation name to its single route path; exact literal match only.
@@ -226,6 +226,80 @@ pub fn validate(operation: &str, value: &Value) -> Result<(), String> {
     {
         return Err(invalid());
     }
+    Ok(())
+}
+
+
+pub const NATIVE_REQUEST_CAP: usize = 512 * 1024;
+pub const NATIVE_RESPONSE_CAP: usize = 32 * 1024;
+const NATIVE_ROUTES: [(&str, &str); 17] = [
+    ("/os/executive/conversation/v2/preview", "preview"),
+    ("/os/executive/conversation/v2/create", "create"),
+    ("/os/executive/conversation/v2/status", "status"),
+    ("/os/executive/conversation/v2/read", "read"),
+    ("/os/executive/conversation/v2/recover", "recover"),
+    ("/os/executive/conversation/v2/consume", "consume"),
+    ("/os/executive/conversation/v2/consume/status", "consume_status"),
+    ("/os/executive/conversation/v2/turn/preview", "turn_preview"),
+    ("/os/executive/conversation/v2/turn", "turn"),
+    ("/os/executive/conversation/v2/turn/status", "turn_status"),
+    ("/os/executive/conversation/v2/turn/read", "turn_read"),
+    ("/os/executive/conversation/v2/turn/recover", "turn_recover"),
+    ("/os/executive/conversation/v2/resume/preview", "resume_preview"),
+    ("/os/executive/conversation/v2/resume", "resume"),
+    ("/os/executive/conversation/v2/resume/status", "resume_status"),
+    ("/os/executive/conversation/v2/stop", "stop"),
+    ("/os/executive/conversation/v2/stop/status", "stop_status"),
+];
+
+pub fn is_native_path(path: &str) -> bool {
+    NATIVE_ROUTES.iter().any(|(candidate, _)| *candidate == path)
+}
+pub fn path_for(operation: &str, contract: Option<&str>) -> Option<&'static str> {
+    match contract {
+        None | Some("legacy-v1") => path(operation),
+        Some("native-v2") => NATIVE_ROUTES.iter().find(|(_, o)| *o == operation).map(|(p, _)| *p),
+        _ => None,
+    }
+}
+pub fn validate_for(operation: &str, value: &Value, native: bool) -> Result<(), String> {
+    if native { validate_native(operation, value) } else { validate(operation, value) }
+}
+fn native_message_valid(value: &str) -> bool {
+    value.len() <= 128 * 1024 && !value.chars().all(py_space) && value.chars().all(|c| {
+        let o = c as u32;
+        !((o < 32 && !matches!(c, '\t' | '\n' | '\r')) || (127..=159).contains(&o))
+    })
+}
+pub fn validate_native(operation: &str, value: &Value) -> Result<(), String> {
+    let invalid = || REQUEST_INVALID.to_owned();
+    if !NATIVE_ROUTES.iter().any(|(_, o)| *o == operation) { return Err(invalid()); }
+    let obj = value.as_object().ok_or_else(invalid)?;
+    let reference_mode = obj.contains_key("reference");
+    if reference_mode && matches!(operation, "preview" | "create") { return Err(invalid()); }
+    let mut keys = vec!["work_ref", if reference_mode { "reference" } else { "operation_key" }];
+    if matches!(operation, "preview" | "create" | "turn_preview" | "turn") { keys.push("message"); }
+    if matches!(operation, "consume" | "consume_status" | "turn_preview" | "turn") { keys.push("initial_digest"); }
+    if matches!(operation, "turn_preview" | "turn" | "turn_status" | "turn_read" | "turn_recover") { keys.push("turn_key"); }
+    if matches!(operation, "resume_preview" | "resume" | "resume_status") { keys.push("resume_key"); }
+    if matches!(operation, "stop" | "stop_status") { keys.push("stop_key"); }
+    if matches!(operation, "create" | "turn" | "resume") { keys.push("preview_digest"); }
+    if matches!(operation, "resume_preview" | "resume") { keys.push("expected_result_digest"); }
+    if operation == "stop" { keys.extend(["turn_id", "binding_digest"]); }
+    if obj.len() != keys.len() || keys.iter().any(|key| !obj.contains_key(*key)) { return Err(invalid()); }
+    let work = obj.get("work_ref").and_then(Value::as_str).ok_or_else(invalid)?;
+    if !work_valid(work) { return Err(invalid()); }
+    if reference_mode {
+        if reference_valid(&obj["reference"])? != work { return Err(invalid()); }
+    } else if !obj["operation_key"].as_str().is_some_and(key_valid) { return Err(invalid()); }
+    for key in ["turn_key", "resume_key", "stop_key"] {
+        if keys.contains(&key) && !obj[key].as_str().is_some_and(key_valid) { return Err(invalid()); }
+    }
+    for key in ["preview_digest", "initial_digest", "expected_result_digest", "binding_digest"] {
+        if keys.contains(&key) && !obj[key].as_str().is_some_and(digest_valid) { return Err(invalid()); }
+    }
+    if keys.contains(&"turn_id") && !obj["turn_id"].as_str().is_some_and(job_id_valid) { return Err(invalid()); }
+    if keys.contains(&"message") && !obj["message"].as_str().is_some_and(native_message_valid) { return Err(invalid()); }
     Ok(())
 }
 
@@ -496,5 +570,56 @@ mod tests {
         assert!(rejects("status", json!("WS:EXAMPLE")), "string request rejects");
         assert!(rejects("status", json!(42)), "numeric request rejects");
         assert!(rejects("status", Value::Array(vec![json!({"work_ref": w, "operation_key": k})])), "array request rejects");
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn native_message_bound_and_explicit_contract_do_not_relax_v1() {
+        let input=json!({"work_ref":"WS:Original.Project","operation_key":"original-create","message":"x".repeat(131072)});
+        assert!(validate_native("preview",&input).is_ok());assert!(validate("preview",&input).is_err());
+        for message in ["x".repeat(131073),"😀".repeat(32769)," \n".into(),"x\0".into()] {
+            let mut bad=input.clone();bad["message"]=message.into();assert!(validate_native("preview",&bad).is_err());
+        }
+        let mut emoji=input.clone();emoji["message"]="😀".repeat(32768).into();assert!(validate_native("preview",&emoji).is_ok());
+        assert!(path_for("stop",None).is_none());assert!(path_for("stop",Some("unknown")).is_none());
+        assert!(operation("/os/executive/conversation/v2/read/").is_none());
+    }
+    #[test]
+    fn native_turn_requires_actual_preview_and_controls_keep_closed_identity() {
+        let input=json!({"work_ref":"WS:Original.Project","operation_key":"original-create",
+            "turn_key":"original-turn","initial_digest":"a".repeat(64),"message":"exact original"});
+        assert!(validate_native("turn_preview",&input).is_ok());assert!(validate_native("turn",&input).is_err());
+        let mut prepared=input.clone();prepared["preview_digest"]="b".repeat(64).into();assert!(validate_native("turn",&prepared).is_ok());
+        for extra in ["permission","model","url","retry"] {
+            let mut foreign=prepared.clone();foreign[extra]=true.into();assert!(validate_native("turn",&foreign).is_err());
+        }
+        let stop=json!({"work_ref":"WS:Original.Project","operation_key":"original-create","stop_key":"original-stop",
+            "turn_id":"original-native-turn","binding_digest":"b".repeat(64)});
+        assert!(validate_native("stop",&stop).is_ok());assert!(validate_native("stop_status",&stop).is_err());
+    }
+
+    #[test]
+    fn signed_native_recovery_selects_only_its_existing_original_operation() {
+        let fixture: Value=serde_json::from_str(include_str!("../../src/fixtures/native-fresh-recovery-owner.json")).unwrap();
+        for sample in fixture["samples"].as_array().unwrap() {
+            let op=sample["operation"].as_str().unwrap();
+            let arguments=&sample["arguments"];
+            assert!(validate_native(op,arguments).is_ok());
+            assert!(path(op).is_none());
+            assert_eq!(path_for(op,Some("native-v2")).unwrap(),
+                format!("/os/executive/conversation/v2/{}",op.replace('_',"/")));
+            for extra in ["message","preview_digest","initial_digest","binding_digest","session_id","retry"] {
+                let mut changed=arguments.clone();changed[extra]="foreign".into();
+                assert!(validate_native(op,&changed).is_err());
+            }
+            let mut changed=arguments.clone();
+            if op=="turn_recover" {changed.as_object_mut().unwrap().remove("turn_key");}
+            else {changed["turn_key"]="foreign".into();}
+            assert!(validate_native(op,&changed).is_err());
+        }
     }
 }

@@ -12,7 +12,7 @@ import programs from "./fixtures/programs-available-workspace-service.json";
 import plan from "./fixtures/project-plan-canonical-owner.json";
 import work from "./fixtures/work-service-available.json";
 import historyFixture from "./fixtures/project-execution-history-owner.json";
-import freshFixture from "./conversations/new-conversation/fixtures/fresh-conversation-owner.json";
+import freshFixture from "./fixtures/native-fresh-app-owner.json";
 import {intentIdForOperationKey} from "./orchestration/operation-key";
 
 vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn().mockResolvedValue({
@@ -31,7 +31,7 @@ beforeEach(async()=>{
   vi.stubGlobal("crypto",webcrypto);
 });
 afterEach(()=>{
-  cleanup();disposals.splice(0).forEach(dispose=>dispose());
+  cleanup();disposals.splice(0).forEach(dispose=>dispose());vi.useRealTimers();
   vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();
   delete window.MastermindMissionHost;
 });
@@ -39,8 +39,11 @@ const executionResult=(operation:string,data:unknown)=>({
   schema:"mastermind.project_execution_private_result.v1",operation,ok:true,data,error:null,
 });
 type Options={completed?:boolean;loseReply?:boolean;signedOut?:boolean;omitExecutive?:boolean;
-  holdPreview?:boolean;legacyManifest?:boolean;holdOperationDiscovery?:boolean};
+  holdPreview?:boolean;legacyManifest?:boolean;holdOperationDiscovery?:boolean;nativeFresh?:boolean};
 async function setup(options:Options={},database=new IDBFactory()){
+  const workRef=options.nativeFresh?freshFixture.request.work_ref:historyFixture.completed_read.reference.work_ref;
+  const scope=options.nativeFresh?freshFixture.executive_context.principal_scope:historyFixture.completed_read.reference.principal_scope_sha256;
+  if(options.nativeFresh){vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(freshFixture.clock.verified_at_seconds*1000));}
   const room=controlRoomFixture(),responsibility=structuredClone(room.autonomy.responsibilities[0]);
   room.work=[room.work[0]];room.autonomy.responsibilities=[];
   const publishRoots=(roots:string[])=>{
@@ -67,13 +70,18 @@ async function setup(options:Options={},database=new IDBFactory()){
     if(command==="auth_status")return options.signedOut
       ?{status:"signed_out",reason:"USER_SIGNED_OUT",acquisition:false,content:false}:signed;
     if(command==="executive_auth_status")return {generation:1,available:!options.signedOut};
+    if(command==="executive_context"&&options.nativeFresh)return structuredClone(freshFixture.executive_context);
     if(command==="executive_context")return {
       schema:"mastermind.os.executive.owner_context.v1",principal_scope:scope,
       verified_expiry:4102444800,profile:{name:"web_ceo_v3",server_version:"1.5.0"},
     };
-    if(command==="read_programs")return {...structuredClone(programs),control_room:structuredClone(room)};
+    if(command==="read_programs")return options.nativeFresh?structuredClone(freshFixture.programs.result):{...structuredClone(programs),control_room:structuredClone(room)};
+    if(command==="read_mission_v3"&&options.nativeFresh)return structuredClone(freshFixture.mission.result);
     if(command==="read_work")return structuredClone(work);
     if(command==="read_project_plan")return structuredClone(sourcePlan);
+    if(command==="executive_project_history_context"&&options.nativeFresh){
+      expect(args).toEqual({workRef});return structuredClone(freshFixture.history_context);
+    }
     if(command==="executive_project_history_context")return {
       schema:"mastermind.os.executive.session_result.v1",operation:"history_context",ok:true,
       effect:"NONE",operation_key:null,error:null,data:{
@@ -83,19 +91,26 @@ async function setup(options:Options={},database=new IDBFactory()){
       },
     };
     if(command==="executive_project_conversations_read"){
+      if(options.nativeFresh){
+        const operation=args!.operation,request=args!.arguments as any;
+        if(operation==='fresh_references'){expect(request).toEqual({work_ref:workRef});return structuredClone(freshFixture.catalogue);}
+        if(operation==='fresh_read'){
+          if(request.content){const part=freshFixture.fragments.find(p=>p.request.content.offset_bytes===request.content.offset_bytes);
+            expect(part).toBeTruthy();expect(request).toEqual(part!.request);return structuredClone(part!.response);}
+          expect(request).toEqual(freshFixture.window.reference);return structuredClone(freshFixture.window);
+        }
+      }
       if(args!.operation==="execution_references")return structuredClone(historyFixture.catalogue);
       if(args!.operation==="execution_read")return structuredClone(historyFixture.completed_read);
     }
     if(command==="executive_fresh_conversation"){
+      expect(options.nativeFresh).toBe(true);expect(args!.contract).toBe('native-v2');
       const operation=String(args!.operation),request=args!.arguments as Record<string,unknown>;
-      if(operation==="preview"||operation==="create"||operation==="read"){
-        // Reuse the producer's closed result body. This inert native boundary
-        // echoes this test's request coordinates, never an execution grant.
-        const source=structuredClone(freshFixture[operation]);
-        source.data.work_ref=String(request.work_ref);source.data.operation_key=String(request.operation_key);
-        if(source.data.locator)source.data.locator.work_ref=String(request.work_ref);
-        return source;
-      }
+      expect(request).toEqual(operation==='preview'?freshFixture.request:operation==='create'?freshFixture.create_request:
+        operation==='consume_status'?freshFixture.consume_request:{work_ref:workRef,operation_key:freshFixture.request.operation_key});
+      if(operation==='consume_status')return structuredClone(freshFixture.consume_status_before);
+      if(operation==='preview'||operation==='create'||operation==='read'||operation==='status')
+        return structuredClone(freshFixture[operation]);
     }
     if(command==="executive_project_execution"){
       const operation=String(args!.operation),request=args!.arguments as Record<string,unknown>;
@@ -215,25 +230,27 @@ it("continues the actual completed-result witness through manifest-free App comp
   expect(f.invoke.mock.calls.filter(([name])=>name==="executive_submit")).toHaveLength(0);
 });
 
-async function editFreshMessage(){
+async function editFreshMessage(selectedWork=workRef){
   fireEvent.click(within(document.querySelector("#workspace-navigation") as HTMLElement)
     .getByRole("button",{name:"New conversation"}));
   const project=await screen.findByRole("combobox",{name:"Project"});
   await waitFor(()=>expect(project).toHaveProperty("disabled",false));
-  fireEvent.change(project,{target:{value:workRef}});
+  fireEvent.change(project,{target:{value:selectedWork}});
+  vi.spyOn(crypto,'getRandomValues').mockImplementation(value=>{for(let i=0;i<20;i++)(value as Uint8Array)[i]=0xaa;return value;});
   fireEvent.change(screen.getByRole("textbox",{name:"First message"}),
     {target:{value:freshFixture.request.message}});
 }
 
 it("global New conversation uses the shared manifest-free owner and exact original fresh preview/create",async()=>{
-  const f=await setup();await editFreshMessage();
+  const f=await setup({nativeFresh:true});await editFreshMessage(freshFixture.request.work_ref);
+  const workRef=freshFixture.request.work_ref;
   const review=screen.getByRole("button",{name:"Review conversation"});
   await waitFor(()=>expect(review).toHaveProperty("disabled",false));fireEvent.click(review);
   const create=await screen.findByRole("button",{name:"Create conversation"});
   expect(f.freshCalls("preview")).toHaveLength(1);expect(f.freshCalls("create")).toHaveLength(0);
   const preview=f.freshCalls("preview")[0][1]!.arguments as Record<string,unknown>;
   expect(preview).toEqual({work_ref:workRef,message:freshFixture.request.message,
-    operation_key:expect.stringMatching(/^mmos-conversation-create-[0-9a-f]{40}$/)});
+    operation_key:expect.stringMatching(/^mmos-native-create-[0-9a-f]{40}$/)});
   await waitFor(()=>expect(create).toHaveProperty("disabled",false));
   fireEvent.click(create);fireEvent.click(create);
   const open=await screen.findByRole("button",{name:"Open initial response"});
@@ -242,7 +259,21 @@ it("global New conversation uses the shared manifest-free owner and exact origin
     work_ref:workRef,operation_key:preview.operation_key,
   });
   fireEvent.click(open);
-  await screen.findByText(freshFixture.read.data.result.envelope.summary);
+  const record=await screen.findByRole('region',{name:'Recorded conversation'});
+  const recorded=within(record).getByRole('button',{name:'Read recorded conversation'});
+  await waitFor(()=>expect(recorded).toHaveProperty('disabled',false));
+  fireEvent.click(recorded);
+  const reply=await within(record).findByRole('button',{name:'Read reply'});
+  await waitFor(()=>expect(reply).toHaveProperty('disabled',false));
+  fireEvent.click(reply);
+  // Markdown omits its final paragraph newline; the content owner still checks
+  // the exact source digest and every original fragment at the transport seam.
+  expect(freshFixture.answer.endsWith('\n')).toBe(true);
+  await waitFor(()=>{
+    expect(record.querySelector('.source-markdown')?.textContent).toBe(freshFixture.answer.slice(0,-1));
+  },{container:record,timeout:5_000});
+  expect(f.invoke.mock.calls.filter(([name,args])=>name==='executive_project_conversations_read'&&
+    args?.operation==='fresh_read'&&(args.arguments as any)?.content)).toHaveLength(freshFixture.fragments.length);
   expect(f.freshCalls("create")).toHaveLength(1);
   expect(f.freshCalls("create")[0][1]!.arguments).toEqual({
     ...preview,preview_digest:freshFixture.preview.data.preview.digest,

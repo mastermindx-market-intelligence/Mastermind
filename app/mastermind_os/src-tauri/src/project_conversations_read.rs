@@ -39,6 +39,49 @@ fn work(s: &str, fresh: bool) -> bool {
             !part.is_empty() && part.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
     }
 }
+fn event_id(value: &Value) -> bool {
+    value.as_u64().is_some_and(|n| (1..=9_007_199_254_740_991).contains(&n))
+}
+fn input_fragment(value: &Value) -> bool {
+    let kind = value.get("kind").and_then(Value::as_str);
+    let mut keys = vec!["kind", "source_event_id", "source_event_sha256", "sha256", "offset_utf8"];
+    if kind == Some("turn_input") { keys.push("turn_key"); }
+    else if kind != Some("initial_input") { return false; }
+    exact(value, &keys) && event_id(&value["source_event_id"])
+        && text(value, "source_event_sha256", hex) && text(value, "sha256", hex)
+        && value["offset_utf8"].as_u64().is_some_and(|n| n < 131072)
+        && (kind == Some("initial_input") || text(value, "turn_key", |s|
+            (1..=96).contains(&s.len()) && s.as_bytes()[0].is_ascii_alphanumeric()
+                && s.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c,b'.'|b'_'|b':'|b'-'))))
+}
+fn native_content(value: &Value) -> bool {
+    let reference=&value["native_ref"];
+    exact(value,&["native_ref","offset_bytes","expected_sha256"])
+        && exact(reference,&["schema_version","command_id","event_id","seal_digest","observation_digest"])
+        && reference["schema_version"].as_str()==Some("mastermind.dsh_native_conversation_result_ref/v1")
+        && text(reference,"command_id",|s| s.len()<=128 && s.strip_prefix("ohf-native-result:").is_some_and(|id|
+            !id.is_empty() && id.as_bytes()[0].is_ascii_alphanumeric()
+            && id.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'.'|b'_'|b':'|b'-'))))
+        && event_id(&reference["event_id"]) && text(reference,"seal_digest",hex) && text(reference,"observation_digest",hex)
+        && value["offset_bytes"].as_u64().is_some_and(|n| n<4*1024*1024 &&
+            (n==0 || !value["expected_sha256"].is_null()))
+        && (value["expected_sha256"].is_null() || text(value,"expected_sha256",hex))
+}
+fn fresh_read_keys(value: &Value) -> bool {
+    let mut keys = vec!["schema", "work_ref", "root_job_id", "root_event_id", "root_event_sha256", "principal_scope_sha256"];
+    if value.get("content").is_some() {
+        if value.get("before_event_id").is_some() || value.get("fragment").is_some() || !native_content(&value["content"]) { return false; }
+        keys.push("content");
+    } else if value.get("fragment").is_some() {
+        if value.get("before_event_id").is_some() || !input_fragment(&value["fragment"]) { return false; }
+        keys.push("fragment");
+    } else if value.get("before_event_id").is_some() {
+        if !event_id(&value["before_event_id"]) { return false; }
+        keys.push("before_event_id");
+    }
+    exact(value, &keys)
+}
+
 pub fn validate(op: &str, value: &Value) -> Result<(), String> {
     let valid = match op {
         "catalogue" => value.as_object().is_some_and(|o|
@@ -68,7 +111,7 @@ pub fn validate(op: &str, value: &Value) -> Result<(), String> {
             && text(value,"root_event_sha256",hex) && text(value,"project_execution_source_sha256",hex)
             && text(value,"principal_scope_sha256",hex),
         "fresh_references" => exact(value,&["work_ref"]) && text(value,"work_ref",|s|work(s,true)),
-        "fresh_read" => exact(value,&["schema","work_ref","root_job_id","root_event_id","root_event_sha256","principal_scope_sha256"])
+        "fresh_read" => fresh_read_keys(value)
             && value["schema"].as_str()==Some("mastermind.fresh_conversation_reference.v1")
             && text(value,"work_ref",|s|work(s,true))
             && text(value,"root_job_id",|s| s.len()<=256 && s.strip_prefix("JOB-").is_some_and(|id|
@@ -90,6 +133,49 @@ mod tests {
         "root_event_sha256":"a".repeat(64),"principal_scope_sha256":"b".repeat(64)})}
     fn read() -> Value {json!({"work_ref":"WS:AB-CD", "conversation_ref":format!("conversation-{}","a".repeat(64)),
         "revision":"b".repeat(64), "requests":[{"read_ref":format!("session-reply-{}","c".repeat(64)),"request_revision":"d".repeat(64)}]})}
+    #[test] fn fresh_history_cursor_and_input_fragments_have_exact_exclusive_selectors() {
+        let mut cursor=reference();cursor["before_event_id"]=123.into();
+        assert!(validate("fresh_read",&cursor).is_ok());
+        let fragment=json!({"kind":"initial_input","source_event_id":1,"source_event_sha256":"a".repeat(64),
+            "sha256":"c".repeat(64),"offset_utf8":0});
+        let mut input=reference();input["fragment"]=fragment.clone();
+        assert!(validate("fresh_read",&input).is_ok());
+        input["fragment"]["kind"]="turn_input".into();input["fragment"]["turn_key"]="native-turn-2".into();
+        assert!(validate("fresh_read",&input).is_ok());
+        for bad in [json!(true),json!(-1),json!(131072),json!(0.5)] {
+            input["fragment"]["offset_utf8"]=bad;assert!(validate("fresh_read",&input).is_err());
+        }
+        input["fragment"]=fragment.clone();input["before_event_id"]=123.into();
+        assert!(validate("fresh_read",&input).is_err());
+        input=reference();input["fragment"]=fragment;input["fragment"]["path"]="/tmp/foreign".into();
+        assert!(validate("fresh_read",&input).is_err());
+        for bad in [Value::Null,json!(true),json!(0),json!(9_007_199_254_740_992_u64)] {
+            cursor["before_event_id"]=bad;assert!(validate("fresh_read",&cursor).is_err());
+        }
+    }
+    #[test] fn native_result_content_uses_only_an_original_result_reference() {
+        let mut value=reference();
+        value["content"]=json!({"native_ref":{
+            "schema_version":"mastermind.dsh_native_conversation_result_ref/v1",
+            "command_id":"ohf-native-result:original","event_id":4,
+            "seal_digest":"c".repeat(64),"observation_digest":"d".repeat(64)},
+            "offset_bytes":0,"expected_sha256":null});
+        assert!(validate("fresh_read",&value).is_ok());
+        let original=value.clone();
+        value["content"]["offset_bytes"]=4096.into();
+        assert!(validate("fresh_read",&value).is_err());
+        value["content"]["expected_sha256"]="e".repeat(64).into();
+        assert!(validate("fresh_read",&value).is_ok());
+        value["before_event_id"]=5.into();assert!(validate("fresh_read",&value).is_err());
+        for bad in [json!(true),json!(-1),json!(4*1024*1024),json!(0.5)] {
+            value=original.clone();value["content"]["offset_bytes"]=bad;
+            assert!(validate("fresh_read",&value).is_err());
+        }
+        value=original.clone();value["content"]["session_id"]="foreign".into();
+        assert!(validate("fresh_read",&value).is_err());
+        value=original;value["content"]["native_ref"]["command_id"]="other:turn".into();
+        assert!(validate("fresh_read",&value).is_err());
+    }
     #[test] fn fixed_routes_and_closed_selectors() {
         for (route,op) in ROUTES {assert_eq!(operation(route),Some(op));assert_eq!(path(op),Some(route));
             assert!(operation(&(route.to_owned()+"/extra")).is_none());}

@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.dsh_native_acp_qualification.v1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "source_sha256": {
+    "native-acp-lifecycle.patch": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
+    "native-acp-source.json": "644bb9e7ed6ba59c522d12b3c8cf01ba8edd80eefd24ab98d426d7a02a3bd885",
+    "prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+    "vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+    "check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+    "native-acp-lifecycle.test.ts": "935190aa4ad1d41db0f0e375a944e8bc301de7d182d912db72f62e0a5f87f5e1"
+  },
+  "logs": {
+    "all_original_and_extension": {
+      "file": "mmx-dsh-native-acp-c8-qualified-20261107.log",
+      "pid": 2373,
+      "cases": 166,
+      "exit_code": 0,
+      "sha256": "c7860d082bc7e9d611b1ed6802da4429cabe473f51910a9f138d4b2e458e646e"
+    },
+    "original_project_types": {
+      "file": "mmx-dsh-native-acp-c8-types-final-20261107.log",
+      "pid": 3037,
+      "cases": null,
+      "exit_code": 0,
+      "sha256": "3c347b934ed1bfa53b6e76c5c643fd5b2321a01ee6c96636e159f14a7fbe1a0a"
+    },
+    "original_admission_preimage": {
+      "file": "mmx-dsh-native-acp-c8-preimage-20261107.log",
+      "pid": 60999,
+      "cases": 1,
+      "exit_code": 1,
+      "sha256": "c9231c823a04c3d1fbb9db28300bb0839c5e284a21b9d15934cb1a0c0b6f3d57"
+    },
+    "inbox_loss_preimage": {
+      "file": "mmx-dsh-native-acp-c8-inbox-functional-preimage-20261107.log",
+      "pid": 86016,
+      "cases": 1,
+      "exit_code": 1,
+      "sha256": "a8e0abbac11683e3f3ea8414ee33668ad1746ba8fd63d2d809edee37a912a72d"
+    }
+  },
+  "original_cases": 150,
+  "extension_cases": 16,
+  "sdk_version": "1.4.0",
+  "terminal_owner": "original ctx.sessions.flush and outputTail",
+  "exact_cancel_scope": "immutable first native claim; refuse after first root turn closes or is superseded; preserve unrelated inbox",
+  "empty_pre_enqueue_terminal": {
+    "claim": null,
+    "throughSeq": -1
+  },
+  "installed": false,
+  "provider_calls": 0,
+  "production_armed": false,
+  "full_native_connection_evidence": "native-connection-20261107.json",
+  "remaining": [
+    "retained OHF adapter",
+    "authenticated profile and conversation result consumer",
+    "installed authenticated journey"
+  ]
+}

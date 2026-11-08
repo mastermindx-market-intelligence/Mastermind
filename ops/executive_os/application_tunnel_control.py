@@ -1,4 +1,4 @@
-"""Closed APPLICATION-purpose reverse transport inside the existing Chisel owner.
+"""Closed Fabric and attended DSH purposes inside the existing Chisel owner.
 
 One original operation owns one dedicated transport identity and the exact VPS
 loopback listeners. stage, apply-server, apply-client,
@@ -7,12 +7,13 @@ second grant registry, no generic deployment framework, no credential
 catalogue or watcher. A closed v2 successor retains the original credential,
 label and journals while adding the two Hermes role addresses. The OS relay entry, its
 constants, its defaults and its main semantics are unchanged; this module only
-adds one separately named APPLICATION purpose on the same incumbent server.
+selects one of two source-defined application purposes on the same incumbent server.
 
-The Chisel authfile is a ``map[user:pass][]remote-regex``. V1 adds the anchored
-127.0.0.1:50142 reverse for the dedicated ``mastermind-fabric-app`` identity.
-Its closed v2 successor adds only 127.0.0.2/.3 on that same port and identity.
-Unrelated incumbent users and ACL values are preserved.
+The Chisel authfile maps each user:password to an array of remote patterns.
+Fabric v1 owns 127.0.0.1:50142; its closed v2 successor adds only
+127.0.0.2/.3 on that same port and original identity. Attended DSH owns
+its separate exact 4181 reverse and credential. Unrelated incumbent users
+and ACL values are preserved.
 
 Public receipts carry nonsecret metadata and digests only. Credential and
 authfile material never reach stdout, stderr, a receipt, a log or an error.
@@ -20,7 +21,7 @@ authfile material never reach stdout, stderr, a receipt, a log or an error.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import fcntl
 import hashlib
 import json
@@ -88,7 +89,7 @@ IDENTITY_KEYS = ("purpose", "operation_id", "audience", "server", "remote_addres
 # incumbent server refuse the whole authfile instead of one entry.
 _GO_UNSUPPORTED = ("(?=", "(?!", "(?<", "(?P", "(?>", "\\1", "\\2", "\\3", "\\4",
                    "\\5", "\\6", "\\7", "\\8", "\\9")
-_SECRET_PATTERN = re.compile(r"mastermind-fabric-app:[A-Za-z0-9_-]{8,128}")
+_SECRET_PATTERN = re.compile(r"(mastermind-(?:fabric|deepseek)-app):[A-Za-z0-9_-]{8,128}")
 _IMPORT_PROBE = (
     "import importlib.util,json,sys;"
     "spec=importlib.util.spec_from_file_location('mm_application_entry',sys.argv[1]);"
@@ -118,24 +119,41 @@ class Paths:
     server_keyfile: Path = Path("/etc/chisel/server.key")
     server_unit: str = "mm-chisel-server.service"
     python: str = "/usr/bin/python3"
+    purpose: os_tunnel_entry.ApplicationPurpose = os_tunnel_entry.FABRIC_APPLICATION
 
     @classmethod
-    def fixture(cls, root):
+    def fixture(cls, root, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
         """Test-only substitution of the closed paths; never a CLI selector."""
+        purpose = os_tunnel_entry.closed_application_purpose(purpose)
         root = Path(root)
         executive = root / "MastermindExecutive"
         return cls(
             executive_root=executive,
-            operation_root=executive / "application-tunnel",
-            config=executive / "config" / "application-tunnel.json",
-            credential=executive / "config" / "application-tunnel.auth",
-            plist=root / "LaunchDaemons" / (LABEL + ".plist"),
+            operation_root=executive / purpose.path_stem,
+            config=executive / "config" / (purpose.path_stem + ".json"),
+            credential=executive / "config" / (purpose.path_stem + ".auth"),
+            plist=root / "LaunchDaemons" / (purpose.label + ".plist"),
             server_authfile=root / "etc" / "chisel" / "users.json",
-            server_operation_root=root / "etc" / "chisel" / "application-tunnel",
+            server_operation_root=root / "etc" / "chisel" / purpose.path_stem,
             server_binary=root / "usr" / "local" / "bin" / "chisel",
             server_keyfile=root / "etc" / "chisel" / "server.key",
             server_unit="mm-chisel-server.service",
-            python=sys.executable,
+            python=sys.executable, purpose=purpose,
+        )
+
+
+    @classmethod
+    def deepseek(cls):
+        """A separate closed deployment identity; never caller-selected ports."""
+        purpose = os_tunnel_entry.DEEPSEEK_APPLICATION
+        base = cls()
+        return cls(
+            operation_root=base.executive_root / purpose.path_stem,
+            config=base.executive_root / "config" / (purpose.path_stem + ".json"),
+            credential=base.executive_root / "config" / (purpose.path_stem + ".auth"),
+            plist=Path("/Library/LaunchDaemons") / (purpose.label + ".plist"),
+            server_operation_root=Path("/etc/chisel") / purpose.path_stem,
+            purpose=purpose,
         )
 
 
@@ -162,43 +180,55 @@ def _root():
 def _redact(value):
     if not isinstance(value, str):
         return ""
-    return _SECRET_PATTERN.sub("mastermind-fabric-app:<redacted>", value)[:512]
+    return _SECRET_PATTERN.sub(r"\1:<redacted>", value)[:512]
 
 
-def operation_identity(role_aliases=False):
-    """Deterministic nonsecret identity shared by both host phases."""
+def _contract_purpose(role_aliases, purpose):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     require(type(role_aliases) is bool, "application contract selector refused")
+    require(not role_aliases or purpose is os_tunnel_entry.FABRIC_APPLICATION,
+            "role aliases require the original Fabric purpose")
+    return purpose
+
+
+def operation_identity(role_aliases=False, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    """Deterministic nonsecret identity shared by both host phases."""
+    purpose = _contract_purpose(role_aliases, purpose)
     contract = {
-        "purpose": PURPOSE,
-        "audience": AUDIENCE,
+        "purpose": purpose.purpose,
+        "audience": purpose.audience,
         "server": SERVER,
-        "remote_address": REMOTE_ADDRESS,
-        "remote_regex": REMOTE_REGEX,
-        "target_address": "127.0.0.1:%d" % TARGET_PORT,
-        "label": LABEL,
+        "remote_address": purpose.remote_address,
+        "remote_regex": purpose.remote_regex,
+        "target_address": "127.0.0.1:%d" % purpose.target_port,
+        "label": purpose.label,
     }
     if role_aliases:
-        contract.update(predecessor=operation_identity(), role_remotes=list(os_tunnel_entry.APPLICATION_ROLE_REVERSES))
+        contract.update(predecessor=operation_identity(purpose=purpose),
+                        role_remotes=list(os_tunnel_entry.APPLICATION_ROLE_REVERSES))
     value = canonical(contract)
-    return "app-tunnel-" + hashlib.sha256(value).hexdigest()[:32]
+    return purpose.operation_prefix + hashlib.sha256(value).hexdigest()[:32]
 
 
 def _stage_directory(paths, role_aliases=False):
-    require(type(role_aliases) is bool, "application contract selector refused")
+    _contract_purpose(role_aliases, paths.purpose)
     # Both immutable generations keep the SAME purpose.lock and installed label.
     return paths.operation_root / ("stage-hermes-v2" if role_aliases else "stage")
 
 
-def _role_intent(intent):
-    require(type(intent) is dict and intent.get("schema") in (SCHEMA, ROLE_SCHEMA), "application contract refused")
+def _role_intent(intent, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
+    schemas = ((purpose.control_schema, ROLE_SCHEMA)
+               if purpose is os_tunnel_entry.FABRIC_APPLICATION else (purpose.control_schema,))
+    require(type(intent) is dict and intent.get("schema") in schemas, "application contract refused")
     return intent["schema"] == ROLE_SCHEMA
 
 
-def _remotes(role_aliases):
-    require(type(role_aliases) is bool, "application contract selector refused")
-    return (os_tunnel_entry.APPLICATION_ROLE_REVERSES if role_aliases else (REMOTE_ADDRESS,),
-            os_tunnel_entry.APPLICATION_ROLE_REGEXES if role_aliases else (REMOTE_REGEX,),
-            os_tunnel_entry.APPLICATION_ROLE_TARGETS if role_aliases else (REVERSE_TARGET,))
+def _remotes(role_aliases, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = _contract_purpose(role_aliases, purpose)
+    return (os_tunnel_entry.APPLICATION_ROLE_REVERSES if role_aliases else (purpose.remote_address,),
+            os_tunnel_entry.APPLICATION_ROLE_REGEXES if role_aliases else (purpose.remote_regex,),
+            os_tunnel_entry.APPLICATION_ROLE_TARGETS if role_aliases else (purpose.reverse_target,))
 
 
 def _predecessor_record(value):
@@ -220,6 +250,7 @@ def _predecessor_record(value):
 
 
 def _role_predecessor(paths, *, system=None, receipt_path=None, expected=None, live=False):
+    _contract_purpose(True, paths.purpose)
     """Read retained v1 custody; live postimages apply only before first v2 write.
 
     Once a v2 write commits, its own captured preimages/receipts own recovery.
@@ -269,6 +300,7 @@ def _role_predecessor(paths, *, system=None, receipt_path=None, expected=None, l
 
 
 def _stopped_role_predecessor(document, paths, system):
+    _contract_purpose(True, paths.purpose)
     original, _ = _role_predecessor(paths, expected=document["intent"]["predecessor"],
                                     system=system, live=True)
     with publication.private(_stage_directory(paths)) as area:
@@ -493,10 +525,12 @@ def _write_once(stage, name, raw):
 class _PurposeLock:
     """Exclusive cooperative lock for the one application transport purpose."""
 
-    def __init__(self, paths, *, create=False, server=False):
+    def __init__(self, paths, *, create=False, server=False, shared_authfile=False):
         self.paths = paths
         self.create = create
-        self.root = paths.server_operation_root if server else paths.operation_root
+        require(not shared_authfile or server, "shared authfile lock is server-only")
+        self.root = (paths.server_authfile.parent / "application-authfile-custody"
+                     if shared_authfile else paths.server_operation_root if server else paths.operation_root)
         self.descriptor = None
         self.identity = None
 
@@ -547,6 +581,16 @@ class _PurposeLock:
                 os.close(self.descriptor)
                 self.descriptor = None
         return False
+
+
+class _HeldLocks:
+    """Recheck the same held purpose and shared-authfile writer exclusions."""
+    def __init__(self, *locks):
+        self.locks = locks
+
+    def check(self):
+        for lock in self.locks:
+            lock.check()
 
 
 # ------------------------------------------------------------- OS observations
@@ -769,25 +813,28 @@ def _authfile_entries(raw):
     return entries
 
 
-def _authorizes_app_listener(patterns, role_aliases=False):
+def _authorizes_app_listener(patterns, role_aliases=False, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    remotes, _, _ = _remotes(role_aliases, purpose=purpose)
     for pattern in patterns:
-        if any(re.search(pattern, remote) for remote in _remotes(role_aliases)[0]):
+        if any(re.search(pattern, remote) for remote in remotes):
             return True
     return False
 
 
-def _merge_authfile(raw, auth, *, allow_absent_port_listener=True, role_aliases=False):
+def _merge_authfile(raw, auth, *, allow_absent_port_listener=True, role_aliases=False,
+                    purpose=os_tunnel_entry.FABRIC_APPLICATION):
     """Merge exactly one app ACL into the full incumbent authfile.
 
     Every incumbent user and every incumbent ACL value is preserved. A second
     grant of the same listener, a conflicting application identity and an
     unanchored or wildcard incumbent rule are refused, never rewritten.
     """
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     entries = _authfile_entries(raw)
-    remotes, regexes, _ = _remotes(role_aliases)
-    require(REMOTE_REGEX.startswith("^") and REMOTE_REGEX.endswith("$"),
+    remotes, regexes, _ = _remotes(role_aliases, purpose=purpose)
+    require(purpose.remote_regex.startswith("^") and purpose.remote_regex.endswith("$"),
             "the application ACL must be anchored")
-    require(re.fullmatch(REMOTE_REGEX, REMOTE_ADDRESS) is not None,
+    require(re.fullmatch(purpose.remote_regex, purpose.remote_address) is not None,
             "the application ACL does not match its own listener")
     ours = entries.get(auth)
     if role_aliases:
@@ -795,13 +842,13 @@ def _merge_authfile(raw, auth, *, allow_absent_port_listener=True, role_aliases=
         require(all(re.fullmatch(pattern, remote) for pattern, remote in zip(regexes, remotes)),
                 "role alias contract differs")
     if ours is not None:
-        require(ours == [REMOTE_REGEX], "existing application grant differs; refusing to rewrite it")
+        require(ours == [purpose.remote_regex], "existing application grant differs; refusing to rewrite it")
     for key, patterns in entries.items():
-        if key != auth and _authorizes_app_listener(patterns, role_aliases):
+        if key != auth and _authorizes_app_listener(patterns, role_aliases, purpose=purpose):
             raise ValueError("an existing grant already authorizes the application listener")
     for key in entries:
         name = key.partition(":")[0]
-        if name == AUDIENCE and key != auth:
+        if name == purpose.audience and key != auth:
             raise ValueError("conflicting existing application identity refused")
     if ours is not None and not role_aliases:
         return entries, dict(entries), False
@@ -813,23 +860,25 @@ def _merge_authfile(raw, auth, *, allow_absent_port_listener=True, role_aliases=
 # ---------------------------------------------------------------------- stage
 
 
-def _render_plist(template, *, python, release_root):
+def _render_plist(template, *, python, release_root, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     text = template.decode("utf-8")
     values = {
-        "__LABEL__": LABEL,
+        "__LABEL__": purpose.label,
         "__PYTHON_BINARY__": python,
         "__RELEASE_ROOT__": str(release_root),
-        "__ENTRYPOINT__": str(Path(release_root) / "ops/executive_os/application_tunnel_entry.py"),
+        "__ENTRYPOINT__": str(Path(release_root) / purpose.entry),
     }
     for key, value in values.items():
         text = text.replace(key, value)
     require(not re.search(r"__[A-Z_]+__", text), "unresolved plist placeholder refused")
-    require(AUDIENCE not in text and "AUTH" not in text,
+    require(purpose.audience not in text and "AUTH" not in text,
             "the plist must not carry credential material")
     return text.encode("utf-8")
 
 
-def _plist_arguments(raw):
+def _plist_arguments(raw, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     try:
         root = ElementTree.fromstring(raw)
     except ElementTree.ParseError as exc:
@@ -845,7 +894,7 @@ def _plist_arguments(raw):
         require(key.tag == "key" and isinstance(key.text, str), "plist dictionary refused")
         pairs[key.text] = value
     label = pairs.get("Label")
-    require(label is not None and label.text == LABEL, "plist label refused")
+    require(label is not None and label.text == purpose.label, "plist label refused")
     arguments = pairs.get("ProgramArguments")
     require(arguments is not None and arguments.tag == "array", "plist arguments refused")
     values = [item.text for item in arguments]
@@ -861,15 +910,16 @@ def _release_seal(release_root, commit_sha, tree_sha):
         raise ValueError("the sealed release does not match its exact-SHA manifest") from exc
 
 
-def _release_entries(release_root, commit_sha, tree_sha, source_repo):
+def _release_entries(release_root, commit_sha, tree_sha, source_repo, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
     """Verify the installed sealed release and bind it to the protected source."""
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     seal = _release_seal(release_root, commit_sha, tree_sha)
     entries = {}
     for row in seal["entries"]:
-        if row["path"] in IMPORT_CLOSURE or row["path"] == TEMPLATE_PATH:
+        if row["path"] in purpose.import_closure or row["path"] == purpose.template_path:
             require(row.get("type") == "file", "release entry refused")
             entries[row["path"]] = row["sha256"]
-    require(set(entries) == set(IMPORT_CLOSURE) | {TEMPLATE_PATH},
+    require(set(entries) == set(purpose.import_closure) | {purpose.template_path},
             "the sealed release does not carry the application transport closure")
     for path, expected in sorted(entries.items()):
         try:
@@ -881,9 +931,10 @@ def _release_entries(release_root, commit_sha, tree_sha, source_repo):
     return seal, entries
 
 
-def _import_closure(release_root, python, entries):
+def _import_closure(release_root, python, entries, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
     """Prove the imported helper closure comes from that same sealed release."""
-    entry = Path(release_root) / "ops/executive_os/application_tunnel_entry.py"
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
+    entry = Path(release_root) / purpose.entry
     completed = subprocess.run([python, "-I", "-B", "-c", _IMPORT_PROBE, str(entry)],
                                capture_output=True, text=True, timeout=120)
     require(completed.returncode == 0, "the sealed application entry did not import")
@@ -891,12 +942,12 @@ def _import_closure(release_root, python, entries):
         resolved = json.loads(completed.stdout.strip())
     except json.JSONDecodeError as exc:
         raise ValueError("the sealed application entry did not import") from exc
-    for name, relative in (("entry", IMPORT_CLOSURE[0]), ("helper", IMPORT_CLOSURE[1]),
+    for name, relative in (("entry", purpose.import_closure[0]), ("helper", purpose.import_closure[1]),
                            ("security", "control_plane/fs_security.py")):
         expected = (Path(release_root) / relative).resolve()
         require(Path(resolved.get(name, "")).resolve() == expected,
                 "an imported helper escapes the sealed release")
-    for path in IMPORT_CLOSURE:
+    for path in purpose.import_closure:
         require(path in entries, "the sealed release closure is incomplete")
     return resolved
 
@@ -907,6 +958,7 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
     """Capture one original operation. Never rotates or regenerates a credential."""
     _root()
     paths = paths or Paths()
+    purpose = _contract_purpose(role_aliases, paths.purpose)
     system = system or System()
     require(type(role_aliases) is bool, "application contract selector refused")
     require(not role_aliases or credential_path is None, "role successor cannot replace the credential")
@@ -922,17 +974,17 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
             source_repo=source_repo, expected_sha=source_sha)
     except install_source_policy.InstallSourcePolicyError as exc:
         raise ValueError("protected source refused") from exc
-    seal, entries = _release_entries(release_root, release_commit_sha, release_tree_sha, source_repo)
+    seal, entries = _release_entries(release_root, release_commit_sha, release_tree_sha, source_repo, purpose=purpose)
     require(source_sha == release_commit_sha and source_tree == release_tree_sha,
             "the application release differs from the protected source")
     _verify_client_binary({"client_binary": qualification["client_binary"]}, paths, system)
-    template = assets._read(release_root / TEMPLATE_PATH, MAX_BYTES)
+    template = assets._read(release_root / purpose.template_path, MAX_BYTES)
     client_config = canonical({
-        "schema": os_tunnel_entry.APPLICATION_ROLE_SCHEMA if role_aliases else os_tunnel_entry.APPLICATION_SCHEMA,
+        "schema": os_tunnel_entry.APPLICATION_ROLE_SCHEMA if role_aliases else purpose.client_schema,
         "binary_sha256": qualification["client_binary"]["sha256"],
         "server_fingerprint": qualification["server_fingerprint"],
     })
-    client_plist = _render_plist(template, python=paths.python, release_root=release_root)
+    client_plist = _render_plist(template, python=paths.python, release_root=release_root, purpose=purpose)
     with _PurposeLock(paths, create=True) as lock:
         stage_directory = _stage_directory(paths, role_aliases)
         if not os.path.lexists(stage_directory):
@@ -959,31 +1011,31 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
                 require(digest(canonical(decode(predecessor_raw))) == predecessor["server_receipt_digest"],
                         "role predecessor server receipt changed")
             if "credential.auth" in names:
-                staged_credential = _normalise_credential(stage_area.read("credential.auth"))
+                staged_credential = _normalise_credential(stage_area.read("credential.auth"), purpose=purpose)
                 require(not role_aliases or credential == staged_credential, "role credential changed")
                 credential = staged_credential
                 supplied = _supplied_credential(credential_path)
                 if supplied is not None:
-                    require(_normalise_credential(supplied) == credential,
+                    require(_normalise_credential(supplied, purpose=purpose) == credential,
                             "credential rotation refused; the original operation keeps its secret")
             elif not role_aliases:
                 require("intent.json" not in names,
                         "original credential staging is incomplete; regeneration refused")
                 credential = _supplied_credential(credential_path)
                 if credential is not None:
-                    credential = _normalise_credential(credential)
+                    credential = _normalise_credential(credential, purpose=purpose)
             intent = {
-                "schema": ROLE_SCHEMA if role_aliases else SCHEMA,
-                "purpose": PURPOSE,
-                "operation_id": operation_identity(role_aliases),
-                "audience": AUDIENCE,
+                "schema": ROLE_SCHEMA if role_aliases else purpose.control_schema,
+                "purpose": purpose.purpose,
+                "operation_id": operation_identity(role_aliases, purpose=purpose),
+                "audience": purpose.audience,
                 "server": SERVER,
-                "remote_address": REMOTE_ADDRESS,
-                "remote_regex": REMOTE_REGEX,
-                "target_address": "127.0.0.1:%d" % TARGET_PORT,
-                "relay_port": RELAY_PORT,
-                "target_port": TARGET_PORT,
-                "label": LABEL,
+                "remote_address": purpose.remote_address,
+                "remote_regex": purpose.remote_regex,
+                "target_address": "127.0.0.1:%d" % purpose.target_port,
+                "relay_port": purpose.relay_port,
+                "target_port": purpose.target_port,
+                "label": purpose.label,
                 "source": {"sha": source_sha, "tree": source_tree},
                 "release": {"root": str(release_root), "commit_sha": release_commit_sha,
                             "tree_sha": release_tree_sha,
@@ -1021,11 +1073,11 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
             # Persist custody before creating the dedicated secret. A missing
             # retained payload after interruption never authorizes rotation.
             if credential is None:
-                credential = _normalise_credential((AUDIENCE + ":" + secrets.token_urlsafe(32)).encode())
+                credential = _normalise_credential((purpose.audience + ":" + secrets.token_urlsafe(32)).encode(), purpose=purpose)
             bundle_value = {
-                "schema": ROLE_BUNDLE_SCHEMA if role_aliases else BUNDLE_SCHEMA, "purpose": PURPOSE,
-                "operation_id": intent["operation_id"], "audience": AUDIENCE,
-                "auth": credential.decode(), "remotes": list(_remotes(role_aliases)[1]),
+                "schema": ROLE_BUNDLE_SCHEMA if role_aliases else purpose.bundle_schema, "purpose": purpose.purpose,
+                "operation_id": intent["operation_id"], "audience": purpose.audience,
+                "auth": credential.decode(), "remotes": list(_remotes(role_aliases, purpose=purpose)[1]),
                 "authfile": str(paths.server_authfile), "unit": paths.server_unit,
                 "server_binary": qualification["server_binary"],
                 "qualification": qualification, "source": intent["source"],
@@ -1048,7 +1100,7 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
             _write_once(stage_area, "server-bundle.json", bundle)
             descriptor = canonical({
                 "schema": intent["schema"],
-                "purpose": PURPOSE,
+                "purpose": purpose.purpose,
                 "operation_id": intent["operation_id"],
                 "files": {name: {"sha256": digest(stage_area.read(name)), "bytes": len(stage_area.read(name))}
                           for name in (ROLE_STAGE_FILES if role_aliases else STAGE_FILES)},
@@ -1083,30 +1135,32 @@ def _supplied_credential(path):
     return _read_root_private(Path(path), 1024)
 
 
-def _normalise_credential(raw):
+def _normalise_credential(raw, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     require(type(raw) is bytes and 0 < len(raw) <= 1024, "application credential refused")
     body = raw[:-1] if raw.endswith(b"\n") else raw
     try:
         text = body.decode("ascii")
     except UnicodeDecodeError as exc:
         raise ValueError("application credential refused") from exc
-    require(re.fullmatch(r"mastermind-fabric-app:[A-Za-z0-9_-]{32,128}", text),
+    require(re.fullmatch(re.escape(purpose.audience) + r":[A-Za-z0-9_-]{32,128}", text),
             "application credential refused")
     return body
 
 
 def _load_stage(stage_area, paths):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     names = stage_area.names()
     require("stage.json" in names, "the staged operation is missing its descriptor")
     raw = stage_area.read("stage.json")
     document = decode(raw)
     require(type(document) is dict and set(document) == {
         "schema", "purpose", "operation_id", "files", "custody"}, "stage descriptor refused")
-    require(document["schema"] in (SCHEMA, ROLE_SCHEMA) and document["purpose"] == PURPOSE
-            and document["custody"] == CUSTODY, "stage descriptor refused")
-    role_aliases = document["schema"] == ROLE_SCHEMA
+    require(document["purpose"] == purpose.purpose and document["custody"] == CUSTODY,
+            "stage descriptor refused")
+    role_aliases = _role_intent(document, purpose=purpose)
     require(stage_area.path == _stage_directory(paths, role_aliases), "stage contract path differs")
-    require(document["operation_id"] == operation_identity(role_aliases), "operation identity differs")
+    require(document["operation_id"] == operation_identity(role_aliases, purpose=purpose), "operation identity differs")
     files = document["files"]
     expected_files = ROLE_STAGE_FILES if role_aliases else STAGE_FILES
     require(type(files) is dict and set(files) == set(expected_files), "stage file set differs")
@@ -1130,23 +1184,23 @@ def _load_stage(stage_area, paths):
         intent_fields.update(("predecessor", "role_remotes"))
     require(type(intent) is dict and set(intent) == intent_fields, "operation intent refused")
     require(intent["operation_id"] == document["operation_id"], "operation identity differs")
-    require(intent["remote_address"] == REMOTE_ADDRESS and intent["remote_regex"] == REMOTE_REGEX
-            and intent["relay_port"] == RELAY_PORT and intent["target_port"] == TARGET_PORT
-            and intent["label"] == LABEL and intent["audience"] == AUDIENCE,
+    require(intent["remote_address"] == purpose.remote_address and intent["remote_regex"] == purpose.remote_regex
+            and intent["relay_port"] == purpose.relay_port and intent["target_port"] == purpose.target_port
+            and intent["label"] == purpose.label and intent["audience"] == purpose.audience,
             "operation intent differs from the closed constants")
     qualification = _qualification(contents["qualification.json"])
     require(qualification["schema"] == (ROLE_QUALIFICATION_SCHEMA if role_aliases else QUALIFICATION_SCHEMA),
             "qualification does not cover the selected remote contract")
     require(digest(contents["qualification.json"]) == intent["qualification_digest"],
             "qualification digest differs")
-    credential = _normalise_credential(contents["credential.auth"])
+    credential = _normalise_credential(contents["credential.auth"], purpose=purpose)
     credential_record = decode(contents["credential.json"])
     require(credential_record == {"schema": document["schema"], "operation_id": intent["operation_id"],
             "credential_sha256": digest(credential), "state": "RETAINED" if role_aliases else "CREATED"},
             "credential binding differs")
-    require(intent["schema"] == document["schema"] and intent["purpose"] == PURPOSE
+    require(intent["schema"] == document["schema"] and intent["purpose"] == purpose.purpose
             and intent["server"] == SERVER and intent["custody"] == CUSTODY
-            and intent["target_address"] == "127.0.0.1:%d" % TARGET_PORT
+            and intent["target_address"] == "127.0.0.1:%d" % purpose.target_port
             and intent["client_targets"] == {"config": str(paths.config),
                 "credential": str(paths.credential), "plist": str(paths.plist)}
             and intent["server_target"] == {"authfile": str(paths.server_authfile),
@@ -1155,13 +1209,13 @@ def _load_stage(stage_area, paths):
     require(all(intent[key] == qualification[key] for key in
                 ("client_binary", "server_binary", "server_fingerprint")),
             "operation binary or server qualification differs")
-    expected_config = canonical({"schema": os_tunnel_entry.APPLICATION_ROLE_SCHEMA if role_aliases else os_tunnel_entry.APPLICATION_SCHEMA,
+    expected_config = canonical({"schema": os_tunnel_entry.APPLICATION_ROLE_SCHEMA if role_aliases else purpose.client_schema,
         "binary_sha256": qualification["client_binary"]["sha256"],
         "server_fingerprint": qualification["server_fingerprint"]})
     require(contents["client-config.json"] == expected_config, "compiled client configuration differs")
-    template = assets._read(Path(intent["release"]["root"]) / TEMPLATE_PATH, MAX_BYTES)
+    template = assets._read(Path(intent["release"]["root"]) / purpose.template_path, MAX_BYTES)
     require(contents["client-plist.xml"] == _render_plist(template, python=paths.python,
-            release_root=Path(intent["release"]["root"])), "compiled client plist differs")
+            release_root=Path(intent["release"]["root"]), purpose=purpose), "compiled client plist differs")
     _, bundle, _ = _server_bundle(stage_area.path / "server-bundle.json",
                                   digest(contents["server-bundle.json"]), paths)
     require(bundle["auth"] == credential.decode() and bundle["source"] == intent["source"]
@@ -1193,10 +1247,13 @@ def _server_expected_argv(paths):
 
 
 def _server_bundle(bundle_path, expected_digest, paths):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     raw = _read_root_private(Path(bundle_path), MAX_BYTES)
     require(digest(raw) == expected_digest, "server bundle digest differs")
     bundle = decode(raw)
-    require(type(bundle) is dict and bundle.get("schema") in (BUNDLE_SCHEMA, ROLE_BUNDLE_SCHEMA),
+    schemas = ((purpose.bundle_schema, ROLE_BUNDLE_SCHEMA)
+               if purpose is os_tunnel_entry.FABRIC_APPLICATION else (purpose.bundle_schema,))
+    require(type(bundle) is dict and bundle.get("schema") in schemas,
             "server bundle refused")
     role_aliases = bundle["schema"] == ROLE_BUNDLE_SCHEMA
     fields = {
@@ -1205,10 +1262,10 @@ def _server_bundle(bundle_path, expected_digest, paths):
     if role_aliases:
         fields.add("predecessor")
     require(set(bundle) == fields, "server bundle refused")
-    require(bundle["purpose"] == PURPOSE
+    require(bundle["purpose"] == purpose.purpose
             and bundle["custody"] == CUSTODY, "server bundle refused")
-    require(bundle["operation_id"] == operation_identity(role_aliases), "operation identity differs")
-    require(bundle["audience"] == AUDIENCE and bundle["remotes"] == list(_remotes(role_aliases)[1]),
+    require(bundle["operation_id"] == operation_identity(role_aliases, purpose=purpose), "operation identity differs")
+    require(bundle["audience"] == purpose.audience and bundle["remotes"] == list(_remotes(role_aliases, purpose=purpose)[1]),
             "server bundle refused")
     require(bundle["authfile"] == str(paths.server_authfile)
             and bundle["unit"] == paths.server_unit, "server bundle target differs")
@@ -1228,11 +1285,11 @@ def _server_bundle(bundle_path, expected_digest, paths):
             and type(release["manifest_digest"]) is str
             and re.fullmatch(r"[0-9a-f]{64}", release["manifest_digest"])
             and type(release["entries"]) is dict
-            and set(release["entries"]) == set(IMPORT_CLOSURE) | {TEMPLATE_PATH}
+            and set(release["entries"]) == set(purpose.import_closure) | {purpose.template_path}
             and all(type(v) is str and re.fullmatch(r"[0-9a-f]{64}", v)
                     for v in release["entries"].values()), "server release binding refused")
     auth = bundle["auth"]
-    require(type(auth) is str and re.fullmatch(r"mastermind-fabric-app:[A-Za-z0-9_-]{32,128}", auth),
+    require(type(auth) is str and re.fullmatch(re.escape(purpose.audience) + r":[A-Za-z0-9_-]{32,128}", auth),
             "server bundle identity refused")
     if role_aliases:
         predecessor = _predecessor_record(bundle["predecessor"])
@@ -1266,9 +1323,10 @@ def _server_observation(paths, system, qualification):
     return dict(unit, live_image=live)
 
 
-def _server_receipt(intent, bundle, qualification, after):
+def _server_receipt(intent, bundle, qualification, after, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     return {
-        "schema": RECEIPT_SCHEMA, "operation_id": bundle["operation_id"],
+        "schema": purpose.receipt_schema, "operation_id": bundle["operation_id"],
         "state": "GRANT_FILE_APPLIED", "bundle_digest": intent["bundle_digest"],
         "source": bundle["source"], "release": bundle["release"],
         "authfile": intent["authfile"], "authfile_sha256": intent["candidate_sha256"],
@@ -1285,8 +1343,113 @@ def _server_receipt(intent, bundle, qualification, after):
     }
 
 
+
+def _historical_server_receipt(receipt, intent, bundle, qualification, candidate, *, purpose):
+    """Qualify a settled receipt against its retained postimage and custody."""
+    require(type(receipt) is dict, "the original server receipt is not an object")
+    after = receipt.get("authfile_identity")
+    require(type(after) is dict and set(after) == {
+        "state", "sha256", "bytes", "mode", "uid", "gid", "identity"},
+        "the historical authfile identity is incomplete")
+    require(after["state"] == "PRESENT" and after["sha256"] == digest(candidate)
+            and after["sha256"] == intent["candidate_sha256"]
+            and type(after["bytes"]) is int and after["bytes"] == len(candidate)
+            and all(type(after[key]) is int and after[key] == intent["preimage"][key]
+                    for key in ("mode", "uid", "gid")),
+            "the historical authfile identity differs from its candidate")
+    identity = after["identity"]
+    require(type(identity) is list and len(identity) == 9
+            and all(type(item) is int and item >= 0 for item in identity)
+            and stat.S_ISREG(identity[2]) and stat.S_IMODE(identity[2]) == after["mode"]
+            and identity[3:7] == [after["uid"], after["gid"], 1, len(candidate)],
+            "the historical authfile file identity differs")
+    require(receipt == _server_receipt(intent, bundle, qualification, after, purpose=purpose),
+            "the original server receipt changed")
+    return receipt
+
+
+def _other_authfile_operation_settled(paths):
+    """Fence every existing peer journal under the shared authfile writer lock."""
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
+    other = (os_tunnel_entry.DEEPSEEK_APPLICATION
+             if purpose is os_tunnel_entry.FABRIC_APPLICATION
+             else os_tunnel_entry.FABRIC_APPLICATION)
+    root = paths.server_operation_root.parent / other.path_stem
+    journals = (("operation", False),)
+    if other is os_tunnel_entry.FABRIC_APPLICATION:
+        journals += (("operation-hermes-v2", True),)
+    peer_paths = replace(paths, purpose=other, server_operation_root=root)
+    for name, role_aliases in journals:
+        operation_path = root / name
+        if not os.path.lexists(operation_path):
+            continue
+        with publication.private(operation_path) as original:
+            names = original.names()
+            if not names:
+                continue
+            require(names == {"server-intent.json", "bundle.json", "preimage.json",
+                              "candidate.json", "server-receipt.json"},
+                    "another original authfile operation requires reconciliation")
+            intent = decode(original.read("server-intent.json"))
+            require(type(intent) is dict
+                    and intent.get("schema") == (ROLE_SCHEMA if role_aliases else other.control_schema)
+                    and intent.get("phase") == "apply-server"
+                    and intent.get("operation_id") == operation_identity(role_aliases, purpose=other)
+                    and intent.get("authfile") == str(paths.server_authfile)
+                    and intent.get("custody") == CUSTODY,
+                    "the peer authfile intent is not qualified")
+            _, bundle, qualification = _server_bundle(original.path / "bundle.json",
+                                                      intent["bundle_digest"], peer_paths)
+            require((bundle["schema"] == ROLE_BUNDLE_SCHEMA) == role_aliases,
+                    "the peer authfile contract differs")
+            if role_aliases:
+                _server_role_predecessor(bundle, peer_paths)
+            candidate = original.read("candidate.json")
+            preimage = original.read("preimage.json")
+            _, merged, changed = _merge_authfile(preimage, bundle["auth"],
+                                                role_aliases=role_aliases, purpose=other)
+            require(changed and candidate == canonical(merged)
+                    and digest(candidate) == intent["candidate_sha256"]
+                    and digest(preimage) == intent["preimage"]["sha256"],
+                    "the peer authfile payload differs")
+            receipt = decode(original.read("server-receipt.json"))
+            _historical_server_receipt(receipt, intent, bundle, qualification, candidate,
+                                       purpose=other)
+
+
+def _observed_authfile_advance(receipt, intent, bundle, qualification, candidate, current,
+                               before, *, purpose):
+    """Observe an unchanged owned grant after additive shared-file evolution.
+
+    The original receipt remains immutable and historical. Current metadata is
+    returned separately, with no claim about server reload or new grant authority.
+    """
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
+    _historical_server_receipt(receipt, intent, bundle, qualification, candidate,
+                               purpose=purpose)
+    original = _authfile_entries(candidate)
+    role_aliases = bundle["schema"] == ROLE_BUNDLE_SCHEMA
+    _contract_purpose(role_aliases, purpose)
+    observed = _authfile_entries(current)
+    require(observed.get(bundle["auth"]) == bundle["remotes"]
+            and all(observed.get(key) == value for key, value in original.items()),
+            "the settled authfile grant or preserved entries changed")
+    for key, patterns in observed.items():
+        if key != bundle["auth"]:
+            require(key.partition(":")[0] != purpose.audience,
+                    "conflicting existing application identity refused")
+            require(not _authorizes_app_listener(patterns, role_aliases, purpose=purpose),
+                    "an existing grant already authorizes the application listener")
+    require(before["mode"] == intent["preimage"]["mode"]
+            and (before["uid"], before["gid"]) == (intent["preimage"]["uid"], intent["preimage"]["gid"]),
+            "server authfile custody differs")
+    return {**receipt, "authfile_observation": "OWN_GRANT_PRESENT_AUTHFILE_ADVANCED",
+            "current_authfile_sha256": digest(current), "current_authfile_identity": before,
+            "current_grant_file_present": True}
+
 def _server_role_predecessor(bundle, paths):
     """Validate VPS-retained v1 custody; never consult a client-side journal."""
+    _contract_purpose(True, paths.purpose)
     expected = _predecessor_record(bundle["predecessor"])
     with publication.private(paths.server_operation_root / "operation") as original:
         require(original.names() == {"server-intent.json", "bundle.json", "preimage.json",
@@ -1324,6 +1487,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
     Reconciliation can finish an exact missing receipt, never another grant
     write. An apply continuation advances only a proved original preimage.
     """
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     raw, bundle, qualification = _server_bundle(bundle_path, expected_digest, paths)
     role_aliases = bundle["schema"] == ROLE_BUNDLE_SCHEMA
     predecessor = _server_role_predecessor(bundle, paths) if role_aliases else None
@@ -1336,7 +1500,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
     if not os.path.lexists(operation_directory):
         require(apply, "the original server operation has not been staged")
         _make_private_directory(operation_directory)
-    listeners = system.listeners(RELAY_PORT)
+    listeners = system.listeners(purpose.relay_port)
     with publication.private(operation_directory) as operation:
         names = operation.names()
         require(names <= {"server-intent.json", "bundle.json", "preimage.json", "candidate.json",
@@ -1346,22 +1510,25 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
             require(type(intent) is dict and set(intent) == {
                 "schema", "phase", "operation_id", "bundle_digest", "authfile", "preimage",
                 "candidate_sha256", "preserved_entries", "server_process", "custody"}
-                and intent["schema"] == (ROLE_SCHEMA if role_aliases else SCHEMA) and intent["phase"] == "apply-server"
+                and intent["schema"] == (ROLE_SCHEMA if role_aliases else purpose.control_schema) and intent["phase"] == "apply-server"
                 and intent["operation_id"] == bundle["operation_id"]
                 and intent["bundle_digest"] == expected_digest
                 and intent["authfile"] == str(authfile) and intent["custody"] == CUSTODY,
                 "an existing server operation differs")
         else:
             require(apply and not names, "server intent is missing; refusing a new operation")
+            # Fence the peer's existing journals before this purpose records
+            # a new whole-authfile intent, preserving original recovery.
+            _other_authfile_operation_settled(paths)
             if role_aliases:
                 require(before == predecessor["authfile_identity"]
                         and unit["live_image"] == predecessor["server_process"],
                         "original server target or process changed before role publication")
-            entries, merged, changed = _merge_authfile(current, bundle["auth"], role_aliases=role_aliases)
+            entries, merged, changed = _merge_authfile(current, bundle["auth"], role_aliases=role_aliases, purpose=purpose)
             require(changed, "an application grant without this original intent cannot be adopted")
             require(not listeners, "the application listener is already held by another grant")
             intent = {
-                "schema": ROLE_SCHEMA if role_aliases else SCHEMA, "phase": "apply-server",
+                "schema": ROLE_SCHEMA if role_aliases else purpose.control_schema, "phase": "apply-server",
                 "operation_id": bundle["operation_id"], "bundle_digest": expected_digest,
                 "authfile": str(authfile), "preimage": before,
                 "candidate_sha256": digest(canonical(merged)), "preserved_entries": len(entries) - int(role_aliases),
@@ -1375,7 +1542,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
         if not complete:
             require(apply and before == intent["preimage"],
                     "incomplete server staging requires the exact original preimage")
-            _, merged, changed = _merge_authfile(current, bundle["auth"], role_aliases=role_aliases)
+            _, merged, changed = _merge_authfile(current, bundle["auth"], role_aliases=role_aliases, purpose=purpose)
             candidate = canonical(merged)
             require(changed and digest(candidate) == intent["candidate_sha256"],
                     "server staging differs from the original intent")
@@ -1386,15 +1553,25 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
         require(operation.read("bundle.json") == raw, "server bundle custody changed")
         preimage = operation.read("preimage.json")
         candidate = operation.read("candidate.json")
-        _, merged, changed = _merge_authfile(preimage, bundle["auth"], role_aliases=role_aliases)
+        _, merged, changed = _merge_authfile(preimage, bundle["auth"], role_aliases=role_aliases, purpose=purpose)
         require(changed and digest(preimage) == intent["preimage"]["sha256"]
                 and canonical(merged) == candidate and digest(candidate) == intent["candidate_sha256"],
                 "original server payload differs")
         committed = current == candidate
+        if "server-receipt.json" in operation.names() and not committed:
+            receipt = decode(operation.read("server-receipt.json"))
+            if listeners:
+                allowed = {remote.removeprefix("R:") for remote in _remotes(role_aliases, purpose=purpose)[0]}
+                addresses = [listener.get("address") for listener in listeners]
+                require(len(addresses) == len(set(addresses)) and set(addresses) <= allowed
+                        and all(listener.get("pid") == unit["main_pid"] for listener in listeners),
+                        "the application listener belongs to another owner")
+            return _observed_authfile_advance(receipt, intent, bundle, qualification,
+                                              candidate, current, before, purpose=purpose)
         require(committed or before == intent["preimage"],
                 "the server authfile conflicts with its original operation")
         if listeners:
-            allowed = {remote.removeprefix("R:") for remote in _remotes(role_aliases)[0]}
+            allowed = {remote.removeprefix("R:") for remote in _remotes(role_aliases, purpose=purpose)[0]}
             addresses = [listener.get("address") for listener in listeners]
             require(committed and len(addresses) == len(set(addresses))
                     and set(addresses) <= allowed
@@ -1402,17 +1579,19 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
                     "the application listener belongs to another owner")
         if "server-receipt.json" in operation.names():
             receipt = decode(operation.read("server-receipt.json"))
-            require(committed and receipt == _server_receipt(intent, bundle, qualification, before),
+            require(committed and receipt == _server_receipt(intent, bundle, qualification, before, purpose=purpose),
                     "the settled server target or receipt changed")
             return receipt
         if not committed:
             if not apply:
-                return {"schema": RECEIPT_SCHEMA, "state": "NOT_APPLIED",
+                return {"schema": purpose.receipt_schema, "state": "NOT_APPLIED",
                         "operation_id": intent["operation_id"], "bundle_digest": expected_digest,
                         "grant_file_applied": False, "custody": SERVER_CUSTODY}
+            # Fence mutation, not read-only observation or exact receipt repair.
+            _other_authfile_operation_settled(paths)
             require(_server_observation(paths, system, qualification)["live_image"] == intent["server_process"],
                     "the original server process changed before publication")
-            require(not system.listeners(RELAY_PORT), "application listener appeared before publication")
+            require(not system.listeners(purpose.relay_port), "application listener appeared before publication")
             require(_read_root_private(Path(bundle_path), MAX_BYTES) == raw, "server bundle changed")
             operation.check()
             lock.check()
@@ -1423,7 +1602,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
         require(after["mode"] == intent["preimage"]["mode"]
                 and (after["uid"], after["gid"]) == (intent["preimage"]["uid"], intent["preimage"]["gid"]),
                 "server authfile custody differs")
-        receipt = _server_receipt(intent, bundle, qualification, after)
+        receipt = _server_receipt(intent, bundle, qualification, after, purpose=purpose)
         lock.check()
         _write_once(operation, "server-receipt.json", canonical(receipt))
     return receipt
@@ -1432,17 +1611,23 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
 def apply_server(*, bundle_path, expected_digest, paths=None, system=None):
     _root()
     paths = paths or Paths()
-    with _PurposeLock(paths, create=True, server=True) as lock:
-        lock.check()
-        return _server_transaction(bundle_path, expected_digest, paths, system or System(), lock, apply=True)
+    _server_bundle(bundle_path, expected_digest, paths)
+    with _PurposeLock(paths, create=True, server=True, shared_authfile=True) as shared:
+        with _PurposeLock(paths, create=True, server=True) as lock:
+            held = _HeldLocks(shared, lock)
+            held.check()
+            return _server_transaction(bundle_path, expected_digest, paths, system or System(), held, apply=True)
 
 
 def reconcile_server(*, bundle_path, expected_digest, paths=None, system=None):
     _root()
     paths = paths or Paths()
-    with _PurposeLock(paths, server=True) as lock:
-        lock.check()
-        return _server_transaction(bundle_path, expected_digest, paths, system or System(), lock, apply=False)
+    _server_bundle(bundle_path, expected_digest, paths)
+    with _PurposeLock(paths, create=True, server=True, shared_authfile=True) as shared:
+        with _PurposeLock(paths, server=True) as lock:
+            held = _HeldLocks(shared, lock)
+            held.check()
+            return _server_transaction(bundle_path, expected_digest, paths, system or System(), held, apply=False)
 
 
 # -------------------------------------------------------------- apply client
@@ -1477,6 +1662,7 @@ def apply_client(*, server_receipt=None, paths=None, system=None, role_aliases=F
     """Install only the application config, credential and plist."""
     _root()
     paths = paths or Paths()
+    purpose = _contract_purpose(role_aliases, paths.purpose)
     system = system or System()
     with _PurposeLock(paths) as lock:
         stage_directory = _stage_directory(paths, role_aliases)
@@ -1525,7 +1711,7 @@ def apply_client(*, server_receipt=None, paths=None, system=None, role_aliases=F
                     if receipt_name in operation.names():
                         receipt = decode(operation.read(receipt_name))
                         require(_target_receipt_matches(receipt, name, document, candidate,
-                                                       _capture_preimage(path), mode),
+                                                       _capture_preimage(path), mode, purpose=purpose),
                                 "the settled client target or receipt changed")
                         dispositions[name] = "ALREADY_APPLIED"
                         continue
@@ -1549,7 +1735,7 @@ def apply_client(*, server_receipt=None, paths=None, system=None, role_aliases=F
                         "operation_id": intent["operation_id"], "stage_digest": document["stage_digest"],
                         "identity": _capture_preimage(path)}))
             return {
-                "schema": RECEIPT_SCHEMA,
+                "schema": purpose.receipt_schema,
                 "state": "CLIENT_FILES_APPLIED",
                 "operation_id": intent["operation_id"],
                 "stage_digest": document["stage_digest"],
@@ -1563,7 +1749,8 @@ def apply_client(*, server_receipt=None, paths=None, system=None, role_aliases=F
             }
 
 
-def _target_receipt_matches(receipt, name, document, candidate, current, mode):
+def _target_receipt_matches(receipt, name, document, candidate, current, mode, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     return (type(receipt) is dict and set(receipt) == {
         "schema", "target", "disposition", "sha256", "bytes", "operation_id", "stage_digest", "identity"}
         and receipt["schema"] == document["intent"]["schema"] and receipt["target"] == name
@@ -1573,12 +1760,13 @@ def _target_receipt_matches(receipt, name, document, candidate, current, mode):
         and receipt["sha256"] == digest(candidate) and receipt["bytes"] == len(candidate)
         and current["state"] == "PRESENT" and current["mode"] == mode
         and current["sha256"] == digest(candidate) and receipt["identity"] == current
-        and (name != "credential" or not _role_intent(document["intent"])
+        and (name != "credential" or not _role_intent(document["intent"], purpose=purpose)
              or current == document["intent"]["predecessor"]["credential_identity"]))
 
 
 def _client_receipts(document, paths):
-    journal = _stage_directory(paths, _role_intent(document["intent"])) / "operation"
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
+    journal = _stage_directory(paths, _role_intent(document["intent"], purpose=purpose)) / "operation"
     if not os.path.lexists(journal):
         return None, {}
     with publication.private(journal) as operation:
@@ -1597,24 +1785,26 @@ def _client_receipts(document, paths):
 
 
 def _verify_release(intent, paths):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     release = intent["release"]
     release_root = Path(release["root"])
     seal = _release_seal(release_root, release["commit_sha"], release["tree_sha"])
     require(digest(canonical(seal)) == release["manifest_digest"], "the release seal differs")
     entries = {}
     for row in seal["entries"]:
-        if row["path"] in IMPORT_CLOSURE or row["path"] == TEMPLATE_PATH:
+        if row["path"] in purpose.import_closure or row["path"] == purpose.template_path:
             entries[row["path"]] = row["sha256"]
     require(entries == release["entries"], "the sealed release entries differ")
-    _import_closure(release_root, paths.python, entries)
+    _import_closure(release_root, paths.python, entries, purpose=purpose)
 
 
 def _server_grant(server_receipt, document, paths):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     if server_receipt is None:
         return {"state": "NOT_PROVIDED"}
     raw = _read_root_private(Path(server_receipt), MAX_BYTES)
     receipt = decode(raw)
-    require(type(receipt) is dict and receipt.get("schema") == RECEIPT_SCHEMA,
+    require(type(receipt) is dict and receipt.get("schema") == purpose.receipt_schema,
             "server receipt refused")
     require(receipt.get("operation_id") == document["intent"]["operation_id"],
             "the server receipt belongs to another operation")
@@ -1633,6 +1823,7 @@ def reconcile(*, server_receipt=None, paths=None, system=None, role_aliases=Fals
     """Inspect the original stage, intent and targets. Never mutates a target."""
     _root()
     paths = paths or Paths()
+    purpose = _contract_purpose(role_aliases, paths.purpose)
     system = system or System()
     with _PurposeLock(paths):
         stage_directory = _stage_directory(paths, role_aliases)
@@ -1647,7 +1838,7 @@ def reconcile(*, server_receipt=None, paths=None, system=None, role_aliases=Fals
                 current = _capture_preimage(path)
                 if name in receipts:
                     targets[name] = ("APPLIED" if _target_receipt_matches(
-                        receipts[name], name, document, candidate, current, mode) else "CONFLICT")
+                        receipts[name], name, document, candidate, current, mode, purpose=purpose) else "CONFLICT")
                 elif current == preimage:
                     targets[name] = "NOT_APPLIED"
                 elif current["state"] == "PRESENT" and current["sha256"] == digest(candidate) and current["mode"] == mode:
@@ -1658,7 +1849,7 @@ def reconcile(*, server_receipt=None, paths=None, system=None, role_aliases=Fals
             _verify_release(intent, paths)
             service, settled = _service_state(stage_area, paths, system, intent)
             return {
-                "schema": RECEIPT_SCHEMA,
+                "schema": purpose.receipt_schema,
                 "state": "RECONCILED" if "CONFLICT" not in targets.values() else "RECONCILIATION_REQUIRED",
                 "operation_id": intent["operation_id"],
                 "stage_digest": document["stage_digest"],
@@ -1675,11 +1866,12 @@ def reconcile(*, server_receipt=None, paths=None, system=None, role_aliases=Fals
 
 def _service_state(stage_area, paths, system, intent):
     """Read the original lifecycle journal and the live launchd state."""
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     journal = stage_area.path / "operation"
-    loaded, info = system.launchctl_print(LABEL)
-    arguments = _plist_arguments(stage_area.read("client-plist.xml"))
+    loaded, info = system.launchctl_print(purpose.label)
+    arguments = _plist_arguments(stage_area.read("client-plist.xml"), purpose=purpose)
     running = _running_client(loaded, info, arguments, intent, paths, system)
-    orphan = not loaded and any(_is_same_purpose(p, _client_binary_path(paths, intent))
+    orphan = not loaded and any(_is_same_purpose(p, _client_binary_path(paths, intent), purpose=purpose)
                                for p in system.processes())
     if not os.path.lexists(journal):
         return ("CONFLICT" if loaded or orphan else "ABSENT"), {}
@@ -1718,7 +1910,8 @@ def _verify_client_binary(intent, paths, system):
             "the installed client binary build differs from the qualification")
 
 
-def _is_same_purpose(process, binary_path):
+def _is_same_purpose(process, binary_path, *, purpose=os_tunnel_entry.FABRIC_APPLICATION):
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
     argv = list(process.get("argv") or [])
     if not argv:
         match = re.fullmatch(r"(.*/chisel) (client(?: .*)?)", process.get("command", ""))
@@ -1726,28 +1919,31 @@ def _is_same_purpose(process, binary_path):
             try:
                 argv = [match.group(1), *shlex.split(match.group(2))]
             except ValueError:
-                return any(remote in process["command"] for remote in _remotes(True)[2])
+                return any(remote in process["command"] for remote in _remotes(purpose is os_tunnel_entry.FABRIC_APPLICATION, purpose=purpose)[2])
     return (bool(argv) and (argv[0] == str(binary_path) or Path(argv[0]).name == "chisel")
-            and "client" in argv[1:] and any(remote in argv for remote in _remotes(True)[2]))
+            and "client" in argv[1:] and any(remote in argv for remote in
+                _remotes(purpose is os_tunnel_entry.FABRIC_APPLICATION, purpose=purpose)[2]))
 
 
 def _running_client(loaded, info, arguments, intent, paths, system):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     expected = [str(_client_binary_path(paths, intent)), "client", "--fingerprint",
                 intent["server_fingerprint"], "--keepalive", "20s", SERVER,
-                *_remotes(_role_intent(intent))[2]]
+                *_remotes(_role_intent(intent, purpose=purpose), purpose=purpose)[2]]
     return (loaded and list(info.get("arguments") or []) == arguments
             and type(info.get("pid")) is int and info["pid"] > 0
             and system.process_matches(info["pid"], expected))
 
 
 def _installed_client(document, paths):
+    purpose = os_tunnel_entry.closed_application_purpose(paths.purpose)
     intent = document["intent"]
     _verify_release(intent, paths)
     apply_intent, receipts = _client_receipts(document, paths)
     for name, path, source, mode in _client_targets(intent):
         current = _capture_preimage(path)
         require(apply_intent and name in receipts and _target_receipt_matches(
-                    receipts[name], name, document, document["contents"][source], current, mode),
+                    receipts[name], name, document, document["contents"][source], current, mode, purpose=purpose),
                 "the application client is not installed; refusing lifecycle action")
 
 
@@ -1755,6 +1951,7 @@ def start_client(*, server_receipt, paths=None, system=None, role_aliases=False)
     """Issue at most one exact bounded launchctl operation for this label."""
     _root()
     paths = paths or Paths()
+    purpose = _contract_purpose(role_aliases, paths.purpose)
     system = system or System()
     with _PurposeLock(paths) as lock:
         stage_directory = _stage_directory(paths, role_aliases)
@@ -1766,8 +1963,8 @@ def start_client(*, server_receipt, paths=None, system=None, role_aliases=False)
             require(grant["state"] == "GRANT_FILE_APPLIED",
                     "the server grant is not applied; refusing to start")
             _verify_client_binary(intent, paths, system)
-            arguments = _plist_arguments(document["contents"]["client-plist.xml"])
-            loaded, info = system.launchctl_print(LABEL)
+            arguments = _plist_arguments(document["contents"]["client-plist.xml"], purpose=purpose)
+            loaded, info = system.launchctl_print(purpose.label)
             if loaded:
                 require(list(info.get("arguments") or []) == arguments,
                         "a foreign launchd label already owns this purpose")
@@ -1775,20 +1972,20 @@ def start_client(*, server_receipt, paths=None, system=None, role_aliases=False)
                         "the application process is not proven running")
                 _require_lifecycle_intent(stage_area, "start", document, arguments)
                 _settle_service(stage_area, "start-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "STARTED",
+                    "schema": purpose.receipt_schema, "state": "STARTED",
                     "operation_id": intent["operation_id"], "commands": 0,
                     "settled_by": "launchd_state", "pid": info.get("pid"),
                     "service_started": True, "tunnel_proven": False,
                     "application_proven": False, "custody": CUSTODY})
                 return {
-                    "schema": RECEIPT_SCHEMA, "state": "ALREADY_STARTED",
+                    "schema": purpose.receipt_schema, "state": "ALREADY_STARTED",
                     "operation_id": intent["operation_id"], "commands": 0,
                     "service_started": True, "tunnel_proven": False,
                     "application_proven": False, "custody": CUSTODY,
                 }
             binary_path = _client_binary_path(paths, intent)
             for process in system.processes():
-                if _is_same_purpose(process, binary_path):
+                if _is_same_purpose(process, binary_path, purpose=purpose):
                     raise ValueError("a concurrent same-purpose client is already running")
             journal = stage_area.path / "operation"
             if not os.path.lexists(journal):
@@ -1813,7 +2010,7 @@ def start_client(*, server_receipt, paths=None, system=None, role_aliases=False)
                 result = system.launchctl_bootstrap(paths.plist)
             except (subprocess.TimeoutExpired, OSError) as exc:
                 _write_service_receipt(journal, "start-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "START_UNKNOWN",
+                    "schema": purpose.receipt_schema, "state": "START_UNKNOWN",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "error_type": type(exc).__name__, "service_started": False,
                     "tunnel_proven": False, "application_proven": False,
@@ -1821,22 +2018,22 @@ def start_client(*, server_receipt, paths=None, system=None, role_aliases=False)
                 raise ValueError("the start command outcome is unknown; reconcile it") from exc
             if result["returncode"] != 0:
                 _write_service_receipt(journal, "start-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "START_REFUSED",
+                    "schema": purpose.receipt_schema, "state": "START_REFUSED",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "returncode": result["returncode"], "detail": result["stderr"],
                     "service_started": False, "tunnel_proven": False,
                     "application_proven": False, "custody": CUSTODY})
                 raise ValueError("the start command was refused")
-            loaded, info = system.launchctl_print(LABEL)
+            loaded, info = system.launchctl_print(purpose.label)
             if not _running_client(loaded, info, arguments, intent, paths, system):
                 _write_service_receipt(journal, "start-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "START_UNKNOWN",
+                    "schema": purpose.receipt_schema, "state": "START_UNKNOWN",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "service_started": False, "tunnel_proven": False,
                     "application_proven": False, "custody": CUSTODY})
                 raise ValueError("the start command outcome is unknown; reconcile it")
             receipt = {
-                "schema": RECEIPT_SCHEMA, "state": "STARTED",
+                "schema": purpose.receipt_schema, "state": "STARTED",
                 "operation_id": intent["operation_id"], "commands": 1,
                 "pid": info.get("pid"), "service_started": True,
                 "tunnel_proven": False, "application_proven": False,
@@ -1850,6 +2047,7 @@ def stop_client(*, paths=None, system=None, role_aliases=False):
     """Issue at most one exact bounded launchctl operation for this label."""
     _root()
     paths = paths or Paths()
+    purpose = _contract_purpose(role_aliases, paths.purpose)
     system = system or System()
     with _PurposeLock(paths) as lock:
         stage_directory = _stage_directory(paths, role_aliases)
@@ -1858,20 +2056,20 @@ def stop_client(*, paths=None, system=None, role_aliases=False):
             intent = document["intent"]
             _installed_client(document, paths)
             _verify_client_binary(intent, paths, system)
-            arguments = _plist_arguments(document["contents"]["client-plist.xml"])
-            loaded, info = system.launchctl_print(LABEL)
+            arguments = _plist_arguments(document["contents"]["client-plist.xml"], purpose=purpose)
+            loaded, info = system.launchctl_print(purpose.label)
             if not loaded:
-                require(not any(_is_same_purpose(p, _client_binary_path(paths, intent))
+                require(not any(_is_same_purpose(p, _client_binary_path(paths, intent), purpose=purpose)
                                 for p in system.processes()),
                         "an unowned application process remains; stop is unproven")
                 _settle_service(stage_area, "stop-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "STOPPED",
+                    "schema": purpose.receipt_schema, "state": "STOPPED",
                     "operation_id": intent["operation_id"], "commands": 0,
                     "settled_by": "launchd_state_absence", "service_started": False,
                     "provider_effects_settled": False, "tunnel_proven": False,
                     "application_proven": False, "custody": CUSTODY})
                 return {
-                    "schema": RECEIPT_SCHEMA, "state": "ALREADY_STOPPED",
+                    "schema": purpose.receipt_schema, "state": "ALREADY_STOPPED",
                     "operation_id": intent["operation_id"], "commands": 0,
                     "service_started": False, "provider_effects_settled": False,
                     "tunnel_proven": False, "application_proven": False, "custody": CUSTODY,
@@ -1901,10 +2099,10 @@ def stop_client(*, paths=None, system=None, role_aliases=False):
                 require(_load_stage(stage_area, paths)["stage_digest"] == document["stage_digest"],
                         "original lifecycle stage changed")
                 _installed_client(document, paths)
-                result = system.launchctl_bootout(LABEL)
+                result = system.launchctl_bootout(purpose.label)
             except (subprocess.TimeoutExpired, OSError) as exc:
                 _write_service_receipt(journal, "stop-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "STOP_UNKNOWN",
+                    "schema": purpose.receipt_schema, "state": "STOP_UNKNOWN",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "error_type": type(exc).__name__, "service_started": False,
                     "provider_effects_settled": False, "tunnel_proven": False,
@@ -1912,23 +2110,23 @@ def stop_client(*, paths=None, system=None, role_aliases=False):
                 raise ValueError("the stop command outcome is unknown; reconcile it") from exc
             if result["returncode"] != 0:
                 _write_service_receipt(journal, "stop-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "STOP_REFUSED",
+                    "schema": purpose.receipt_schema, "state": "STOP_REFUSED",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "returncode": result["returncode"], "detail": result["stderr"],
                     "service_started": False, "provider_effects_settled": False,
                     "tunnel_proven": False, "application_proven": False, "custody": CUSTODY})
                 raise ValueError("the stop command was refused")
-            loaded, _ = system.launchctl_print(LABEL)
-            if loaded or any(_is_same_purpose(p, _client_binary_path(paths, intent))
+            loaded, _ = system.launchctl_print(purpose.label)
+            if loaded or any(_is_same_purpose(p, _client_binary_path(paths, intent), purpose=purpose)
                              for p in system.processes()):
                 _write_service_receipt(journal, "stop-receipt.json", {
-                    "schema": RECEIPT_SCHEMA, "state": "STOP_UNKNOWN",
+                    "schema": purpose.receipt_schema, "state": "STOP_UNKNOWN",
                     "operation_id": intent["operation_id"], "commands": 1,
                     "service_started": True, "provider_effects_settled": False,
                     "tunnel_proven": False, "application_proven": False, "custody": CUSTODY})
                 raise ValueError("the stop command outcome is unknown; reconcile it")
             receipt = {
-                "schema": RECEIPT_SCHEMA, "state": "STOPPED",
+                "schema": purpose.receipt_schema, "state": "STOPPED",
                 "operation_id": intent["operation_id"], "commands": 1,
                 "service_started": False, "provider_effects_settled": False,
                 "tunnel_proven": False, "application_proven": False, "custody": CUSTODY,
@@ -2032,4 +2230,3 @@ if __name__ == "__main__":
             subprocess.SubprocessError) as exc:
         sys.stderr.write(_redact("application transport refused: %s" % exc) + "\n")
         raise SystemExit(65)
-

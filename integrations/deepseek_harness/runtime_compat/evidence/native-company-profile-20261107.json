@@ -1,0 +1,205 @@
+{
+  "schema": "mastermind.dsh_native_company_source_qualification.v1",
+  "published_base": "691f2207a3ca6facfc8411b37efaf254701005d1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "installed": false,
+  "production_armed": false,
+  "provider_account_calls": 0,
+  "native_profile": {
+    "schema": "mastermind.dsh_native_company_lifecycle_proof.v1",
+    "production_armed": false,
+    "new": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "new",
+      "actual_session_id": "a1088a41-76a7-45c5-9edb-24cc269072fe",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "startup",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 0,
+      "agent_creates": 1,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_storage": {
+        "path": "dsh/sessions/--private-tmp-mmx-dsh-company-profile-c6-20261107-case5-test_original_profile_new_clos0-workspace--/a1088a41-76a7-45c5-9edb-24cc269072fe/session.v4.jsonl.zstd",
+        "sha256": "0974a4b4651c4dcea94e3bfc7665ea95c4237eda509bb82e756c8560f64c6822"
+      }
+    },
+    "cold_resume": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "resume",
+      "actual_session_id": "a1088a41-76a7-45c5-9edb-24cc269072fe",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "resume",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 0,
+      "agent_creates": 1,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_storage": {
+        "path": "dsh/sessions/--private-tmp-mmx-dsh-company-profile-c6-20261107-case5-test_original_profile_new_clos0-workspace--/a1088a41-76a7-45c5-9edb-24cc269072fe/session.v4.jsonl.zstd",
+        "sha256": "e4f77b84e96371c5f1f00e613dabe782bd2c8157efae8d0ce70ec3fe40685d4a"
+      }
+    }
+  },
+  "host_patch_sha256": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
+  "full_build_manifest_sha256": "5110ba853e2f4e14b721cfd50c7b1926cf970c891524e93b9d67d3d799cb0260",
+  "runtime_inventory": {
+    "file": "runtime-inventory.json",
+    "sha256": "622e80287ca6faba9a12de9474b9a635576e329bc6371c3cf779d89eee515dc8",
+    "entries": 116133
+  },
+  "source_sha256": {
+    "integrations/deepseek_harness/runtime_compat/native-company-profile-fixture.mjs": "1a49890fdf8c3409f2b19556e05e56ea5eb2ff1bc681c6d1eb64b9d0f2408698",
+    "integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py": "69606ad7b97c29b8c1c80ff55416ae0aae5de5b28feb609b937d0ace26140981",
+    "tests/harness_convergence/test_dsh_fullapp_company_profile.py": "8342bb4e5b5e60c03366bd333ee4debbdc376938bbe402f0fbdde7f2def4b3ff",
+    "control_plane/executive_worker_broker.py": "5e2fb212263efc7cf074195d6d12fe4492c49a268692223bcf3400036d246fac",
+    "tests/test_executive_operator_broker.py": "97b0e9dc82aa28dba7b97cd0077a50be22669dd102ee1ab20b6b49f7ddf8b0fd"
+  },
+  "logs": {
+    "native_host_36_cases": {
+      "file": "mmx-dsh-host-and-owner-qualified-20261107.log",
+      "pid": 60758,
+      "sha256": "f1096d9c45971d6c22036edc99412cf47c120a60f78e4c279d5ec956d3581e96",
+      "exit_code": 0
+    },
+    "host_preimage_refusal": {
+      "file": "mmx-dsh-host-admission-preimage-clear-20261107.log",
+      "pid": 35607,
+      "sha256": "d385bf18d776f3e4b9efa4965086cdca3bb0d13691a2530310071c65d254ee5b",
+      "exit_code": 1
+    },
+    "full_original_build": {
+      "file": "mmx-dsh-company-host-build-20261107.log",
+      "pid": 63073,
+      "sha256": "c6b84ae93bcb8f51abea1f30b4946c558061c6d3674fab2189a35dcc4dc678fe",
+      "exit_code": 0
+    },
+    "native_full_profile_new_cold_resume": {
+      "file": "mmx-dsh-company-profile-c6-20261107-case4.log",
+      "pid": 26485,
+      "sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "exit_code": 0
+    },
+    "ohf_interrupt_preimage": {
+      "file": "mmx-dsh-ohf-interrupt-preimage-20261107.log",
+      "pid": 10588,
+      "sha256": "19267dc1cdb610abdafef76963aecf8efafc7abc13d93fcc968ca6a4ce459744",
+      "exit_code": 1
+    },
+    "ohf_broker_58_cases": {
+      "file": "mmx-dsh-ohf-interrupt-qualified-20261107.log",
+      "pid": 13508,
+      "sha256": "b53866f7a853267d7eca16c2faa2f71689f462d5b06ee572ef078a18d6b0409a",
+      "exit_code": 0
+    },
+    "ohf_shutdown_race": {
+      "file": "mmx-dsh-ohf-interrupt-shutdown-20261107.log",
+      "pid": 18964,
+      "sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "exit_code": 0
+    },
+    "native_full_profile_current_source": {
+      "file": "mmx-dsh-company-profile-c6-20261107-case5.log",
+      "pid": 98675,
+      "sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "exit_code": 0
+    }
+  },
+  "preceding_native_profile": {
+    "schema": "mastermind.dsh_native_company_lifecycle_proof.v1",
+    "production_armed": false,
+    "new": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "new",
+      "actual_session_id": "c085afb4-9720-4da4-9e6e-5c00c169c5e6",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "startup",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 0,
+      "agent_creates": 1,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_storage": {
+        "path": "dsh/sessions/--private-tmp-mmx-dsh-company-profile-c6-20261107-case4-test_original_profile_new_clos0-workspace--/c085afb4-9720-4da4-9e6e-5c00c169c5e6/session.v4.jsonl.zstd",
+        "sha256": "1745471b4128460127b632b6e4d6168b2b5194251b8f9c63f12986a3b0f31f34"
+      }
+    },
+    "cold_resume": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "resume",
+      "actual_session_id": "c085afb4-9720-4da4-9e6e-5c00c169c5e6",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "resume",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 0,
+      "agent_creates": 1,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_storage": {
+        "path": "dsh/sessions/--private-tmp-mmx-dsh-company-profile-c6-20261107-case4-test_original_profile_new_clos0-workspace--/c085afb4-9720-4da4-9e6e-5c00c169c5e6/session.v4.jsonl.zstd",
+        "sha256": "2f66df28b671da5221d9c11b661f22e3d7d59e9d742460aa5875b09dbd244858"
+      }
+    }
+  },
+  "preceding_fixture_sha256": "2f8351492a9402a45d7308fe439ff65a3772bb06b65cc795c0433fcfc6eb478c"
+}

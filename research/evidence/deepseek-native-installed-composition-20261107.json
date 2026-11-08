@@ -1,0 +1,314 @@
+{
+  "schema": "mastermind.deepseek_native_installed_composition_evidence.v1",
+  "recorded": "2026-11-07T19:33:00.478836+00:00",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "source_parent": "0bee7ef41af0051d617aaa3797f5ec75c955963a",
+  "procedure_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "source_sha256": {
+    "control_plane/executive_fabric_composition.py": "277b8e0468d412ec557c16a6ace694190702de4401e986e71c867ae3715ae874",
+    "control_plane/executive_operator_supervisor.py": "a8080b95c08da17a19d183cc05eef9d3be85d1e227c17c4abf9abb520c014d34",
+    "control_plane/native_conversation_binding.py": "545a96b0fae70ea2debab1f5f9163c7458dea86d49e45645bcb56d893e75fab3",
+    "integrations/deepseek_harness/operator_adapter.py": "b0f0afce6ad40872e360df3cfb3aad5340eff5ba333920beaeeb5d33b6b8a883",
+    "ops/executive_os/autonomy_control.py": "26486f7128653f8e5f39a4e04c0d578394399ae906f460a2f7fde83e5db6edf1",
+    "ops/executive_os/control_component_update.py": "3e66fcf0648a23656b143e98e24a38d640d94c6d23ab417a7ce23406d72b93d7",
+    "scripts/executive_os_phase1c.py": "b0517d97cc38675724353928743dceae3c4630b9575533ef5cc5618b4265ce0d",
+    "tests/executive_fabric_release_identity_review.py": "acc6f3c827925e226edb97bd994db6ae38939376f61808d81ea449633bab6bcf",
+    "tests/test_ceo_submit_armed_composition.py": "2be6e261df9ead3880197283ac15bfba771c0a0dd0ef4e4f38db101dcb00193d",
+    "tests/test_control_component_update.py": "d540743323895bffd0d878ce7bb317fe2077ec6e4b4355566d0408860f1f2611",
+    "tests/test_dsh_native_composition.py": "556d1b2a4a640dab3f3416c6fb1c866fdd528543d940e1c41ea8c96468960c3d",
+    "tests/test_native_claude_operator_supervisor.py": "044f83cc55153d51d70b7181305a21a6f36798d8313b83533cedce46c36f6efc"
+  },
+  "tests": [
+    {
+      "name": "composition",
+      "summary": {
+        "passed": 295
+      },
+      "scope": "Native pinned source, mixed factory/workspace, original recovery and primary local commission; before two later startup tests",
+      "receipt_path": "/private/tmp/mmx-dsh-c22-installed-composition-20261107-pro2.json",
+      "receipt_sha256": "e094f2adbd18ffb74de7317d5738663e32207ed079fbeb9a8481447842ef84cb",
+      "receipt": {
+        "started": "2026-11-07T19:22:14.913236+00:00",
+        "finished": "2026-11-07T19:22:37.808105+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_composition.py",
+          "tests/test_hermes_secretary_composition.py",
+          "tests/test_executive_fabric_composition.py",
+          "tests/test_fabric_remote_composition.py",
+          "tests/test_claimed_operator_control_composition.py",
+          "tests/test_remote_operator_workspace_identity.py",
+          "tests/test_ordinary_remote_operator_recovery.py",
+          "tests/test_dsh_native_remote_transport.py",
+          "tests/test_dsh_native_installed_binding.py",
+          "tests/test_dsh_native_operator.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/b2fe92f158284db178b9c69b2e77df5175bb578aae269bc95680dd7afd03cc63.json",
+          "sha256": "b2fe92f158284db178b9c69b2e77df5175bb578aae269bc95680dd7afd03cc63",
+          "entries": 1422
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/b2fe92f158284db178b9c69b2e77df5175bb578aae269bc95680dd7afd03cc63.json",
+          "sha256": "b2fe92f158284db178b9c69b2e77df5175bb578aae269bc95680dd7afd03cc63",
+          "entries": 1422
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "b591698c759df1fde6edbe414d4471b749928b20174335eeb6e8972bc20e6720"
+      }
+    },
+    {
+      "name": "updater",
+      "summary": {
+        "passed": 558
+      },
+      "scope": "Existing component update and autonomy suite, including v6 preservation/refusal/sealed recovery",
+      "receipt_path": "/private/tmp/mmx-dsh-c22-update-preservation-20261107-pro1.json",
+      "receipt_sha256": "55b7bb9c999b3622d202aabba7112e0d4910bfb6dde298e3422ca52ac4f569f3",
+      "receipt": {
+        "started": "2026-11-07T19:23:34.861871+00:00",
+        "finished": "2026-11-07T19:24:37.209836+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_control_component_update.py",
+          "tests/test_executive_autonomy_control.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/cdd64b5732201274d5a414d7e416c086538c75b41b56dc574c9f339ccc6012ba.json",
+          "sha256": "cdd64b5732201274d5a414d7e416c086538c75b41b56dc574c9f339ccc6012ba",
+          "entries": 1521
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/cdd64b5732201274d5a414d7e416c086538c75b41b56dc574c9f339ccc6012ba.json",
+          "sha256": "cdd64b5732201274d5a414d7e416c086538c75b41b56dc574c9f339ccc6012ba",
+          "entries": 1521
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "545623b64a5636faa9211520990608bba637e728b318b2fc9bce7a81aacc68aa"
+      }
+    },
+    {
+      "name": "final-source-regression",
+      "summary": {
+        "passed": 412
+      },
+      "scope": "Final native composition tests, identity review, full operator/Claude profile regression, startup and original Unix listener ownership",
+      "receipt_path": "/private/tmp/mmx-dsh-c22-source-regression-20261107-pro2.json",
+      "receipt_sha256": "0018ac3527298a66faa844d383f35ad169bf2b7b87136850bd235dba3642200e",
+      "receipt": {
+        "started": "2026-11-07T19:28:03.963167+00:00",
+        "finished": "2026-11-07T19:31:01.948822+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_composition.py",
+          "tests/test_executive_fabric_release_identity_review.py",
+          "tests/test_executive_operator_supervisor.py",
+          "tests/test_native_claude_operator_supervisor.py",
+          "tests/test_attended_control_startup.py",
+          "tests/test_attended_control_startup_both_stanzas.py",
+          "tests/test_executive_fabric_phase1c.py",
+          "tests/test_attended_qualification.py",
+          "tests/test_workspace_control_room_unix_socket.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/a60b384a53c148d5d03ef01e880920afae3684a547fdd30f1f368a9d41170107.json",
+          "sha256": "a60b384a53c148d5d03ef01e880920afae3684a547fdd30f1f368a9d41170107",
+          "entries": 1528
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/a60b384a53c148d5d03ef01e880920afae3684a547fdd30f1f368a9d41170107.json",
+          "sha256": "a60b384a53c148d5d03ef01e880920afae3684a547fdd30f1f368a9d41170107",
+          "entries": 1528
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "dc5631f19554696d913b2844af0042c42c08c3eea888410e8167a7c21f177155"
+      }
+    }
+  ],
+  "corrected_fixture_failure": [
+    {
+      "receipt_path": "/private/tmp/mmx-dsh-c22-source-regression-20261107-pro1.json",
+      "receipt_sha256": "700157c67475c1b4845e631ddb40d4765572cc310ccc24ca28e7072cc10103b6",
+      "note": "225 passed, then original Claude fixture lacked Runtime.jobs; no production guard changed.",
+      "receipt": {
+        "started": "2026-11-07T19:25:46.680011+00:00",
+        "finished": "2026-11-07T19:26:06.484671+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_executive_fabric_release_identity_review.py",
+          "tests/test_executive_operator_supervisor.py",
+          "tests/test_native_claude_operator_supervisor.py"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee.json",
+          "sha256": "561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee",
+          "entries": 1522
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee.json",
+          "sha256": "561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee",
+          "entries": 1522
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "bfb41d85631b6d3c6de3d997ddac4efe6f7389c93f6e0e1eae2fac20dc394d98"
+      }
+    },
+    {
+      "receipt_path": "/private/tmp/mmx-dsh-c22-claude-fixture-preimage-20261107-pro1.json",
+      "receipt_sha256": "4b0d311b1922d0e5302f6431f4c52eecda5336a48117bb7ace13d021cdbd444e",
+      "note": "Reproduced the same missing-Runtime.jobs AttributeError using the exact committed C21 _requested_profile method. Added its absent-DeepSeek-creator read and job ID to the existing fixture, preserving all test assertions.",
+      "receipt": {
+        "started": "2026-11-07T19:27:14.916542+00:00",
+        "finished": "2026-11-07T19:27:18.274865+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-c",
+          "import ast, subprocess, __future__, pytest\nfrom control_plane import executive_operator_supervisor as current\nsource=subprocess.check_output([\"git\",\"-c\",\"gc.auto=0\",\"show\",\"0bee7ef41af0051d617aaa3797f5ec75c955963a:control_plane/executive_operator_supervisor.py\"],text=True)\ntree=ast.parse(source)\nowner=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name==\"ExecutiveOperatorSupervisor\")\nmethod=next(n for n in owner.body if isinstance(n,ast.FunctionDef) and n.name==\"_requested_profile\")\nspace=dict(vars(current))\nexec(compile(ast.Module(body=[method],type_ignores=[]),\"<committed-c21-requested-profile>\",\"exec\",flags=__future__.annotations.compiler_flag),space)\ncurrent.ExecutiveOperatorSupervisor._requested_profile=space[\"_requested_profile\"]\nraise SystemExit(pytest.main([\"-vv\",\"-x\",\"tests/test_native_claude_operator_supervisor.py::test_exact_admitted_native_profile_retains_worker_quota_and_policy\"]))\n"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee.json",
+          "sha256": "561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee",
+          "entries": 1522
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee.json",
+          "sha256": "561a95119c98cb1a48759c1eb93cefa5ec4f11a76f62d5e73faaca7ad3f002ee",
+          "entries": 1522
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "430f84ccf94b6a005b2ad6bafe5e7a81dda8868a4ad8e6564b02f1a79ccc6a35"
+      }
+    }
+  ],
+  "review": {
+    "phase1c_sha256": "b0517d97cc38675724353928743dceae3c4630b9575533ef5cc5618b4265ce0d",
+    "phase1c_anchors": {
+      "serve_installed_control": {
+        "byte_identical": true,
+        "ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819"
+      },
+      "primary_factory": {
+        "byte_identical": true,
+        "ast_sha256": "cadeba7907406cd2c4c5ad56fdc226c8ca9a9cfe4d8ffb6f634245dff978b4e1"
+      }
+    },
+    "autonomy_control_sha256": "26486f7128653f8e5f39a4e04c0d578394399ae906f460a2f7fde83e5db6edf1",
+    "autonomy_identity_owners": {
+      "_sealed_origin_chain": {
+        "ast_identical": true,
+        "ast_sha256": "2fdce5fc4e6a3e831de9cad1bda8e4b9e3c0ca728bef023261aad198882f79e5"
+      },
+      "_replace_gateway_target": {
+        "ast_identical": true,
+        "ast_sha256": "41f0862640a9cacf96ae68ae6191728fcac8f893a004af140302153e49610107"
+      },
+      "_component_root_file": {
+        "ast_identical": true,
+        "ast_sha256": "a79370efab7c10ea2b4d5a05e7424ded2b09d3365aecaf20fdd0bafcfb16ac55"
+      },
+      "_replace_component_target": {
+        "ast_identical": true,
+        "ast_sha256": "5b657ae9b2a15ff766beea2ad36246e4b14d97c2b178bae1dc72b7524f0257f4"
+      }
+    },
+    "autonomy_sites": [
+      [
+        349,
+        24,
+        27,
+        "int",
+        "501"
+      ],
+      [
+        6961,
+        35,
+        37,
+        "int",
+        "80"
+      ],
+      [
+        6962,
+        50,
+        55,
+        "int",
+        "0o755"
+      ],
+      [
+        7825,
+        41,
+        46,
+        "int",
+        "0o644"
+      ],
+      [
+        8593,
+        64,
+        69,
+        "int",
+        "0o644"
+      ],
+      [
+        10010,
+        41,
+        46,
+        "int",
+        "0o644"
+      ]
+    ],
+    "updater_sha256": "3e66fcf0648a23656b143e98e24a38d640d94c6d23ab417a7ce23406d72b93d7",
+    "updater_effect_plan_apply_reconcile_byte_identical": true,
+    "claude_original_test_assertions_preserved": true,
+    "diff_check": 0
+  },
+  "prior_c21_hosted_checks": {
+    "head": "0bee7ef41af0051d617aaa3797f5ec75c955963a",
+    "observed_on": "2026-11-07",
+    "success": [
+      42405176991,
+      42405177031,
+      42405177010,
+      42405174033
+    ],
+    "integrated_ci": {
+      "run_id": 42405177042,
+      "state": "queued",
+      "conclusion": null
+    }
+  },
+  "input_manifest_encoding": "Replace each input_manifest reference with its verified exact map to reconstruct original receipt fields.",
+  "production_acceptance": false,
+  "installed_configuration_changed": false,
+  "services_restarted": 0,
+  "remaining_work": [
+    "Same-process original native launcher and original broker materialization/current-effect producer",
+    "Actual account/model/capability/confinement observation and enabled-profile admission",
+    "Signed-in packaged native journey and eligible governed tool settlement under original grants"
+  ],
+  "constraints": [
+    "No replacement Worker, Session, auth or lifecycle owner",
+    "No repeated Hermes canary",
+    "Prior explicit live-config and Fabric denials remain closed",
+    "Preserve #2175 os_assets.py and exclude #1870"
+  ]
+}

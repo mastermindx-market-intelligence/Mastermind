@@ -2768,3 +2768,166 @@ def test_ohf_effect_counter_is_zero_for_all_observer_paths(tmp_path: Path) -> No
         assert observed["result"]["resync_required"] is False
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("order", [
+    "interrupt-first", "collection-first", "cancelled-interrupt", "cancelled-collection",
+    "shutdown-during-interrupt",
+])
+def test_ohf_exact_turn_interrupt_during_owned_collection(tmp_path: Path, order: str) -> None:
+    """A real broker drain and adapter interrupt retain separate physical owners."""
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path, "interrupt-join", "bounded original conversation turn"
+        )
+        state = broker._operator_run
+        assert state is not None
+        adapter = adapters[-1]
+        entered_collection, entered_interrupt = threading.Event(), threading.Event()
+        release_interrupt = threading.Event()
+        adapter.gate.clear()
+        original_read = adapter.read_events
+        calls = []
+
+        def read_events(cursor, *, timeout_seconds):
+            entered_collection.set()
+            assert adapter.gate.wait(10), "fixture collection did not release"
+            return original_read(cursor, timeout_seconds=timeout_seconds)
+
+        def interrupt(selected, *, operation_id):
+            calls.append((selected, operation_id))
+            entered_interrupt.set()
+            assert release_interrupt.wait(10), "fixture interrupt did not release"
+
+        adapter.read_events, adapter.interrupt_turn = read_events, interrupt
+        cursor = EventCursor(turn.attempt_id, turn.session_epoch_id,
+                             turn.process_generation_id, turn_id=turn.turn_id)
+        collection_payload = {"turn": to_wire(turn), "cursor": to_wire(cursor),
+                              "timeout_seconds": 5.0}
+        sequence = 0
+
+        async def execute(operation, payload):
+            nonlocal sequence
+            sequence += 1
+            return await broker.execute(
+                _request(operation, payload, f"interrupt-join-{sequence}"), peer=peer
+            )
+
+        def interrupt_payload(selected=turn, command="ohf-op:interrupt-join"):
+            return {"turn": to_wire(selected), "operation_id": to_wire(OperationId(command))}
+
+        async def ordinary_refused():
+            generation = state.generation
+            payloads = [
+                ("ohf-collect-turn", collection_payload),
+                ("ohf-stop", {"operation_id": to_wire(OperationId("ohf-op:held-stop")),
+                              "generation": to_wire(generation)}),
+                ("ohf-cancel", {"operation_id": to_wire(OperationId("ohf-op:held-cancel")),
+                                "generation": to_wire(generation), "reason": "must stay held"}),
+                ("ohf-begin-turn", {
+                    "operation_id": to_wire(OperationId("ohf-op:held-begin")),
+                    "turn": to_wire(dataclasses.replace(turn, turn_id="next-turn")),
+                    "generation": to_wire(generation),
+                    "launch": to_wire(compare_launch(state.requested,
+                                                     adapter.observed_attestation(generation))),
+                    "prompt": "must stay held",
+                }),
+            ]
+            for operation, payload in payloads:
+                with pytest.raises(BrokerStateError, match="active operation"):
+                    await execute(operation, payload)
+
+        collection = asyncio.create_task(execute("ohf-collect-turn", collection_payload))
+        interruption = None
+        owned_collection = owned_interrupt = shutdown_task = None
+        try:
+            assert await asyncio.to_thread(entered_collection.wait, 2)
+            wrong = dataclasses.replace(turn, turn_id="foreign-turn")
+            with pytest.raises(BrokerStateError, match="active operation"):
+                await execute("ohf-interrupt", interrupt_payload(wrong))
+            assert calls == []
+            interruption = asyncio.create_task(execute("ohf-interrupt", interrupt_payload()))
+            reached = asyncio.create_task(asyncio.to_thread(entered_interrupt.wait, 2))
+            await asyncio.wait((interruption, reached), return_when=asyncio.FIRST_COMPLETED)
+            if interruption.done():
+                # Against the original source this exposes the exact busy refusal.
+                await interruption
+            assert await reached, "matching interrupt never reached the original adapter"
+            assert state.busy and state.collecting_turn == turn
+            owned_collection, owned_interrupt = state.collection_task, state.interrupt_task
+            assert owned_collection is not None and owned_interrupt is not None
+            for command in ("ohf-op:interrupt-join", "ohf-op:second-interrupt"):
+                with pytest.raises(BrokerStateError):
+                    await execute("ohf-interrupt", interrupt_payload(command=command))
+            await ordinary_refused()
+            if order == "shutdown-during-interrupt":
+                original_sweep = broker.last_sweep
+                shutdown_task = asyncio.create_task(broker.shutdown())
+                await asyncio.sleep(0)
+                assert not shutdown_task.done() and "provider_stop" not in adapter.lifecycle
+                adapter.gate.set()
+                collected = await collection
+                assert not shutdown_task.done()
+                assert broker.last_sweep == original_sweep
+                assert "provider_stop" not in adapter.lifecycle
+                release_interrupt.set()
+                await interruption
+                await shutdown_task
+                assert adapter.lifecycle.count("provider_stop") == 1
+                assert broker._operator_run is None
+            elif order == "cancelled-interrupt":
+                interruption.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await interruption
+                assert state.interrupt_task is owned_interrupt and not owned_interrupt.done()
+                adapter.gate.set()
+                collected = await collection
+                assert not state.busy
+                await ordinary_refused()
+                release_interrupt.set()
+                await asyncio.shield(owned_interrupt)
+            elif order == "cancelled-collection":
+                collection.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await collection
+                assert state.collection_task is owned_collection and state.busy
+                release_interrupt.set()
+                interrupted = await interruption
+                assert interrupted["result"] == {"interrupted": True}
+                assert state.busy
+                await ordinary_refused()
+                adapter.gate.set()
+                collected = {"result": await asyncio.shield(owned_collection)}
+            elif order == "interrupt-first":
+                release_interrupt.set()
+                interrupted = await interruption
+                assert interrupted["result"] == {"interrupted": True}
+                assert state.busy and state.interrupt_task is None
+                with pytest.raises(BrokerStateError, match="already attempted"):
+                    await execute("ohf-interrupt", interrupt_payload(command="ohf-op:late-repeat"))
+                await ordinary_refused()
+                adapter.gate.set()
+                collected = await collection
+            else:
+                adapter.gate.set()
+                collected = await collection
+                assert not state.busy and state.interrupt_task is owned_interrupt
+                await ordinary_refused()
+                release_interrupt.set()
+                interrupted = await interruption
+                assert interrupted["result"] == {"interrupted": True}
+            assert collected["result"]["candidate"]["complete_job_permitted"] is False
+            if order != "shutdown-during-interrupt":
+                assert broker._operator_run is state
+            assert not state.busy
+            assert state.collecting_turn is state.collection_interrupt_operation is None
+            assert state.collection_task is state.interrupt_task is None
+            assert calls == [(turn, OperationId("ohf-op:interrupt-join"))]
+        finally:
+            adapter.gate.set()
+            release_interrupt.set()
+            tasks = [task for task in (collection, interruption, owned_collection, owned_interrupt, shutdown_task)
+                     if task is not None]
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+
+    asyncio.run(scenario())

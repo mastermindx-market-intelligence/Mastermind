@@ -273,15 +273,55 @@ def _fresh_references(value):
     return {'work_ref': _fresh_work_ref(value['work_ref'])}
 
 
+def _input_fragment(value):
+    _mapping(value)
+    kind = _text(value.get('kind'))
+    if kind not in ('initial_input', 'turn_input'):
+        _fail()
+    keys = frozenset(('kind', 'source_event_id', 'source_event_sha256', 'sha256', 'offset_utf8'))
+    _exact_keys(value, keys | ({'turn_key'} if kind == 'turn_input' else set()))
+    offset = _integer(value['offset_utf8'])
+    if not 0 <= offset < 131072:
+        _fail()
+    result = dict(kind=kind, source_event_id=_root_event_id(value['source_event_id']),
+        source_event_sha256=_digest(value['source_event_sha256']), sha256=_digest(value['sha256']),
+        offset_utf8=offset)
+    if kind == 'turn_input':
+        key = _bounded(value['turn_key'], 96, 1)
+        if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,95}', key) is None:
+            _fail()
+        result['turn_key'] = key
+    return result
+
+
+def _native_content(value):
+    _exact_keys(value, frozenset(('native_ref', 'offset_bytes', 'expected_sha256')))
+    from control_plane.native_conversation_result import NativeConversationResultRef
+    try:
+        reference = NativeConversationResultRef.from_wire(value['native_ref']).to_wire()
+    except (ValueError, TypeError):
+        _fail()
+    offset = _integer(value['offset_bytes'])
+    digest = None if value['expected_sha256'] is None else _digest(value['expected_sha256'])
+    if not 0 <= offset < 4*1024*1024 or offset > 0 and digest is None:
+        _fail()
+    return dict(native_ref=reference, offset_bytes=offset, expected_sha256=digest)
+
+
 def _fresh_read(value):
-    _exact_keys(value, frozenset((
+    _mapping(value)
+    keys = frozenset((
         'schema',
         'work_ref',
         'root_job_id',
         'root_event_id',
         'root_event_sha256',
         'principal_scope_sha256',
-    )))
+    ))
+    extension = value.keys() & {'before_event_id', 'fragment', 'content'}
+    if len(extension) > 1:
+        _fail()
+    _exact_keys(value, keys | extension)
     schema = _text(value['schema'])
     if schema != _FRESH_REFERENCE_SCHEMA:
         _fail()
@@ -292,6 +332,9 @@ def _fresh_read(value):
         'root_event_id': _root_event_id(value['root_event_id']),
         'root_event_sha256': _digest(value['root_event_sha256']),
         'principal_scope_sha256': _digest(value['principal_scope_sha256']),
+        **({'before_event_id': _root_event_id(value['before_event_id'])} if 'before_event_id' in value else {}),
+        **({'fragment': _input_fragment(value['fragment'])} if 'fragment' in value else {}),
+        **({'content': _native_content(value['content'])} if 'content' in value else {}),
     }
 
 

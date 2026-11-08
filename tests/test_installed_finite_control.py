@@ -91,7 +91,7 @@ def test_fixed_entry_reaches_same_loaded_definition_and_original_guard(tmp_path,
     raw, _, captured = setup_startup(tmp_path, monkeypatch)
     raw.update(finite_raw())
     physical = SimpleNamespace(bindings=(SimpleNamespace(worker_id='minimax-finite-01', provider='minimax', socket_path=FINITE_SOCKET_PATH),),
-                               hermes_roles_reader=lambda: None)
+                               hermes_roles_reader=lambda: None, native_conversation_composition=lambda: None)
     monkeypatch.setattr(service, '_staged_fabric_binding_source', lambda loaded: physical)
     monkeypatch.setattr(service, '_sha256_file', lambda path: 'a'*64)
     called=[]
@@ -112,7 +112,7 @@ def test_actual_wrapper_chain_binds_guard_to_selected_definition(tmp_path, monke
     if edge == 'staged':
         raw.update(coo_autonomy_armed=False, coo_foreground_only=False)
     physical = SimpleNamespace(bindings=(SimpleNamespace(worker_id='minimax-finite-01', provider='minimax', socket_path=FINITE_SOCKET_PATH),),
-                               hermes_roles_reader=lambda: None)
+                               hermes_roles_reader=lambda: None, native_conversation_composition=lambda: None)
     monkeypatch.setattr(service, '_staged_fabric_binding_source', lambda loaded: physical)
     digest = ['a'*64]
     monkeypatch.setattr(service, '_sha256_file', lambda path: digest[0])

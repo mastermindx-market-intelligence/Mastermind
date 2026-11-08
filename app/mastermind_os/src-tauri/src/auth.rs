@@ -2613,8 +2613,11 @@ fn executive_guard(inner: &mut Inner, generation: u64, token_expires: Instant) -
     } else { Err("EXECUTIVE_AUTH_CHANGED".into()) }
 }
 fn executive_body(body: &Value) -> Result<Vec<u8>> {
+    executive_body_with_cap(body, EXECUTIVE_REQUEST_CAP)
+}
+fn executive_body_with_cap(body: &Value, cap: usize) -> Result<Vec<u8>> {
     let serialized = serde_json::to_vec(body).map_err(|_| "REQUEST_INVALID".to_owned())?;
-    if serialized.len() > EXECUTIVE_REQUEST_CAP {
+    if serialized.len() > cap {
         return Err("REQUEST_BOUND".into());
     }
     Ok(serialized)
@@ -2695,6 +2698,7 @@ where
     let planning=crate::project_planning::operation(path);
     let execution=crate::project_execution::operation(path);
     let fresh=crate::fresh_conversation::operation(path);
+    let native_fresh=crate::fresh_conversation::is_native_path(path);
     let conversation_read=crate::project_conversations_read::operation(path);
     let session_send=path==crate::native_session_send::PATH;
     if session_send {
@@ -2707,7 +2711,7 @@ where
     }
     if let Some(operation)=fresh {
         if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
-        crate::fresh_conversation::validate(operation,&body["arguments"])?;
+        crate::fresh_conversation::validate_for(operation,&body["arguments"],native_fresh)?;
     }
     if let Some(operation)=execution {
         if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
@@ -2759,11 +2763,11 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
-            if planning.is_some() || execution.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+            if planning.is_some() || execution.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) || native_fresh && matches!(fresh,Some("resume_preview"|"resume"|"stop"|"recover"|"turn_recover")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
                 Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };
-    let serialized = executive_body(&body)?;
+    let serialized = if native_fresh {executive_body_with_cap(&body,crate::fresh_conversation::NATIVE_REQUEST_CAP)?} else {executive_body(&body)?};
     let direct = matches!(path, "/os/executive/direct-native/result" | "/os/executive/direct-native/consume"
         | "/os/executive/direct-native/correction");
     if direct && serialized.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
@@ -2794,7 +2798,7 @@ where
         { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         let status = response.status();
         let result = if status.is_success() {
-            read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
+            read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else if native_fresh {crate::fresh_conversation::NATIVE_RESPONSE_CAP} else { EXECUTIVE_RESPONSE_CAP }).await
         } else if execution.is_some() && [400, 401, 403, 409, 503].contains(&status.as_u16()) {
             let value = read_json_body(response, EXECUTIVE_RESPONSE_CAP).await?;
             if crate::project_execution::is_refusal(&value, execution.unwrap()) { Ok(value) }
@@ -2863,9 +2867,9 @@ pub async fn executive_project_conversations_read(app:AppHandle,operation:String
     result
 }
 #[tauri::command]
-pub async fn executive_fresh_conversation(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
-    let path=crate::fresh_conversation::path(&operation).ok_or("REQUEST_INVALID")?;
-    crate::fresh_conversation::validate(&operation,&arguments)?;
+pub async fn executive_fresh_conversation(app:AppHandle,operation:String,arguments:Value,contract:Option<String>)->Result<Value> {
+    let path=crate::fresh_conversation::path_for(&operation,contract.as_deref()).ok_or("REQUEST_INVALID")?;
+    crate::fresh_conversation::validate_for(&operation,&arguments,crate::fresh_conversation::is_native_path(path))?;
     let result=executive_post(app.clone(),path,serde_json::json!({"arguments":arguments})).await;
     if result.is_err(){emit(&app);}
     result
@@ -4226,6 +4230,90 @@ mod tests {
                 count.set(count.get()+1);state.lock().unwrap().executive_generation+=1;
                 let response:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();async{Ok(response)}
             }));assert_eq!(count.get(),1);assert_eq!(result.unwrap_err(),"EXECUTIVE_AUTH_CHANGED");
+        }
+    }
+
+
+    fn native_v2_transport_cases() -> Vec<(&'static str, Value, bool)> {
+        let fixture: Value=serde_json::from_str(include_str!("../../src/fixtures/native-fresh-transport-owner.json")).unwrap();
+        let selected=serde_json::json!({"work_ref":fixture["request"]["work_ref"],"operation_key":fixture["request"]["operation_key"]});
+        let with=|fields:Value| {let mut result=selected.clone();result.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());result};
+        let digest="b".repeat(64);
+        let mut create=fixture["request"].clone();create["preview_digest"]=digest.clone().into();
+        let mut preview=fixture["send"].clone();preview.as_object_mut().unwrap().remove("preview_digest");
+        vec![
+            ("preview",fixture["request"].clone(),true),("create",create,true),
+            ("status",selected.clone(),false),("read",selected.clone(),false),
+            ("recover",selected.clone(),true),
+            ("turn_recover",with(serde_json::json!({"turn_key":fixture["send"]["turn_key"]})),true),
+            ("consume",with(serde_json::json!({"initial_digest":fixture["send"]["initial_digest"]})),true),
+            ("consume_status",with(serde_json::json!({"initial_digest":fixture["send"]["initial_digest"]})),false),
+            ("turn_preview",preview,true),("turn",fixture["send"].clone(),true),
+            ("turn_status",with(serde_json::json!({"turn_key":fixture["send"]["turn_key"]})),false),
+            ("turn_read",with(serde_json::json!({"turn_key":fixture["send"]["turn_key"]})),false),
+            ("resume_preview",with(serde_json::json!({"resume_key":"original-resume","expected_result_digest":digest})),true),
+            ("resume",with(serde_json::json!({"resume_key":"original-resume","expected_result_digest":digest,"preview_digest":digest})),true),
+            ("resume_status",with(serde_json::json!({"resume_key":"original-resume"})),false),
+            ("stop",with(serde_json::json!({"stop_key":"original-stop","turn_id":"original-native-turn","binding_digest":digest})),true),
+            ("stop_status",with(serde_json::json!({"stop_key":"original-stop"})),false),
+        ]
+    }
+    #[test]
+    fn native_v2_seventeen_routes_preserve_exact_bytes_and_auth_resource_split() {
+        assert_eq!(native_v2_transport_cases().len(),17);
+        for (operation, arguments, dual) in native_v2_transport_cases() {
+            let path=crate::fresh_conversation::path_for(operation,Some("native-v2")).unwrap();
+            assert_eq!(path,format!("/os/executive/conversation/v2/{}",operation.replace('_',"/")));
+            for workspace in [false,true] {
+                let state=native_executive_state(EXECUTIVE_SCOPE);
+                state.lock().unwrap().acquisition=if workspace {Some(token("fixture-workspace"))} else {None};
+                let calls=std::cell::Cell::new(0);
+                let body=serde_json::json!({"arguments":arguments});
+                // Dispatch/auth fixture only; no native owner or control execution is simulated.
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,path,body.clone(),|builder|{
+                    calls.set(calls.get()+1);let request=builder.build().unwrap();
+                    assert_eq!(request.url().path(),path);
+                    assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
+                    assert_eq!(request.headers().contains_key("x-mastermind-workspace-authorization"),dual);
+                    async {Ok(tauri::http::Response::builder().status(200).header("Content-Type","application/json").body("{}").unwrap().into())}
+                }));
+                assert_eq!(calls.get(),usize::from(!dual||workspace));
+                assert_eq!(result.is_ok(),!dual||workspace,"{operation} {workspace}: {result:?}");
+            }
+        }
+    }
+    #[test]
+    fn native_v2_closed_preflight_and_read_only_tokens_dispatch_nothing() {
+        for (operation, arguments, _) in native_v2_transport_cases() {
+            let path=crate::fresh_conversation::path_for(operation,Some("native-v2")).unwrap();
+            for mode in ["foreign-field","read-token","signed-out"] {
+                let state=native_executive_state(if mode=="read-token" {"mastermind.executive.read"} else {EXECUTIVE_SCOPE});
+                state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+                if mode=="signed-out" {state.lock().unwrap().executive=None;}
+                let mut args=arguments.clone();if mode=="foreign-field" {args["principal"]="foreign".into();}
+                let calls=std::cell::Cell::new(0);
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,path,serde_json::json!({"arguments":args}),|_|{
+                    calls.set(calls.get()+1);async {Ok(tauri::http::Response::builder().status(200).header("Content-Type","application/json").body("{}").unwrap().into())}
+                }));
+                assert_eq!(result.unwrap_err(),match mode {"foreign-field"=>"REQUEST_INVALID","read-token"=>"EXECUTIVE_SEND_SCOPE_REQUIRED",_=>"EXECUTIVE_AUTH_REQUIRED"});assert_eq!(calls.get(),0);
+            }
+        }
+    }
+    #[test]
+    fn native_v2_late_auth_change_and_response_bound_withhold_without_retry() {
+        let (_,args,_)=native_v2_transport_cases().into_iter().find(|(op,_,_)|*op=="turn").unwrap();
+        let path=crate::fresh_conversation::path_for("turn",Some("native-v2")).unwrap();
+        for mode in ["executive","workspace","body-bound"] {
+            let state=native_executive_state(EXECUTIVE_SCOPE);state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+            let calls=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,path,serde_json::json!({"arguments":args}),|_|{
+                calls.set(calls.get()+1);
+                if mode=="executive" {state.lock().unwrap().executive_generation+=1;}
+                if mode=="workspace" {state.lock().unwrap().generation+=1;}
+                let body=serde_json::json!({"transport_fixture":"x".repeat(if mode=="body-bound" {32768} else {1})}).to_string();
+                async {Ok(tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(body).unwrap().into())}
+            }));
+            assert!(result.is_err());assert_eq!(calls.get(),1);
         }
     }
 

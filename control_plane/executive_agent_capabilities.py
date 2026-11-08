@@ -128,11 +128,15 @@ PAID_FABRIC_ADAPTER_ID = "canonical-paid-fabric"
 PAID_GLM_SEALED_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
 PAID_GLM_EXECUTION_SURFACE = "glm-model-only"
 PAID_GLM_AUTH_REALM = "paid-lease-bound-account"
+DSH_OPERATOR_EXECUTION_SURFACE = "dsh-native-web-acp"
+DSH_NATIVE_CONVERSATION_PROFILE_ID = "operator.dsh.native-conversation.v1"
+DSH_COMPANY_PLUGIN_ID = "mastermind-company"
 ACP_EXECUTION_SURFACE = "acp-agent"
 ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
-    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, DSH_OPERATOR_EXECUTION_SURFACE,
+    CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
     HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({
@@ -145,6 +149,7 @@ _ADAPTER_EXECUTION_SURFACES = {
     "attended-fabric": frozenset({"claude-code"}),
     PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
     "acp": frozenset({ACP_EXECUTION_SURFACE}),
+    "dsh-native-acp": frozenset({DSH_OPERATOR_EXECUTION_SURFACE}),
 }
 # The Hermes native principal surface is deliberately absent from every
 # mapping above and from the sealed-worker and supervisor-validation fences
@@ -1126,6 +1131,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
+        if (self.profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                or self.execution_surface == DSH_OPERATOR_EXECUTION_SURFACE):
+            raise CapabilityPolicyError("DSH native policy cannot use an App Server projection")
         if self.execution_surface in {
             CLAUDE_OPERATOR_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
             HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
@@ -1209,6 +1217,32 @@ class ExecutionCapabilityProfile:
             }
         return projection
 
+    def dsh_native_config_projection(self) -> dict[str, object]:
+        """Exact native requirements; never installed observations or grants."""
+        from control_plane.native_conversation_result import DSH_NATIVE_RESULT_CONTRACT
+        if (self.profile_id != DSH_NATIVE_CONVERSATION_PROFILE_ID
+                or self.execution_surface != DSH_OPERATOR_EXECUTION_SURFACE
+                or type(self.enabled) is not bool or self.auth_realm != "dedicated-worker-account"
+                or self.sandbox_policy != "read-only" or self.approval_policy != "never"
+                or self.network_policy != "disabled" or self.write_capable
+                or self.native_helper_policy is not NativeHelperPolicy.DISABLED
+                or self.native_helper is not None or self.skills or self.skill_grants
+                or self.mcp_server_grants or self.resource_grants or self.validation_resource_grants
+                or self.plugins != (DSH_COMPANY_PLUGIN_ID,) or self.forbidden):
+            raise CapabilityPolicyError("DSH native profile requires its exact owner admission tuple")
+        return {
+            "execution_surface": self.execution_surface,
+            "result_contract": DSH_NATIVE_RESULT_CONTRACT,
+            "auth_realm": self.auth_realm,
+            "sandbox_policy": self.sandbox_policy,
+            "approval_policy": self.approval_policy,
+            "network_policy": self.network_policy,
+            "write_capable": self.write_capable,
+            "native_helper_policy": self.native_helper_policy.value,
+            "skills": [], "mcp_servers": [], "resources": [],
+            "plugins": list(self.plugins), "forbidden": [],
+        }
+
     def acp_config_projection(self) -> dict[str, object]:
         """Secret-free policy projection for the provider-neutral ACP surface."""
 
@@ -1252,6 +1286,9 @@ class ExecutionCapabilityProfile:
 
     @property
     def expected_config_digest(self) -> str:
+        if (self.profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                or self.execution_surface == DSH_OPERATOR_EXECUTION_SURFACE):
+            return _digest(self.dsh_native_config_projection())
         if self.execution_surface == ACP_EXECUTION_SURFACE:
             return _digest(self.acp_config_projection())
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
@@ -1487,12 +1524,23 @@ class ExecutionCapabilityProfile:
         """
 
         self._require_browser_owner_admission()
+        if (self.profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                or self.execution_surface == DSH_OPERATOR_EXECUTION_SURFACE):
+            self.dsh_native_config_projection()
         binary_digest = str(harness_binary_digest or "").strip().lower()
         if re.fullmatch(r"[0-9a-f]{64}", binary_digest) is None:
             raise CapabilityPolicyError(
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
+        if self.execution_surface == DSH_OPERATOR_EXECUTION_SURFACE:
+            # The fixed native slice uses the original source-qualified read
+            # and fixed-argv search implementations. It never inherits ambient
+            # tools, a shell, MCP, Skills or helper authority.
+            required.extend(
+                CapabilityIdentity(name=name, kind="tool", harness_binary_digest=binary_digest)
+                for name in ("read", "glob", "grep")
+            )
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
             # The SDK injects its result-rendering tool only for the fixed
             # Executive plan output schema. It is observed as a capability,
@@ -2357,7 +2405,12 @@ class ExecutionCapabilityRegistry:
                     f"profile {profile_id!r} references unknown resources: "
                     + ", ".join(unknown_resources)
                 )
-            if plugins:
+            exact_dsh_plugin = (
+                profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                and execution_surface == DSH_OPERATOR_EXECUTION_SURFACE
+                and plugins == (DSH_COMPANY_PLUGIN_ID,)
+            )
+            if plugins and not exact_dsh_plugin:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant plugins before "
                     "installed-bundle attestation"
@@ -2594,6 +2647,18 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     "rich Claude principal cannot gain Skill capability in this generation"
                 )
+            if (profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                    or execution_surface == DSH_OPERATOR_EXECUTION_SURFACE):
+                if (profile_id != DSH_NATIVE_CONVERSATION_PROFILE_ID
+                        or execution_surface != DSH_OPERATOR_EXECUTION_SURFACE
+                        or auth_realm != "dedicated-worker-account"
+                        or sandbox_policy != "read-only" or approval_policy != "never"
+                        or network_policy != "disabled" or write_capable
+                        or native_helper_policy is not NativeHelperPolicy.DISABLED
+                        or native_helper is not None or skills or skill_grants or skill_capability_ids
+                        or mcp_server_ids or resource_ids or validation_resource_ids
+                        or plugins != (DSH_COMPANY_PLUGIN_ID,) or forbidden):
+                    raise CapabilityPolicyError("DSH native profile requires exact owner admission tuple")
             if profile_id == _PENDING_BROWSER_PROFILE_ID:
                 if (enabled or execution_surface != "codex-app-server"
                         or auth_realm != "dedicated-worker-account"

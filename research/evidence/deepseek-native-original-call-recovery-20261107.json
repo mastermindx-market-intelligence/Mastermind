@@ -1,0 +1,886 @@
+{
+  "schema": "mastermind.deepseek_native_original_call_recovery_evidence/v1",
+  "created_at": "2026-11-07T21:12:23.092066+00:00",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "pr": 2177,
+  "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+  "source_parent_sha": "dfe4cef89637381115fe655065c2d34042b1d7c0",
+  "procedure_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "source_sha256": {
+    "app/mastermind_os/src-tauri/src/auth.rs": "92483890e5549914a130753b6447f1bb7dc3ec2afbf700b471d427772346d041",
+    "app/mastermind_os/src-tauri/src/fresh_conversation.rs": "14c975d8888671888709829ea759efbd153dd80de347f198cd835038746a366e",
+    "app/mastermind_os/src/conversations/new-conversation/fresh-conversation-attended-binding.ts": "09db4505a3ce19f494fbcb5866bf07f5439824eae1e3391cbf560dfed34820df",
+    "app/mastermind_os/src/conversations/new-conversation/fresh-conversation-command-binding.ts": "93396f332614b20b49495704b3278561ce852ad0f42959317d3d24528b6dea26",
+    "app/mastermind_os/src/conversations/new-conversation/native-attended-binding.test.ts": "ee11e4cff58413547433e09772c40d64bc8216923077a2de5e9d6d52d5597836",
+    "app/mastermind_os/src/conversations/new-conversation/native-conversation-controls.ts": "ea1b37df59adbe1b414fe2a134c9267ffc4feec2793c1eaaeda197d52498b877",
+    "app/mastermind_os/src/conversations/new-conversation/native-fresh-journey.test.tsx": "ee882057fdd5f5835011f04267e6856f2ccda6e5f61997c7d5b78a38f786f2c7",
+    "app/mastermind_os/src/conversations/new-conversation/native-fresh-request.test.ts": "b4cc6eac0868bf6699b3cc1a860c39bec4b4419b017a9002970391eef76c355f",
+    "app/mastermind_os/src/conversations/new-conversation/native-fresh-request.ts": "2cc0191a50863a21fc1d373bcefed265bf86076000e95da1c4e95300cae62d2e",
+    "app/mastermind_os/src/conversations/new-conversation/native-fresh-result.test.ts": "6ef14adfad70fc9deccca24eedb32b51e4ec9ed8f0a6bc032b8a20b0f613a86f",
+    "app/mastermind_os/src/conversations/new-conversation/native-fresh-result.ts": "6175bf877ff18913141cf693b4bc93f09dc61f87f765eba03712c8aea3ce8cb8",
+    "app/mastermind_os/src/conversations/new-conversation/useFreshConversationContinuation.tsx": "70294837bf4bd682f92a03ab07ff0d75846ef3f54e9adc227dd01e853eb89f93",
+    "app/mastermind_os/src/conversations/new-conversation/useFreshConversationJourney.tsx": "6cd58fcd318f8f615654db28dddffe8475786f6dedf950c080c6582dcdc21116",
+    "app/mastermind_os/src/fixtures/native-fresh-recovery-owner.json": "659f25e340567c9b317bc36bd7ed23b33f9505434bdfbde07a639c7edf908821",
+    "app/mastermind_os/src/orchestration/fresh-conversation-transport.ts": "88ab6bd5c482ba1d06b28e577257d5927075681ba725184b17156b73fd5ea36b",
+    "app/mastermind_os/src/orchestration/operation-controller.ts": "d41d237babeb0a3a1646702f7f2998ad8bb35afd4c88c77dd5b3591f73405087",
+    "common/fresh_conversation_contract.py": "46b05a8df6bc1b518a81c4609c8bece773aef07d3c70059520cccb7433bef9ff",
+    "control_plane/executive_operator_harness_port.py": "2a066c0fd7151633778f635fb84d6e359af87ee7d0599bb666820baa517ca27b",
+    "control_plane/executive_operator_supervisor.py": "ff205239ec922dd186d26d2582e58fc045ed60ce9c57bf37414efe963dec8448",
+    "control_plane/executive_runtime.py": "425dea86e3d27030f3397c81e34bbfd8aed5b6896cb39358a4555e32f188d420",
+    "control_plane/executive_service.py": "42bd526b34c087b1779fc125fcc22a3ce93020419386179c59c9534a33209360",
+    "control_plane/executive_worker_broker.py": "e83b68e74cdf6e0adc3acd31b8357a152695c389fa35f11aed7a589bc56718f8",
+    "control_plane/fresh_conversation_admission.py": "44826c826af09b7cab1b14bb85c4f6c0b4506f17129fb8dcf1d9572a1fd5dd5a",
+    "control_plane/fresh_conversation_native.py": "664c184cf02e68f872cc4887e26d848e73c27adf895d158a06faae809d2efadd",
+    "control_plane/fresh_conversation_turn.py": "0b4fa3a5c730074821e6c954c70b7c13abbe59a7dc7aa8bb7e7b2a3372ea97a6",
+    "control_plane/native_conversation_result.py": "a8a0865b25d2bc493c35cbdbab32f239fcd883a421d0a00fcabb2a46ca95be66",
+    "control_plane/operator_harness_orchestrator.py": "9611ec9d74b6c1ef625960236aba655e0d34b1e10a283afc2f7820d96d7e2a09",
+    "control_plane/operator_harness_wire.py": "f490a4b17f8fa414e65a17fbe662d57265babf776b33d8da74b64c171cb9ba3f",
+    "control_plane/remote_attempt_transport.py": "1e315c8d1aa5ad6e45e96a735444c1f99b00706ef5701450176f72f064c952f5",
+    "control_plane/remote_operator_harness_adapter.py": "6bf7db5f746ac122e43734b84f0f4dd250372f23b99da6c6990529be6e41533e",
+    "control_plane/remote_worker_broker_client.py": "71876135fa8c6332e990fd34b67680fadb7abea3285c638f0c01049960a428ff",
+    "integrations/deepseek_harness/native_connection.py": "d72a3ffbba8d92aea6ee19e4a7c30d311abc16542b50d7c43d2c68d4ccad3cbb",
+    "integrations/deepseek_harness/operator_adapter.py": "9d31ea79ae6e007efabaa562afce8f5d4f919cef6c07d5f204c40b05dcb606d5",
+    "integrations/executive_mcp/server.py": "4fe268dd2a767b12c97eaa3542076cc84b386a20820db860082ccdb8269446b9",
+    "tests/test_dsh_native_begin_recovery.py": "d78405533bf71b5544ae79cfc1e7713ff97a8f55574fc9c15d185735725aca63",
+    "tests/test_dsh_native_conversation_wire.py": "768a667910c086a296b70ffbbd1cc5c7a1045a9bdc66826c28e9fff779eef685",
+    "tests/test_dsh_native_fresh_http.py": "bf6aec9159339cb03ffd670a711be925b453cf1770da0cff69756b9fb0c61677",
+    "tests/test_dsh_native_fresh_recovery.py": "96a2b4aa5ad29896f2cc34e627e42e7b01072dd5fd4f5121c73d79811a5ce2a4",
+    "tests/test_dsh_native_protocol.py": "0e7c376a821857fbc16aefe954d78c1d944e36b308c0e56c0830ac01028a86e6",
+    "tests/test_dsh_native_runtime_begin_recovery.py": "3e1149d9426082c6128632aba65f1133c30e26c2cdbcb98d5de04109a44693e6"
+  },
+  "tests": [
+    {
+      "passed": 207,
+      "scope": "Original Runtime/Control/Supervisor recovery, signed RS256 native-v2/private Unix journey, receipt loss before/after commit, ordinary OHF and native Stop/resume",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro7.json",
+      "sha256": "0032fdef62dd011b6a92e5fc63f6f49de64ef86c4900b60107c569ee721babf3",
+      "receipt": {
+        "started": "2026-11-07T20:58:57.470704+00:00",
+        "finished": "2026-11-07T21:00:53.091905+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_dsh_native_conversation_wire.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro7.xml"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/5aaf3bf6dc6427fb3220d9a88375e64951adae0b2ea25f79298d8393d3443bf7.json",
+          "sha256": "5aaf3bf6dc6427fb3220d9a88375e64951adae0b2ea25f79298d8393d3443bf7",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/5aaf3bf6dc6427fb3220d9a88375e64951adae0b2ea25f79298d8393d3443bf7.json",
+          "sha256": "5aaf3bf6dc6427fb3220d9a88375e64951adae0b2ea25f79298d8393d3443bf7",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "233e7ac102ad45d3832a5d18b30e30b7b0cdbfe6b093ae26d0b62b3c972fb20e"
+      }
+    },
+    {
+      "passed": 874,
+      "scope": "Final native protocol/broker/proxy, ordinary Runtime and Supervisor, original conversation lifecycle, public gateway mount/auth and protected source guards",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-regression-20261107-pro2.json",
+      "sha256": "751f596d3524b4ff6da3a05f35f08e6614a8e8beb777f48fa98c3b3d2b2a0e94",
+      "receipt": {
+        "started": "2026-11-07T21:04:25.112523+00:00",
+        "finished": "2026-11-07T21:10:23.000376+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_dsh_native_begin_recovery.py",
+          "tests/test_dsh_native_remote_transport.py",
+          "tests/test_remote_operator_harness_adapter.py",
+          "tests/test_remote_worker_broker_client.py",
+          "tests/test_remote_attempt_transport.py",
+          "tests/test_executive_operator_supervisor.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "tests/test_ohf_p1b_runtime_adversarial.py",
+          "tests/test_fresh_conversation.py",
+          "tests/test_fresh_conversation_http.py",
+          "tests/test_fresh_conversation_private_mount.py",
+          "tests/test_fresh_conversation_admission.py",
+          "tests/test_fresh_conversation_root_validation.py",
+          "tests/test_fresh_conversation_write_fences.py",
+          "tests/test_fresh_conversation_multiturn.py",
+          "tests/test_fresh_conversation_turn.py",
+          "tests/test_fresh_conversation_consumption.py",
+          "tests/test_fresh_conversation_source_check.py",
+          "tests/test_fresh_conversation_installed_reader_lifetime.py",
+          "tests/test_mastermind_os_session_transport.py",
+          "tests/test_ceo_submit_armed_composition.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-native-recovery-regression-20261107-pro2.xml"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/53adaafd7c574f69044365edfcd4c4754509c22698c873608449e4424cab1e40.json",
+          "sha256": "53adaafd7c574f69044365edfcd4c4754509c22698c873608449e4424cab1e40",
+          "entries": 1628
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/53adaafd7c574f69044365edfcd4c4754509c22698c873608449e4424cab1e40.json",
+          "sha256": "53adaafd7c574f69044365edfcd4c4754509c22698c873608449e4424cab1e40",
+          "entries": 1628
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "5a709593299d200390783f09f9441849225b077e66c1d075836b779992540619"
+      }
+    },
+    {
+      "passed": 817,
+      "scope": "TypeScript zero diagnostics; actual owner response decoders, native recovery UI, original pointer/CAS/subordinate Stop, auth and ordinary conversation regressions",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-ui-20261107-pro3.json",
+      "sha256": "27c17d3c912450faea78c0b2c1ba5dba48813c81345bd370f8fcb898ee38c978",
+      "receipt": {
+        "started": "2026-11-07T21:01:21.432630+00:00",
+        "finished": "2026-11-07T21:01:28.768566+00:00",
+        "gates": [
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/tsc",
+              "--noEmit"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/vitest",
+              "run",
+              "src/conversations/new-conversation",
+              "src/orchestration/operation-controller.test.ts",
+              "src/orchestration/indexeddb-pending-pointer-store.test.ts",
+              "src/orchestration/fresh-conversation-transport.test.ts",
+              "src/host.fresh-conversation.test.ts",
+              "src/web-auth.test.ts"
+            ],
+            "returncode": 0
+          }
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/68b27ae96c1585c01fd21c513f997d11cbccb45ce756db2921f309d5ed44addb.json",
+          "sha256": "68b27ae96c1585c01fd21c513f997d11cbccb45ce756db2921f309d5ed44addb",
+          "entries": 929
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/68b27ae96c1585c01fd21c513f997d11cbccb45ce756db2921f309d5ed44addb.json",
+          "sha256": "68b27ae96c1585c01fd21c513f997d11cbccb45ce756db2921f309d5ed44addb",
+          "entries": 929
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "123518d6968f2059367c5780b56103a9fde416b4d536765025a1d3a7be7cc983"
+      }
+    },
+    {
+      "passed": 267,
+      "ignored": 8,
+      "scope": "Native route/resource/closed-input/auth tests including both explicit recovery operations; original updater signature tests; test build only",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-rust-20261107-pro3.json",
+      "sha256": "5a34ea150ac32ef1c5fd3b3bbe20019898a9ffc6d392853ed5927f236ca5c6a7",
+      "receipt": {
+        "started": "2026-11-07T20:59:56.070794+00:00",
+        "finished": "2026-11-07T21:00:03.918911+00:00",
+        "argv": [
+          "/Users/chriswong/.cargo/bin/cargo",
+          "test",
+          "--offline",
+          "--",
+          "--nocapture"
+        ],
+        "build_identity": "c24-worktree-test-not-release",
+        "base_source_revision": "dfe4cef89637381115fe655065c2d34042b1d7c0",
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/f3d50c80cccd229ccafd19083c49b2bacd7cad2472545cdc671ab19a2481fd61.json",
+          "sha256": "f3d50c80cccd229ccafd19083c49b2bacd7cad2472545cdc671ab19a2481fd61",
+          "entries": 110
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/f3d50c80cccd229ccafd19083c49b2bacd7cad2472545cdc671ab19a2481fd61.json",
+          "sha256": "f3d50c80cccd229ccafd19083c49b2bacd7cad2472545cdc671ab19a2481fd61",
+          "entries": 110
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "02c6e3f4ce996def53921d36765e06ec6743045091c0835181a503c525628232"
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "reason": "Negative-control fixture attempted immutable event mutation without the existing isolated corruption helper; corrected fixture and restored triggers.",
+      "path": "/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro1.json",
+      "sha256": "8eb59041ce33039a6711d8f088c2f09851ae8da149d8ddfc37b4939fd4b02acf",
+      "receipt": {
+        "started": "2026-11-07T20:18:36.367331+00:00",
+        "finished": "2026-11-07T20:18:41.678227+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_interactive_tx5_runtime.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro1.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/77e2f02f373d119d75e1efebeef965ff8d7415f36dd0026882f492485cf71555.json",
+          "sha256": "77e2f02f373d119d75e1efebeef965ff8d7415f36dd0026882f492485cf71555",
+          "entries": 1599
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/77e2f02f373d119d75e1efebeef965ff8d7415f36dd0026882f492485cf71555.json",
+          "sha256": "77e2f02f373d119d75e1efebeef965ff8d7415f36dd0026882f492485cf71555",
+          "entries": 1599
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "0b12829d50b2adf399b09d68cb21ad79c17f507cab2f6a494b2cfb973854054e"
+      }
+    },
+    {
+      "reason": "Negative-control fixture used a noncanonical unknown-command suffix; corrected to :effect-unknown and asserted the original event exists.",
+      "path": "/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro2.json",
+      "sha256": "f326ff1a1de3169084e9c284a8f2ffea654061a3fdb3b8c08a7d7f3b3029f961",
+      "receipt": {
+        "started": "2026-11-07T20:19:30.558321+00:00",
+        "finished": "2026-11-07T20:19:35.711163+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_interactive_tx5_runtime.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro2.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/5049b3aec6a88949bd7d575664bb9cb7b64b6e7f10a72e86d358b51863dda3cf.json",
+          "sha256": "5049b3aec6a88949bd7d575664bb9cb7b64b6e7f10a72e86d358b51863dda3cf",
+          "entries": 1599
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/5049b3aec6a88949bd7d575664bb9cb7b64b6e7f10a72e86d358b51863dda3cf.json",
+          "sha256": "5049b3aec6a88949bd7d575664bb9cb7b64b6e7f10a72e86d358b51863dda3cf",
+          "entries": 1599
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "3d982ddccccb72d0d312c9193a9e4c9fe011b437343da83d9dcaf13979a40921"
+      }
+    },
+    {
+      "reason": "New fixture read session.attestation instead of the actual session.observed; corrected fixture.",
+      "path": "/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro4.json",
+      "sha256": "48af4464ae1bb8a15658b8cacb481f4d0cdcc71cb353d1e34bb4a9ccd04ffb5c",
+      "receipt": {
+        "started": "2026-11-07T20:23:03.839577+00:00",
+        "finished": "2026-11-07T20:23:09.527970+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_interactive_tx5_runtime.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro4.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/b09f337be64907231aeff60b1d461648d1f6063039eb1caaedf6e0d6240d7a95.json",
+          "sha256": "b09f337be64907231aeff60b1d461648d1f6063039eb1caaedf6e0d6240d7a95",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/b09f337be64907231aeff60b1d461648d1f6063039eb1caaedf6e0d6240d7a95.json",
+          "sha256": "b09f337be64907231aeff60b1d461648d1f6063039eb1caaedf6e0d6240d7a95",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "0a9d73a57d921868a73127d055554ae2729081585ec47b6dcc00f2eb1f806df6"
+      }
+    },
+    {
+      "reason": "Refactor changed an existing active-observer error string; restored the original message and assertions.",
+      "path": "/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro5.json",
+      "sha256": "f60ab8f5f2bfb21161caeb8a3ab32d1bb064703c3ebf0b002d3927be5a9c50f2",
+      "receipt": {
+        "started": "2026-11-07T20:24:34.141782+00:00",
+        "finished": "2026-11-07T20:24:45.381044+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_interactive_tx5_runtime.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-runtime-recovery-20261107-pro5.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/4d8e96a1aad95cb98ff1a01a6a62905dbcc34589424d719ea509dc67a7c5b714.json",
+          "sha256": "4d8e96a1aad95cb98ff1a01a6a62905dbcc34589424d719ea509dc67a7c5b714",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/4d8e96a1aad95cb98ff1a01a6a62905dbcc34589424d719ea509dc67a7c5b714.json",
+          "sha256": "4d8e96a1aad95cb98ff1a01a6a62905dbcc34589424d719ea509dc67a7c5b714",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "ecc474f728ae9e144fe077afc5cdba8748ee9c4960fba367f324a65febfa60d3"
+      }
+    },
+    {
+      "reason": "Follow-up HTTP completion raced pending custody publication; publish same pending owner before waking the request.",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro1.json",
+      "sha256": "a350d12f32ddf6c55d38948c546663574b088fad092986f66b625bec8f588d4b",
+      "receipt": {
+        "started": "2026-11-07T20:31:32.736206+00:00",
+        "finished": "2026-11-07T20:31:53.176554+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro1.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/8ce75b91ce5c85940159a98af78d4861772bbbd5e6374118514786eecc6bb413.json",
+          "sha256": "8ce75b91ce5c85940159a98af78d4861772bbbd5e6374118514786eecc6bb413",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/8ce75b91ce5c85940159a98af78d4861772bbbd5e6374118514786eecc6bb413.json",
+          "sha256": "8ce75b91ce5c85940159a98af78d4861772bbbd5e6374118514786eecc6bb413",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "2e77966ab2ac505223090212e49b12da7314e85ddb53c4555962e89e02e5c247"
+      }
+    },
+    {
+      "reason": "Explicit recovery raced the completing original dispatch task; boundedly join that original task and clear only the original recovery waiter.",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro2.json",
+      "sha256": "b504c710c95459a0eb4a4ea92b12ab37283e31a82ad462e8d36bbaa9e8701a57",
+      "receipt": {
+        "started": "2026-11-07T20:34:59.592790+00:00",
+        "finished": "2026-11-07T20:35:22.518349+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro2.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/85f2fbecc58196ba1bfc597c833f81b41a6dea86a6499f7be8343d0b2241b962.json",
+          "sha256": "85f2fbecc58196ba1bfc597c833f81b41a6dea86a6499f7be8343d0b2241b962",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/85f2fbecc58196ba1bfc597c833f81b41a6dea86a6499f7be8343d0b2241b962.json",
+          "sha256": "85f2fbecc58196ba1bfc597c833f81b41a6dea86a6499f7be8343d0b2241b962",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "20050b8c15fc0228a48fad5d244df29c826a4fae6200bd81a01b5781fc42ab33"
+      }
+    },
+    {
+      "reason": "Overbroad post-projection pending conversion changed an existing cleanup assertion; preserved established optional app-reply failure cleanup and receipt-first Runtime answer recovery.",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro3.json",
+      "sha256": "597d3292ca068c07f3b7f17da1895e6183492ab7b3aec1220bdd3a85e1172030",
+      "receipt": {
+        "started": "2026-11-07T20:39:01.421907+00:00",
+        "finished": "2026-11-07T20:39:45.548550+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro3.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/24e37f8b8e20fbfce4a71e2f3d00665da1ab88c89d2135692841112fb8606a25.json",
+          "sha256": "24e37f8b8e20fbfce4a71e2f3d00665da1ab88c89d2135692841112fb8606a25",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/24e37f8b8e20fbfce4a71e2f3d00665da1ab88c89d2135692841112fb8606a25.json",
+          "sha256": "24e37f8b8e20fbfce4a71e2f3d00665da1ab88c89d2135692841112fb8606a25",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "c2bc25d660136c218fc7ca0be56e0e3e1250bae7f5db4dfd89a6eac316caf8da"
+      }
+    },
+    {
+      "reason": "New signed test expected 401/403 for a missing Workspace header; the original malformed-header contract is exactly invalid_input/400. Corrected only the new test.",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro4.json",
+      "sha256": "66cc4f6caf551b53064c5142dd3b0c40814cd26009e418ef1411bfb246f3acb3",
+      "receipt": {
+        "started": "2026-11-07T20:42:19.588931+00:00",
+        "finished": "2026-11-07T20:43:00.651210+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro4.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1eb939d65758ddcf6258ea9b7d4bc18e1cb07fb330ef33ab739789f9cfc68864.json",
+          "sha256": "1eb939d65758ddcf6258ea9b7d4bc18e1cb07fb330ef33ab739789f9cfc68864",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1eb939d65758ddcf6258ea9b7d4bc18e1cb07fb330ef33ab739789f9cfc68864.json",
+          "sha256": "1eb939d65758ddcf6258ea9b7d4bc18e1cb07fb330ef33ab739789f9cfc68864",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "2bfb4d471117bb4dc5c1697d734f1592e759527ce1a7ed69671b3e4fba9a69d8"
+      }
+    },
+    {
+      "reason": "Pre-write option construction refused changed input before the before_write callback; classify known no-write native input/options refusal and preserve original QUARANTINED assertions.",
+      "path": "/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro5.json",
+      "sha256": "b8e2ca44b4c24ce1827dc90da489d44af88e089bfd125e96d8cd270dafbb63d5",
+      "receipt": {
+        "started": "2026-11-07T20:46:51.885957+00:00",
+        "finished": "2026-11-07T20:48:13.953964+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_fresh_recovery.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_dsh_native_runtime_begin_recovery.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_ohf_p1b_runtime_orchestrator.py",
+          "tests/test_ohf_p1b_orchestrator.py",
+          "tests/test_native_service_dispatch.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-owner-recovery-20261107-pro5.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/50c809f15017d7a49c99c8d889e3a079c1d40a42200459ce254442c3cd907be3.json",
+          "sha256": "50c809f15017d7a49c99c8d889e3a079c1d40a42200459ce254442c3cd907be3",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/50c809f15017d7a49c99c8d889e3a079c1d40a42200459ce254442c3cd907be3.json",
+          "sha256": "50c809f15017d7a49c99c8d889e3a079c1d40a42200459ce254442c3cd907be3",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "cf90311c745a528fb6aa8b46b53e70e3c40f5d78b4a64369eb4aa9c9560593d1"
+      }
+    },
+    {
+      "reason": "New race fixture violated the original IndexedDB key/kind/target grammar; used valid replacement identities. Recovery effect codec now requires NONE. Base readiness retains its established projection semantics.",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-ui-20261107-pro1.json",
+      "sha256": "d7bb9c03d86ca08cdc21c77d2c8ade192bebb97ed45fb11901b88b1df0470e78",
+      "receipt": {
+        "started": "2026-11-07T20:49:51.892041+00:00",
+        "finished": "2026-11-07T20:50:06.365617+00:00",
+        "gates": [
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/tsc",
+              "--noEmit"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/vitest",
+              "run",
+              "src/conversations/new-conversation",
+              "src/orchestration/operation-controller.test.ts",
+              "src/orchestration/indexeddb-pending-pointer-store.test.ts",
+              "src/orchestration/fresh-conversation-transport.test.ts",
+              "src/host.fresh-conversation.test.ts",
+              "src/web-auth.test.ts"
+            ],
+            "returncode": 1
+          }
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/99ad4c338ada1b2269b236473b164617d1f4bd06512cb60a23d78063f8b1c2a3.json",
+          "sha256": "99ad4c338ada1b2269b236473b164617d1f4bd06512cb60a23d78063f8b1c2a3",
+          "entries": 929
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/99ad4c338ada1b2269b236473b164617d1f4bd06512cb60a23d78063f8b1c2a3.json",
+          "sha256": "99ad4c338ada1b2269b236473b164617d1f4bd06512cb60a23d78063f8b1c2a3",
+          "entries": 929
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "a34e852c766c68b9bdc6fbf663f9ff52a2d4ad390d38206b42c685e40715c26d"
+      }
+    },
+    {
+      "reason": "Test build omitted mandatory source/build identity variables; reran with exact base SHA and c24-worktree-test-not-release, without weakening build guard.",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-rust-20261107-pro1.json",
+      "sha256": "1a49bb58bc79b9295f6955dc5d25c4c0d0aa4cadbf4e16946deae7afd5e285ef",
+      "receipt": {
+        "started": "2026-11-07T20:50:16.178254+00:00",
+        "finished": "2026-11-07T20:51:22.110532+00:00",
+        "argv": [
+          "/Users/chriswong/.cargo/bin/cargo",
+          "test",
+          "--offline",
+          "--",
+          "--nocapture"
+        ],
+        "returncode": 101,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/4e877d113b405a01d51bb53af001013f2fd869d806cb4627204597c890eeecb7.json",
+          "sha256": "4e877d113b405a01d51bb53af001013f2fd869d806cb4627204597c890eeecb7",
+          "entries": 110
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/4e877d113b405a01d51bb53af001013f2fd869d806cb4627204597c890eeecb7.json",
+          "sha256": "4e877d113b405a01d51bb53af001013f2fd869d806cb4627204597c890eeecb7",
+          "entries": 110
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "a79ec3418d71829fec66bd5055c028a4987e32c9acb8db5f2398b7144b589885"
+      }
+    },
+    {
+      "reason": "Existing exact outer-route assertion found both missing public recovery routes; mounted them through the incumbent host/origin/auth fence. Assertion unchanged.",
+      "path": "/private/tmp/mmx-dsh-c24-native-recovery-regression-20261107-pro1.json",
+      "sha256": "f9454532888ff338042d93aa18662dfdb0a7805757633ff9dcd1bb156d356100",
+      "receipt": {
+        "started": "2026-11-07T21:01:34.087096+00:00",
+        "finished": "2026-11-07T21:02:35.273660+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_dsh_native_begin_recovery.py",
+          "tests/test_dsh_native_remote_transport.py",
+          "tests/test_remote_operator_harness_adapter.py",
+          "tests/test_remote_worker_broker_client.py",
+          "tests/test_remote_attempt_transport.py",
+          "tests/test_executive_operator_supervisor.py",
+          "tests/test_ohf_p1b_runtime.py",
+          "tests/test_ohf_p1b_runtime_adversarial.py",
+          "tests/test_fresh_conversation.py",
+          "tests/test_fresh_conversation_http.py",
+          "tests/test_fresh_conversation_private_mount.py",
+          "tests/test_fresh_conversation_admission.py",
+          "tests/test_fresh_conversation_root_validation.py",
+          "tests/test_fresh_conversation_write_fences.py",
+          "tests/test_fresh_conversation_multiturn.py",
+          "tests/test_fresh_conversation_turn.py",
+          "tests/test_fresh_conversation_consumption.py",
+          "tests/test_fresh_conversation_source_check.py",
+          "tests/test_fresh_conversation_installed_reader_lifetime.py",
+          "tests/test_mastermind_os_session_transport.py",
+          "tests/test_ceo_submit_armed_composition.py",
+          "--junitxml=/private/tmp/mmx-dsh-c24-native-recovery-regression-20261107-pro1.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/09aec192544d2e8b8274cc5de0a0219224b1f82557a5e9fe2e46fda96683f3e7.json",
+          "sha256": "09aec192544d2e8b8274cc5de0a0219224b1f82557a5e9fe2e46fda96683f3e7",
+          "entries": 1628
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/09aec192544d2e8b8274cc5de0a0219224b1f82557a5e9fe2e46fda96683f3e7.json",
+          "sha256": "09aec192544d2e8b8274cc5de0a0219224b1f82557a5e9fe2e46fda96683f3e7",
+          "entries": 1628
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "d96c26ab1be0f1f29074c2e314f4b53785ac546e0f38f6df7cad01b9fbd45fcc"
+      }
+    }
+  ],
+  "source_review": {
+    "kind": "source-only root and concurrent judgments; no formal GitHub approval claimed",
+    "corrections": [
+      "exact click pointer fence",
+      "passive automatic refresh",
+      "known no-effect original pre-write refusals",
+      "receipt-first candidate/seal recovery",
+      "journal/read/lease fault custody",
+      "missing original UNKNOWN preparation",
+      "fixed public recovery route mount"
+    ],
+    "diff_check": "passed"
+  },
+  "signed_fixture": {
+    "path": "app/mastermind_os/src/fixtures/native-fresh-recovery-owner.json",
+    "sha256": "659f25e340567c9b317bc36bd7ed23b33f9505434bdfbde07a639c7edf908821",
+    "schema": "mastermind.native_fresh_recovery_fixture.v1",
+    "seams": [
+      "inert installed policy, provider and process",
+      "actual signed RS256 Executive and Workspace authentication",
+      "actual private Unix socket, kernel peer, original Control/Supervisor/Runtime",
+      "original begin timeout followed by explicit claim/answer recovery; no second send"
+    ],
+    "samples": [
+      {
+        "test": "signed-original-initial-recovery",
+        "operation": "recover",
+        "arguments": {
+          "work_ref": "WS:ONE",
+          "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "response": {
+          "data": {
+            "active_turn": null,
+            "can_resume": false,
+            "can_send": false,
+            "can_stop": false,
+            "effect": "NONE",
+            "head_result": {
+              "contract": "mastermind.dsh_native_conversation/v1",
+              "digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+              "reference": {
+                "command_id": "ohf-native-result:ohf-turn-7dad4f0bd73a4d78b971aa87ea376148",
+                "event_id": 23,
+                "observation_digest": "6210a145dae49aa3eb000304161a4a5e707f1d7cd6732e7886c3153cd99a4e93",
+                "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+                "seal_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332"
+              }
+            },
+            "locator": {
+              "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+              "job_id": "JOB-002",
+              "root_job_id": "JOB-001",
+              "work_ref": "WS:ONE"
+            },
+            "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "parent_consumed": false,
+            "preview": null,
+            "reference": null,
+            "result": {
+              "contract": "mastermind.dsh_native_conversation/v1",
+              "digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+              "reference": {
+                "command_id": "ohf-native-result:ohf-turn-7dad4f0bd73a4d78b971aa87ea376148",
+                "event_id": 23,
+                "observation_digest": "6210a145dae49aa3eb000304161a4a5e707f1d7cd6732e7886c3153cd99a4e93",
+                "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+                "seal_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332"
+              }
+            },
+            "schema": "mastermind.executive.fresh_conversation_data.v2",
+            "session": {
+              "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+              "binding_digest": "61a35a512637a0645a7a0993d66e85e95c7054d2286a444b8b9884a935f97dac",
+              "process_generation_id": "ohf-generation-9f18fb221cc948eaa0fe9ca16f6ad8a3",
+              "provider_session_id": "SESSION-ACTIVE",
+              "session_epoch_id": "ohf-epoch-fce9455082ef4d5b916805b068bc3444"
+            },
+            "state": "CREATED",
+            "work_ref": "WS:ONE"
+          },
+          "error": null,
+          "ok": true,
+          "operation": "recover",
+          "schema": "mastermind.executive.fresh_conversation_result.v2"
+        }
+      },
+      {
+        "test": "signed-original-followup-recovery",
+        "operation": "turn_recover",
+        "arguments": {
+          "work_ref": "WS:ONE",
+          "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "turn_key": "mmos-native-turn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "response": {
+          "data": {
+            "can_send": false,
+            "effect": "NONE",
+            "initial_consumption": {
+              "event_id": 25,
+              "event_sha256": "d71af8fa9bdb257d24d32fb03160653ea530fc71ab4d04f42a28d27ebbbf0294",
+              "initial_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+              "state": "CONSUMED"
+            },
+            "locator": {
+              "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+              "job_id": "JOB-002",
+              "root_job_id": "JOB-001",
+              "work_ref": "WS:ONE"
+            },
+            "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "parent_consumed": false,
+            "reference": null,
+            "result": {
+              "contract": "mastermind.dsh_native_conversation/v1",
+              "digest": "01434dc57549b820b6439ce0fbec365681bbaacb964186b66895f561f1c702ab",
+              "reference": {
+                "command_id": "ohf-native-result:ohf-turn-05cc988db45942c6933aa5f7f2ae699b",
+                "event_id": 38,
+                "observation_digest": "e823753aab761a118b7ed14cd3e79633722d61d72adba4af825f14429b6f2daf",
+                "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+                "seal_digest": "01434dc57549b820b6439ce0fbec365681bbaacb964186b66895f561f1c702ab"
+              }
+            },
+            "schema": "mastermind.executive.fresh_conversation_turn_data.v2",
+            "state": "RECORDED",
+            "turn_key": "mmos-native-turn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "work_ref": "WS:ONE"
+          },
+          "error": null,
+          "ok": true,
+          "operation": "turn_recover",
+          "schema": "mastermind.executive.fresh_conversation_result.v2"
+        }
+      }
+    ],
+    "counts": {
+      "jobs": 2,
+      "attempts": 1,
+      "adapters": 1,
+      "starts": 1,
+      "provider_turns": 2
+    }
+  },
+  "ownership": {
+    "new_session_owners": 0,
+    "new_dispatch_owners": 0,
+    "provider_resends": 0,
+    "active_services_restarted": 0,
+    "native_canary_repeated": false,
+    "hermes_2180_repeated": false
+  },
+  "release": {
+    "c24_release": false,
+    "c24_deployment": false,
+    "signed_in_packaged_deepseek_acceptance": false,
+    "rust_build_identity": "c24-worktree-test-not-release",
+    "external_provider_journey": false
+  },
+  "production_holds": [
+    "explicit original DeepSeek worker factory and realm branch",
+    "immutable same-process entrypoint and package qualification",
+    "actual same-Agent account/model/capability/confinement observations",
+    "original installed enabled capability policy/router/alias/quota/host/source binding",
+    "real signed-in packaged DeepSeek journey including eligible tool execution/settlement",
+    "installed source identity, routing, authentication and deployment evidence"
+  ],
+  "existing_observation": {
+    "at": "2026-11-07T18:51:29.133788Z",
+    "surface": "Executive V3",
+    "code": "backend_unavailable",
+    "execution_readiness_observed": false,
+    "rechecked": false
+  },
+  "closed_lanes": [
+    "denied live runtime/configuration inspection",
+    "paid Fabric/VPS permission lane",
+    "foreign worktree Git GC/repack"
+  ],
+  "preserved": {
+    "hermes_merge": "72eee6155c8e6c3c7e9c4e82a1e28f2d3ca392c7",
+    "protected_master": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+    "os_assets_source_owner": 2175,
+    "excluded_pr": 1870,
+    "fabric_tool_seam_2210": "requires original enrollment/grant owners"
+  },
+  "next_action": "Implement original worker factory/realm and qualified same-process native entry; do not repeat accepted physical canaries."
+}

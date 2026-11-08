@@ -142,7 +142,7 @@ def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity
         lease_token=dispatch.lease_token,
         requested=profile,
     )
-    operation = OperationId("ohf-op:projection-start")
+    operation = OperationId(f"ohf-op:start:{sealed.attempt_id}")
     epoch, generation = harness.reserve_start(
         sealed.attempt_id,
         fence_generation=sealed.fence_generation,

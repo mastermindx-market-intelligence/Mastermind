@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 from common import fresh_conversation_contract as wire
-from control_plane.fresh_conversation_admission import read_creation_restriction
+from control_plane.fresh_conversation_admission import read_creation_restriction, NATIVE_SCHEMA
 from control_plane.principal_projection import NeutralPrincipalProjection
 
 _SCHEMA = "mastermind.fresh_conversation_reference.v1"
@@ -85,18 +85,40 @@ def project_references(owner, principal, selection):
             raise ValueError("CONVERSATION_REFERENCE_CHANGED")
         event=owner._runtime.store.unique_root_created_event(root.job_id)
         if event.event_id!=row["event_id"]:raise ValueError("CONVERSATION_REFERENCE_CHANGED")
+        if material["schema"] == NATIVE_SCHEMA:
+            from control_plane.fresh_conversation_native_reference import initial_message, input_descriptor
+            entries.append(dict(kind="fresh_native", reference=_reference(root,event,material),
+                root_state=root.status.value, result_contract=wire.NATIVE_RESULT_CONTRACT,
+                initial_input=input_descriptor(initial_message(material), event)))
+            continue
         objective=json.loads(root.objective)
         if type(objective) is not dict or objective.get("mode")!="fresh_conversation" or type(objective.get("message")) is not str:
             raise ValueError("CONVERSATION_INITIAL_MESSAGE_UNAVAILABLE")
         entries.append(dict(kind="fresh_native",reference=_reference(root,event,material),
             initial_message=objective["message"],root_state=root.status.value))
     origin_identity(owner,principal)
-    return _bounded(dict(schema="mastermind.fresh_conversation_references.v1",work_ref=selection["work_ref"],
+    catalogue_schema = ("mastermind.fresh_conversation_references.v2"
+        if any("initial_input" in row for row in entries) else "mastermind.fresh_conversation_references.v1")
+    return _bounded(dict(schema=catalogue_schema,work_ref=selection["work_ref"],
         state="AVAILABLE",coverage=dict(state="PARTIAL" if len(rows)>_LIMIT else "COMPLETE",limit=_LIMIT,returned=len(entries)),entries=entries))
 
 
-def read_reference(owner, principal, reference):
+def read_reference(owner, principal, selection, *, guard=None):
+    from common.project_conversation_read_contract import arguments
+    selected=arguments(selection,"fresh_read")
+    before=selected.get("before_event_id")
+    reference={key:value for key,value in selected.items() if key not in {"before_event_id", "fragment", "content"}}
     root,material,origin=_original(owner,principal,reference)
+    if material["schema"] == NATIVE_SCHEMA:
+        if "content" in selected:
+            from control_plane.fresh_conversation_native_reference import read_native_content
+            return read_native_content(owner, principal, reference, root, material, origin,
+                selected["content"], guard=guard)
+        from control_plane.fresh_conversation_native_reference import read_native_reference
+        return read_native_reference(owner,principal,reference,root,material,origin,
+            before=before,fragment=selected.get("fragment"))
+    if "fragment" in selected or "content" in selected:
+        raise ValueError("CONVERSATION_NATIVE_CONTRACT_REQUIRED")
     objective=json.loads(root.objective)
     if type(objective) is not dict or objective.get("mode")!="fresh_conversation" or type(objective.get("message")) is not str:
         raise ValueError("CONVERSATION_INITIAL_MESSAGE_UNAVAILABLE")
@@ -146,7 +168,7 @@ def read_reference(owner, principal, reference):
                     state="RECONCILIATION_REQUIRED"
     # Actual consumed-parent and recorded follow-up evidence, independent of
     # generic Wake targets. These rows never imply permission to send.
-    from control_plane.fresh_conversation_turn import _command,_event,_CONSUME,_REQUEST,_REPLY
+    from control_plane.fresh_conversation_turn import _command,_event,_CONSUME,_REQUEST,_recorded_reply
     scope=wire.canonical_digest(origin)
     consumed=_event(owner._runtime,_command("consume",scope,root.job_id),_CONSUME,root.job_id)
     consumption=None
@@ -158,47 +180,66 @@ def read_reference(owner, principal, reference):
             raise ValueError("CONVERSATION_CONSUMPTION_CHANGED")
         consumption=dict(state="CONSUMED",event_id=consumed.event_id,event_sha256=wire.canonical_digest(consumed.to_dict()),initial_digest=initial["digest"])
     with owner._runtime.store.read() as connection:
-        requests=connection.execute("SELECT command_id FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type=? ORDER BY event_id LIMIT 2",(root.job_id,_REQUEST)).fetchall()
-    if len(requests)>1:raise ValueError("CONVERSATION_TURN_HISTORY_CONFLICT")
+        requests=connection.execute("""SELECT command_id,event_id FROM events
+            WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type=?
+              AND (? IS NULL OR event_id<?) ORDER BY event_id DESC LIMIT ?""",
+            (root.job_id,_REQUEST,before,before,_LIMIT+1)).fetchall()
+    page=dict(kind="initial" if before is None else "history",before_event_id=before,next_before_event_id=None)
+    window=dict(schema="mastermind.fresh_conversation_window.v2",kind="fresh_native",reference=dict(reference),
+        state=state,locator=locator,epoch=epoch,initial_message=objective["message"],
+        initial_result=initial if before is None else None,
+        initial_digest=initial["digest"] if initial is not None else None,
+        initial_consumption=consumption,turns=[],page=page,can_send=False,parent_consumed=False)
+    _bounded(window)
     turns=[]
-    for row in requests:
+    oldest=None
+    for index,row in enumerate(requests[:_LIMIT]):
         requested=_event(owner._runtime,row["command_id"],_REQUEST,root.job_id)
         identity=requested.payload["identity"]
-        if (identity["principal"]!=scope or identity["root_job_id"]!=root.job_id or identity["locator"]!=locator
+        if (requested.event_id!=row["event_id"] or identity["principal"]!=scope
+                or identity["root_job_id"]!=root.job_id or identity["locator"]!=locator
+                or identity["root_event_id"]!=reference["root_event_id"] or identity["work_ref"]!=reference["work_ref"]
                 or identity["root_event_sha256"]!=reference["root_event_sha256"] or initial is None
-                or identity["initial_digest"]!=initial["digest"] or consumption!=requested.payload["consumption"]):
+                or identity["initial_digest"]!=initial["digest"] or consumption is None
+                or consumption!=requested.payload["consumption"]
+                or row["command_id"]!=_command("turn",scope,root.job_id,requested.payload["turn_key"])):
             raise ValueError("CONVERSATION_TURN_HISTORY_CHANGED")
-        reply=_event(owner._runtime,row["command_id"]+":reply",_REPLY,root.job_id)
-        result=None
-        if reply is not None:
-            value=reply.payload
-            candidate=owner._runtime.events.get_event_by_command_id("ohf-candidate:"+value["turn_id"])
-            if (value["request_event_id"]!=requested.event_id
-                    or value["request_event_sha256"]!=wire.canonical_digest(requested.to_dict())
-                    or value["operation_id"]!=requested.payload["operation_id"] or value["native_acknowledged"] is not True
-                    or value["parent_consumed"] is not False or candidate is None
-                    or candidate.event_type!="OHF_CANDIDATE_RESULT_RECORDED" or candidate.job_id!=locator["job_id"]
-                    or candidate.attempt_id!=locator["attempt_id"] or candidate.event_id!=value["candidate_event_id"]
-                    or wire.canonical_digest(candidate.to_dict())!=value["candidate_event_sha256"]
-                    or wire.canonical_digest(value["result"]["envelope"])!=value["result"]["digest"]):
-                raise ValueError("CONVERSATION_TURN_REPLY_CHANGED")
-            result=value["result"]
-        turns.append(dict(turn_key=requested.payload["turn_key"],message=requested.payload["message"],
-            state="RECORDED" if reply else "RECONCILIATION_REQUIRED",result=result,parent_consumed=False))
+        reply=_recorded_reply(owner,requested)
+        turn=dict(turn_key=requested.payload["turn_key"],message=requested.payload["message"],
+            state="RECORDED" if reply else "RECONCILIATION_REQUIRED",
+            result=reply.payload["result"] if reply else None,parent_consumed=False)
+        candidate={**window,"turns":list(reversed([*turns,turn])),
+            "page":{**page,"next_before_event_id":row["event_id"] if index+1<len(requests) else None}}
+        if _encoded_size(candidate)>28000:
+            if not turns:
+                if before is not None:
+                    raise ValueError("CONVERSATION_REFERENCE_RESPONSE_OVER_BUDGET")
+                # Keep the complete initial envelope. The first history page
+                # starts at the latest request, with no skipped or cut reply.
+                page["next_before_event_id"]=row["event_id"]+1
+            else:
+                page["next_before_event_id"]=oldest
+            break
+        turns.append(turn);oldest=row["event_id"]
+        window["turns"]=candidate["turns"]
+        page["next_before_event_id"]=candidate["page"]["next_before_event_id"]
     _original(owner,principal,reference)
     if epoch is not None:
         import dataclasses
         current=owner._runtime.current_harness_binding_source(epoch["attempt_id"])
         if wire.canonical_digest(dataclasses.asdict(current))!=epoch["binding_digest"]:
             raise ValueError("CONVERSATION_WRITER_CHANGED")
-    return _bounded(dict(schema="mastermind.fresh_conversation_window.v1",kind="fresh_native",reference=dict(reference),
-        state=state,locator=locator,epoch=epoch,initial_message=objective["message"],initial_result=initial,
-        initial_consumption=consumption,turns=turns,can_send=False,parent_consumed=False))
+    return _bounded(window)
+
+
+def _encoded_size(value):
+    return len(json.dumps(value,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode("utf-8"))
 
 
 def _bounded(value):
-    # Leave framing space inside the incumbent 32-KiB Executive response.
-    if len(json.dumps(value,ensure_ascii=True,allow_nan=False).encode("ascii"))>28000:
+    # Match actual compact UTF-8 framing, leaving space inside the incumbent
+    # 32-KiB Executive response. Full result envelopes are never truncated.
+    if _encoded_size(value)>28000:
         raise ValueError("CONVERSATION_REFERENCE_RESPONSE_OVER_BUDGET")
     return value
 
@@ -221,20 +262,17 @@ def resolve_action_reference(owner, principal, reference, *, for_write=True):
         # genuine later consumption/turn originals may supply it; no backfill,
         # key inversion, generated replacement or new root is permitted.
         read_reference(owner,principal,reference)
-        candidates=[]
-        with owner._runtime.store.read() as connection:
-            rows=connection.execute("SELECT command_id,event_type FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type IN ('FRESH_CONVERSATION_INITIAL_CONSUMED','FRESH_CONVERSATION_TURN_REQUESTED') ORDER BY event_id LIMIT 3",(root.job_id,)).fetchall()
-        if len(rows)>2:raise ValueError("CONVERSATION_ORIGINAL_KEY_UNAVAILABLE")
-        from control_plane.fresh_conversation_turn import _event
-        for row in rows:
-            event=_event(owner._runtime,row["command_id"],row["event_type"],root.job_id)
-            identity=event.payload if row["event_type"]=="FRESH_CONVERSATION_INITIAL_CONSUMED" else event.payload["identity"]
-            if identity.get("principal")!=wire.canonical_digest(origin) or identity.get("root_job_id")!=root.job_id:
-                raise ValueError("CONVERSATION_ORIGINAL_KEY_CHANGED")
-            candidates.append(identity["operation_key"])
-        if not candidates or len(set(candidates))!=1:
+        from control_plane.fresh_conversation_turn import _command,_event,_CONSUME
+        consumed=_event(owner._runtime,_command("consume",wire.canonical_digest(origin),root.job_id),_CONSUME,root.job_id)
+        if consumed is None:
             raise ValueError("CONVERSATION_ORIGINAL_KEY_UNAVAILABLE")
-        key=candidates[0]
+        identity=consumed.payload
+        if (identity.get("principal")!=wire.canonical_digest(origin)
+                or identity.get("root_job_id")!=root.job_id):
+            raise ValueError("CONVERSATION_ORIGINAL_KEY_CHANGED")
+        # Consumption precedes every follow-up and retains this original key.
+        # More recorded turns do not create another key recovery authority.
+        key=identity["operation_key"]
     wire.validate_request(dict(work_ref=reference["work_ref"],operation_key=key),operation="status")
     from control_plane.fresh_conversation import scoped_operation_key
     from control_plane import ceo_intent,ceo_request

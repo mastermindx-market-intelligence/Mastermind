@@ -67,6 +67,8 @@ class ProviderWorkerSlot:
     def auth_path(self) -> Path:
         if self.provider_family == "anthropic":
             return self.provider_home / ".claude" / ".credentials.json"
+        if self.provider_family == "deepseek":
+            raise SlotCatalogError("native_provider_owns_credential_storage")
         return self.provider_home / "auth.json"
 
     @property
@@ -382,6 +384,35 @@ def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
         )
         for field in ("slot_id", "worker_user", "worker_group", "worker_uid",
                       "worker_gid", "provider_home", "readiness_receipt"):
+            _unique(existing + (row,), field)
+        return row
+    if config.get("native_provider") == "deepseek":
+        # A projection of the original root-enrolled principal, never a new
+        # numbered account/seat, credential path, enrollment or READY assertion.
+        uid, gid, name = (config.get(k) for k in ("worker_uid", "worker_gid", "worker_user"))
+        control, home_value = config.get("control_uid"), config.get("provider_home")
+        if (type(slot_id) is not str
+                or re.fullmatch(r"deepseek-native-[a-z0-9][a-z0-9-]{0,47}", slot_id) is None
+                or type(uid) is not int or uid <= 0
+                or type(gid) is not int or gid <= 0
+                or type(control) is not int or control <= 0 or control == uid
+                or type(name) is not str or _WORKER_USER_RE.fullmatch(name) is None
+                or type(home_value) is not str or not Path(home_value).is_absolute()
+                or str(Path(home_value)) != home_value or ".." in Path(home_value).parts):
+            raise SlotCatalogError("native_deepseek_principal_invalid")
+        row = ProviderWorkerSlot(
+            slot_id=slot_id, worker_user=name, worker_group=name,
+            worker_uid=uid, worker_gid=gid, provider_home=Path(home_value),
+            readiness_receipt=SYSTEM_CONFIG_ROOT / f"provider-readiness-{slot_id}.json",
+            workspace_binding_class="native_deepseek_account",
+            allowed_credential_kinds=("provider-owned-account",),
+            oauth_seat_ref=None, provider_family="deepseek",
+        )
+        existing = all_slots()
+        if control in {s.worker_uid for s in existing}:
+            raise SlotCatalogError("native_deepseek_control_collision")
+        for field in ("slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",
+                      "provider_home", "readiness_receipt"):
             _unique(existing + (row,), field)
         return row
     if (config.get("native_provider") != "claude"

@@ -1,4 +1,4 @@
-"""A strict 12-file release profile; no wildcard/optional asset admission.
+"""Strict 12/14-file private-entry profiles; no wildcard/optional admission.
 
 The legacy 3/9/11/13 profiles stay intact. This exercises the incumbent
 manifest builder, not a mock release permission or simulated installation.
@@ -47,6 +47,7 @@ PROFILE9 = BASE + NOIR + LICENSES
 PROFILE11 = PROFILE9 + NOTICES
 PROFILE12 = PROFILE11 + (PRIVATE_ENTRY,)
 PROFILE13 = PROFILE11 + RICH_CLIENT
+PROFILE14 = PROFILE13 + (PRIVATE_ENTRY,)
 
 
 def _fixture_source(tmp_path: Path, names: tuple[str, ...]) -> Path:
@@ -65,9 +66,9 @@ def _fixture_source(tmp_path: Path, names: tuple[str, ...]) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("names", [PROFILE3, PROFILE9, PROFILE11, PROFILE12, PROFILE13])
+@pytest.mark.parametrize("names", [PROFILE3, PROFILE9, PROFILE11, PROFILE12, PROFILE13, PROFILE14])
 def test_existing_closed_asset_layouts_remain_qualified(names):
-    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13)
+    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13, 14)
     mimes = os_asset_mimes(names)
     assert len(mimes) == len(names)
     assert set(mimes) == set(names)
@@ -99,7 +100,6 @@ def test_exact_current_private_entry_release_has_sealed_manifest(tmp_path):
         PROFILE12 + ("assets/unapproved-ABC.js",),
         PROFILE12 + (PRIVATE_ENTRY,),
         PROFILE12 + ("assets/SourceMarkdown-ABC_1.js",),
-        PROFILE12 + RICH_CLIENT,
         PROFILE11 + ("assets/private-entry-ABC_1.png",),
         PROFILE11 + ("assets/private-entry-ABC_1.svg",),
         PROFILE11 + ("assets/private-entry-ABC_1.jpeg",),

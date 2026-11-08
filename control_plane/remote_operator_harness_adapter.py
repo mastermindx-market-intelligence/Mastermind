@@ -16,6 +16,11 @@ from control_plane.executive_orchestration_principal import (
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT, NativeConversationResultError,
+    NativeConversationResultObservation, NativeConversationBeginObservation,
+    NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+)
 from control_plane.executive_worker_broker import (
     BrokerProtocolError,
     WorkerBrokerClient,
@@ -54,6 +59,7 @@ from control_plane.operator_harness_wire import (
     profile_validation,
     provider_home_observation,
     raw_role_result_observation,
+    native_conversation_result_observation,
     reconcile_observation,
     retained_plain_input_evidence,
     session_start_observation,
@@ -124,14 +130,22 @@ class RemoteOperatorHarnessAdapter:
 
     interface_version = OPERATOR_HARNESS_INTERFACE_VERSION
 
+    @property
+    def result_contract(self) -> str:
+        return self._result_contract
+
     def __init__(
         self,
         client: WorkerBrokerClient,
         *,
         turn_input_loader: TurnInputLoader,
         capabilities: HarnessAdapterCapabilities,
+        result_contract: str = ROLE_RESULT_CONTRACT,
     ) -> None:
         _validate_remote_capabilities(capabilities)
+        if result_contract not in {ROLE_RESULT_CONTRACT, DSH_NATIVE_RESULT_CONTRACT}:
+            raise BrokerProtocolError("remote operator result contract is unsupported")
+        self._result_contract = result_contract
         self.client = client
         self._fresh_effect_guard = None
         self._foreground_attempt_id = None
@@ -151,6 +165,48 @@ class RemoteOperatorHarnessAdapter:
         self._turn_evidence: dict[TurnRef, RetainedPlainInputEvidence | None] = {}
         self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
 
+
+    async def _native_read_request(self, operation, payload, *, before_read):
+        from control_plane.native_conversation_read_contract import NativeReadUnavailable, canonical
+        if self.result_contract != DSH_NATIVE_RESULT_CONTRACT or not callable(before_read):
+            raise NativeReadUnavailable()
+        client, frozen = self.client, canonical(payload)
+        def current():
+            if self.client is not client or canonical(payload) != frozen:
+                raise NativeReadUnavailable()
+            outcome = before_read()
+            if outcome is not None:
+                import inspect
+                if inspect.iscoroutine(outcome):
+                    outcome.close()
+                raise NativeReadUnavailable()
+            if self.client is not client or canonical(payload) != frozen:
+                raise NativeReadUnavailable()
+        def before_write(actual_operation, actual_payload):
+            if actual_operation != operation or canonical(actual_payload) != frozen:
+                raise NativeReadUnavailable()
+            current()
+        current()
+        value = await client.request(operation, json.loads(frozen), timeout_seconds=6.0, before_write=before_write)
+        current()
+        if type(value) is not dict or set(value) != {"native_read"} or value["native_read"] is None:
+            raise NativeReadUnavailable()
+        return value["native_read"]
+
+    async def read_native_binding(self, *, epoch, generation, before_read):
+        from control_plane.native_conversation_read_contract import validate_native_read_binding
+        value = await self._native_read_request("ohf-native-read-binding",
+            {"epoch": to_wire(epoch), "generation": to_wire(generation)}, before_read=before_read)
+        return validate_native_read_binding(value)
+
+    async def read_native_content(self, *, epoch, generation, association, request, before_read):
+        from control_plane.native_conversation_read_contract import validate_native_read_response
+        value = await self._native_read_request("ohf-native-read",
+            {"epoch": to_wire(epoch), "generation": to_wire(generation),
+             "association": association, "request": request}, before_read=before_read)
+        return validate_native_read_response(value, request)
+
+
     def bind_fresh_effect_guard(self, guard, *, attempt_id):
         """Trusted local source from the original supervisor; never a wire field."""
         if (self._fresh_effect_guard is not None or not callable(guard)
@@ -161,16 +217,36 @@ class RemoteOperatorHarnessAdapter:
         self._foreground_attempt_id = attempt_id
 
     def _fresh_write_options(self, operation, payload):
+        # These options are constructed before the original transport is called.
+        # A local input/identity refusal cannot have written provider bytes.
+        try:
+            return self._checked_fresh_write_options(operation, payload)
+        except Exception as exc:
+            if operation == "ohf-begin-turn" and self.result_contract == DSH_NATIVE_RESULT_CONTRACT:
+                from control_plane.remote_worker_transport import TransportError, TransportEffect
+                raise TransportError("native_before_write_refused", TransportEffect.NO_EFFECT) from exc
+            raise
+
+    def _checked_fresh_write_options(self, operation, payload):
         guard = self._fresh_effect_guard
         attempt_id = self._foreground_attempt_id
         continuation = getattr(self, "_native_continuation_guard", None)
         if (operation == "ohf-begin-turn" and continuation is not None
                 and payload.get("operation_id", {}).get("command_id") == continuation[2]):
-            guard, attempt_id, _ = continuation
+            guard, attempt_id, _, expected_input = continuation
+            if expected_input is not None and payload.get("prompt") != expected_input:
+                raise BrokerProtocolError("native continuation input differs from original request")
+        control = getattr(self, "_native_control_guard", None)
+        selected_control = (control is not None and operation == control[3]
+            and payload.get("operation_id", {}).get("command_id") == control[2])
+        if selected_control:
+            guard, attempt_id, _, _ = control
         if guard is None:
             return {}
+        if operation == "ohf-interrupt" and not selected_control:
+            raise BrokerProtocolError("foreground interrupt requires its original control source")
         identity = payload.get("epoch", payload.get("turn", {}))
-        generation = payload.get("generation", {})
+        generation = identity if operation == "ohf-interrupt" else payload.get("generation", {})
         if (identity.get("attempt_id") != attempt_id
                 or generation.get("session_epoch_id") != identity.get("session_epoch_id")
                 or ("turn" in payload and generation.get("process_generation_id")
@@ -178,13 +254,22 @@ class RemoteOperatorHarnessAdapter:
             raise BrokerProtocolError("foreground request differs from original Attempt")
         frozen = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         def before_write(actual_operation, actual_payload):
-            if (actual_operation != operation or json.dumps(actual_payload,
-                    sort_keys=True, separators=(",", ":"), ensure_ascii=False) != frozen):
-                raise BrokerProtocolError("foreground request bytes changed")
-            guard()
+            try:
+                if (actual_operation != operation or json.dumps(actual_payload,
+                        sort_keys=True, separators=(",", ":"), ensure_ascii=False) != frozen):
+                    raise BrokerProtocolError("foreground request bytes changed")
+                if selected_control:
+                    guard(actual_operation, actual_payload)
+                else:
+                    guard()
+            except Exception as exc:
+                if operation == "ohf-begin-turn" and self.result_contract == DSH_NATIVE_RESULT_CONTRACT:
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("native_before_write_refused", TransportEffect.NO_EFFECT) from exc
+                raise
         return {"before_write": before_write}
 
-    def bind_native_continuation_guard(self, guard, *, attempt_id, operation_id):
+    def bind_native_continuation_guard(self, guard, *, attempt_id, operation_id, expected_input=None):
         """Exact private supervisor source for ONE ACK-bound retained turn.
 
         This never removes the original creation guard: start/resume and any
@@ -197,7 +282,21 @@ class RemoteOperatorHarnessAdapter:
                 or not operation_id.command_id.startswith("ohf-op:native-continuation:")):
             raise BrokerProtocolError("native continuation guard binding is invalid")
         guard()
-        self._native_continuation_guard = (guard, attempt_id, operation_id.command_id)
+        if expected_input is not None and (type(expected_input) is not str or not expected_input
+                or len(expected_input.encode("utf-8")) > 128 * 1024):
+            raise BrokerProtocolError("native continuation input binding is invalid")
+        self._native_continuation_guard = (guard, attempt_id, operation_id.command_id, expected_input)
+
+    def bind_native_control_guard(self, guard, *, attempt_id, operation_id, kind):
+        """Select one authenticated control at the incumbent final write fence."""
+        if (kind not in {"stop", "resume"} or not callable(guard)
+                or type(attempt_id) is not str or not attempt_id
+                or type(operation_id) is not OperationId
+                or not operation_id.command_id.startswith("ohf-op:fresh-control:")):
+            raise BrokerProtocolError("native control guard binding is invalid")
+        guard()
+        self._native_control_guard = (guard, attempt_id, operation_id.command_id,
+            "ohf-interrupt" if kind == "stop" else "ohf-resume")
 
     @staticmethod
     def _mapping(value: Any, *, name: str) -> dict[str, Any]:
@@ -432,6 +531,32 @@ class RemoteOperatorHarnessAdapter:
             self._retained_plain_turns[turn] = (generation, observation)
         return observation
 
+    def observe_native_begin(self, *, operation_id, turn, generation):
+        if self._result_contract != DSH_NATIVE_RESULT_CONTRACT:
+            raise BrokerProtocolError("native begin observation requires its original contract")
+        if (generation.process_generation_id != turn.process_generation_id
+                or generation.session_epoch_id != turn.session_epoch_id):
+            raise BrokerProtocolError("native begin observation identity differs")
+        result = self.client.request_sync("ohf-native-begin-status", {
+            "operation_id": to_wire(operation_id), "turn": to_wire(turn),
+            "generation": to_wire(generation),
+        }, timeout_seconds=30)
+        if (type(result) is not dict or set(result) != {"schema_version", "status", "observation"}
+                or result["schema_version"] != NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA):
+            raise BrokerProtocolError("native begin status is invalid")
+        if result["status"] == "PENDING" and result["observation"] is None:
+            return None
+        if result["status"] != "ACKNOWLEDGED":
+            raise BrokerProtocolError("native begin status is unresolved")
+        try:
+            observed = NativeConversationBeginObservation.from_wire(result["observation"])
+            observed.require_origin(operation_id, turn, generation)
+        except NativeConversationResultError as exc:
+            raise BrokerProtocolError("native begin evidence is invalid") from exc
+        if operation_id.command_id.startswith(CONTINUATION_OPERATION_PREFIX):
+            self._retained_plain_turns[turn] = (generation, observed.start)
+        return observed
+
     def deliver_attention(
         self,
         *,
@@ -493,14 +618,23 @@ class RemoteOperatorHarnessAdapter:
         try:
             events = tuple(normalized_event(item) for item in events_raw)
             next_cursor = event_cursor(result.get("cursor"))
-            cached = {
-                "candidate": candidate_result(result.get("candidate")),
-                "raw_role_result": raw_role_result_observation(
-                    result.get("raw_role_result")
-                ),
-            }
+            native_contract = self._result_contract == DSH_NATIVE_RESULT_CONTRACT
+            field = "native_conversation_result" if native_contract else "raw_role_result"
+            if set(result) & {"native_conversation_result", "raw_role_result"} != {field}:
+                raise BrokerProtocolError("remote OHF result variant differs from its bound contract")
+            raw = (native_conversation_result_observation(result.get(field)) if native_contract
+                   else raw_role_result_observation(result.get(field)))
+            candidate = candidate_result(result.get("candidate"))
+            if native_contract:
+                raw.require_turn(turn)
+                if ((candidate.attempt_id, candidate.session_epoch_id, candidate.process_generation_id)
+                        != (turn.attempt_id, turn.session_epoch_id, turn.process_generation_id)
+                        or candidate.artifact_digest != raw.provider_turn_artifact_digest
+                        or result.get("retained_plain_input_evidence") is not None):
+                    raise BrokerProtocolError("remote native result and candidate differ")
+            cached = {"candidate": candidate, field: raw, "turn": turn}
             evidence = self._decoded_retained_plain_input_evidence(result, turn)
-        except OperatorHarnessWireError as exc:
+        except (OperatorHarnessWireError, NativeConversationResultError) as exc:
             raise BrokerProtocolError("remote OHF turn receipt is invalid") from exc
         self._turn_results[turn.turn_id] = cached
         self._turn_evidence[turn] = evidence
@@ -538,7 +672,10 @@ class RemoteOperatorHarnessAdapter:
 
     def _turn_result(self, turn: TurnRef, field: str) -> Any:
         try:
-            return self._turn_results[turn.turn_id][field]
+            result = self._turn_results[turn.turn_id]
+            if result.get("turn") != turn:
+                raise BrokerProtocolError("remote OHF cached result belongs to another turn binding")
+            return result[field]
         except KeyError as exc:
             raise BrokerProtocolError(
                 "remote OHF turn result was not collected in protocol order"
@@ -549,6 +686,9 @@ class RemoteOperatorHarnessAdapter:
 
     def observe_raw_role_result(self, turn: TurnRef) -> RawRoleResultObservation:
         return self._turn_result(turn, "raw_role_result")
+
+    def observe_native_conversation_result(self, turn: TurnRef) -> NativeConversationResultObservation:
+        return self._turn_result(turn, "native_conversation_result")
 
     def collect_retained_plain_text_evidence(
         self, turn: TurnRef
@@ -593,10 +733,10 @@ class RemoteOperatorHarnessAdapter:
         return evidence
 
     def interrupt_turn(self, turn: TurnRef, *, operation_id: OperationId) -> None:
+        payload = {"operation_id": to_wire(operation_id), "turn": to_wire(turn)}
         result = self.client.request_sync(
-            "ohf-interrupt",
-            {"operation_id": to_wire(operation_id), "turn": to_wire(turn)},
-            timeout_seconds=30,
+            "ohf-interrupt", payload, timeout_seconds=30,
+            **self._fresh_write_options("ohf-interrupt", payload),
         )
         if result.get("interrupted") is not True:
             raise BrokerProtocolError("remote OHF interrupt receipt is invalid")

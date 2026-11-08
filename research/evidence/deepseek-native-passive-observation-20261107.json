@@ -1,0 +1,674 @@
+{
+  "schema": "mastermind.deepseek_native_passive_observation_evidence.v1",
+  "recorded": "2026-11-07T19:11:19.645969+00:00",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "source_parent": "355cf8ce8a4f4641072fa7ce960a1bdeeed600cc",
+  "procedure_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "source_sha256": {
+    "integrations/deepseek_harness/native_connection.py": "d76bd77f95296677deb435aaf7ecae589396f55e655f55ea64278ef51330542d",
+    "integrations/deepseek_harness/native_protocol.py": "cd537d73b383e9be567ff2a40866e86bb9f717bd76e35e5a64d29de641b04435",
+    "integrations/deepseek_harness/operator_adapter.py": "d97fd6e577fd8445ecf5b99ab43c20f4a7f7bc115c281ae4c5d30e070c112600",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "4c240742d3fc95dcb33afc87344b75db4c7be8f7a8de95310df3c8711076732f",
+    "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+    "integrations/deepseek_harness/runtime_compat/native-company-profile-fixture.mjs": "dfb2eb7dd9d8bd0f2b2e8497ea2ae9836c1944b74ab82ca7ee40afc99d515cd3",
+    "tests/harness_convergence/test_dsh_native_operator_profile.py": "ce01d19d88d46dfaac8bd3296a3b1e5a83e8f3263d590c3490dffefdaea7e63f",
+    "tests/test_dsh_native_operator.py": "270b2c5712acd15a8cab09276cd9329e47436f138fe30895b5ab2116c1c8a02f",
+    "tests/test_dsh_native_protocol.py": "3e3be9d1ec783e3f283267750410a507948a09756af79b1ecbede21a773ffe25"
+  },
+  "tests": [
+    {
+      "name": "final-python",
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-20261107-pro4.json",
+      "receipt_sha256": "f50ddc233ddf96e64454f735e353d4d9837970ca8bf064309453b24f23838697",
+      "summary": {
+        "passed": 85
+      },
+      "scope": "Final Python frame boundary, protocol, adapter and ACP package custody",
+      "receipt": {
+        "started": "2026-11-07T19:03:34.914242+00:00",
+        "finished": "2026-11-07T19:03:44.522933+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_dsh_native_acp_package.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/0bbe2204ccf43a57fa91d258e7829c1e1ab339ba1f0f48a5e2962c5ece22dfff.json",
+          "sha256": "0bbe2204ccf43a57fa91d258e7829c1e1ab339ba1f0f48a5e2962c5ece22dfff",
+          "entries": 1415
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/0bbe2204ccf43a57fa91d258e7829c1e1ab339ba1f0f48a5e2962c5ece22dfff.json",
+          "sha256": "0bbe2204ccf43a57fa91d258e7829c1e1ab339ba1f0f48a5e2962c5ece22dfff",
+          "entries": 1415
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "9e2b8dd1126766c7dd092cce859140f3748ddb884ab887a570a00c83699a4d99"
+      }
+    },
+    {
+      "name": "final-donor",
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-donor-20261107-pro3.json",
+      "receipt_sha256": "b1fdba86263b8e1254b94d5ae33bbdfdd2bcb88eb209236f6de1888d653dde1a",
+      "summary": {
+        "passed": 191,
+        "files": 12,
+        "typecheck_diagnostics": 0
+      },
+      "scope": "Final donor patch, preparation, existing 150 ACP tests and 41 extension cases",
+      "receipt": {
+        "started": "2026-11-07T18:57:07.161519+00:00",
+        "finished": "2026-11-07T18:57:23.762239+00:00",
+        "results": [
+          {
+            "argv": [
+              "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py",
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/opt/homebrew/bin/node",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.bin/vitest",
+              "run",
+              "--config",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts"
+            ],
+            "returncode": 0
+          }
+        ],
+        "inputs_before": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "4c240742d3fc95dcb33afc87344b75db4c7be8f7a8de95310df3c8711076732f",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_after": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "4c240742d3fc95dcb33afc87344b75db4c7be8f7a8de95310df3c8711076732f",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "b92b46680704cdfb8ec6d70804ac669b078f6592ea18c0f24e14d50f9dcb8209"
+      }
+    },
+    {
+      "name": "full-native-build",
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-build-20261107-pro2.json",
+      "receipt_sha256": "e18c1f0797635c77febf8d00eebd12f9093e4b745c3125d263b448d618418184",
+      "summary": {
+        "build_gates_passed": 7,
+        "client_artifacts": 325
+      },
+      "scope": "Independent full native closure; no installed target",
+      "receipt": {
+        "started": "2026-11-07T19:00:40.584025+00:00",
+        "finished": "2026-11-07T19:05:18.100285+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022",
+          "/private/tmp/mmx-dsh-c21-native-observation-supply-20261107-pro1",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.pnpm/pnpm@11.28.5/node_modules/pnpm/bin/pnpm.cjs",
+          "--native-acp"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py": "356a4dc602c97806f2948fc81bfe589e49df225e6faeffce8e0f2543d8aba2a9",
+          "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "integrations/deepseek_harness/runtime_compat/native-host-source.json": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
+          "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
+          "integrations/deepseek_harness/runtime_compat/native-session-source.json": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+          "integrations/deepseek_harness/runtime_compat/native-session-generation.patch": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "ca8da73ab3b2aade864ceb5fbdee688680eceec115f4cbb13bf7ceea1302246a",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_session.py": "52aa4d1258015e368ae9cc8f92366d1fa09a32baf44a6ae166487410923c317d"
+        },
+        "inputs_after": {
+          "integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py": "356a4dc602c97806f2948fc81bfe589e49df225e6faeffce8e0f2543d8aba2a9",
+          "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "integrations/deepseek_harness/runtime_compat/native-host-source.json": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
+          "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
+          "integrations/deepseek_harness/runtime_compat/native-session-source.json": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+          "integrations/deepseek_harness/runtime_compat/native-session-generation.patch": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "ca8da73ab3b2aade864ceb5fbdee688680eceec115f4cbb13bf7ceea1302246a",
+          "integrations/deepseek_harness/runtime_compat/prepare_native_session.py": "52aa4d1258015e368ae9cc8f92366d1fa09a32baf44a6ae166487410923c317d"
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "6e924a37d591b3ed055bc6e4f54e3bc0a6cb1bae5238cdc46eb5bb7cdb8f5567",
+        "target": "/private/tmp/mmx-dsh-c21-native-observation-supply-20261107-pro1",
+        "build_manifest_sha256": "8f8eb9389ccb539a521131a6b92e77f1e18fffb9500a324ecd1e9f6cbeca2666"
+      }
+    },
+    {
+      "name": "full-native-physical",
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-physical-20261107-pro1.json",
+      "receipt_sha256": "a292bed45e53fdf5087d32aad00be7c42d4875285196eb5acbdd924e1613f9e7",
+      "summary": {
+        "passed": 1
+      },
+      "scope": "Final actual SDK/passive observation and stream/Stop/close/same-Session resume",
+      "receipt": {
+        "started": "2026-11-07T19:09:12.145132+00:00",
+        "finished": "2026-11-07T19:09:47.956563+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/harness_convergence/test_dsh_native_operator_profile.py",
+          "--basetemp=/private/tmp/mmx-dsh-c21-native-observation-physical-state-20261107-pro1"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/d2590b7bdc90b727577f5baa4d948795cbdde804b72ccb3e0872f2b622399f4d.json",
+          "sha256": "d2590b7bdc90b727577f5baa4d948795cbdde804b72ccb3e0872f2b622399f4d",
+          "entries": 1416
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/d2590b7bdc90b727577f5baa4d948795cbdde804b72ccb3e0872f2b622399f4d.json",
+          "sha256": "d2590b7bdc90b727577f5baa4d948795cbdde804b72ccb3e0872f2b622399f4d",
+          "entries": 1416
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "a7d0db451255bf4e311c2be2899c5f90947d07ef16d7a0e5c5f4d0379a55ba72"
+      }
+    },
+    {
+      "name": "earlier-broad-python",
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-regression-20261107-pro1.json",
+      "receipt_sha256": "0c3e150e6f0ae418cc957a7e7be15c1ce2a8cb41616b01398d427c8f9cd17e67",
+      "summary": {
+        "passed": 469,
+        "skipped": 1
+      },
+      "scope": "Earlier C21 Python candidate, before final frame-counter fix and physical fixture extension; not relabeled final",
+      "receipt": {
+        "started": "2026-11-07T18:50:42.881669+00:00",
+        "finished": "2026-11-07T18:53:17.919542+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_acp_package.py",
+          "tests/test_dsh_native_capability_profile.py",
+          "tests/test_dsh_native_conversation_wire.py",
+          "tests/test_dsh_native_fresh_conversation.py",
+          "tests/test_dsh_native_fresh_history.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_dsh_native_history_http.py",
+          "tests/test_dsh_native_idle_close.py",
+          "tests/test_dsh_native_initial_input.py",
+          "tests/test_dsh_native_installed_binding.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_dsh_native_owner_identity.py",
+          "tests/test_dsh_native_owner_package.py",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_remote_transport.py",
+          "tests/test_dsh_native_result.py",
+          "tests/test_dsh_native_result_content.py",
+          "tests/test_dsh_native_result_transport.py",
+          "tests/test_dsh_native_runtime_binding.py",
+          "tests/test_dsh_native_runtime_result.py",
+          "tests/test_dsh_native_runtime_resume.py",
+          "tests/test_dsh_native_session_package.py",
+          "tests/test_dsh_native_supervisor_binding.py",
+          "tests/test_dsh_native_supervisor_conversation.py",
+          "tests/test_dsh_native_terminal.py",
+          "tests/harness_convergence/test_dsh_native_operator_profile.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/63ad0d5dad7d1e4d9836b6faabd35f78191f9952dac46866f3e0fef123d6c5ad.json",
+          "sha256": "63ad0d5dad7d1e4d9836b6faabd35f78191f9952dac46866f3e0fef123d6c5ad",
+          "entries": 1438
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/63ad0d5dad7d1e4d9836b6faabd35f78191f9952dac46866f3e0fef123d6c5ad.json",
+          "sha256": "63ad0d5dad7d1e4d9836b6faabd35f78191f9952dac46866f3e0fef123d6c5ad",
+          "entries": 1438
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "de17fdfcf25e8946b68e0d44f688ed80f42029b44482efe0d5d8a9afa16a29a3"
+      }
+    }
+  ],
+  "corrected_failures": [
+    {
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-20261107-pro2.json",
+      "receipt_sha256": "0fdce9be3b8d9f26e030e5616231171aa167bd23468a5863609fc7d03fcc881b",
+      "reason": "Initial module-level OHF decode import caused a collection cycle; moved to the decode call.",
+      "receipt": {
+        "started": "2026-11-07T18:45:28.711529+00:00",
+        "finished": "2026-11-07T18:45:32.316795+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_dsh_native_acp_package.py"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/3bec7b0aa7c5dfd157185c65765ff44f7bb502ea9b108ac4999ae70140bf18d0.json",
+          "sha256": "3bec7b0aa7c5dfd157185c65765ff44f7bb502ea9b108ac4999ae70140bf18d0",
+          "entries": 1415
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/3bec7b0aa7c5dfd157185c65765ff44f7bb502ea9b108ac4999ae70140bf18d0.json",
+          "sha256": "3bec7b0aa7c5dfd157185c65765ff44f7bb502ea9b108ac4999ae70140bf18d0",
+          "entries": 1415
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "ba04428c23da3c82535d58504f5d83a31af8b53ab81748ce9671a3fcd37366b9"
+      }
+    },
+    {
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-donor-20261107-pro1.json",
+      "receipt_sha256": "60111464e21ed6cbb17a9101904007660968921dbc2886e92d8e9bc84c9d04d9",
+      "reason": "Fresh Cordis service proxies compared by reference; use original service identity while retaining actual Agent/Session comparisons.",
+      "receipt": {
+        "started": "2026-11-07T18:50:13.642269+00:00",
+        "finished": "2026-11-07T18:52:18.446298+00:00",
+        "results": [
+          {
+            "argv": [
+              "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py",
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/opt/homebrew/bin/node",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs"
+            ],
+            "returncode": 1
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.bin/vitest",
+              "run",
+              "--config",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts"
+            ],
+            "returncode": 1
+          }
+        ],
+        "inputs_before": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "f99065af9caf13a13f429d123243e7596929c52c09a8b311b154ac8137e0255f",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "8b5ffd659b9b5b9210ca52b62ebab42ec42e733f24e4792290ca923c19922305",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "bb1b4d4b9a24692d78d905494109dc51e4c1d1b5829ba6224e666f8a16248681",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_after": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "f99065af9caf13a13f429d123243e7596929c52c09a8b311b154ac8137e0255f",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "8b5ffd659b9b5b9210ca52b62ebab42ec42e733f24e4792290ca923c19922305",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "bb1b4d4b9a24692d78d905494109dc51e4c1d1b5829ba6224e666f8a16248681",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "34ea40192b5fe55b3c0ea578ff3cdd1a42213c5ccef53c3958ea4c948c19a3b1"
+      }
+    },
+    {
+      "receipt_path": "/private/tmp/mmx-dsh-c21-native-observation-donor-20261107-pro2.json",
+      "receipt_sha256": "bb60ef4fb37aea888c16b0170a70feceaa27628ed0c583e552437db8f12d015b",
+      "reason": "Test used incorrect SDK cancellation option and expected non-cooperative cancellation; corrected to actual cancellationSignal and retained response semantics.",
+      "receipt": {
+        "started": "2026-11-07T18:55:10.972146+00:00",
+        "finished": "2026-11-07T18:55:44.034393+00:00",
+        "results": [
+          {
+            "argv": [
+              "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py",
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/opt/homebrew/bin/node",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.bin/vitest",
+              "run",
+              "--config",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts"
+            ],
+            "returncode": 1
+          }
+        ],
+        "inputs_before": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "8ce47a475464134c39d1e3425126fe4a46855b6e8e5171cc055278989c7746c7",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_after": {
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-source.json": "11256a373a7564a978a5a866005bed9fb7ee129efa003b24fa53742fb5e37035",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "8ce47a475464134c39d1e3425126fe4a46855b6e8e5171cc055278989c7746c7",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "4c66cf1757cc6381ac29e90f212e1988315ef0d06b20c47500bb3f25d281090b",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "b943668b8c9989e1e6fa8997db96545b0d8826409430517b67ddb6fb5fc6a489",
+          "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+          "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "ba68a4b6e2106fe443d11e46fd8594b275be767ea978bbc1bb32b366ae94149f"
+      }
+    }
+  ],
+  "native_proof": {
+    "path": "/private/tmp/mmx-dsh-c21-native-observation-physical-state-20261107-pro1/test_full_native_ohf_adapter_s0/native-ohf-adapter-proof.json",
+    "sha256": "9702df69c87fcedb63801d4dc023936b57c6fe99a4d67bb1544f86e38a504200",
+    "proof": {
+      "schema": "mastermind.dsh_native_ohf_adapter_fixture.v1",
+      "production_armed": false,
+      "provider_calls": 0,
+      "authority": "explicit laboratory callbacks, not installed Executive",
+      "new": {
+        "native": {
+          "schema": "mastermind.dsh_native_company_profile_proof.v1",
+          "production_armed": false,
+          "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+          "mode": "new",
+          "actual_session_id": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+          "shared_agent": true,
+          "shared_session": true,
+          "pre_ready_owner_denied": true,
+          "company_page_observed": true,
+          "reader_retirement_keeps_owner": true,
+          "pre_admission_absent": true,
+          "native_start_source": "startup",
+          "isolated_native_home": true,
+          "native_close_settled": true,
+          "root_teardown_settled": true,
+          "model_calls": 1,
+          "agent_creates": 1,
+          "lifecycle": true,
+          "stream_partial": true,
+          "native_signal_aborted": true,
+          "model_stream_settled": true,
+          "native_observation_reads": 2,
+          "interrupted_seq": 14,
+          "interrupted_history": true,
+          "recovered_interrupted": false,
+          "http": {
+            "unauthenticated": 401,
+            "index": 200,
+            "held_file": 403,
+            "foreign_origin": 403,
+            "title": true,
+            "owner_baseline_held": true
+          }
+        },
+        "result": {
+          "schema_version": "mastermind.dsh_native_conversation_result/v1",
+          "attempt_id": "attempt-native-fixture",
+          "session_epoch_id": "epoch-native-fixture",
+          "process_generation_id": "generation-native-new",
+          "turn_id": "turn-native-new",
+          "provider_session_id": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+          "provider_native_turn_id": "1",
+          "native_claim": {
+            "schema": "mastermind.dsh.native_prompt_claim.v1",
+            "operationId": "ohf-op:fixture-native-turn-new",
+            "requestId": 4,
+            "sessionId": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+            "messageId": "50434436-5a75-4695-af26-7a166a5ab037",
+            "nativeTurn": 1,
+            "throughSeq": 5
+          },
+          "native_terminal": {
+            "schema": "mastermind.dsh.native_prompt_terminal.v1",
+            "operationId": "ohf-op:fixture-native-turn-new",
+            "requestId": 4,
+            "claim": {
+              "schema": "mastermind.dsh.native_prompt_claim.v1",
+              "operationId": "ohf-op:fixture-native-turn-new",
+              "requestId": 4,
+              "sessionId": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+              "messageId": "50434436-5a75-4695-af26-7a166a5ab037",
+              "nativeTurn": 1,
+              "throughSeq": 5
+            },
+            "throughSeq": 16,
+            "observedLastTurn": 1,
+            "observedTurnCount": 1
+          },
+          "stop_reason": "cancelled",
+          "provider_turn_artifact_digest": "0db6bdab6a7a3d293a108f6986814fd42b510b778e2688e26b290c8a84e4250c"
+        },
+        "actual_process": {
+          "pid": 31563,
+          "pgid": 31563,
+          "process_start_identity": "1794078582.761502",
+          "boot_id": "7ED78369-2C27-4290-8E4B-A7AD01647AD0"
+        },
+        "currentness_checks": 13,
+        "turn_writer_state": "HELD",
+        "closed_writer_state": "RELEASED"
+      },
+      "resume": {
+        "native": {
+          "schema": "mastermind.dsh_native_company_profile_proof.v1",
+          "production_armed": false,
+          "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+          "mode": "resume",
+          "actual_session_id": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+          "shared_agent": true,
+          "shared_session": true,
+          "pre_ready_owner_denied": true,
+          "company_page_observed": true,
+          "reader_retirement_keeps_owner": true,
+          "pre_admission_absent": true,
+          "native_start_source": "resume",
+          "isolated_native_home": true,
+          "native_close_settled": true,
+          "root_teardown_settled": true,
+          "model_calls": 1,
+          "agent_creates": 1,
+          "lifecycle": true,
+          "stream_partial": true,
+          "native_signal_aborted": false,
+          "model_stream_settled": true,
+          "native_observation_reads": 2,
+          "interrupted_seq": null,
+          "interrupted_history": false,
+          "recovered_interrupted": true,
+          "http": {
+            "unauthenticated": 401,
+            "index": 200,
+            "held_file": 403,
+            "foreign_origin": 403,
+            "title": true,
+            "owner_baseline_held": true
+          }
+        },
+        "result": {
+          "schema_version": "mastermind.dsh_native_conversation_result/v1",
+          "attempt_id": "attempt-native-fixture",
+          "session_epoch_id": "epoch-native-fixture",
+          "process_generation_id": "generation-native-resume",
+          "turn_id": "turn-native-resume",
+          "provider_session_id": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+          "provider_native_turn_id": "2",
+          "native_claim": {
+            "schema": "mastermind.dsh.native_prompt_claim.v1",
+            "operationId": "ohf-op:fixture-native-turn-resume",
+            "requestId": 4,
+            "sessionId": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+            "messageId": "5fe37c65-f98e-4132-ba40-69f7ddd4efc3",
+            "nativeTurn": 2,
+            "throughSeq": 20
+          },
+          "native_terminal": {
+            "schema": "mastermind.dsh.native_prompt_terminal.v1",
+            "operationId": "ohf-op:fixture-native-turn-resume",
+            "requestId": 4,
+            "claim": {
+              "schema": "mastermind.dsh.native_prompt_claim.v1",
+              "operationId": "ohf-op:fixture-native-turn-resume",
+              "requestId": 4,
+              "sessionId": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+              "messageId": "5fe37c65-f98e-4132-ba40-69f7ddd4efc3",
+              "nativeTurn": 2,
+              "throughSeq": 20
+            },
+            "throughSeq": 27,
+            "observedLastTurn": 2,
+            "observedTurnCount": 1
+          },
+          "stop_reason": "end_turn",
+          "provider_turn_artifact_digest": "55546e7752b4dea83f721ede1b078179e171827e6b923e75b8a163aad1f82fdc"
+        },
+        "actual_process": {
+          "pid": 31879,
+          "pgid": 31879,
+          "process_start_identity": "1794078585.430343",
+          "boot_id": "7ED78369-2C27-4290-8E4B-A7AD01647AD0"
+        },
+        "currentness_checks": 9,
+        "turn_writer_state": "HELD",
+        "closed_writer_state": "RELEASED"
+      }
+    }
+  },
+  "isolated_build": {
+    "path": "/private/tmp/mmx-dsh-c21-native-observation-supply-20261107-pro1/build-manifest.json",
+    "sha256": "8f8eb9389ccb539a521131a6b92e77f1e18fffb9500a324ecd1e9f6cbeca2666",
+    "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+    "native_acp_preparation": {
+      "schema": "mastermind.dsh_native_acp_prepared.v1",
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "patch_sha256": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
+      "source_files": 7,
+      "output_sha256": {
+        "packages/acp/acp/src/index.ts": "2dddbe6ac99263bfb0b465054ce90b878147660c674c4d18ee82a6660c0ee23a",
+        "packages/acp/acp/src/session.ts": "a8c0eceb09630e55690c30663c6fa94f30180217b8c3507a12b964de6a284f6c"
+      },
+      "installed": false,
+      "provider_calls": 0
+    },
+    "runtime_inventory": {
+      "file": "runtime-inventory.json",
+      "sha256": "de01234f46ff1594a2eb43cb80633eb5e1247bee900f775aeb89bc489384f6d9",
+      "entries": 116128
+    },
+    "installed": false,
+    "production_armed": false
+  },
+  "whitespace": {
+    "non_patch_diff_check": 0,
+    "non_context_trailing_spaces": [],
+    "original_patch_blank_context_lines": 15,
+    "current_patch_blank_context_lines": 18,
+    "explanation": "Three added single-space unified-diff blank context markers preserve normal patch grammar; generated TypeScript has no trailing-space defect."
+  },
+  "current_installed_read": {
+    "observed_at": "2026-11-07T18:51:29.133788Z",
+    "reader": "Executive V3 executive_state",
+    "ok": false,
+    "mode": "readonly",
+    "error_code": "backend_unavailable",
+    "execution_readiness_observed": false
+  },
+  "input_manifest_encoding": "Large exact input-hash maps use the same source-linked leaves as C20. Replace each input_manifest reference with its SHA-256-verified map to reconstruct original receipt fields.",
+  "production_acceptance": false,
+  "remaining_work": [
+    "Installed pinned native Worker/quota/host producer preserving primary Codex and Hermes",
+    "Same-process company launcher and actual account/model/capability/confinement observers",
+    "Signed-in packaged native Send/history/answer/reconnect/uncertain-send/Stop/exact-resume proof",
+    "Eligible governed tool execution and settlement under actual grants"
+  ],
+  "invariants": [
+    "No service restart",
+    "No replacement Worker or Session owner",
+    "Hermes #2180 canary not repeated",
+    "Previously denied live-config and Fabric lanes not replayed",
+    "os_assets.py remains #2175; #1870 excluded; #2210 requires original grants"
+  ]
+}

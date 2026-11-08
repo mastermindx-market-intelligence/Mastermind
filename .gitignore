@@ -104,3 +104,15 @@ research/evidence/ohf_p0/**
 
 # Pinned Rakazo qualification installs its exact contract deps locally.
 integrations/rakazo_qualification/node_modules/
+
+# Outputs of this operation's attended native package qualification.
+/.cache/attended-native-c41-20261108-pro1/
+/.cache/attended-native-state-c41-20261108-pro1/
+
+# C43 exact closed-history candidate and state; no general artifact exclusion.
+/.cache/attended-native-c43-20261108-pro1/
+/.cache/attended-native-state-c43-20261108-pro1/
+
+# C43 compiled decorator repair candidate; previous proof artifacts retained.
+/.cache/attended-native-c43-20261108-pro2/
+/.cache/attended-native-state-c43-20261108-pro2/

@@ -1,0 +1,87 @@
+{
+  "fences": {
+    "os_assets_py": "PR2175 untouched",
+    "pr1870": "untouched",
+    "publication": "No root commit/push/install"
+  },
+  "frontier": [
+    "Native terminal success and idle consumer through original lifecycle",
+    "Authenticated native resume/Send/Stop and result/reference wire",
+    "Original company-frame delegation, installed native observation/authority/tool producer",
+    "Signed-in production real-path proof"
+  ],
+  "installed": false,
+  "production_accepted": false,
+  "proved": [
+    "Immutable native creator selects exact ACP profile; production registry resolve still gates enabled policy",
+    "Native initial input checks nominal source before claim and exact text again at original final prewrite",
+    "Original retained Supervisor returns exclusive typed native result reference without planner prompt/result envelope",
+    "Historical G1 reference is validated separately from current G2 writer",
+    "Native handles cannot enter legacy ACK/CONTINUE contract",
+    "Original COO classifier recognizes immutable native creator and leaves its child outside one-shot planning"
+  ],
+  "provider_calls": 0,
+  "qualification": {
+    "changed_inputs": [],
+    "installed": false,
+    "log": "/private/tmp/mmx-dsh-c15-supervisor-final-20261107.log",
+    "log_sha256": "ea00a3bc20061f3e1451afe7a511de601c578a7c8543a3ac101e0884a38051e5",
+    "provider_calls": 0,
+    "returncode": 0,
+    "schema": "mastermind.source_qualification.v1",
+    "seconds": 75.26,
+    "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+    "source_sha256": {
+      "config/executive_dsh_native_conversation_capabilities.json": "b2a04c939683afdb36ea0a2c4bbfcdbdcb5141150772853dc1ee28ab4fb50612",
+      "control_plane/executive_agent_capabilities.py": "57f65be34637d23b400b331dc0b0b4f82ed7cdae3a5460f788a053840167d9da",
+      "control_plane/executive_coo_cycle.py": "8a59247fa41b596ea76e9b298048249da6719ad7ef682282352fcd400735819f",
+      "control_plane/executive_operator_harness_port.py": "87d50043a34cf227679072c35407a736b646b18fa6945b989d9aac18bab59f5a",
+      "control_plane/executive_operator_supervisor.py": "1ebf5561b6cbdbfab5a93264cff77047eef10c9b18e4b7efa86d3a47574ed6b8",
+      "control_plane/executive_runtime.py": "2c5975c010b0f7cbf8bc7f29c9a00aa5bef01bddf9d9a5b9a24315cae21b796b",
+      "control_plane/executive_service.py": "3c024cbad9ab4c5c4fb983939341dcd378454585d71cebf78c43aa924ec93a16",
+      "control_plane/fresh_conversation_admission.py": "985e34e8a7b109fe49ae90782bf4e099762f8385bdc6d53e5b5871d82be42c6d",
+      "control_plane/native_conversation_result.py": "e2a119124d9b0147cd3704aaf80909fa916f7750759857a8ec83b355c6ef92b9",
+      "control_plane/operator_harness_orchestrator.py": "3e897b044792119ffb173e96b07f25e237795b32a6e49804309c6da919e840fe",
+      "control_plane/remote_operator_harness_adapter.py": "b948f1423ae65a54009adc0515e24d17de901cd78aed0f8dcbf3634419b83ee0",
+      "tests/test_dsh_native_idle_close.py": "84f1e47b1c67eee2cefe6bdf7b45d91754c77424707bc27b7812868806acd6fc",
+      "tests/test_dsh_native_initial_input.py": "46bc9950ee77dc3c7cebe5ce7dcf5adf7bd10018e1cef15d14c0bac24ed2a5cf",
+      "tests/test_dsh_native_runtime_binding.py": "eaec42c3deafcb5c9c1e99da25456f3f6597455ec5ce739e283084464251cbd4",
+      "tests/test_dsh_native_runtime_result.py": "549589d9308713c7fa02a05a4f8cc5c1c6964f564941de46c4740ce3ab584a71",
+      "tests/test_dsh_native_runtime_resume.py": "c5b07335f89994e2e3b720447871235c74f80757cfce799543009ad64769fb15",
+      "tests/test_dsh_native_supervisor_binding.py": "26bc46b97c3ab0f75dfd5e8f3734b9d268c3156e292d6c6997d479913c899fb7",
+      "tests/test_dsh_native_supervisor_conversation.py": "d97bb8e90cb190ecb0526d0a1c419af15a9376554dec9936911c5b646b707d87",
+      "tests/test_executive_operator_supervisor.py": "ff72353e5b15a1155fccaff1ad042a223bbf3ef523358615fa900d877cd9ebe4",
+      "tests/test_fresh_conversation.py": "541d16522cf17c1ca95f1854a285e5eb3d04603899b9748f606d393c80334049",
+      "tests/test_native_initial_active_turn.py": "fc35198e8adb6b3c2d92df885ac50512ff08333c44c43d13af3f054131c24319",
+      "tests/test_native_retained_runtime.py": "1ae8f6275f95b4a073bab33e9d8eafe8592ad338edf457a225e6c82fdf6c7185"
+    },
+    "source_unchanged": true,
+    "summary": {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "skipped": "0",
+      "tests": "142",
+      "time": "73.885",
+      "timestamp": "2026-11-07T04:17:57.572094-07:00"
+    },
+    "tests": [
+      "tests/test_executive_operator_supervisor.py",
+      "tests/test_native_retained_runtime.py",
+      "tests/test_dsh_native_supervisor_binding.py",
+      "tests/test_dsh_native_supervisor_conversation.py",
+      "tests/test_native_initial_active_turn.py",
+      "tests/test_dsh_native_initial_input.py",
+      "tests/test_fresh_conversation.py",
+      "tests/test_dsh_native_idle_close.py",
+      "tests/test_dsh_native_runtime_result.py"
+    ],
+    "xml": "/private/tmp/mmx-dsh-c15-supervisor-final-20261107.xml"
+  },
+  "schema": "mastermind.deepseek.native_supervisor_conversation_evidence.v1",
+  "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+  "source_pr": 2177,
+  "status": "SOURCE_QUALIFIED_NOT_INSTALLED",
+  "test_seams": "Positive Supervisor tests explicitly provide inert native config projection, nominal-input callback and physical/provider observations. Actual nominal source separately qualified in C13. No production profile enabled."
+}

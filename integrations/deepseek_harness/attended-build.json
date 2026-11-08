@@ -1,0 +1,49 @@
+{
+  "schema": "mastermind.dsh_attended_build.v1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "package_manifest_sha256": "79570a871965abfac1fc51ae538b302a5a79bd40b26c41a4f9f8010c9ebabaed",
+  "app_config_sha256": "61da053ca49ecf20b56325aae6ce5f622b47cae16ca4dad5f869b7f484719b50",
+  "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+  "native_client_build_sha256": "6d9529336be67e059e55b3727fd9fa6d2fe53a40ad9a1079deaac9f939ed84ad",
+  "index_sha256": "0c37affd964c8819b210e02b5da8c600c2cfa03ee999fc3977a8809b2e8c74a0",
+  "company_host_exports": {
+    "./company-peer": {
+      "file": "company-peer.js",
+      "sha256": "8a00870eea70d3e89de1bff988731409700e0b9ae6c2003ee2f8a528bc24ea5b"
+    },
+    "./executive-read-port": {
+      "file": "executive-read-port.js",
+      "sha256": "7d11c2d521b4f41a0ff49c292476d05ac6c6086facdffe37bfcbafc4507f7eb5"
+    }
+  },
+  "native_session_patch": {
+    "source_sha256": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+    "patch_sha256": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+    "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea"
+  },
+  "native_owner_access": {
+    "source_sha256": "07f538387397222ebda157ec3be76e88e9bba4dfe19842ac8a9ee5e83016b054",
+    "patch_sha256": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+    "host_source_sha256": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+    "host_patch_sha256": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597",
+    "receipt_sha256": "569f5e69f1a16950fb92987872aa65e585b6cbe4fde40d7d1d053c40d75df093"
+  },
+  "native_acp_patch": {
+    "source_sha256": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720",
+    "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+    "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef"
+  },
+  "evidence_commit": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+  "custody": "Source-linked C43 complete staged attended package and original Worker entry; seven build gates, full check-only closure and a finite test-owned closed-Session answer read through the compiled entry passed. No final Worker materialization, installation or production acceptance claimed.",
+  "installed": false,
+  "provider_calls": 0,
+  "native_worker": {
+    "schema": "mastermind.dsh_native_worker_entry/v1",
+    "entry": "native_worker.mjs",
+    "sha256": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642",
+    "agent_name": "deepseek-harness-acp",
+    "agent_version": "0.0.1",
+    "model_provider": "deepseek-account"
+  },
+  "native_worker_patch_sha256": "79d2034a4e0e21f3386333d1959e1196a8a8c21535c860c696ce9c3cb8082583"
+}

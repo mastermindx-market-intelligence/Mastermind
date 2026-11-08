@@ -1,0 +1,23 @@
+{
+  "schema": "mastermind.dsh_native_acp_source.v1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "donor_lock_sha256": "4637cca3b89c4c8d5a147321710e597aa62ec2444a3772ab542be5690893dfe4",
+  "source_sha256": {
+    "packages/acp/acp/src/codec.ts": "141f573b899b65e912f2db24deff80a1b3eed22d4b031acf67ae8984ebe3716f",
+    "packages/acp/acp/src/content.ts": "ff17c0e4736bba3894ff32c4e3c31a1be1d1843457e96cbe09880f46336e4bb6",
+    "packages/acp/acp/src/index.ts": "9aa1b4449871f97c99d0757dedc3bead59427317446beefef39c4e8be9fdb82f",
+    "packages/acp/acp/src/mcp.ts": "b5f29d192bba71d043c27d37989e36a51d907e2060b78e6dc990d55338aebc2e",
+    "packages/acp/acp/src/model-control.ts": "238ced89fce89ab3396830c1fa3d227d33893217bdf3c4ab12204d0923e5f113",
+    "packages/acp/acp/src/session.ts": "6e944674ec48d24d168a9fadde83f979338eb6ebe6e90cb1d5afebadf5a6639e",
+    "packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
+  },
+  "output_sha256": {
+    "packages/acp/acp/src/index.ts": "893ed37d11ef74890f792dcdf540d59c26e267976f28c54bd226f806a95e10d2",
+    "packages/acp/acp/src/model-control.ts": "064b39df618aed97be61928f6d23edd733be53a7fd41d699d82ceef44813218c",
+    "packages/acp/acp/src/session.ts": "9ead5cf8a30eff194d49d88dd7768bb342e1c56bfae7b56a0659b2f275ddd2dd"
+  },
+  "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+  "installed": false,
+  "provider_calls": 0,
+  "production_armed": false
+}

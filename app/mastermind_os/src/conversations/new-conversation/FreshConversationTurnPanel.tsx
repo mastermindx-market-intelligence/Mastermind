@@ -2,16 +2,25 @@ import { useId, type ReactNode } from "react";
 import type { OperationState } from "../../orchestration/operation-controller";
 import type { FreshConversationTurnData, FreshConversationTurnConsumption } from "./fresh-conversation-turn";
 import { FreshConversationInitialResponse } from "./NewConversationOutcome";
+import type {FreshAttendedData} from "./fresh-conversation-attended-contract";
 import "./fresh-conversation-turn-panel.css";
 
 export interface FreshConversationTurnPanelProps {
   locale: "en" | "zh-CN";
   /** Parent-decoded follow-up window; null until a confirmed read exists. */
-  data: FreshConversationTurnData | null;
+  data: FreshAttendedData | null;
   /** Actual current reader's receipt; no synthetic turn DATA is constructed. */
   initialConsumption?: FreshConversationTurnConsumption | null;
-  /** The caller already attempted its one turn; only original recovery remains. */
+  /** A submitted turn remains held until its exact original read settles. */
   responsePending?: boolean;
+  /** Only the caller's verified original read releases the next draft. */
+  allowNextMessage?:boolean;
+  /** Only an owner-confirmed absence before any submission can offer initial Keep. */
+  allowInitialKeep?:boolean;
+  /** Previously verified local reads, retained for this open conversation. */
+  recordedTurns?:readonly {data:FreshAttendedData;message:string|null}[];
+  /** Complete older entries were omitted from the bounded local presentation. */
+  historyLimited?:boolean;
   /** Live controller observation; null when the controller holds no state here. */
   operationState: OperationState | null;
   /** Actual caller-side await activity; never a provider state. */
@@ -40,7 +49,7 @@ type TurnKey = "keeping" | "sending" | "checking" | "unresolved" | "recorded" | 
 /** Priority-ordered continuation sentence: a live controller or any
  * unresolved/effect-unknown signal dominates every green or success heading. */
 function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["activity"],
-  operationState: OperationState | null, data: FreshConversationTurnData | null):
+  operationState: OperationState | null, data: FreshAttendedData | null):
   { key: TurnKey; title: string } | null {
   const text = (en: string, cn: string) => zh ? cn : en;
   if (activity === "keeping") return { key: "keeping", title: text("Keeping response…", "正在保留回复…") };
@@ -62,7 +71,9 @@ function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["acti
   if (data?.state === "ABSENT") {
     return {
       key: "absent",
-      title: text("No follow-up is recorded for this original request yet.", "此原请求尚未记录后续回复。"),
+      title: data.turn_key===null&&data.initial_consumption===null
+        ? text("First response not kept yet", "首条回复尚未保留")
+        : text("No follow-up is recorded for this original request yet.", "此原请求尚未记录后续回复。"),
     };
   }
   if (controller === "refused") {
@@ -76,7 +87,7 @@ function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["acti
 
 /** Bounded source rows; raw codes live only inside the closed disclosure. */
 function sourceRows(zh: boolean, operationState: OperationState | null,
-  data: FreshConversationTurnData | null, initialConsumption: FreshConversationTurnConsumption | null): { label: string; value: string }[] {
+  data: FreshAttendedData | null, initialConsumption: FreshConversationTurnConsumption | null): { label: string; value: string }[] {
   const text = (en: string, cn: string) => zh ? cn : en;
   const notSupplied = text("Not supplied", "未提供");
   const flag = (value: boolean | undefined) => value === undefined ? notSupplied : String(value);
@@ -122,7 +133,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, allowNextMessage = false, allowInitialKeep = false, recordedTurns = [], historyLimited = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -133,11 +144,12 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
   const absent = status?.key === "absent";
   const receipt = data?.initial_consumption ?? initialConsumption;
   const result = data?.result ?? null;
-  /** An absent turn is a hold, not clearance: neither slot is offered for replay. */
-  const holdActions = busy || unresolved || recorded || absent || responsePending || status?.key === "refused";
+  /** Absent submitted turns stay held; the owner alone may qualify an initial Keep. */
+  const unsubmittedInitial=allowInitialKeep&&absent&&data?.turn_key===null&&receipt==null;
+  const holdActions = busy || unresolved || recorded && !allowNextMessage || absent && !unsubmittedInitial || responsePending || status?.key === "refused";
   const keepVisible = keepControl != null && receipt == null && !holdActions;
   const sendVisible = sendControl != null && receipt != null && !holdActions;
-  const inputHeld = readOnly || busy || unresolved || recorded || responsePending;
+  const inputHeld = readOnly || busy || unresolved || recorded && !allowNextMessage || responsePending;
   const showUnavailable = !busy && !unresolved && !recorded && !responsePending && !keepVisible && !sendVisible;
   return <section className="mm-fresh-conversation-turn" lang={zh ? "zh-CN" : "en"}>
     <h2 className="mm-fresh-conversation-turn-heading">{text("Continue this conversation", "继续此对话")}</h2>
@@ -149,7 +161,19 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       {receipt != null ? text("First response kept", "已保留第一条回复")
         : text("Keep the first response to continue.", "保留第一条回复后继续。")}
     </p>
-    {receipt != null && !recorded && (messagePreview ?? <div className="mm-fresh-conversation-turn-field">
+    {historyLimited && <p>{text("Earlier replies remain available in project conversation history.", "更早的回复仍可在项目对话历史中查看。")}</p>}
+    {recordedTurns.map(turn=><section className="mm-fresh-conversation-turn-followup" key={turn.data.turn_key}>
+      {turn.data.result&&!("envelope"in turn.data.result)?<NativeTurnNotice locale={locale} message={turn.message}/>:
+       <FreshConversationInitialResponse locale={locale} result={turn.data.result&&"envelope"in turn.data.result?turn.data.result:null} originalMessage={turn.message}
+        responseKind="followup" headingLevel={3}/>}
+    </section>)}
+    {recorded && result != null && !recordedTurns.some(turn=>turn.data.turn_key===data?.turn_key) && <section className="mm-fresh-conversation-turn-followup">
+      {!("envelope"in result)?<NativeTurnNotice locale={locale} message={originalTurnMessage??null}/>:
+       <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalTurnMessage??null} responseKind="followup" headingLevel={3}
+        caption={data?.parent_consumed === false
+          ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null} />}
+    </section>}
+    {receipt != null && (!recorded || allowNextMessage) && (messagePreview ?? <div className="mm-fresh-conversation-turn-field">
       <label className="mm-fresh-conversation-turn-label" htmlFor={inputId}>
         {text("Your next message", "下一条消息")}
       </label>
@@ -157,14 +181,9 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
         value={message} disabled={inputHeld} readOnly={messageReadOnly} onFocus={onMessageFocus} rows={4}
         onChange={event => onMessageChange(event.target.value)} />
       <p className="mm-fresh-conversation-turn-hint">
-        {text("This view supports one follow-up message.", "此视图仅支持一条后续消息。")}
+        {text("Your messages stay in this conversation.", "消息将保留在此对话中。")}
       </p>
     </div>)}
-    {recorded && result != null && <section className="mm-fresh-conversation-turn-followup">
-      <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalTurnMessage??null} responseKind="followup" headingLevel={3}
-        caption={data?.parent_consumed === false
-          ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null} />
-    </section>}
     {(keepVisible || sendVisible || checkControl != null) &&
       <div className="mm-fresh-conversation-turn-actions">
         {keepVisible ? keepControl : null}
@@ -187,4 +206,14 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       </div>
     </details>
   </section>;
+}
+
+
+function NativeTurnNotice({locale,message}:{locale:"en"|"zh-CN";message:string|null}){
+ const zh=locale==="zh-CN";
+ return <>
+  <h3>{zh?"已记录后续回复":"Follow-up response recorded"}</h3>
+  {message!==null?<p style={{whiteSpace:"pre-wrap"}}>{message}</p>:null}
+  <p>{zh?"打开“已记录对话”以读取原始回复。":"Open Recorded conversation to read the original answer."}</p>
+ </>;
 }

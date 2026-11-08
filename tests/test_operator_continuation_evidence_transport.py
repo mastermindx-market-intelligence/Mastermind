@@ -872,7 +872,10 @@ def test_proxy_preserves_the_existing_candidate_and_raw_behavior():
 def test_executive_worker_broker_owns_the_collect_evidence_emission():
     import inspect
 
-    source = inspect.getsource(ExecutiveWorkerBroker._ohf_collect_turn)
+    entry = inspect.getsource(ExecutiveWorkerBroker._ohf_collect_turn)
+    assert entry.count("self._operator_collection_transaction(") == 1
+    assert "asyncio.shield(task)" in entry
+    source = inspect.getsource(ExecutiveWorkerBroker._operator_collection_transaction)
     # The accepted collector is reached only behind the transient mark, and
     # only through the guarded helper, never directly off the adapter.
     assert "retained_plain_turns.get(turn) == state.generation" in source

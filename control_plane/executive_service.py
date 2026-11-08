@@ -239,7 +239,8 @@ class OperatorSupervisorProtocol(Protocol):
 
     def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
 
-    async def start_retained_native_job(self, job_id: str, *, command_id: str) -> Any: ...
+    async def start_retained_native_job(self, job_id: str, *, command_id: str,
+                                        _active_turn_observer=None) -> Any: ...
     async def run_native_continuation(self, retained: Any, *, source: Any, read_ref: str) -> Any: ...
     async def finish_retained_native_job(self, retained: Any) -> None: ...
     async def abort_retained_native_job(self, retained: Any, *, reason: str) -> bool: ...
@@ -255,9 +256,13 @@ class _NativeOperatorDispatch:
     continuation: asyncio.Future
     retained: Any = None
     source: Any = None
+    active_turn: Any = None
+    pending_turn: Any = None
+    recovery_waiter: Any = None
 
 
 _NATIVE_CONTINUATION_WAIT_SECONDS = 300.0
+_NATIVE_ACTIVE_OBSERVATION_WAIT_SECONDS = 15.0
 
 
 class BackupBackendProtocol(Protocol):
@@ -2476,6 +2481,8 @@ class ExecutiveControlService:
         )
         self._terminal_return_last_diagnostic: str | None = None
         self._coo_execution_binding = self._load_coo_execution_binding()
+        # Optional installed source; browser/config DTOs cannot enable native admission.
+        self._native_conversation_binding_source = None
         self._coo_tick_task: asyncio.Task[Any] | None = None
         self._coo_shutdown_event: asyncio.Event | None = None
         self._coo_action_tasks: set[asyncio.Task[Any]] = set()
@@ -3030,6 +3037,23 @@ class ExecutiveControlService:
             raise StateConflict("foreground qualification changed")
         return binding
 
+    def _require_current_native_conversation_binding(self) -> dict[str, Any]:
+        from control_plane.native_conversation_binding import NativeConversationBindingSource
+        source = self._native_conversation_binding_source
+        if type(source) is not NativeConversationBindingSource or source._service is not self:
+            raise StateConflict("installed native conversation source is unavailable")
+        try:
+            return source.current_binding()
+        except (ValueError, KeyError, CapabilityPolicyError, RoutingPolicyError) as exc:
+            raise StateConflict("installed native conversation identity is unavailable or drifted") from exc
+
+    def _require_native_conversation_admission_binding(self) -> dict[str, Any]:
+        qualification = self._require_attended_qualification()
+        binding = self._require_current_native_conversation_binding()
+        if self._require_attended_qualification() != qualification:
+            raise StateConflict("native foreground qualification changed")
+        return binding
+
     @property
     def ceo_ingress_socket_path(self) -> Path | None:
         return self._ceo_ingress_socket_path
@@ -3439,17 +3463,20 @@ class ExecutiveControlService:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
     def _ceo_ingress_stream_ceiling(self):
-        """Allocate the larger frame only for a configured source App owner.
+        """Allocate framing for configured owners; retain each protocol limit.
 
-        Each decoded protocol retains its own old ceiling. UID selection and
-        its exact source schema precede any use of the larger source budget.
+        Kernel-peer and exact schema selection precede use of a larger budget.
         """
         from control_plane import executive_release_ingress as release_ingress
         from common.workspace_source_operation_wire import MAX_REQUEST_BYTES as SOURCE_BYTES
         binding = self._ceo_ingress_app_binding
-        return (max(release_ingress.MAX_FRAME_BYTES, SOURCE_BYTES)
-                if binding is not None and callable(binding.source_operation_provider_factory)
-                else release_ingress.MAX_FRAME_BYTES)
+        ceiling = release_ingress.MAX_FRAME_BYTES
+        if binding is not None and callable(binding.source_operation_provider_factory):
+            ceiling = max(ceiling, SOURCE_BYTES)
+        if binding is not None and callable(binding.fresh_conversation_provider_factory):
+            from common.fresh_conversation_contract import NATIVE_MAX_REQUEST_BYTES
+            ceiling = max(ceiling, NATIVE_MAX_REQUEST_BYTES)
+        return ceiling
 
     def _grant_app_socket_access(self) -> None:
         """One named-user ACL; C1 ownership, modes and groups stay intact.
@@ -5449,7 +5476,12 @@ class ExecutiveControlService:
             from common import project_execution_private_contract as execution_wire
             selected_execution=(isinstance(parsed,dict) and parsed.get('schema')==execution_wire.SCHEMA and app_peer
                 and callable(app_binding.project_execution_provider_factory))
+            from common import fresh_conversation_contract as fresh_wire
+            selected_native_conversation = (type(parsed) is dict
+                and parsed.get("schema") == fresh_wire.NATIVE_SCHEMA and app_peer
+                and callable(app_binding.fresh_conversation_provider_factory))
             request_ceiling = (source_operation_wire.MAX_REQUEST_BYTES if selected_source_operation else
+                fresh_wire.NATIVE_MAX_REQUEST_BYTES if selected_native_conversation else
                 execution_wire.MAX_BYTES if selected_execution else
                 planning_wire.MAX_BYTES if selected_planning else
                 principal_app_protocol.MAX_REQUEST_BYTES if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
@@ -6234,7 +6266,9 @@ class ExecutiveControlService:
                     elif frame["operation"] == "fresh_references":
                         result = provider.project_references(principal, arguments)
                     else:
-                        result = provider.read_reference(principal, arguments)
+                        result = provider.read_reference(principal, arguments, guard=require_conversation_read_current)
+                        if inspect.isawaitable(result):
+                            result = await result
                     require_conversation_read_current()
                     await self._send_ceo_ingress_response(writer, {"ok": True, "result": result},
                         response_ceiling=conversation_read_wire.MAX_RESPONSE_BYTES)
@@ -6242,15 +6276,18 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, "ingress_unavailable", "project conversation reader unavailable")
                 return
             from common import fresh_conversation_contract as fresh_wire
-            if isinstance(parsed, Mapping) and parsed.get("schema") == fresh_wire.SCHEMA:
+            if isinstance(parsed, Mapping) and parsed.get("schema") in {fresh_wire.SCHEMA, fresh_wire.NATIVE_SCHEMA}:
                 if not app_peer:
                     await self._send_ceo_ingress_error(writer, "peer_denied", "fresh conversation requires installed App peer")
                     return
                 try:
                     from control_plane.fresh_conversation import FreshConversationOwner
                     frame = fresh_wire.validate_private_frame(parsed)
-                    modifying = frame["operation"] in fresh_wire.MODIFYING
-                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read", "turn_status", "turn_read", "consume_status"} else {"READY"}
+                    native = frame["schema"] == fresh_wire.NATIVE_SCHEMA
+                    modifying = frame["operation"] in fresh_wire.modifying_operations(frame["schema"])
+                    passive = (fresh_wire.NATIVE_PASSIVE if native else
+                        {"status", "read", "turn_status", "turn_read", "consume_status"})
+                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in passive else {"READY"}
                     factory = app_binding.fresh_conversation_provider_factory
                     runtime = self._require_runtime()
                     if factory is None:
@@ -6281,7 +6318,10 @@ class ExecutiveControlService:
                     result = await provider.handle_frame(frame, host_current=require_fresh_host_current,
                         reader=reader if modifying else None)
                     require_fresh_host_current()
-                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                    if native:
+                        fresh_wire.validate_native_response(result, frame["arguments"], operation=frame["operation"])
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result},
+                        response_ceiling=fresh_wire.NATIVE_MAX_RESPONSE_BYTES if native else ceo_ingress.MAX_RESPONSE_BYTES)
                 except Exception:
                     await self._send_ceo_ingress_error(writer, "ingress_unavailable", "fresh conversation owner unavailable")
                 return
@@ -7896,6 +7936,14 @@ class ExecutiveControlService:
     def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
         from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
         raw = self._require_current_coo_binding()
+        from control_plane.fresh_conversation_admission import read_creation_restriction, NATIVE_SCHEMA
+        fresh = read_creation_restriction(self._require_runtime(), root)
+        if fresh is not None and fresh["schema"] == NATIVE_SCHEMA:
+            from common.fresh_conversation_contract import canonical_digest
+            effective = self._require_current_native_conversation_binding()
+            if canonical_digest(effective) != fresh["host_binding_sha256"]:
+                raise StateConflict("native conversation original host binding changed")
+            return effective
         from control_plane import project_execution_admission as project_source
         material = project_source.read_source(self._require_runtime(), root)
         if material is not None:
@@ -8853,15 +8901,31 @@ class ExecutiveControlService:
         binding = self._coo_binding_for_root(root)
         if self._require_project_execution_root(root) is not None:
             return None  # Qualified sealed worker; the native return adapter is not selected.
-        if binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+        from control_plane.executive_agent_capabilities import DSH_NATIVE_CONVERSATION_PROFILE_ID
+        native = binding["operator_execution_profile_id"] == DSH_NATIVE_CONVERSATION_PROFILE_ID
+        if not native and binding["operator_execution_profile_id"] != NATIVE_RETURN_TX5_EXECUTION_PROFILE:
             return None
         # Existing ordinary native G2 planners retain their original lifecycle.
         if children and (len(children) != 1 or not isinstance(children[0].orchestration_provenance, dict)
                 or children[0].orchestration_provenance.get("command_id")
                 != f"coo-cycle:{root.job_id}:create-interactive:0"):
             return None
-        source = self._native_return_source(root)
         runtime = self._require_runtime()
+        if native:
+            from control_plane.fresh_conversation_admission import (
+                FreshConversationCreationSource, require_original_creation_request, NATIVE_SCHEMA)
+            from control_plane.foreground_operation import current_foreground_operation
+            operation = current_foreground_operation()
+            material = require_original_creation_request(runtime, root, operation)
+            issued = getattr(operation, "_fresh_conversation_creation_source", None)
+            if (material is None or material["schema"] != NATIVE_SCHEMA
+                    or type(issued) is not tuple or len(issued) != 2
+                    or type(issued[0]) is not FreshConversationCreationSource
+                    or issued[0]._require_root_validation_issuer(operation) != material):
+                raise StateConflict("native initial dispatch lacks its original creation source")
+            source = issued[0]
+        else:
+            source = self._native_return_source(root)
         async with self._dispatch_lock:
             async with self._workspace_lock:
                 if not children:
@@ -8885,43 +8949,231 @@ class ExecutiveControlService:
                 outcome = await asyncio.shield(dispatch.started)
                 return CooCycleOutcome(root.job_id, "DISPATCHED", job.job_id, command, outcome.to_dict())
 
-    async def _run_native_operator_dispatch(self, dispatch: _NativeOperatorDispatch) -> None:
+    def _native_initial_turn_observer(self, dispatch, supervisor, *, continuation_source=None):
+        """Publish one observation on the same event loop; acquire no lifecycle."""
+        import concurrent.futures
+        import threading
+        from control_plane.executive_operator_supervisor import ActiveNativeOperatorTurn
+        from control_plane.fresh_conversation_admission import require_original_creation_request
+        from control_plane.foreground_operation import _current_foreground_operation_or_none
+        loop, owner_thread = asyncio.get_running_loop(), threading.get_ident()
+        # A continuation has its own nominal source. The retained dispatch
+        # inherits the already closed creation context; it is not fresh Send
+        # authority and must not be consulted for this later operation.
+        operation = _current_foreground_operation_or_none() if continuation_source is None else None
+        def observe(active, present):
+            if type(active) is not ActiveNativeOperatorTurn or type(present) is not bool:
+                raise StateConflict("native active observation is malformed")
+            receipt = concurrent.futures.Future()
+            def apply():
+                try:
+                    if present:
+                        runtime = self._require_runtime()
+                        if (active.withdrawn or self._closing or self._native_operator_dispatch is not dispatch
+                                or self._require_operator_supervisor() is not supervisor
+                                or active.owner is not supervisor or supervisor.runtime is not runtime
+                                or active.job.job_id != dispatch.job_id
+                                or (continuation_source is None and dispatch.retained is not None)
+                                or (dispatch.active_turn is not None and dispatch.active_turn is not active)
+                                or dispatch.command_id != f"coo-cycle:{active.job.root_job_id}:dispatch:{active.job.job_id}:attempt:1"):
+                            raise StateConflict("native active observation lost its original dispatch")
+                        if continuation_source is None:
+                            if runtime.jobs.get_native_conversation_binding(active.job.job_id) is not None:
+                                from control_plane.fresh_conversation_admission import require_native_initial_record
+                                require_native_initial_record(runtime, active, operation)
+                            else:
+                                require_original_creation_request(runtime, runtime.jobs.get_job(active.job.root_job_id), operation)
+                        else:
+                            from control_plane.fresh_conversation_turn import FreshConversationTurnSource
+                            if (type(continuation_source) is not FreshConversationTurnSource
+                                    or continuation_source._owner._service is not self
+                                    or continuation_source._dispatch is not dispatch
+                                    or dispatch.retained is None
+                                    or active.session != dispatch.retained.session
+                                    or active.adapter is not dispatch.retained.adapter):
+                                raise StateConflict("native active observation lost its original continuation")
+                            _event, payload = continuation_source.check_record()
+                            if (payload.get("result_contract") != "mastermind.dsh_native_conversation/v1"
+                                    or payload["operation_id"] != active.operation_id.command_id):
+                                raise StateConflict("native active observation differs from its original request")
+                        supervisor._require_active_native_turn(active)
+                        dispatch.active_turn = active
+                        if active.withdrawn:
+                            dispatch.active_turn = None
+                            raise StateConflict("native active observation was withdrawn during publication")
+                    elif dispatch.active_turn is active:
+                        dispatch.active_turn = None
+                    receipt.set_result(None)
+                except BaseException as exc:
+                    receipt.set_exception(exc)
+            if threading.get_ident() == owner_thread:
+                apply()
+            else:
+                loop.call_soon_threadsafe(apply)
+            # No cancellation/retry: a late callback still reconciles this same
+            # observation. Original request/Runtime checks precede any use.
+            return receipt.result(timeout=_NATIVE_ACTIVE_OBSERVATION_WAIT_SECONDS)
+        return observe
+
+    async def recover_native_operator_turn(self, dispatch, *, current):
+        """One authenticated recovery attempt on the same retained dispatch."""
+        from control_plane.executive_operator_supervisor import PendingNativeOperatorTurn
+        async with self._dispatch_lock:
+            if (self._closing or self._service_state != "READY" or self._native_operator_dispatch is not dispatch
+                    or not callable(current) or current() is not None):
+                raise StateConflict("native recovery lost its current authenticated dispatch")
+            pending = dispatch.pending_turn
+            if type(pending) is not PendingNativeOperatorTurn:
+                return False
+            task = self._dispatch_tasks.get(dispatch.job_id)
+            if task is not None and not task.done() and dispatch.recovery_waiter is None:
+                # The original source may wake HTTP just before its caller
+                # observes the same pending outcome. Join that caller first.
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                except asyncio.TimeoutError:
+                    return False
+                if (current() is not None or self._native_operator_dispatch is not dispatch
+                        or dispatch.pending_turn is not pending):
+                    raise StateConflict("native pending caller changed while joining")
+                task = self._dispatch_tasks.get(dispatch.job_id)
+            if task is not None and not task.done():
+                waiter = dispatch.recovery_waiter
+                if waiter is None:
+                    return False
+            else:
+                waiter = asyncio.get_running_loop().create_future()
+                dispatch.recovery_waiter = waiter
+                task = asyncio.create_task(self._run_native_operator_dispatch(
+                    dispatch, recovery=pending, recovery_current=current),
+                    name=f"executive-native-recover-{dispatch.job_id}")
+                self._dispatch_tasks[dispatch.job_id] = task
+        await asyncio.shield(waiter)
+        return dispatch.pending_turn is None
+
+    async def _run_native_operator_dispatch(self, dispatch: _NativeOperatorDispatch, *,
+                                            recovery=None, recovery_current=None) -> None:
+        from control_plane.executive_operator_supervisor import NativeOperatorRecoveryPending
         supervisor = self._require_operator_supervisor()
         try:
-            dispatch.retained = await self._run_owned_coroutine(supervisor.start_retained_native_job(
-                dispatch.job_id, command_id=dispatch.command_id))
+            if recovery is None:
+                observer = self._native_initial_turn_observer(dispatch, supervisor)
+                dispatch.retained = await self._run_owned_coroutine(supervisor.start_retained_native_job(
+                    dispatch.job_id, command_id=dispatch.command_id, _active_turn_observer=observer))
+            else:
+                try:
+                    if dispatch.pending_turn is not recovery or self._native_operator_dispatch is not dispatch:
+                        raise StateConflict("native recovery original pending call changed")
+                    retained, receipt = await self._run_owned_coroutine(asyncio.to_thread(
+                        supervisor.recover_pending_native_turn, recovery, current=recovery_current,
+                        timeout_seconds=30.0))
+                    dispatch.retained = retained
+                    source = getattr(dispatch, "_fresh_turn_source", None)
+                    if source is not None:
+                        from control_plane.fresh_conversation_turn import record_native_turn_result
+                        event, payload = source.check_record()
+                        if payload["operation_id"] != recovery.operation_id.command_id:
+                            raise StateConflict("native recovery original request changed")
+                        record_native_turn_result(self, dispatch, source, retained, event, payload,
+                                                  recovery.operation_id, receipt)
+                        dispatch._fresh_turn_source = None
+                    dispatch.pending_turn = None
+                    dispatch.continuation = asyncio.get_running_loop().create_future()
+                    self._dispatch_errors.pop(dispatch.job_id, None)
+                except Exception as exc:
+                    raise NativeOperatorRecoveryPending(recovery) from exc
             supervisor.retain_native_wait_window(dispatch.retained)
             lease = dispatch.retained.lease
+            native_conversation = dispatch.retained.native_result is not None
+            if native_conversation:
+                from control_plane.fresh_conversation_control import settle_interrupted_turn
+                dispatch.native_phase = "READY"
+                await self._run_owned_coroutine(settle_interrupted_turn(self, dispatch))
             current_attempt = self._require_runtime().attempts.get_attempt(lease.attempt.attempt_id)
             if current_attempt is None:
                 raise StateConflict("native dispatch lost its exact Attempt")
-            dispatch.started.set_result(OrchestrationDispatchOutcome(
-                command_id=dispatch.command_id, job_id=dispatch.job_id,
-                attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
-            # The initial seal exposes this writer before the thread returns
-            # its retained handle. Re-read a persisted ACK once at attachment;
-            # an ingress edge in that interval must not need redelivery.
-            await self._signal_native_continuation()
-            # Wake owns delivery and persisted ACK; no polling or provider retry.
-            read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
+            if not dispatch.started.done():
+                dispatch.started.set_result(OrchestrationDispatchOutcome(
+                    command_id=dispatch.command_id, job_id=dispatch.job_id,
+                    attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
+            if dispatch.recovery_waiter is not None and not dispatch.recovery_waiter.done():
+                dispatch.recovery_waiter.set_result(None)
+            dispatch.recovery_waiter = None
+            from control_plane.fresh_conversation_admission import read_creation_restriction
             from control_plane.fresh_conversation_turn import FreshConversationTurnSource, execute_attended_turn
-            if type(read_ref) is FreshConversationTurnSource:
-                await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+            root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
+            if root is None:
+                raise StateConflict("native continuation lost its exact root")
+            if read_creation_restriction(self._require_runtime(), root) is not None:
+                # Trusted fresh admission, including initial-only conversations,
+                # uses this same retained writer and one bounded idle waiter.
+                while True:
+                    current_attempt = self._require_runtime().attempts.get_attempt(lease.attempt.attempt_id)
+                    if current_attempt is None:
+                        raise StateConflict("fresh continuation lost its exact Attempt")
+                    remaining = datetime.fromisoformat(current_attempt.lease_expires_at).timestamp() - time.time()
+                    # Remote graceful stop can need 90 seconds. No idle renewal.
+                    idle_seconds = min(_NATIVE_CONTINUATION_WAIT_SECONDS, max(0.0, remaining - 120.0))
+                    if idle_seconds <= 0:
+                        break
+                    try:
+                        read_ref = await asyncio.wait_for(dispatch.continuation, timeout=idle_seconds)
+                    except asyncio.TimeoutError:
+                        if (native_conversation and getattr(dispatch, "native_phase", "READY") == "READY"
+                                and dispatch.retained.session.generation.generation_number == 1):
+                            dispatch.native_phase = "IDLING"
+                            await self._run_owned_coroutine(supervisor.idle_retained_native_job(dispatch.retained))
+                            supervisor.native_idle_projection(dispatch.retained, expected_result=dispatch.retained.native_result)
+                            dispatch.native_phase = "IDLE"
+                            dispatch.continuation = asyncio.get_running_loop().create_future()
+                            continue  # Same bounded waiter; no idle lease renewal.
+                        break
+                    if native_conversation:
+                        from control_plane.fresh_conversation_control import FreshConversationControlSource, execute_resume
+                    if type(read_ref) is FreshConversationTurnSource:
+                        await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+                        if native_conversation:
+                            await self._run_owned_coroutine(settle_interrupted_turn(self, dispatch))
+                    elif native_conversation and type(read_ref) is FreshConversationControlSource:
+                        await self._run_owned_coroutine(execute_resume(self, dispatch, read_ref))
+                    else:
+                        raise StateConflict("fresh continuation lost its exact attended source")
+                    # No await between successful settlement and the next
+                    # waiter: the HTTP client may send its next message at once.
+                    for slot in ("_fresh_turn_source", "_fresh_control_source"):
+                        if getattr(dispatch, slot, None) is read_ref:
+                            setattr(dispatch, slot, None)
+                    dispatch.continuation = asyncio.get_running_loop().create_future()
+                    if not read_ref._completion.done():
+                        read_ref._completion.set_result(None)
+                    if native_conversation and dispatch.native_phase == "SETTLED":
+                        break
             else:
-                root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
-                if root is None:
-                    raise StateConflict("native continuation lost its exact root")
-                self._native_return_source(root)  # Fresh installed read/execute admission.
+                # Legacy native return keeps its original persisted-ACK path
+                # and timeout semantics; fresh messages never signal that ACK.
+                await self._signal_native_continuation()
+                read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
+                self._native_return_source(root)
                 await self._run_owned_coroutine(supervisor.run_native_continuation(
                     dispatch.retained, source=dispatch.source, read_ref=read_ref))
                 committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
-                # Notification is a separate post-COMMIT effect, not a native-Job
-                # terminalization prerequisite. Retain it under existing service
-                # physical-task custody; its Runtime reservation survives restart.
                 self._schedule_native_reply_events(read_ref, committed_reply)
-            await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
+            # Withdraw the only admission slot before physical cleanup can
+            # await; a zero remaining idle window must not accept a new turn.
+            if not dispatch.continuation.done():
+                dispatch.continuation.cancel()
+            if getattr(dispatch, "native_phase", None) != "SETTLED":
+                await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
+        except NativeOperatorRecoveryPending as exc:
+            # The same dispatch keeps the original call and source. No send,
+            # lifecycle cleanup, background retry or service-wide quarantine.
+            dispatch.pending_turn = exc.pending
+            dispatch.native_phase = "RECONCILIATION_REQUIRED"
+            if not dispatch.started.done():
+                dispatch.started.set_exception(exc)
+            self._dispatch_errors[dispatch.job_id] = "original native turn requires authenticated recovery"
         except (Exception, asyncio.CancelledError) as exc:
             if not dispatch.started.done():
                 dispatch.started.set_exception(exc)
@@ -8936,7 +9188,17 @@ class ExecutiveControlService:
             if isinstance(exc, asyncio.CancelledError):
                 raise
         finally:
-            if self._native_operator_dispatch is dispatch:
+            dispatch.active_turn = None
+            if not dispatch.continuation.done():
+                dispatch.continuation.cancel()
+            for slot in ("_fresh_turn_source", "_fresh_control_source"):
+                source = getattr(dispatch, slot, None)
+                if source is not None and not source._completion.done():
+                    # Delivery settlement only; the original journal decides outcome.
+                    source._completion.set_result(None)
+            if dispatch.recovery_waiter is not None and not dispatch.recovery_waiter.done():
+                dispatch.recovery_waiter.set_result(None)
+            if self._native_operator_dispatch is dispatch and dispatch.pending_turn is None:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
                 self._dispatch_tasks.pop(dispatch.job_id, None)
@@ -9037,6 +9299,10 @@ class ExecutiveControlService:
                 or self._closing or self._service_state != "READY"):
             return
         retained, source = dispatch.retained, dispatch.source
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        root = self._require_runtime().jobs.get_job(retained.job.root_job_id)
+        if root is None or read_creation_restriction(self._require_runtime(), root) is not None:
+            return
         events = self._require_runtime().events.list_events(
             job_id=dispatch.job_id, attempt_id=retained.session.attempt_id)
         requests = [item for item in events if item.event_type == _EVENT]

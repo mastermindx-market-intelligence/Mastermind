@@ -1,0 +1,1549 @@
+--- a/packages/api/gateway/src/index.ts
++++ b/packages/api/gateway/src/index.ts
+@@ -11,7 +11,7 @@
+   ConnectionRpcAttachment,
+   ConnectionRpcHandler,
+ } from '@deepseek-ai/dsh-client-connection'
+-import type { RemoteAccessDecision } from '@deepseek-ai/dsh-api-remote-access'
++import type { RemoteAccessDecision, OwnerAccessScope } from '@deepseek-ai/dsh-api-remote-access'
+ import { callResources, eventResources } from './access.ts'
+ import { Deque } from '@deepseek-ai/dsh-deque'
+ import type { WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
+@@ -100,6 +100,7 @@
+   readonly args: readonly unknown[]
+   readonly method: (...args: never[]) => unknown
+   readonly invocation: GatewayInvocation
++  readonly requireAccess: () => void
+ }
+
+ /** Carrier inputs `GatewayInvocation.uplink()` decodes on first use. */
+@@ -130,6 +131,7 @@
+   readonly principal: Principal
+   /** Only owner streams receive scoped waterfalls they could answer; other Peers receive admitted broadcasts only. */
+   readonly answers: boolean
++  readonly ownerAccess: OwnerAccessScope | undefined
+ }
+
+ interface PendingRemoteEvent {
+@@ -137,6 +139,8 @@
+   readonly source: TypertRemoteEventInvocation
+   readonly frame: RemoteEventInvocationFrame
+   readonly deliveries: Set<RemoteEventClient>
++  readonly ownerAccess: OwnerAccessScope | undefined
++  readonly resources: readonly RemoteAccessResource[] | undefined
+   releaseContext: () => void
+   releaseSignal: () => void
+ }
+@@ -321,7 +325,11 @@
+    */
+   hasLiveClient(): boolean {
+     for (const client of this.remoteEventClients.values()) {
+-      if (client.answers && !client.signal.aborted) return true
++      if (!client.answers || client.signal.aborted) continue
++      try {
++        client.ownerAccess?.requireCurrent()
++        return true
++      } catch { /* The original source retires this Client generation. */ }
+     }
+     return false
+   }
+@@ -417,8 +425,11 @@
+       )
+     }
+
++    let result: unknown
+     try {
+-      return await Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
++      prepared.requireAccess()
++      result = await Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
++      prepared.requireAccess()
+     } catch (error) {
+       if (prepared.invocation.signal.aborted) throw remoteCancelled(prepared.endpoint, error)
+       throw error
+@@ -426,6 +437,8 @@
+       // A unary call's uplink is readable only while the method runs.
+       await prepared.invocation.close()
+     }
++    prepared.requireAccess()
++    return result
+   }
+
+   /**
+@@ -453,6 +466,7 @@
+     }
+     let source: unknown
+     try {
++      prepared.requireAccess()
+       source = Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
+     } catch (error) {
+       await prepared.invocation.close()
+@@ -468,17 +482,13 @@
+         { field: 'result' },
+       )
+     }
+-    return cancellableStream(source, prepared.endpoint, prepared.invocation)
+-  }
+-
+-  /** Company launch holds stock-owner commands before lookup or event ownership. */
+-  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
+-    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
+-      && endpoint !== 'remoteAccess/follow') {
+-      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
+-        action: endpoint, reason: 'owner-restricted',
+-      })
+-    }
++    return cancellableStream(source, prepared.endpoint, prepared.invocation, prepared.requireAccess)
++  }
++
++  /** Preserve the host's launch hold before receiver lookup or event ownership. */
++  private assertOwnerRoute(peer: PeerScope, endpoint: string): OwnerAccessScope | undefined {
++    if (peer.principal.kind !== 'owner' || endpoint === 'remoteAccess/follow') return undefined
++    return this.ctx.remoteAccess.captureOwnerRestriction()
+   }
+
+   private async dispatchRpc(
+@@ -529,9 +539,9 @@
+       // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
+       releaseUplink(uplink)
+       assertPeerLive(peer, endpoint)
+-      this.assertOwnerRoute(peer, endpoint)
++      const ownerAccess = this.assertOwnerRoute(peer, endpoint)
+       requireInteractions(peer, endpoint)
+-      return this.openRemoteEvents(payload, signal, peer)
++      return this.openRemoteEvents(payload, signal, peer, ownerAccess)
+     }
+     return this.openStream({ ...remoteRequest(endpoint, payload, signal, peer), uplink, uplinkWindow }, control)
+   }
+@@ -540,10 +550,13 @@
+     payload: unknown,
+     signal: AbortSignal,
+     peer: PeerScope,
++    ownerAccess: OwnerAccessScope | undefined,
+   ): AsyncGenerator<
+     RemoteEventEmitFrame | RemoteEventInvocationFrame | RemoteEventCancellationFrame
+     | RemoteEventReadyFrame
+   > {
++    // The lazy first pull belongs to the source captured at stream opening.
++    ownerAccess?.requireCurrent()
+     if (!isObject(payload)
+       || !isPlainObject(payload)
+       || Reflect.ownKeys(payload).length !== 1
+@@ -565,7 +578,8 @@
+         'forwarded Remote event source is unavailable',
+       )
+     }
+-    const lifetime = AbortSignal.any([signal, registration.lifetime.signal, peer.signal])
++    const lifetime = AbortSignal.any([signal, registration.lifetime.signal, peer.signal,
++      ...ownerAccess === undefined ? [] : [ownerAccess.signal]])
+     let clientId = randomUUID() as RemoteEventClientId
+     while (this.remoteEventClients.has(clientId)) clientId = randomUUID() as RemoteEventClientId
+     const client: RemoteEventClient = {
+@@ -577,12 +591,14 @@
+       principal: peer.principal,
+       // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+       answers: peer.principal.kind === 'owner',
++      ownerAccess,
+     }
+     this.remoteEventClients.set(clientId, client)
+     if (client.answers) {
+       for (const pending of this.pendingRemoteEvents.values()) this.deliverRemoteEvent(pending, client)
+     }
+     try {
++      ownerAccess?.requireCurrent()
+       yield { ...REMOTE_EVENT_STREAM_READY, clientId, host: registration.host }
+       yield* client.queue.iterate(lifetime)
+     } finally {
+@@ -614,20 +630,26 @@
+       event: frame.event,
+       args: frame.args,
+     }
++    let resources: readonly RemoteAccessResource[] | undefined
+     let resolved = false
+-    let resources: readonly RemoteAccessResource[] | undefined
++    const readResources = (): readonly RemoteAccessResource[] | undefined => {
++      if (!resolved) { resources = eventResources(frame.resources, wire.args); resolved = true }
++      return resources
++    }
+     for (const client of this.remoteEventClients.values()) {
+-      if (!client.answers) {
+-        // A non-owner receives the whole notification or nothing: its resources decide, payloads are never trimmed,
+-        // and a notification with invalid resources reaches no non-owner.
+-        if (!resolved) {
+-          resources = eventResources(frame.resources, frame.args)
+-          resolved = true
+-        }
+-        if (resources === undefined) continue
+-        if (this.ctx.remoteAccess.decide({ principal: client.principal, action: `event:${frame.event}`, resources }).kind === 'deny') continue
+-      }
+-      client.queue.push(wire)
++      const mayDeliver = (): boolean => {
++        try {
++          if (client.signal.aborted) return false
++          client.ownerAccess?.requireCurrent()
++          if (client.answers && client.ownerAccess === undefined) return true
++          const touched = readResources()
++          return touched !== undefined && this.ctx.remoteAccess.decide({
++            principal: client.principal, action: `event:${wire.event}`, resources: touched,
++          }).kind === 'allow'
++        } catch { return false }
++      }
++      if (mayDeliver()) client.queue.push(wire,
++        client.ownerAccess === undefined ? undefined : mayDeliver)
+     }
+   }
+
+@@ -638,6 +660,16 @@
+         throw new TypeError(
+           'typert gateway: scoped Remote events require a non-empty Agent identity',
+         )
++      }
++      const ownerAccess = this.ctx.remoteAccess.captureOwnerRestriction()
++      const resources = scopedEventResources(source.context.resources)
++      if (ownerAccess !== undefined && (resources === undefined
++        || this.ctx.remoteAccess.decide({
++          principal: { kind: 'owner' }, action: `event:${source.event}`, resources,
++        }).kind !== 'allow')) {
++        throw new RemoteError('remote-access/denied', 'Scoped event authority is unavailable', {
++          action: `event:${source.event}`, reason: 'resource-unavailable',
++        })
+       }
+       const projected = projectRemoteEventRequest(source.request, source.context.subject)
+       let id = randomUUID() as RemoteEventId
+@@ -658,7 +690,10 @@
+         source.resolve({ kind: 'next' })
+         return
+       }
+-      const signals = new Set(projected.signal === undefined ? [] : [projected.signal])
++      const signals = new Set<AbortSignal>([
++        ...projected.signal === undefined ? [] : [projected.signal],
++        ...ownerAccess === undefined ? [] : [ownerAccess.signal],
++      ])
+       const abort = (): void => {
+         const reason: unknown = [...signals].find(signal => signal.aborted)?.reason
+         this.cancelRemoteEvent(pending, reason instanceof Error
+@@ -676,6 +711,7 @@
+           request: projected.request,
+         },
+         deliveries: new Set(),
++        ownerAccess, resources,
+         releaseContext,
+         releaseSignal: () => {
+           for (const signal of signals) signal.removeEventListener('abort', abort)
+@@ -694,10 +730,29 @@
+     }
+   }
+
++  private allowsRemoteEvent(pending: PendingRemoteEvent, client: RemoteEventClient): boolean {
++    try {
++      if (client.signal.aborted) return false
++      client.ownerAccess?.requireCurrent()
++      pending.ownerAccess?.requireCurrent()
++      if (client.ownerAccess === undefined && pending.ownerAccess === undefined) return true
++      return pending.resources !== undefined && this.ctx.remoteAccess.decide({
++        principal: client.principal, action: `event:${pending.source.event}`, resources: pending.resources,
++      }).kind === 'allow'
++    } catch { return false }
++  }
++
+   private deliverRemoteEvent(pending: PendingRemoteEvent, client: RemoteEventClient): void {
++    if (!this.allowsRemoteEvent(pending, client)) return
+     pending.deliveries.add(client)
+     client.deliveries.set(pending.id, pending)
+-    client.queue.push(pending.frame)
++    client.queue.push(pending.frame, () => {
++      if (client.ownerAccess === undefined) return true
++      if (this.pendingRemoteEvents.get(pending.id) !== pending) return false
++      if (this.allowsRemoteEvent(pending, client)) return true
++      this.cancelRemoteEvent(pending, new Error('Original scoped event authority retired'))
++      return false
++    })
+   }
+
+   private receiveRemoteEventResult(
+@@ -708,6 +763,12 @@
+     // Settlement and Client replacement may race the result request. Results
+     // from a completed event or a superseded delivery are idempotent no-ops.
+     if (pending === undefined || !pending.deliveries.has(client)) return
++    if (!this.allowsRemoteEvent(pending, client)) {
++      this.cancelRemoteEvent(pending, new Error('Original scoped event authority retired'))
++      throw new RemoteError('remote-access/denied', 'Original scoped event authority retired', {
++        action: `event:${pending.source.event}`, reason: 'owner-source-unavailable',
++      })
++    }
+     this.removeRemoteEventDelivery(pending, client)
+     if (result.outcome.kind === 'result') {
+       this.settleRemoteEvent(pending, {
+@@ -753,6 +814,8 @@
+       type: 'cancel',
+       eventId: pending.id,
+     }
++    // This carries no new data: original recipients must release an already delivered
++    // invocation even when its action is no longer permitted.
+     for (const client of clients) client.queue.push(cancellation)
+   }
+
+@@ -775,6 +838,7 @@
+         new AbortController(),
+       )
+       const value = await this.invokePrepared(prepared)
++      prepared.requireAccess()
+       // A void or explicitly absent business result carries no `value` field;
+       // JSON has no `undefined`, and the envelope's optional slot is the one
+       // representation of absence that both args and results already use.
+@@ -791,36 +855,47 @@
+   ): Promise<PreparedInvocation> {
+     const endpoint = endpointOf(request.namespace, request.method)
+     assertPeerLive(request.peer, endpoint)
+-    this.assertOwnerRoute(request.peer, endpoint)
++    const ownerAccess = this.assertOwnerRoute(request.peer, endpoint)
+     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
+     assertExactArguments(request.args, descriptor, endpoint)
+     const validated = validateArguments(descriptor, request.args, endpoint)
+-    // Access precedes lookup resolution, so a refused call activates nothing.
+-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (request.peer.principal.kind !== 'owner') {
++    const restricted = request.peer.principal.kind !== 'owner' || ownerAccess !== undefined
++    const admittedRequest = ownerAccess === undefined ? request : {
++      ...request,
++      signal: AbortSignal.any([request.signal ?? NEVER_ABORTED_SIGNAL, request.peer.signal, ownerAccess.signal]),
++    }
++    // The original question and registration remain pinned across every await.
++    const checkAccess = (): void => {
++      assertPeerLive(request.peer, endpoint)
++      ownerAccess?.requireCurrent()
++      if (ownerAccess !== undefined && admittedRequest.signal?.aborted) {
++        throw remoteCancelled(endpoint, admittedRequest.signal.reason)
++      }
++      if (!restricted) return
+       const resources = callResources(
+-        this.ctx.typert,
+-        this.resourceReaders(descriptor),
+-        descriptor,
+-        validated,
+-        request.signal ?? NEVER_ABORTED_SIGNAL,
++        this.ctx.typert, this.resourceReaders(descriptor), descriptor, validated,
++        admittedRequest.signal ?? NEVER_ABORTED_SIGNAL,
+       )
+       const decision: RemoteAccessDecision = resources === undefined
+         ? { kind: 'deny', reason: 'resource-invalid' }
+         : this.ctx.remoteAccess.decide({
+           principal: request.peer.principal,
+           action: `${descriptor.namespace}/${descriptor.method}`,
+-          resources,
+-          args: validated,
++          resources, args: validated,
+         })
+-      if (decision.kind === 'deny') {
++      if (decision.kind !== 'allow') {
+         throw new RemoteError('remote-access/denied', `remote access: ${endpoint}: access denied (${decision.reason})`, {
+-          action: endpoint,
+-          reason: decision.reason,
++          action: endpoint, reason: decision.reason,
+         })
+       }
+     }
++    // Preserve ordinary native invocation semantics; required owner sources
++    // alone add a captured generation and post-await checks.
++    const requireAccess = ownerAccess === undefined ? (): void => {} : checkAccess
++    // Refuse before a receiver or lookup can activate a native object.
++    checkAccess()
+     const receiverContext = await this.resolveReceiverContext(descriptor, validated, endpoint)
++    requireAccess()
+     const receiver: unknown = receiverContext.get(descriptor.service)
+     if (!isObject(receiver)) {
+       throw new TypertGatewayError(
+@@ -830,9 +905,20 @@
+       )
+     }
+     validateBinding(receiver, descriptor.service, descriptor.namespace, endpoint)
+-    const args = await Promise.all(descriptor.parameters.map(parameter =>
+-      this.resolveParameter(parameter, validated, endpoint)))
+-    const signal = methodSignal(request, control, descriptor.mode === 'stream')
++    let args: unknown[]
++    if (ownerAccess === undefined) {
++      args = await Promise.all(descriptor.parameters.map(parameter =>
++        this.resolveParameter(parameter, validated, endpoint)))
++    } else {
++      args = []
++      for (const parameter of descriptor.parameters) {
++        requireAccess()
++        args.push(await this.resolveParameter(parameter, validated, endpoint))
++        requireAccess()
++      }
++    }
++    requireAccess()
++    const signal = methodSignal(admittedRequest, control, descriptor.mode === 'stream')
+     const invocation = new GatewayInvocation(
+       { namespace: request.namespace, method: request.method, args: request.args },
+       descriptor.service,
+@@ -868,6 +954,7 @@
+       args,
+       method: method as (...args: never[]) => unknown,
+       invocation,
++      requireAccess,
+     }
+   }
+
+@@ -1184,13 +1271,13 @@
+
+ /** Pull-driven queue owned by one connected Client event generation. */
+ class RemoteEventQueue {
+-  private readonly frames = new Deque<RemoteEventWireFrame>()
++  private readonly frames = new Deque<{ frame: RemoteEventWireFrame; mayDeliver: () => boolean }>()
+   private waiter: (() => void) | undefined
+   private closed = false
+
+-  push(frame: RemoteEventWireFrame): void {
++  push(frame: RemoteEventWireFrame, mayDeliver: () => boolean = () => true): void {
+     if (this.closed) return
+-    this.frames.pushBack(frame)
++    this.frames.pushBack({ frame, mayDeliver })
+     this.waiter?.()
+   }
+
+@@ -1211,7 +1298,10 @@
+     signal.addEventListener('abort', abort, { once: true })
+     try {
+       while (true) {
+-        while (this.frames.size > 0 && !signal.aborted) yield this.frames.popFront() as RemoteEventWireFrame
++        while (this.frames.size > 0 && !signal.aborted) {
++          const next = this.frames.popFront()!
++          if (next.mayDeliver() && !signal.aborted) yield next.frame
++        }
+         if (this.closed || signal.aborted) return
+         await new Promise<void>((resolve) => { this.waiter = resolve })
+         this.waiter = undefined
+@@ -1220,6 +1310,20 @@
+       signal.removeEventListener('abort', abort)
+     }
+   }
++}
++
++/** Retain the original Host projection; a generic Agent label is never a resource. */
++function scopedEventResources(value: readonly RemoteAccessResource[] | undefined): readonly RemoteAccessResource[] | undefined {
++  if (!Array.isArray(value) || value.length === 0) return undefined
++  const captured: RemoteAccessResource[] = []
++  for (const resource of value) {
++    if (resource === null || typeof resource !== 'object' || typeof resource.kind !== 'string'
++      || resource.kind.length === 0 || resource.kind === 'global'
++      || !('id' in resource) || typeof resource.id !== 'string' || resource.id.length === 0
++      || Object.keys(resource).length !== 2) return undefined
++    captured.push(Object.freeze({ kind: resource.kind, id: resource.id }) as RemoteAccessResource)
++  }
++  return Object.freeze(captured)
+ }
+
+ function assertRemoteEventFrame(frame: TypertRemoteEventFrame): void {
+@@ -1315,6 +1419,7 @@
+   source: Iterable<unknown> | AsyncIterable<unknown>,
+   endpoint: string,
+   invocation: GatewayInvocation,
++  requireAccess: () => void,
+ ): AsyncGenerator {
+   const { signal } = invocation
+   const asyncFactory: unknown = Reflect.get(source, Symbol.asyncIterator)
+@@ -1330,12 +1435,14 @@
+   try {
+     while (true) {
+       if (signal.aborted) throw streamAbortFailure(endpoint, signal.reason)
++      requireAccess()
+       // Reusing a pending cancellation promise retains every completed race.
+       const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject })
+       // next() can abort and throw synchronously before the race subscribes.
+       void aborted.catch(() => undefined)
+       const next = await Promise.race([Promise.resolve(iterator.next()), aborted])
+       rejectAbort = undefined
++      requireAccess()
+       if (next.done === true) return
+       yield next.value
+     }
+--- a/packages/api/gateway/src/types.ts
++++ b/packages/api/gateway/src/types.ts
+@@ -4,7 +4,7 @@
+  */
+
+ import type { Context } from '@deepseek-ai/cordis'
+-import type { PeerScope, RemoteUplinkWindow, TypertResourceReader } from '@deepseek-ai/dsh-typert-protocol'
++import type { PeerScope, RemoteAccessResource, RemoteUplinkWindow, TypertResourceReader } from '@deepseek-ai/dsh-typert-protocol'
+ import type { RemoteEventHostInfo } from './stream-protocol.ts'
+
+ /** One Remote method request after a carrier has decoded its envelope. */
+@@ -50,6 +50,8 @@
+   readonly subject: object
+   /** Agent identity read directly from the scoped event subject. */
+   readonly agentId: string
++  /** Exact Host-owned resource projection, never reconstructed from a wire Agent label. */
++  readonly resources?: readonly RemoteAccessResource[]
+ }
+
+ /** Result returned from a Client waterfall, or delegation back to the Host chain. */
+--- a/packages/api/remote-access/src/index.ts
++++ b/packages/api/remote-access/src/index.ts
+@@ -11,6 +11,7 @@
+ import type {} from '@deepseek-ai/dsh-host-webserver'
+ import {
+   Remote,
++  RemoteError,
+   TypertRemoteService,
+   readOwnerAccessRestriction,
+   type Principal,
+@@ -25,6 +26,8 @@
+   RemoteAccessGrant,
+   RemoteAccessPolicy,
+   RemoteAccessRequest,
++  OwnerAccessSource,
++  OwnerAccessScope,
+ } from './types.ts'
+
+ export type * from './types.ts'
+@@ -67,6 +70,15 @@
+ interface PolicyEntry {
+   readonly kind: string
+   readonly policy: RemoteAccessPolicy<Principal>
++  readonly owner?: {
++    readonly source: OwnerAccessSource
++    readonly sourceSignal: AbortSignal
++    readonly sourceGuard: () => void
++    readonly bindings: RemoteAccessPolicy<Principal>['bindings']
++    readonly explain: RemoteAccessPolicy<Principal>['explain']
++    readonly retirement: AbortController
++    readonly signal: AbortSignal
++  }
+ }
+
+ /** A condition's refusal. */
+@@ -123,19 +135,18 @@
+  * the Gateway mounts this service too.
+  */
+ export class RemoteAccessService extends TypertRemoteService {
++  private readonly ownerRequired: boolean
+   private readonly policies = new Map<string, PolicyEntry>()
+   /** Policies whose failure was logged since the last `invalidate()`; their later failures stay silent. */
+   private readonly reported = new Set<PolicyEntry>()
+   private readonly followers = new Set<AccessFollower>()
+   /** Aborted when this instance unloads; every open snapshot generation ends with it. */
+   private readonly lifetime = new AbortController()
+-  /** Sticky launch restriction; removing a child consumer cannot restore owner access. */
+-  readonly ownerRestricted: boolean
+
+   /** @param ctx - owning Host plugin Context. */
+   constructor(ctx: Context) {
+     super(ctx, 'remoteAccess')
+-    this.ownerRestricted = readOwnerAccessRestriction(ctx)
++    this.ownerRequired = readOwnerAccessRestriction(ctx)
+     ctx.effect(() => () => { this.lifetime.abort() }, 'remoteAccess: snapshot generations')
+     // Every index the webServer renders belongs to the owner; snapshotFor documents non-owner pages.
+     ctx.inject(['webServer'], (webCtx) => {
+@@ -145,6 +156,93 @@
+     })
+   }
+
++  /** Fixed by the original package composition, never cleared by policy unload. */
++  get ownerRestricted(): boolean { return this.ownerRequired }
++
++  /** Install one trusted source in the existing policy owner. Late adoption of
++   * an unrestricted native service is deliberately unsupported. */
++  registerOwnerRestriction(source: OwnerAccessSource): () => void {
++    if (!this.ownerRequired) throw new Error('owner restriction must be required before native startup')
++    if (source === null || typeof source !== 'object' || !(source.signal instanceof AbortSignal)
++      || typeof source.requireCurrent !== 'function' || source.policy === null
++      || typeof source.policy !== 'object' || typeof source.policy.bindings !== 'function') {
++      throw new TypeError('original native owner restriction source required')
++    }
++    if (this.policies.has('owner')) throw new Error('original owner restriction must retire before replacement')
++    const retirement = new AbortController()
++    const entry: PolicyEntry = {
++      kind: 'owner', policy: source.policy,
++      owner: {
++        source, sourceSignal: source.signal, sourceGuard: source.requireCurrent,
++        bindings: source.policy.bindings, explain: source.policy.explain, retirement,
++        signal: AbortSignal.any([source.signal, retirement.signal, this.lifetime.signal]),
++      },
++    }
++    const sourceSignal = source.signal
++    const changed = (): void => { this.invalidate(OWNER) }
++    const retire = (): void => {
++      retirement.abort()
++      sourceSignal.removeEventListener('abort', changed)
++      if (this.policies.get('owner') === entry) this.policies.delete('owner')
++      this.invalidate(OWNER)
++    }
++    const dispose = this.ctx.effect(() => {
++      this.policies.set('owner', entry)
++      if (!this.ownerCurrent(entry)) {
++        retire()
++        throw new Error('original native owner restriction source is unavailable')
++      }
++      sourceSignal.addEventListener('abort', changed)
++      this.invalidate(OWNER)
++      return retire
++    }, 'remoteAccess: required owner restriction')
++    // Retirement is synchronous even when the caller's fiber drains asynchronously.
++    return () => { retire(); void dispose() }
++  }
++
++  /** Gateway captures this same registration before any receiver or lookup. */
++  captureOwnerRestriction(): OwnerAccessScope | undefined {
++    if (!this.ownerRequired) return undefined
++    const entry = this.policies.get('owner')
++    const requireCurrent = (): void => {
++      if (entry === undefined || !this.ownerCurrent(entry)) {
++        throw new RemoteError('remote-access/denied', 'original owner restriction is unavailable', {
++          action: 'owner', reason: 'owner-restricted',
++        })
++      }
++    }
++    requireCurrent()
++    return Object.freeze({ signal: entry!.owner!.signal, requireCurrent })
++  }
++
++  private ownerCurrent(entry: PolicyEntry): boolean {
++    const owner = entry.owner
++    if (owner === undefined) return false
++    const matches = (): boolean => this.policies.get('owner') === entry
++      && !owner.signal.aborted
++      && owner.source.signal === owner.sourceSignal
++      && owner.source.requireCurrent === owner.sourceGuard
++      && owner.source.policy === entry.policy
++      && entry.policy.bindings === owner.bindings
++      && entry.policy.explain === owner.explain
++    try {
++      if (!matches()) throw new Error('owner source changed')
++      const result: unknown = owner.sourceGuard()
++      if (result !== undefined) {
++        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(result).catch(() => undefined)
++        }
++        throw new Error('owner source currentness must be synchronous')
++      }
++      if (!matches()) throw new Error('owner source changed')
++      return true
++    } catch {
++      // A failed original registration cannot revive when its labels later return.
++      owner.retirement.abort()
++      return false
++    }
++  }
++
+   /**
+    * Register the policy of one non-owner principal kind in the caller's
+    * fiber; open snapshots are recomputed on registration and removal.
+@@ -154,8 +252,8 @@
+    * @throws Error when `kind` already has a policy.
+    */
+   registerPolicy<K extends Exclude<keyof PrincipalMap, 'owner'>>(kind: K, policy: RemoteAccessPolicy<PrincipalMap[K]>): () => void {
++    if ((kind as string) === 'owner') throw new Error('use the required owner restriction source')
+     const policies = this.policies
+-    if ((kind as string) === 'owner') throw new Error('remote access: owner policy registration is forbidden')
+     if (policies.has(kind)) throw new Error(`remote access: principal kind ${JSON.stringify(kind)} already has a policy`)
+     const entry: PolicyEntry = { kind, policy }
+     const dispose = this.ctx.effect(() => {
+@@ -203,9 +301,11 @@
+   decide(request: RemoteAccessRequest<Principal>): RemoteAccessDecision {
+     const { principal, action } = request
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
++    if (principal.kind === 'owner' && !this.ownerRequired) return ALLOW
+     if (action === FOLLOW_ACTION) return ALLOW
+-    if (principal.kind === 'owner') return this.ownerRestricted ? NO_ALLOW : ALLOW
+     const entry = this.policies.get(principal.kind)
++    if (principal.kind === 'owner' && (entry === undefined || !this.ownerCurrent(entry))) return POLICY_FAILED
++    if (principal.kind === 'owner' && request.resources.length === 0) return NO_ALLOW
+     if (entry === undefined) return NO_ALLOW
+     const bindings = this.bindingsOf(entry, principal, action)
+     if (bindings === undefined) return POLICY_FAILED
+@@ -223,7 +323,7 @@
+           return assertNever(evaluation)
+       }
+     }
+-    return ALLOW
++    return principal.kind === 'owner' && !this.ownerCurrent(entry) ? POLICY_FAILED : ALLOW
+   }
+
+   /**
+@@ -239,14 +339,16 @@
+    */
+   allows(resource: RemoteAccessResource): boolean {
+     const invocation = this.ctx.invocation
+-    const principal = invocation?.peer.principal
+-    if (invocation === undefined || principal === undefined) return true
+-    if (principal.kind === 'owner') return !this.ownerRestricted
+-    const action: RemoteAccessAction = `${invocation.request.namespace}/${invocation.request.method}`
++    if (invocation === undefined) return true
++    const principal = invocation.peer.principal
++    if (principal.kind === 'owner' && !this.ownerRequired) return true
++    if (principal.kind === 'owner' && invocation.signal?.aborted === true) return false
++    const action = (invocation.request.namespace + '/' + invocation.request.method) as RemoteAccessAction
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return false
+     const bindings = this.bindingsOf(entry, principal, action)
+     return bindings !== undefined && this.evaluate(entry, bindings, action, resource, undefined).kind === 'allow'
++      && (principal.kind !== 'owner' || this.ownerCurrent(entry))
+   }
+
+   /**
+@@ -259,8 +361,7 @@
+    */
+   snapshotFor(principal: Principal): RemoteAccessBaseline {
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner') return this.ownerRestricted
+-      ? { type: 'baseline', owner: false, grants: [] } : OWNER_BASELINE
++    if (principal.kind === 'owner' && !this.ownerRequired) return OWNER_BASELINE
+     return { type: 'baseline', owner: false, grants: this.grantsFor(principal) }
+   }
+
+@@ -278,8 +379,8 @@
+   async *follow(signal: AbortSignal): AsyncIterable<RemoteAccessFrame> {
+     signal.throwIfAborted()
+     const generation = AbortSignal.any([signal, this.lifetime.signal])
+-    const principal = this.ctx.invocation?.peer.principal
+-    if (principal === undefined || principal.kind === 'owner') {
++    const principal = this.ctx.invocation?.peer.principal ?? OWNER
++    if (principal.kind === 'owner' && !this.ownerRequired) {
+       yield this.snapshotFor(OWNER)
+       await abortion(generation)
+       return
+@@ -309,7 +410,13 @@
+   /** One `bindings()` call; `undefined` after a logged failure. */
+   private bindingsOf(entry: PolicyEntry, principal: Principal, purpose: string): readonly ErasedBinding[] | undefined {
+     try {
+-      return entry.policy.bindings(principal)
++      if (entry.kind === 'owner' && !this.ownerCurrent(entry)) return undefined
++      const bindings = entry.policy.bindings(principal)
++      if (!Array.isArray(bindings)) {
++        discardThenable(bindings)
++        throw new TypeError('remote access: bindings must be a synchronous array')
++      }
++      return entry.kind === 'owner' && !this.ownerCurrent(entry) ? undefined : bindings
+     } catch (error) {
+       // A policy failure is contained to this question, so one faulty rule cannot break a shared event stream.
+       this.report(entry, `list bindings for ${purpose}`, error)
+@@ -332,6 +439,12 @@
+       let decision: RemoteAccessDecision
+       try {
+         decision = binding.condition(args === undefined ? { action, resource } : { action, resource, args })
++        if (decision === null || typeof decision !== 'object'
++          || (decision.kind !== 'allow' && (decision.kind !== 'deny' || typeof decision.reason !== 'string'))
++          || typeof (decision as unknown as PromiseLike<unknown>).then === 'function') {
++          discardThenable(decision)
++          throw new TypeError('remote access: conditions must return a synchronous decision')
++        }
+       } catch (error) {
+         this.report(entry, `evaluate a condition for ${action}`, error)
+         return FAILED
+@@ -347,6 +460,10 @@
+     let reason: string | undefined
+     try {
+       reason = entry.policy.explain?.(request)
++      if (reason !== undefined && typeof reason !== 'string') {
++        discardThenable(reason)
++        throw new TypeError('remote access: refusal explanations must be synchronous strings')
++      }
+     } catch (error) {
+       this.report(entry, `explain a refusal of ${request.action}`, error)
+       return POLICY_FAILED
+@@ -380,7 +497,7 @@
+       const actions = [...candidates].filter(action => this.evaluate(entry, bindings, action, resource, undefined).kind === 'allow').sort()
+       if (actions.length > 0) grants.push(Object.freeze({ resource, actions: Object.freeze(actions) }))
+     }
+-    return grants
++    return entry.kind === 'owner' && !this.ownerCurrent(entry) ? [] : grants
+   }
+
+   /** Log a policy failure once per policy until the next `invalidate()`; snapshots and lists ask many times per change. */
+@@ -429,3 +546,11 @@
+ }
+
+ export default RemoteAccessService
++
++/** Do not leave a rejected malformed async policy result unobserved. */
++function discardThenable(value: unknown): void {
++  if (value !== null && (typeof value === 'object' || typeof value === 'function')
++    && typeof (value as PromiseLike<unknown>).then === 'function') {
++    void Promise.resolve(value).catch(() => undefined)
++  }
++}
+--- a/packages/api/remote-access/src/types.ts
++++ b/packages/api/remote-access/src/types.ts
+@@ -19,7 +19,7 @@
+   TypertResourceMap,
+ } from '@deepseek-ai/dsh-typert-protocol'
+
+-/** Canonical `<namespace>/<method>` Remote endpoint; its segments never contain `:`. */
++/** Canonical `<namespace>/<method>` operation for Remote calls or explicitly qualified native HTTP routes. */
+ export type RemoteAccessEndpoint = `${string}/${string}`
+
+ /** A Remote endpoint, or `event:<name>` for one forwarded event. */
+@@ -140,3 +140,16 @@
+   | { readonly type: 'baseline'; readonly owner: false; readonly grants: readonly RemoteAccessGrant[] }
+   | { readonly type: 'upsert'; readonly grant: RemoteAccessGrant }
+   | { readonly type: 'remove'; readonly resource: RemoteAccessResource }
++
++/** Live authority is supplied by the original native association producer. */
++export interface OwnerAccessSource {
++  readonly policy: RemoteAccessPolicy<Extract<Principal, { kind: 'owner' }>>
++  readonly signal: AbortSignal
++  readonly requireCurrent: () => void
++}
++
++/** A captured registration; an old invocation cannot adopt its replacement. */
++export interface OwnerAccessScope {
++  readonly signal: AbortSignal
++  readonly requireCurrent: () => void
++}
+--- a/packages/api/remotes/src/index.ts
++++ b/packages/api/remotes/src/index.ts
+@@ -71,7 +71,8 @@
+           queue,
+           event,
+           request,
+-          { value: agent.ctx, subject: agent, agentId: agent.id },
++          { value: agent.ctx, subject: agent, agentId: agent.id,
++            resources: Object.freeze([Object.freeze({ kind: 'session' as const, id: agent.session.id })]) },
+           next,
+         )
+       }) as never)
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -316,19 +316,25 @@
+    * @param source - the `user-rpc` source recorded on the accepted message.
+    * @returns acknowledgement that the Agent accepted the prompt.
+    */
+-  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal): Promise<SessionPromptValue> {
+-    signal?.throwIfAborted()
++  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal,
++    requireAccess?: () => void): Promise<SessionPromptValue> {
++    const assertCurrent = (): void => {
++      signal?.throwIfAborted()
++      requireAccess?.()
++      signal?.throwIfAborted()
++    }
++    assertCurrent()
+     const agent = await this.resolveAgent(request.sessionId, signal)
+-    signal?.throwIfAborted()
++    assertCurrent()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     const hasImage = request.content.some(part => part.type === 'image')
+     const admit = async (): Promise<SessionPromptValue> => {
+-      signal?.throwIfAborted()
++      assertCurrent()
+       try {
+         if (hasImage) {
+           const current = this.agents.selectionFor(agent).current
+           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
+-          signal?.throwIfAborted()
++          assertCurrent()
+           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+             throw new RemoteError(
+               'session/attachment-invalid',
+@@ -342,7 +348,7 @@
+           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+         )
+         const content = await this.ctx.attachments.admitPromptContent(admission.content)
+-        signal?.throwIfAborted()
++        assertCurrent()
+         const message: UserMessage = createUserMessage({ content, source })
+         if (this.ctx.agents.get(agent.id) !== agent) {
+           throw new RemoteError(
+@@ -351,8 +357,8 @@
+             { sessionId: agent.id },
+           )
+         }
+-        // No await separates current cancellation from the original durable enqueue.
+-        signal?.throwIfAborted()
++        // No await separates current access/cancellation from the original durable enqueue.
++        assertCurrent()
+         using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
+         if (request.mode === 'steer') agent.steer(message)
+         else agent.followup(message)
+--- a/packages/api/session-controller/src/index.ts
++++ b/packages/api/session-controller/src/index.ts
+@@ -13,10 +13,10 @@
+ import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
+ import type {} from '@deepseek-ai/dsh-session-projection-cache'
+ import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
+-import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
++import { Remote, RemoteError, TypertRemoteService, principalOf, type PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+-import type {} from '@deepseek-ai/dsh-api-remote-access'
++import type { OwnerAccessScope } from '@deepseek-ai/dsh-api-remote-access'
+ import {
+   ApiSessionAgentController,
+   inspectApiSession,
+@@ -137,6 +137,7 @@
+     listWorkSliceMs: z.natural().min(1).default(16),
+   })
+
++  private readonly changeReadAccess: Context['remoteAccess']
+   private readonly agents: ApiSessionAgentController
+   private readonly commands: SessionCommandController
+   private readonly controlState: SessionControlController
+@@ -156,15 +157,36 @@
+    */
+   constructor(ctx: Context, config: Config, internals: SessionControllerInternals = {}) {
+     super(ctx, 'sessionController', { namespace: 'session' })
++    this.changeReadAccess = ctx.remoteAccess
+     ctx.typert.resources.register('session', { field: 'sessionId' })
+     const resolved = SessionController.Config(config)
+     installModelSelectionProjection(ctx)
+     this.agents = new ApiSessionAgentController(ctx)
+     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
+-    ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId) => {
+-      const result = await this.agents.resolveAgent(sessionId)
++    ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId, signal) => {
++      const result = await this.agents.resolveAgent(sessionId, signal)
+       if ('error' in result) throw result.error
+       return result.agent
++    }, (request, peer, signal) => {
++      const access = ctx.remoteAccess.captureOwnerRestriction()
++      if (access === undefined) return undefined
++      const args = { agentId: request.sessionId, request: {
++        ...(request.data === undefined ? {} : { data: request.data }),
++        ...(request.name === undefined ? {} : { name: request.name }),
++      } }
++      const requireCurrent = (): void => {
++        access.requireCurrent()
++        signal.throwIfAborted()
++        peer.signal.throwIfAborted()
++        const decision = ctx.remoteAccess.decide({ principal: peer.principal,
++          action: 'fileUploads/upload', resources: [{ kind: 'session', id: request.sessionId }], args })
++        if (decision.kind !== 'allow') {
++          throw new RemoteError('remote-access/denied', 'native upload access is unavailable',
++            { action: 'fileUploads/upload', reason: decision.reason })
++        }
++      }
++      requireCurrent()
++      return Object.freeze({ signal: access.signal, requireCurrent })
+     }), 'session-controller: file-upload Agent resolver')
+     this.controlState = new SessionControlController(ctx)
+     // Registered before history so reverse-order teardown closes every
+@@ -222,6 +244,35 @@
+     })
+   }
+
++  /** Capture one explicit native change read; event coordinates never grant a path read. */
++  captureChangeReadAccess(
++    action: 'changes/summary' | 'changes/diff',
++    request: { readonly sessionId: SessionId; readonly seq: number; readonly index?: number },
++    peer: PeerScope, signal: AbortSignal,
++  ): OwnerAccessScope | undefined {
++    const access = this.changeReadAccess.captureOwnerRestriction()
++    if (access === undefined) return undefined
++    const coordinates = Object.freeze({ sessionId: request.sessionId, seq: request.seq,
++      ...(request.index === undefined ? {} : { index: request.index }) })
++    const args = Object.freeze({ request: coordinates })
++    const requireCurrent = (): void => {
++      access.requireCurrent()
++      signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++      const decision = this.changeReadAccess.decide({ principal: peer.principal, action,
++        resources: [{ kind: 'session', id: coordinates.sessionId }], args })
++      if (decision.kind !== 'allow') {
++        throw new RemoteError('remote-access/denied', 'native change read access is unavailable',
++          { action, reason: decision.reason })
++      }
++      access.requireCurrent()
++      signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++    }
++    requireCurrent()
++    return Object.freeze({ signal: access.signal, requireCurrent })
++  }
++
+   private promote(observation: SessionObservation, signal: AbortSignal): void {
+     const sessionId = observation.header.id
+     const task = (async () => {
+@@ -279,17 +330,24 @@
+   }
+
+   /**
+-   * Search visible Session content without resuming an Agent. A non-owner
+-   * receives only the hits whose Session `allows()` admits; `hasMore`
+-   * describes the bounded result before that filtering.
++   * Search permitted Session content without resuming an Agent. Authorization
++   * precedes result counting, so the page and `hasMore` describe permitted hits.
+    * @param request - literal message-content query.
+    * @param signal - cancellation for list and search reads.
+    * @returns authorized bounded Session search results.
+    */
+   @Remote('search')
+   async search(request: SessionSearchRequest, signal: AbortSignal): Promise<SessionSearchValue> {
+-    const result = await this.listState.search(request.query, signal)
+-    return { ...result, items: result.items.filter(item => this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId })) }
++    // Capture this invocation Context; the listing helper's construction Context
++    // does not carry the caller and must not make this access decision.
++    const allowsSession = (id: SessionId): boolean => this.ctx.remoteAccess.allows({ kind: 'session', id })
++    const result = await this.listState.search(request.query, signal, allowsSession)
++    const items = result.items.filter(item => allowsSession(item.sessionId))
++    if (items.length !== result.items.length) {
++      throw new RemoteError('remote-access/denied', 'session search access changed while reading results',
++        { action: 'session/search', reason: 'access-changed' })
++    }
++    return { items, hasMore: result.hasMore }
+   }
+
+   /**
+@@ -482,7 +540,27 @@
+       ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
+       ...(principal === undefined ? {} : { principal }),
+     }
+-    return this.commands.prompt(request, source, signal)
++    // Capture once before the original command awaits Agent/attachment admission.
++    // Policy changes must be checked at the durable enqueue, not only on reply.
++    const invocation = this.ctx.invocation
++    const access = invocation?.peer.principal.kind === 'owner'
++      ? this.ctx.remoteAccess.captureOwnerRestriction() : undefined
++    const requireAccess = access === undefined ? undefined : (): void => {
++      access.requireCurrent()
++      signal.throwIfAborted()
++      const decision = this.ctx.remoteAccess.decide({
++        principal: invocation!.peer.principal,
++        action: 'session/prompt',
++        resources: [{ kind: 'session', id: request.sessionId }],
++        args: { request },
++      })
++      if (decision.kind !== 'allow') {
++        throw new RemoteError('remote-access/denied',
++          `remote access: session/prompt: access denied (${decision.reason})`,
++          { action: 'session/prompt', reason: decision.reason })
++      }
++    }
++    return this.commands.prompt(request, source, signal, requireAccess)
+   }
+
+   /**
+--- a/packages/api/session-controller/src/list.ts
++++ b/packages/api/session-controller/src/list.ts
+@@ -184,9 +184,12 @@
+    * Search current visible message content without activating any matching Session.
+    * @param query - literal message-content query.
+    * @param signal - cancellation for list and search reads.
++   * @param allowsSession - synchronous authorization captured from the Remote invocation.
+    * @returns authorized bounded Session search results.
+    */
+-  async search(query: string, signal: AbortSignal): Promise<SessionSearchValue> {
++  async search(
++    query: string, signal: AbortSignal, allowsSession: (id: SessionId) => boolean = () => true,
++  ): Promise<SessionSearchValue> {
+     const normalizedQuery = normalizeSearchQuery(query)
+     signal.throwIfAborted()
+     const provider = this.ctx.get('sessionQuery')
+@@ -201,7 +204,7 @@
+       const visible = await provider.listSessions(signal)
+       signal.throwIfAborted()
+       const visibleIds = new Set(visible
+-        .filter(record => record.header.cwd !== undefined)
++        .filter(record => record.header.cwd !== undefined && allowsSession(record.header.id) === true)
+         .map(record => record.header.id))
+       if (visibleIds.size === 0) return { items: [], hasMore: false }
+       const authorized: SessionSearchItem[] = []
+@@ -253,9 +256,17 @@
+         if (page.items.length > requestedLimit) {
+           throw new Error(`session search provider returned ${String(page.items.length)} items; maximum is ${String(requestedLimit)}`)
+         }
++        // A permission revoked during the page await cannot occupy the result
++        // limit or its authorized lookahead. Keep the original cursor and budget.
++        for (let index = authorized.length - 1; index >= 0; index--) {
++          const item = authorized[index]!
++          if (allowsSession(item.sessionId) === true) continue
++          authorized.splice(index, 1)
++          acceptedIds.delete(item.sessionId)
++        }
+         for (const hit of page.items) {
+           if (authorized.length > SESSION_SEARCH_RESULT_LIMIT) continue
+-          if (!visibleIds.has(hit.header.id)
++          if (!visibleIds.has(hit.header.id) || allowsSession(hit.header.id) !== true
+             || hit.bestMatch.sessionId !== hit.header.id
+             || hit.bestMatch.surface !== 'current'
+             || !MESSAGE_TYPES.has(hit.bestMatch.type)
+@@ -275,9 +286,13 @@
+         if (authorized.length > SESSION_SEARCH_RESULT_LIMIT || page.nextCursor === undefined) break
+         cursor = page.nextCursor
+       }
++      const permitted = authorized.filter(item => allowsSession(item.sessionId) === true)
++      if (permitted.length !== authorized.length) {
++        throw new Error('session search access changed while reading results')
++      }
+       return {
+-        items: authorized.slice(0, SESSION_SEARCH_RESULT_LIMIT),
+-        hasMore: authorized.length > SESSION_SEARCH_RESULT_LIMIT,
++        items: permitted.slice(0, SESSION_SEARCH_RESULT_LIMIT),
++        hasMore: permitted.length > SESSION_SEARCH_RESULT_LIMIT,
+       }
+     } catch (error: unknown) {
+       signal.throwIfAborted()
+--- a/packages/client/connection/src/index.ts
++++ b/packages/client/connection/src/index.ts
+@@ -20,6 +20,8 @@
+   ConnectionFetchMethod,
+   ConnectionFetchHandler,
+   ConnectionFetchRoute,
++  ConnectionFetchAccess,
++  ConnectionFetchContext,
+   ConnectionIndexRequest,
+   ConnectionIndexResponse,
+   ConnectionRpcEndpointMatcher,
+--- a/packages/client/connection/src/rpc-host.ts
++++ b/packages/client/connection/src/rpc-host.ts
+@@ -22,6 +22,8 @@
+   ConnectionIndexResponse,
+   ConnectionFetchRoute,
+   ConnectionFetchHandler,
++  ConnectionFetchAccess,
++  ConnectionFetchContext,
+   HostConnectionFetch,
+   ConnectionRpcEndpointMatcher,
+   ConnectionRpcFailure,
+@@ -51,6 +53,8 @@
+   readonly methods: ReadonlySet<string>
+   readonly requestBody: ConnectionFetchRoute['requestBody']
+   readonly fetch: ConnectionFetchRoute['fetch']
++  readonly ownerAccess: ConnectionFetchRoute['ownerAccess']
++  readonly lifetime: AbortController
+ }
+
+ interface ConnectionServerResponse {
+@@ -220,7 +224,8 @@
+         if (route?.methods.has(request.method) === true) {
+           // Exact routes bypass Gateway access checks, so only the owner reaches them.
+           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (this.ownerRestricted) return this.fetchRestrictedOwner(route, request, peer, pathname)
+           return route.fetch(request)
+         }
+         const endpoint = endpointFromPath(channel, pathname)
+@@ -233,23 +238,71 @@
+     }
+   }
+
++  private async fetchRestrictedOwner(
++    route: RegisteredFetchRoute, request: Request, peer: PeerScope, pathname: string,
++  ): Promise<Response> {
++    try {
++      request.signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++      if (route.ownerAccess === undefined) throw new Error('required owner route unavailable')
++      const source: ConnectionFetchAccess = route.ownerAccess(request, peer)
++      if (source === null || typeof source !== 'object'
++        || typeof (source as unknown as PromiseLike<unknown>).then === 'function' || !(source.signal instanceof AbortSignal)
++        || typeof source.requireCurrent !== 'function') {
++        // A runtime-cast asynchronous registration must not become an allowance.
++        if (source && typeof (source as unknown as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(source).catch(() => undefined)
++        }
++        throw new Error('required owner route source invalid')
++      }
++      const sourceSignal = source.signal, sourceGuard = source.requireCurrent
++      const signal = AbortSignal.any([request.signal, peer.signal, sourceSignal, route.lifetime.signal])
++      const requireCurrent = (): void => {
++        signal.throwIfAborted()
++        if (this.fetchRoutes.get(pathname) !== route || source.signal !== sourceSignal
++          || source.requireCurrent !== sourceGuard) throw new Error('original native route retired')
++        const value: unknown = sourceGuard()
++        if (value !== undefined) {
++          if (value && typeof (value as PromiseLike<unknown>).then === 'function') {
++            void Promise.resolve(value).catch(() => undefined)
++          }
++          throw new Error('native route currentness must be synchronous')
++        }
++        signal.throwIfAborted()
++      }
++      requireCurrent()
++      const access: ConnectionFetchContext = Object.freeze({ peer, signal, requireCurrent })
++      const response = await route.fetch(new Request(request, { signal }), access)
++      requireCurrent()
++      return response
++    } catch {
++      return new Response('forbidden', { status: 403 })
++    }
++  }
++
+   private registerFetchRoute(
+     owner: Context,
+     route: ConnectionFetchRoute,
+   ): () => Promise<void> {
+     assertFetchRoute(route)
++    const path = route.path
+     const registered: RegisteredFetchRoute = {
+       methods: new Set(route.methods),
+       requestBody: route.requestBody,
+       fetch: route.fetch,
++      ownerAccess: route.ownerAccess,
++      lifetime: new AbortController(),
+     }
+     return owner.effect(() => {
+-      if (this.fetchRoutes.has(route.path)) {
+-        throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+-      }
+-      this.fetchRoutes.set(route.path, registered)
+-      return () => { this.fetchRoutes.delete(route.path) }
+-    }, `client-connection: ${route.path} Fetch route`)
++      if (this.fetchRoutes.has(path)) {
++        throw new Error(`connection: exact Fetch route ${JSON.stringify(path)} is already registered`)
++      }
++      this.fetchRoutes.set(path, registered)
++      return () => {
++        registered.lifetime.abort()
++        if (this.fetchRoutes.get(path) === registered) this.fetchRoutes.delete(path)
++      }
++    }, `client-connection: ${path} Fetch route`)
+   }
+
+   private register(
+--- a/packages/client/connection/src/rpc.ts
++++ b/packages/client/connection/src/rpc.ts
+@@ -149,6 +149,17 @@
+ /** How the node:http bridge presents one request body to its Fetch route. */
+ export type ConnectionRequestBodyMode = 'buffered' | 'streaming'
+
++/** The existing owner restriction, retained for one exact native Fetch request. */
++export interface ConnectionFetchAccess {
++  readonly signal: AbortSignal
++  requireCurrent(): void
++}
++
++/** Original authenticated Peer and joined request lifetime; never serialized. */
++export interface ConnectionFetchContext extends ConnectionFetchAccess {
++  readonly peer: PeerScope
++}
++
+ /** One exact, transport-independent Fetch route owned by a Host feature. */
+ export interface ConnectionFetchRoute {
+   /** Absolute path below `/api`; query parameters remain available on the request URL. */
+@@ -162,7 +173,9 @@
+    * authentication policy. Only owner Peers reach an exact route; the shared
+    * handler answers 403 for every other principal.
+    */
+-  readonly fetch: (request: Request) => Promise<Response>
++  readonly fetch: (request: Request, access?: ConnectionFetchContext) => Promise<Response>
++  /** Trusted native route registration; absent routes keep the required-owner hold. */
++  readonly ownerAccess?: (request: Request, peer: PeerScope) => ConnectionFetchAccess
+ }
+
+ /** Host registry for exact Fetch routes that cannot use JSON Remote invocation. */
+--- a/packages/client/file-upload/src/http-route.ts
++++ b/packages/client/file-upload/src/http-route.ts
+@@ -4,6 +4,7 @@
+ import type { SessionId } from '@deepseek-ai/dsh-session'
+ import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+ import type { FileUploads } from './index.ts'
++import type { ConnectionFetchContext } from '@deepseek-ai/dsh-client-connection'
+ import type { FileUploadValue } from './types.ts'
+
+ type FileUploadHttpResult =
+@@ -19,7 +20,7 @@
+  * @param request - authenticated HTTP request from Connection.
+  * @returns JSON result using HTTP status 200 after request validation.
+  */
+-export async function handleFileUploadHttp(service: FileUploads, request: Request): Promise<Response> {
++export async function handleFileUploadHttp(service: FileUploads, request: Request, access?: ConnectionFetchContext): Promise<Response> {
+   if (request.method !== 'POST') {
+     return new Response(null, { status: 405, headers: { allow: 'POST' } })
+   }
+@@ -39,8 +40,9 @@
+       ok: true,
+       value: await service.uploadStream({
+         sessionId: brandString<SessionId>(sessionId),
+-        data: requestBodyChunks(request.body),
++        data: requestBodyChunks(request.body, request.signal),
+         signal: request.signal,
++        ...(access === undefined ? {} : { access }),
+         ...(name === undefined ? {} : { name }),
+       }),
+     }
+@@ -66,16 +68,24 @@
+   })
+ }
+
+-async function* requestBodyChunks(body: ReadableStream<Uint8Array> | null): AsyncIterable<Uint8Array> {
++async function* requestBodyChunks(body: ReadableStream<Uint8Array> | null, signal: AbortSignal): AsyncIterable<Uint8Array> {
++  signal.throwIfAborted()
+   if (body === null) return
+   const reader = body.getReader()
++  let complete = false
++  const abort = (): void => { void reader.cancel(signal.reason).catch(() => undefined) }
++  signal.addEventListener('abort', abort, { once: true })
+   try {
++    signal.throwIfAborted()
+     while (true) {
+       const chunk = await reader.read()
+-      if (chunk.done) return
++      signal.throwIfAborted()
++      if (chunk.done) { complete = true; return }
+       yield chunk.value
+     }
+   } finally {
++    signal.removeEventListener('abort', abort)
++    if (!complete) void reader.cancel(signal.reason).catch(() => undefined)
+     reader.releaseLock()
+   }
+ }
+--- a/packages/client/file-upload/src/index.ts
++++ b/packages/client/file-upload/src/index.ts
+@@ -5,6 +5,8 @@
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+ import type {} from '@deepseek-ai/dsh-client-connection'
++import type { ConnectionFetchAccess, ConnectionFetchContext } from '@deepseek-ai/dsh-client-connection'
++import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import type { CommandFileReceiptResolver } from '@deepseek-ai/dsh-commands'
+ import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+@@ -28,7 +30,19 @@
+ }
+
+ /** Resolve or resume the ordinary Agent that owns one Session identity. */
+-export type AgentResolver = (sessionId: SessionId) => Promise<Agent>
++export type AgentResolver = (sessionId: SessionId, signal?: AbortSignal) => Promise<Agent>
++
++/** Same Session resolver owner supplies the original native access decision. */
++export type AgentUploadAccess = (
++  request: { readonly sessionId: SessionId; readonly name?: string; readonly data?: string },
++  peer: PeerScope, signal: AbortSignal,
++) => ConnectionFetchAccess | undefined
++
++interface AgentResolverEntry {
++  readonly resolve: AgentResolver
++  readonly access: AgentUploadAccess | undefined
++  readonly lifetime: AbortController
++}
+
+ /** Prompt receipt binding that restores its previous owners unless delivery commits it. */
+ export interface PromptFileBinding extends Disposable {
+@@ -57,7 +71,7 @@
+   static inject = ['agents', 'attachments', 'commands', 'connection']
+
+   private readonly stagedFiles = new WeakMap<Session, Map<FileUploadReceiptId, StagedFileUpload>>()
+-  private agentResolver: AgentResolver | undefined
++  private agentResolver: AgentResolverEntry | undefined
+
+   /** @param ctx - Host context carrying Agent, attachment, command, and Connection services. */
+   constructor(ctx: Context) {
+@@ -73,7 +87,8 @@
+         path: FILE_UPLOAD_PATH,
+         methods: ['POST'],
+         requestBody: 'streaming',
+-        fetch: request => handleFileUploadHttp(this, request),
++        fetch: (request, access) => handleFileUploadHttp(this, request, access),
++        ownerAccess: (request, peer) => this.uploadAccess(request, peer),
+       }),
+       'file-upload: streaming route',
+     )
+@@ -81,16 +96,64 @@
+     ctx.on('session/disposed', (session) => { this.stagedFiles.delete(session) })
+   }
+
++  /** Exact native upload route; the Session controller owns its access source. */
++  private uploadAccess(request: Request, peer: PeerScope): ConnectionFetchAccess {
++    const url = new URL(request.url), id = url.searchParams.get('sessionId')
++    if (!id) throw new Error('native upload Session required')
++    const name = url.searchParams.get('name') ?? undefined
++    const access = this.captureUploadAccess({ sessionId: id as SessionId,
++      ...(name === undefined ? {} : { name }) }, peer, request.signal)
++    if (access === undefined) throw new Error('required native upload source unavailable')
++    return access
++  }
++
++  private captureUploadAccess(
++    request: { readonly sessionId: SessionId; readonly name?: string; readonly data?: string }, peer: PeerScope, signal: AbortSignal,
++  ): ConnectionFetchAccess | undefined {
++    const entry = this.agentResolver
++    const source = entry?.access?.(request, peer, signal)
++    if (source === undefined) return undefined
++    if (source === null || typeof source !== 'object'
++        || typeof (source as unknown as PromiseLike<unknown>).then === 'function' || !(source.signal instanceof AbortSignal)
++      || typeof source.requireCurrent !== 'function') {
++      if (source && typeof (source as unknown as PromiseLike<unknown>).then === 'function') {
++        void Promise.resolve(source).catch(() => undefined)
++      }
++      throw new Error('original upload access source invalid')
++    }
++    const sourceSignal = source.signal, sourceGuard = source.requireCurrent
++    const lifetime = AbortSignal.any([signal, peer.signal, sourceSignal, entry!.lifetime.signal])
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      if (this.agentResolver !== entry || source.signal !== sourceSignal
++        || source.requireCurrent !== sourceGuard) throw new Error('original upload resolver retired')
++      const result: unknown = sourceGuard()
++      if (result !== undefined) {
++        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(result).catch(() => undefined)
++        }
++        throw new Error('upload currentness must be synchronous')
++      }
++      lifetime.throwIfAborted()
++      if (this.agentResolver !== entry || source.signal !== sourceSignal
++        || source.requireCurrent !== sourceGuard) throw new Error('original upload resolver retired')
++    }
++    requireCurrent()
++    return Object.freeze({ signal: lifetime, requireCurrent })
++  }
++
+   /**
+    * Register the ordinary-Session resolver used when a raw upload addresses a cold Session.
+    * @param resolve - resolver that returns the exact live Agent or throws a Remote error.
+    * @returns disposer removing this resolver.
+    */
+-  registerAgentResolver(resolve: AgentResolver): () => void {
++  registerAgentResolver(resolve: AgentResolver, access?: AgentUploadAccess): () => void {
+     if (this.agentResolver !== undefined) throw new Error('file-upload: Agent resolver is already registered')
+-    this.agentResolver = resolve
++    const entry: AgentResolverEntry = { resolve, access, lifetime: new AbortController() }
++    this.agentResolver = entry
+     return () => {
+-      if (this.agentResolver === resolve) this.agentResolver = undefined
++      entry.lifetime.abort()
++      if (this.agentResolver === entry) this.agentResolver = undefined
+     }
+   }
+
+@@ -104,10 +167,20 @@
+   @Remote('upload')
+   upload(agent: Agent, request: EncodedFileUploadRequest, signal: AbortSignal): Promise<FileUploadValue> {
+     signal.throwIfAborted()
++    const peer = this.ctx.invocation?.peer
++    const access = peer?.principal.kind === 'owner'
++      ? this.captureUploadAccess({ sessionId: agent.session.id, data: request.data,
++        ...(request.name === undefined ? {} : { name: request.name }) }, peer, signal) : undefined
++    const lifetime = access === undefined ? signal : AbortSignal.any([signal, access.signal])
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      access?.requireCurrent()
++      lifetime.throwIfAborted()
++    }
+     return this.commit(agent, async () => this.ctx.attachments.admitEncodedFile({
+       data: request.data,
+       ...(request.name === undefined ? {} : { name: request.name }),
+-    }))
++    }), requireCurrent)
+   }
+
+   /**
+@@ -120,13 +193,37 @@
+     readonly data: AsyncIterable<Uint8Array>
+     readonly signal?: AbortSignal
+     readonly name?: string
++    readonly access?: ConnectionFetchContext
+   }): Promise<FileUploadValue> {
+-    const agent = await this.resolveAgent(request.sessionId)
++    const requireCurrent = (): void => {
++      request.signal?.throwIfAborted()
++      request.access?.requireCurrent()
++      request.signal?.throwIfAborted()
++    }
++    requireCurrent()
++    // Company uploads belong to the writer admitted by its original operation.
++    // Opening a cold writer requires the original explicit resume, not upload.
++    if (request.access !== undefined && this.ctx.agents.get(request.sessionId) === undefined) {
++      throw new RemoteError('session/not-found', 'Open the conversation before uploading a file.',
++        { sessionId: request.sessionId })
++    }
++    const agent = await this.resolveAgent(request.sessionId, request.signal)
++    requireCurrent()
++    if (agent.session.id !== request.sessionId) throw new Error('original upload Session differs')
++    async function* chunks(): AsyncIterable<Uint8Array> {
++      requireCurrent()
++      for await (const chunk of request.data) {
++        requireCurrent()
++        yield chunk
++        requireCurrent()
++      }
++      requireCurrent()
++    }
+     return this.commit(agent, async () => this.ctx.attachments.saveFileStream({
+-      data: request.data,
++      data: chunks(),
+       ...(request.signal === undefined ? {} : { signal: request.signal }),
+       ...(request.name === undefined ? {} : { name: request.name }),
+-    }))
++    }), requireCurrent)
+   }
+
+   /**
+@@ -176,7 +273,8 @@
+     this.retire(agent.session, requestId)
+   }
+
+-  private async commit(agent: Agent, save: () => Promise<FileAttachmentRef>): Promise<FileUploadValue> {
++  private async commit(agent: Agent, save: () => Promise<FileAttachmentRef>, requireCurrent?: () => void): Promise<FileUploadValue> {
++    requireCurrent?.()
+     this.assertOrdinaryAgent(agent)
+     let file: FileAttachmentRef
+     try {
+@@ -192,6 +290,7 @@
+         { cause: error },
+       )
+     }
++    requireCurrent?.()
+     if (this.ctx.agents.get(agent.id) !== agent) {
+       throw new RemoteError(
+         'session/not-found',
+@@ -209,14 +308,15 @@
+     return { receiptId, file }
+   }
+
+-  private async resolveAgent(sessionId: SessionId): Promise<Agent> {
++  private async resolveAgent(sessionId: SessionId, signal?: AbortSignal): Promise<Agent> {
++    signal?.throwIfAborted()
+     const live = this.ctx.agents.get(sessionId)
+     if (live !== undefined) return live
+     const resolver = this.agentResolver
+     if (resolver === undefined) {
+       throw new RemoteError('session/not-found', `session "${sessionId}" is not attached`, { sessionId })
+     }
+-    return resolver(sessionId)
++    return resolver.resolve(sessionId, signal)
+   }
+
+   private assertOrdinaryAgent(agent: Agent): void {
+--- a/packages/client/ui-deliverables/src/present-open.ts
++++ b/packages/client/ui-deliverables/src/present-open.ts
+@@ -4,7 +4,7 @@
+ import type {} from '@deepseek-ai/dsh-api-workspace-files'
+ import type {} from '@deepseek-ai/dsh-fs'
+ import type {} from '@deepseek-ai/dsh-sandbox-policy'
+-import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
++import { remoteErrorOf, type PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import type {} from '@deepseek-ai/dsh-client-connection'
+ import type {} from '@deepseek-ai/dsh-session-query'
+ import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+@@ -26,6 +26,7 @@
+   ctx.connection.fetch.register({
+     path: CHANGED_FILES_PATH, methods: ['GET'], requestBody: 'buffered',
+     fetch: request => Promise.resolve(handleChangesSummary(ctx, request)),
++    ownerAccess: (request, peer) => captureChangesAccess(ctx, request, peer, 'changes/summary'),
+   })
+   const lifetime = new AbortController()
+   const pending = new Set<Promise<Response>>()
+@@ -41,6 +42,8 @@
+       path,
+       methods: [...methods],
+       requestBody: 'buffered',
++      ...(path === CHANGES_DIFF_PATH ? { ownerAccess: (request: Request, peer: PeerScope) =>
++        captureChangesAccess(ctx, request, peer, 'changes/diff') } : {}),
+       fetch: (request) => {
+         const task = handler(ctx, new Request(request, {
+           signal: AbortSignal.any([request.signal, lifetime.signal]),
+@@ -51,6 +54,21 @@
+       },
+     })
+   }
++}
++
++/** These two raw reads use explicit policy operations and their original Session/event coordinates. */
++function captureChangesAccess(ctx: Context, request: Request, peer: PeerScope,
++  action: 'changes/summary' | 'changes/diff') {
++  const query = new URL(request.url).searchParams
++  const id = query.get('sessionId'), seq = coordinate(query.get('seq'))
++  const index = action === 'changes/diff' ? coordinate(query.get('index')) : undefined
++  if (!id || seq === undefined || action === 'changes/diff' && index === undefined) {
++    throw new Error('native change read coordinates required')
++  }
++  const access = ctx.sessionController.captureChangeReadAccess(action,
++    { sessionId: id as SessionId, seq, ...(index === undefined ? {} : { index }) }, peer, request.signal)
++  if (access === undefined) throw new Error('required native change read source unavailable')
++  return access
+ }
+
+ const NUMERIC = /^\d+$/

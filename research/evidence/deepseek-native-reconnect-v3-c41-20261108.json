@@ -1,0 +1,280 @@
+{
+  "canonical_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2177#issuecomment-6707499732",
+  "closed_lanes": [
+    "installed receipt/config-read denial",
+    "paid Fabric/VPS denial",
+    "administrative branch-protection read403",
+    "foreign-worktree GC/repack",
+    "active-service restart prohibited"
+  ],
+  "counts_overlap": true,
+  "do_not_redo": [
+    "accepted Hermes2180/2228 installed journey",
+    "accepted C21 inert native canary"
+  ],
+  "governing_pin": "1981aea5122943ce59d7ebe9706ddf5a658b377d",
+  "hosted_c40": {
+    "acp": {
+      "conclusion": "success",
+      "run": 42460316900
+    },
+    "ci": {
+      "failed_job": 128668158902,
+      "failure_category": "native-branch expected-output fixtures, repaired in this diff",
+      "observed_failure_count": 6,
+      "run": 42460316934,
+      "state": "in_progress"
+    },
+    "codeql": {
+      "conclusion": "success",
+      "run": 42460314047
+    },
+    "head": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+    "mcp": {
+      "conclusion": "success",
+      "run": 42460316902
+    },
+    "observation": "One bounded exact-head read; only completed failure log fetched. No reruns or old-C39 reads.",
+    "os": {
+      "conclusion": "success",
+      "run": 42460316899
+    },
+    "rwe": {
+      "run": 42460316927,
+      "state": "in_progress"
+    }
+  },
+  "implementation": {
+    "attestation": "Original account tuple remains frozen for the generation. Same-live-grant identity enrichment advances only the private continuity anchor. Worker observed==sealed, original materialization receipt and broker digest fences remain unchanged.",
+    "edge_fixtures": "Reuse independent fixed17-path native_branch fixture only in expected deep copies; historical41297 bytes remain unchanged. Whole-config equality, predecessor immutability, native matcher/order/body/header/proxy and malformed-route assertions retained.",
+    "history": "Original history-after-logout, original answer/Session/ACP owner and receipt-first Stop tests remain passing. Renewal never replays the preceding operation.",
+    "races": "Snapshot methods/data are captured and checked around callbacks; previous-record CAS survives all awaits and callbacks. No active candidate renewal, invalid account/wire-size partial publication, concurrent losing observation, or retired-witness final write is admitted.",
+    "reconnect": "Only original nativeObservation renews the private inference-currentness witness when idle. Original account, credentials, provider, Agent, Session, realm, snapshot method and other owners remain pinned. Retired grant renewal requires a prior known non-null account ID equal to the fresh non-null ID.",
+    "startup": "NativeAcpProcess.observe accepts exact V2/V3 and retains the negotiated version across await; V1/mixed/version drift remain refused. Actual SDK observation and following READ share one original connection/resource and create no prompt owner."
+  },
+  "installed": false,
+  "next_action": "Publish same carrier; build and --check-only a fresh unselected ordinary package with the already-qualified donor, Python, pnpm and standalone Node; record exact new closure and continue permitted source/release work.",
+  "next_package": {
+    "check": "launch_attended.mjs --check-only; never launch",
+    "kind": "ordinary unselected complete build candidate, not native final materialization",
+    "node": "/private/tmp/mmx-dsh-c37-node26-20261108-pro1/node",
+    "node_sha256": "cbee2298aee5cc476bf8d5441e7348b627254a39d869743a5b04489028c729d4",
+    "producer": "integrations/deepseek_harness/package_attended.py",
+    "release": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c41-20261108-pro1",
+    "state": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-state-c41-20261108-pro1"
+  },
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "pr": 2177,
+  "protected_source_composed": "1981aea5122943ce59d7ebe9706ddf5a658b377d",
+  "provider_calls": 0,
+  "qualification": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_dsh_native_read_acp.py::test_real_v3_sdk_observation_preserves_the_original_owner_and_following_read"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "Real V3 SDK observation refused before any wire write; repaired by exact V2/V3 captured-version guard.",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T08:01:56.316704+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "b6c205f618deaca3336b439d450b95fe62f8eb336b6422fc1fbeb8f90577bb5b",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-python-regression-20261108-pro1.json",
+      "receipt_sha256": "15403f9bd9e1ed97fb1e6263e537c51105bc8ebee9f3f74c0d6d5bdf1f541c2e",
+      "result": "1 failed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:01:53.105602+00:00"
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts",
+        "-t",
+        "reconnects the same identified account"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "Real PlatformAccount sign-out/replacement could not re-observe; repaired within original host witness owner.",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T08:01:57.161228+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "af24b2e061e73c17ed220731dc704c791cc049b772bb54b2f18d60c636356bb7",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-account-regression-20261108-pro1.json",
+      "receipt_sha256": "776e977a55bd7872912903d7aef6846a1aa8a28611cdd94a83e170284813e256",
+      "result": "1 failed;19 filtered",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:01:53.652802+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_dsh_native_protocol.py",
+        "tests/test_dsh_native_read_acp.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_dsh_native_model_selection.py",
+        "tests/test_native_worker_factory.py",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_worker_package.py"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "Exact V2/V3, owner drift, real SDK observe then READ, operator/model/factory/package suites. Later changes are TS/edge test fixtures only; runtime Python and native entry hashes remain identical.",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T08:09:24.117484+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "650d050af9b291a2e3ca8b9ced4426282f7d44341e0382f33da26f0195778dd8",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-python-tests-20261108-pro1.json",
+      "receipt_sha256": "8e2c37c2da24d43524463be9ee20f3e9ee1af3d89f6ce4414bac7dce830bca7d",
+      "result": "186 passed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:09:08.825546+00:00"
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts",
+        "native-capability-admission.test.ts",
+        "native-profile-source.test.ts"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "Three fixture issues: active sign-out had already closed original turn; Cordis matcher introspection; duplicate browser credentials. Repaired fixture ordering, normalized identity and reused original real credential service.",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T08:09:15.889288+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "cfe015ea930bf2f027b510c2f5c625f92cf825a4f3b48958850e58b41e253646",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-host-tests-20261108-pro1.json",
+      "receipt_sha256": "8503a8a1a2844368784b0befe58656a71fd7f813d69b139920ff49e24535e04b",
+      "result": "54 passed;3 failed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:09:09.848534+00:00"
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts",
+        "native-capability-admission.test.ts",
+        "native-profile-source.test.ts"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "34 original-host entry/real-account/race cases,17 capability and6 original profile/source cases.",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T08:12:00.318301+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "e764c6892a8129e3a2c11c836adbc58aa482a49387e9e2f4a7217dbcf588ed03",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-host-qualified-20261108-pro1.json",
+      "receipt_sha256": "5eee8c0d931c2fa9a618b19adce920da01c0185cf4292bb977a413db90f20877",
+      "result": "57 passed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:11:47.355033+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_byok_roles_public_edge.py",
+        "tests/test_native_session_send_public_edge.py",
+        "tests/test_project_controls_edge_join.py"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "New substring-count assertion conflated prefix-sharing native route names; corrected to exact route-token counts.",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T08:16:32.976683+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "f4893afece674d7917298931c6de2d968af6646eb8f3f3a9512570a00af3a2cb",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-edge-composition-tests-20261108-pro1.json",
+      "receipt_sha256": "76b7d9baec5aa5e15fbf6be44febf6827d24eae7984056b0965771844199b5eb",
+      "result": "25 passed;2 failed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:16:28.860744+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "addopts=",
+        "tests/test_byok_roles_public_edge.py",
+        "tests/test_native_session_send_public_edge.py",
+        "tests/test_project_controls_edge_join.py"
+      ],
+      "base_sha": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "disposition": "Six observed hosted failures and same shared predecessor expectation repaired; complete config equality and input immutability preserved.",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T08:17:31.041443+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "25b50fd7a2052d51c0ed6a362c7bcf4c8db98d61884f19a44dade847987da306",
+      "receipt_path": "/private/tmp/mmx-dsh-c41-edge-qualified-20261108-pro1.json",
+      "receipt_sha256": "f7ddd9418270206208ff80843e00bcdf3c44c16e08494940f7f58fcc7f8ae7cc",
+      "result": "27 passed",
+      "source_inputs": 7219,
+      "started_at": "2026-11-08T08:17:25.466876+00:00"
+    }
+  ],
+  "recorded_at": "2026-11-08T08:19:18.067161+00:00",
+  "remaining_production_holds": [
+    "accepted protected source and required exact-head CI",
+    "fresh source-linked complete package qualification; native final layout still needs actual original enrolled coordinates",
+    "root-custodied native/Node/ACP installation and original attestation",
+    "actual original Worker/company-account/realm/quota/host admission and public/service routing",
+    "signed-in packaged DeepSeek create/history/send/recovery/logout/reconnect/uncertain-send/Stop/same-Session resume/tool-settlement acceptance"
+  ],
+  "reuse_decision": "Use the original native connection, host bindings, PlatformAccount/credential lifetime, ACP/Agent/Session, sealed attestation and original package producer. No second auth, retry, Session, publication or admission owner.",
+  "schema": "mastermind.deepseek_native_reconnect_v3_evidence.v1",
+  "source_parent": "a12ca6d43c6684e1b3b1ef355ddf11841aea8f0f",
+  "source_sha256": {
+    "integrations/deepseek_harness/native_connection.py": "f9e1d1c4b223615fc965b9146e5fd4750323f49362224db3cab163f8f5a91201",
+    "integrations/deepseek_harness/native_worker.mjs": "e47e35060596ee9fe4e7bc4715dfaff32be22d22a4cbd394db72daabe8ea5469",
+    "integrations/deepseek_harness/runtime_compat/native-worker-entry.test.ts": "32c073cbb6d9dd2f3b7764c218a0c7dc7f6023d7decba967ef5c6d674bbad388",
+    "tests/test_byok_roles_public_edge.py": "b94c9c23336afba44680192ad4bfd8a1d0f3151c4231041c029c13dc8262aa85",
+    "tests/test_dsh_native_protocol.py": "74c295182411043a879f6d2326c032943e221ed4d27ab50e8793b3716c941011",
+    "tests/test_dsh_native_read_acp.py": "0f33a2b130ec5affca5fdfbb7d0faddc4180145fbb8748f262a7bc96b718e71c",
+    "tests/test_native_session_send_public_edge.py": "01ae4055ec121f09387a251a1f7c8c3efa50de53a4411d1ddc606907a67a9d17",
+    "tests/test_project_controls_edge_join.py": "2e75f2beeb66f97e04112166d85de07465c8f5044756e6114a38810580d13876"
+  }
+}

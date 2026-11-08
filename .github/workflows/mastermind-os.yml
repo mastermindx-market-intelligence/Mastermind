@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - app/mastermind_os/**
+      - integrations/deepseek_harness/company_plugin/src/protocol.ts
+      - ops/executive_os/os_release_assets.py
+      - tests/test_os_release_assets.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
   merge_group:
@@ -12,6 +15,9 @@ on:
     branches: [master]
     paths:
       - app/mastermind_os/**
+      - integrations/deepseek_harness/company_plugin/src/protocol.ts
+      - ops/executive_os/os_release_assets.py
+      - tests/test_os_release_assets.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
   workflow_dispatch:
@@ -40,14 +46,13 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      # The production release archives only app/mastermind_os. Build that exact
-      # source closure, rather than succeeding because checkout-root fixtures
-      # happen to exist on the CI runner. Reuse the current frontend job.
-      - name: Build exact app-only release archive
+      # Use the original release owner's exact archive closure, including the
+      # single shared company contract. Checkout-only files cannot enter it.
+      - name: Build exact production source archive
         working-directory: .
         run: |
           release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"
-          git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"
+          PYTHONPATH="$GITHUB_WORKSPACE" python3 -c 'from pathlib import Path; import os, sys; from ops.executive_os.os_release_assets import _archive; _archive(Path(os.environ["GITHUB_WORKSPACE"]), os.environ["GITHUB_SHA"], Path(sys.argv[1]))' "$release_root"
           (
             cd "$release_root/app/mastermind_os"
             npm ci --ignore-scripts

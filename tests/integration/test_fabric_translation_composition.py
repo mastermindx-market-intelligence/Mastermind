@@ -43,10 +43,11 @@ PINS = {
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
     "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
 }
-# Protected package/flat-import realm successor consumed through d62d93d.
-# Exact source pin; admission, credentials and realm call semantics are unchanged.
+# Current package realm includes the reviewed DeepSeek native-identity join.
+# All APPLICATION catalog/protocol/credential owner ASTs are identical to the
+# protected d62d93d successor; historical sealed projection inputs stay frozen.
 REALM_PINS = {
-    "control_plane/codex_provider_realm.py": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
+    "control_plane/codex_provider_realm.py": "f8bf293f6fb7cc760e048e4ba86f87360d04c495",
     "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
     "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }
@@ -158,6 +159,21 @@ class FabricTranslationCompositionTests(unittest.TestCase):
                 patch.object(Path, "read_bytes", drift), \
                 patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
             with self.assertRaisesRegex(AssertionError, "Native source mismatch: candidate/lease_broker.py"):
+                DriftFixture.setUpClass()
+
+    def test_reviewed_realm_byte_drift_stops_before_native_fixture_import(self):
+        source = Path(__file__).resolve().parents[2] / "control_plane/codex_provider_realm.py"
+        original = Path.read_bytes
+        def drift(path):
+            raw = original(path)
+            return raw + b"\n" if path == source else raw
+        class DriftFixture(FabricTranslationCompositionTests):
+            pass
+        with patch.dict(os.environ, {"MM_REQUIRE_FABRIC_COMPOSITION": "1",
+                                     "MM_FABRIC_FIXTURE_ROOT": str(self.macro_root)}), \
+                patch.object(Path, "read_bytes", drift), \
+                patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
+            with self.assertRaisesRegex(AssertionError, "Native source mismatch: control_plane/codex_provider_realm.py"):
                 DriftFixture.setUpClass()
 
     def setUp(self):

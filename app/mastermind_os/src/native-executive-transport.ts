@@ -131,8 +131,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       {operation,arguments:planningArguments(operation,arguments_)})},
     projectExecution: {request:(operation,arguments_,signal)=>call("executive_project_execution",signal,
       {operation,arguments:projectExecutionArguments(operation,arguments_)})},
-    freshConversation: {request:(operation,arguments_,signal)=>call("executive_fresh_conversation",signal,
-      {operation,arguments:freshConversationArguments(operation,arguments_)})},
+    freshConversation: {request:(operation,arguments_,signal,contract)=>call("executive_fresh_conversation",signal,
+      {operation,arguments:freshConversationArguments(operation,arguments_,contract),...(contract?{contract}:{})})},
     directNative: {
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);

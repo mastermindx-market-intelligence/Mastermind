@@ -120,11 +120,11 @@ def test_real_private_kernel_peer_and_foreground_creation_mount(tmp_path, rsa_ke
                         "result_error_code": nested_error.get("code") if isinstance(nested_error, dict) else None})
                     return response
 
-                async def traced_create(owner, principal, request, *, workspace_principal):
+                async def traced_create(owner, principal, request, *, workspace_principal, _schema="mastermind.executive.fresh_conversation.v1"):
                     duplicate_trace.append({"owner": "create", "event": "entered"})
                     try:
                         value = await original_create(owner, principal, request,
-                            workspace_principal=workspace_principal)
+                            workspace_principal=workspace_principal, _schema=_schema)
                     except BaseException as exc:
                         duplicate_trace.append({"owner": "create", "event": "raised",
                             "exceptions": exception_trace(exc)})
@@ -181,14 +181,15 @@ def test_actual_v3_factory_mounts_fixed_fresh_routes_with_same_workspace_owner(t
             enable_os_executive_transport=True, os_executive_resource=installed.policies.submit.resource)
         try:
             assert type(app.fresh_conversation_transport) is FreshConversationTransportApp
-            assert set(gateway._OS_FRESH_CONVERSATION_ROUTES) == set(wire.ROUTES)
+            assert set(gateway._OS_FRESH_CONVERSATION_ROUTES) == set(wire.ROUTES) | set(wire.NATIVE_ROUTES)
             assert app.fresh_conversation_transport._workspace is config
             assert app.fresh_conversation_transport._workspace_verifier is original._workspace_verifier
             # All literal routes pass the actual outer route fence. Without a
             # credential they stop at authentication, never the socket/Runtime.
             jobs, events = runtime.jobs.list_jobs(), runtime.events.list_events()
-            for operation in wire.ROUTES.values():
-                code, _ = await post(app, operation, {}, "not-a-jwt")
+            for path, operation in {**wire.ROUTES, **wire.NATIVE_ROUTES}.items():
+                code, _ = await post(app, operation, {}, "not-a-jwt",
+                    change={"path": path, "raw_path": path.encode()})
                 assert code == 401
             for change in ({"query_string": b"unexpected=1"}, {"method": "GET"},
                     {"headers": [(b"host", b"foreign.example")]}, {"scheme": "http"},

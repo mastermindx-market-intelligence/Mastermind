@@ -25,6 +25,10 @@ from typing import Any, TYPE_CHECKING
 from control_plane.operator_harness_contract import (
     HarnessAdapterCapabilities, RequestedExecutionProfile, WorkspaceIdentity,
 )
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_HARNESS_KIND, DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT,
+    NativeConversationResultError, result_contract_for_profile,
+)
 
 if TYPE_CHECKING:
     from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
@@ -572,6 +576,7 @@ class RemoteOperatorHostBinding:
                     or (self.provider, self.harness_kind) not in {
                         ("openai-codex", "codex-app-server"),
                         ("claude", "claude-agent-sdk"),
+                        ("acp", DSH_NATIVE_HARNESS_KIND),
                     }):
                 raise ValueError("invalid operator binding")
             for digest in (self.worker_source_config_digest,
@@ -583,6 +588,23 @@ class RemoteOperatorHostBinding:
                 raise ValueError("native Claude resume is not qualified")
         except (TypeError, ValueError, RemoteAttemptTransportError):
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
+
+
+def _operator_native_binding(runtime: Runtime, job_id: str, *, recovery: bool):
+    """Read the original creator; a host tuple cannot select a result contract.
+
+    Recovery construction also serves containment, so it requires historical
+    creator evidence without borrowing fresh execution authority. Runtime still
+    owns current generation/effect admission when the returned adapter is used.
+    """
+    try:
+        binding = runtime.jobs.get_native_conversation_binding(job_id)
+        if binding is not None and not recovery:
+            if runtime.jobs.assert_native_conversation_execution(job_id) != binding:
+                raise StateConflict("native creator binding moved")
+        return binding
+    except StateConflict:
+        raise RemoteAttemptTransportError("CLAIM_MISMATCH") from None
 
 
 def build_claimed_remote_workspace_identity_source(
@@ -625,6 +647,7 @@ def build_claimed_remote_workspace_identity_source(
                     copy.deepcopy(source_job.constraints))
 
         before_signature = signature(before)
+        native_binding = _operator_native_binding(runtime, job.job_id, recovery=False)
         try:
             observed = binding_source(join.capacity_join.host_ref, current.worker_id)
         except Exception:
@@ -638,7 +661,11 @@ def build_claimed_remote_workspace_identity_source(
                 or (quota.provider, observed.provider, observed.harness_kind) not in {
                     ("codex", "openai-codex", "codex-app-server"),
                     ("claude", "claude", "claude-agent-sdk"),
+                    ("acp", "acp", DSH_NATIVE_HARNESS_KIND),
                 }
+                or ((native_binding is not None) != (
+                    (quota.provider, observed.provider, observed.harness_kind)
+                    == ("acp", "acp", DSH_NATIVE_HARNESS_KIND)))
                 or type(workspace) is not WorkspaceIdentity
                 or workspace.workspace_path != job.worktree
                 or workspace.base_sha != job.constraints.get("base_sha")
@@ -648,7 +675,8 @@ def build_claimed_remote_workspace_identity_source(
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
         after = _read_claim(runtime, job_id=current.job_id,
                             attempt_id=current.attempt_id, purpose=RemoteTransportPurpose.LAUNCH)
-        if signature(after) != before_signature:
+        if (signature(after) != before_signature
+                or _operator_native_binding(runtime, job.job_id, recovery=False) != native_binding):
             raise RemoteAttemptTransportError("STATE_MOVED")
         return workspace
 
@@ -695,6 +723,28 @@ def build_claimed_remote_operator_factory(
             # A sealed/previously attempted operator must enter recovery. Never
             # mint a fresh-start-capable client to disguise a lost start reply.
             raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+        native_binding = _operator_native_binding(runtime, job.job_id, recovery=recovery)
+        if native_binding is not None:
+            if (requested.requested_model != job.constraints.get("model")
+                    or any(getattr(requested, key) != job.constraints.get(key)
+                           for key in ("harness_binary_digest", "harness_version"))
+                    or requested.workspace.workspace_path != job.worktree
+                    or requested.workspace.base_sha != job.constraints.get("base_sha")):
+                raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+            if not recovery and (
+                    quota.model != job.constraints.get("model")
+                    or quota.effort != job.constraints.get("effort")
+                    or any(quota.metadata.get(key) != job.constraints.get(key) for key in (
+                        "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+                        "capability_policy_version", "capability_policy_digest",
+                        "harness_binary_digest", "harness_version"))):
+                raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        result_contract = DSH_NATIVE_RESULT_CONTRACT if native_binding is not None else ROLE_RESULT_CONTRACT
+        try:
+            if result_contract_for_profile(requested) != result_contract:
+                raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        except NativeConversationResultError:
+            raise RemoteAttemptTransportError("CLAIM_MISMATCH") from None
         try:
             binding = binding_source(join.capacity_join.host_ref, current.worker_id)
         except Exception:
@@ -707,7 +757,11 @@ def build_claimed_remote_operator_factory(
                 or (quota.provider, binding.provider, binding.harness_kind) not in {
                     ("codex", "openai-codex", "codex-app-server"),
                     ("claude", "claude", "claude-agent-sdk"),
+                    ("acp", "acp", DSH_NATIVE_HARNESS_KIND),
                 }
+                or ((native_binding is not None) != (
+                    (quota.provider, binding.provider, binding.harness_kind)
+                    == ("acp", "acp", DSH_NATIVE_HARNESS_KIND)))
                 or any(getattr(binding, k) != getattr(requested, k) for k in (
                     "provider", "harness_kind", "harness_binary_digest", "harness_version",
                     "expected_config_digest", "workspace"))):
@@ -722,11 +776,16 @@ def build_claimed_remote_operator_factory(
                     source_attempt.lease_owner, source_attempt.authority_policy_hash,
                     source_attempt.execution_mode, source_attempt.requested_execution_profile_digest,
                     source_attempt.effective_grant_digest, source_attempt.placement_snapshot_digest,
-                    source_attempt.execution_principal_snapshot_digest)
-        if operator_signature(before) != operator_signature(after):
+                    source_attempt.execution_principal_snapshot_digest,
+                    source_job.worktree, source_job.constraints,
+                    (source_quota.model, source_quota.effort, source_quota.metadata)
+                    if native_binding is not None and not recovery else None)
+        if (operator_signature(before) != operator_signature(after)
+                or _operator_native_binding(runtime, job.job_id, recovery=recovery) != native_binding):
             raise RemoteAttemptTransportError("STATE_MOVED")
         operations = {
-            "ohf-identity", "ohf-materialization-status", "ohf-begin-turn",
+            "ohf-identity", "ohf-materialization-status", "ohf-native-begin-status", "ohf-begin-turn",
+            "ohf-native-read-binding", "ohf-native-read",
             "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
             "ohf-reconcile", "ohf-reconcile-absence",
         }
@@ -763,6 +822,24 @@ def build_claimed_remote_operator_factory(
                         raise RemoteAttemptTransportError("STATE_MOVED") from None
                     if canonical != generation:
                         raise RemoteAttemptTransportError("STATE_MOVED")
+
+
+                async def read_native_binding(self, *, epoch, generation, before_read):
+                    def guard():
+                        self._assert_generation(epoch, generation)
+                        before_read()
+                        self._assert_generation(epoch, generation)
+                    return await super().read_native_binding(
+                        epoch=epoch, generation=generation, before_read=guard)
+
+                async def read_native_content(self, *, epoch, generation, association, request, before_read):
+                    def guard():
+                        self._assert_generation(epoch, generation)
+                        before_read()
+                        self._assert_generation(epoch, generation)
+                    return await super().read_native_content(epoch=epoch, generation=generation,
+                        association=association, request=request, before_read=guard)
+
 
                 def _bind_initial_generation(self, epoch, generation):
                     self._assert_generation(epoch, generation)
@@ -814,7 +891,8 @@ def build_claimed_remote_operator_factory(
                     )
 
             adapter = RuntimeGenerationBoundAdapter(
-                client, turn_input_loader=loader, capabilities=binding.capabilities
+                client, turn_input_loader=loader, capabilities=binding.capabilities,
+                result_contract=result_contract,
             )
             if recovery:
                 with runtime.store.read() as connection:
@@ -838,7 +916,8 @@ def build_claimed_remote_operator_factory(
                     )
                 except Exception:
                     raise RemoteAttemptTransportError("STATE_MOVED") from None
-                if generation.generation_number != 1:
+                allowed_generations = {1, 2} if native_binding is not None else {1}
+                if generation.generation_number not in allowed_generations:
                     raise RemoteAttemptTransportError("STATE_MOVED")
                 adapter._bind_initial_generation(epoch, generation)
             return adapter

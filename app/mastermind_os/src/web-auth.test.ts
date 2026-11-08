@@ -2271,6 +2271,55 @@ describe("fixed project execution two-resource requests", () => {
   });
 });
 
+describe("native-v2 fresh transport on original Executive authentication",()=>{
+ const resource="https://mcp.mastermind-x.com/os/executive";
+ const selected={work_ref:"WS:Original.Project",operation_key:"mmos-native-create-"+"a".repeat(40)};
+ const digest="b".repeat(64),signal=new AbortController().signal;
+ const cases=[
+  ["preview","preview",{...selected,message:"x".repeat(131072)},true],
+  ["create","create",{...selected,message:"x".repeat(131072),preview_digest:digest},true],
+  ["status","status",selected,false],["read","read",selected,false],
+  ["consume","consume",{...selected,initial_digest:digest},true],
+  ["consume_status","consume/status",{...selected,initial_digest:digest},false],
+  ["turn_preview","turn/preview",{...selected,initial_digest:digest,turn_key:"original-turn",message:"original"},true],
+  ["turn","turn",{...selected,initial_digest:digest,turn_key:"original-turn",message:"original",preview_digest:digest},true],
+  ["turn_status","turn/status",{...selected,turn_key:"original-turn"},false],
+  ["turn_read","turn/read",{...selected,turn_key:"original-turn"},false],
+  ["resume_preview","resume/preview",{...selected,resume_key:"original-resume",expected_result_digest:digest},true],
+  ["resume","resume",{...selected,resume_key:"original-resume",expected_result_digest:digest,preview_digest:digest},true],
+  ["resume_status","resume/status",{...selected,resume_key:"original-resume"},false],
+  ["stop","stop",{...selected,stop_key:"original-stop",turn_id:"original-native-turn",binding_digest:digest},true],
+  ["stop_status","stop/status",{...selected,stop_key:"original-stop"},false],
+ ] as const;
+ it("uses fifteen literal paths, exact input bytes and the original two-resource split",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({transport_fixture:true}));
+  for(const [operation,path,request,dual] of cases){
+   await e.client.executive!.freshConversation!.request(operation,request,signal,"native-v2");
+   const [url,options]=e.fetcher.mock.calls.at(-1)!;
+   expect(url).toBe(ORIGIN+"/os/executive/conversation/v2/"+path);
+   expect(JSON.parse(options!.body as string)).toEqual({arguments:request});
+   expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(dual);
+  }
+  expect(e.fetcher).toHaveBeenCalledTimes(15);
+ });
+ it("enforces the native response bound and does not retry a lost original send after logout",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({oversize:"x".repeat(32768)}));
+  await expect(e.client.executive!.freshConversation!.request("status",selected,signal,"native-v2")).rejects.toThrow();
+  const held=deferred<Response>();e.fetcher.mockImplementation(()=>held.promise);
+  const pending=e.client.executive!.freshConversation!.request("turn",cases[7][2],signal,"native-v2"),rejected=expect(pending).rejects.toThrow();
+  await flush();await e.client.signOut();held.resolve(response({unknown:true}));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(2);
+ });
+ it("does not dispatch invalid or unversioned native controls",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  expect(()=>e.client.executive!.freshConversation!.request("stop",cases[13][2],signal)).toThrow();
+  expect(()=>e.client.executive!.freshConversation!.request("turn",{...cases[7][2],message:"x".repeat(131073)},signal,"native-v2")).toThrow();
+  expect(e.fetcher).not.toHaveBeenCalled();
+ });
+});
+
 // New read reuses the independent Executive READ owner, never Workspace/SEND.
 describe("authored company priorities fixed read",()=>{
  it("uses the fixed empty JSON route with READ-only Executive scope",async()=>{

@@ -126,7 +126,9 @@ def _identity_guard_source_path(path: str) -> bool:
 def _identity_guard_evidence_json_path(path: str) -> bool:
     parts = Path(path).parts
     return (not Path(path).is_absolute() and ".." not in parts
-            and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
+            and Path(path).suffix == ".json" and (
+                parts[:2] == ("research", "evidence")
+                or path == "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.json"))
 
 
 def _scan_evidence_identity_literals(document: str) -> list[str]:
@@ -1589,6 +1591,11 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
+# Reviewed C32 source also selects the passive reader from the original retained
+# native dispatch. No new process, event loop, sender or conversation owner.
+# Reviewed C19 source adds only nominal native host selection through the existing
+# armed claimed factory, after the original Runtime exists. No event-loop change;
+# the independent AST anchor, exact call and source-node identity remain pinned.
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Exact source review of the canonical installed wrapper. Keep a pinned
     # full-source digest; never derive it during this test. The pinned digest
@@ -1599,11 +1606,20 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # static literal freezes the combined candidate, not independent review or
     # release authority, and grants no native SEND or installed-release
     # approval.
+    # The adopted/current-context READ and exact live DeepSeekNativeReadSource
+    # compose through the existing SessionBridge and COO owners. JSON/config
+    # cannot mint that native source or arm COO effects. The installed entry
+    # AST and all original mutation refusals remain unchanged; no additional
+    # event loop or execution call is admitted. The native pinned selection
+    # joins the existing claimed factory and keeps primary_factory byte-identical;
+    # its config-currentness wrapper adds no listener, runner or registration.
     # The adopted-context read composition changes this full-file pin. The
     # exact installed entry AST and all ten mutation refusals remain unchanged;
     # no additional event loop or execution call is admitted.
     # The optional sealed observation owner composes with those protected reads;
     # only this final full-file fingerprint changes, never the wrapper AST.
+    # The retained-read resolver import now names its original Session Bridge
+    # owner; its class and the installed event-loop AST are unchanged.
     # The attended configuration adds one optional digest and its strict
     # validation. The installed event-loop anchor remains byte-for-byte the
     # same AST; retain every path, membership and mutation refusal below.
@@ -1611,7 +1627,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'a422011c13b7ee3646aab825a0147e8f224048c9654aa7e924ca189ee3f894ba'):
+            'cf5dce8fb8ae4b5b55bf0a0b4be8c0534fec23c1931f5eab114c7abf026ef353'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -1867,6 +1883,40 @@ def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
     for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
         source = prose + executable
         assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
+
+
+def test_d8_retained_provider_archive_keeps_python_scope_and_identity_guards():
+    path = (
+        "ops/native_fabric/quota_continuity/source/"
+        "provider-application-codex_provider_realm.py.source"
+    )
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "07367ea8db85df09414a7668af8c3c2cfc9fae705a457816071da8177b232623"
+    )
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == []
+    for extra in ("peer_uid = 471\n", "value = 471\npeer_uid = value\n"):
+        changed = source + "\n" + extra
+        assert "471" in _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+        )
+    # The binary size bound is not an identity allowance: changing only the
+    # observed stat field to uid/gid makes the same 512 literal security relevant.
+    for field in ("st_uid", "st_gid"):
+        changed = source.replace("0 < before.st_size <= 512", f"0 < before.{field} <= 512", 1)
+        assert changed != source
+        assert "512" in _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+        )
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(path, source),
+            source_postimages={path: source.replace("512 * 1024", "513 * 1024", 1)},
+        )
 
 
 _D8_PR1572_CSS = "\n".join([
@@ -3378,6 +3428,65 @@ def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
     assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
 
 
+
+_DSH_NATIVE_HOST_PATCH = "integrations/deepseek_harness/runtime_compat/native-host-admission.patch"
+
+
+def _d8_native_host_scan(source, *, path=_DSH_NATIVE_HOST_PATCH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_native_host_masks_only_two_exact_forbidden_status_tokens():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597"
+    )
+    spans = reviewed_literal_spans(_DSH_NATIVE_HOST_PATCH, source)
+    assert len(spans) == 2
+    lines = source.splitlines()
+    assert [lines[line - 1][start:end] for line, start, end, kind in spans] == ["403", "403"]
+    assert all(kind == "int" for line, start, end, kind in spans)
+    assert _d8_native_host_scan(source) == []
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _DSH_NATIVE_HOST_PATCH),
+    (True, "integrations/deepseek_harness/runtime_compat/foreign.patch"),
+])
+def test_d8_native_host_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    assert _d8_native_host_scan(source, path=path, postimage=postimage) == ["403", "403"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("status: 403", "status: 459", ["459", "459"]),
+    (" || this.ownerRestricted", " || false", ["403", "403"]),
+    ("", "\n+peer_uid = 501\n", ["403", "403", "501"]),
+    ("", "\n# source drift\n", ["403", "403"]),
+])
+def test_d8_native_host_drift_keeps_all_identity_checks(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    changed = source.replace(old, new) if old else source + new
+    assert reviewed_literal_spans(_DSH_NATIVE_HOST_PATCH, changed) == ()
+    assert _d8_native_host_scan(changed) == expected
+
+
+def test_d8_native_host_rejects_false_postimage():
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_DSH_NATIVE_HOST_PATCH, source),
+            source_postimages={_DSH_NATIVE_HOST_PATCH: source.replace("status: 403", "status: 459")},
+        )
+
+
 def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
     """Exercise the reviewed mode-only statements in real identity context."""
     safe = (
@@ -3400,6 +3509,41 @@ def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
     for line in guarded:
         assert _scan_identity_source_lines([line], path_identity=True), line
 
+
+_NATIVE_RUNTIME_EVIDENCE = "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.json"
+
+
+@pytest.mark.parametrize("fault", ["none", "peer_uid", "nested_identity", "duplicate", "malformed"])
+def test_d8_native_runtime_receipt_uses_structural_evidence_guard(tmp_path, monkeypatch, fault):
+    # Retain the actual immutable receipt and its numeric test count. Only the
+    # disposable negative candidate changes; identity values are still refused.
+    content = (ROOT / _NATIVE_RUNTIME_EVIDENCE).read_text()
+    value = json.loads(content)
+    assert value["qualification"]["tests"]["tests"] == 645
+    if fault == "peer_uid":
+        value["peer_uid"] = 645
+        content = json.dumps(value)
+    elif fault == "nested_identity":
+        value["qualification"]["allowed_peer_uids"] = [645]
+        content = json.dumps(value)
+    elif fault == "duplicate":
+        content = '{"peer_uid":645,"peer_uid":null}'
+    elif fault == "malformed":
+        content = '{"qualification":'
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _NATIVE_RUNTIME_EVIDENCE, content, fault != "none")
+
+
+@pytest.mark.parametrize("path", [
+    "integrations/deepseek_harness/runtime_compat/evidence-lookalike/native-runtime-port-20261107.json",
+    "integrations/deepseek_harness/runtime_compat/config/native-runtime-port-20261107.json",
+    "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.py",
+    "integrations/deepseek_harness/runtime_compat/evidence/other.json",
+])
+def test_d8_native_evidence_path_does_not_exempt_configuration_or_source(tmp_path, monkeypatch, path):
+    assert not _identity_guard_evidence_json_path(path)
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, path, '{"peer_uid":645}', True)
 
 
 _WEB_OBSERVATION_PATH = "integrations/session_bridge/installed_web_observation.py"

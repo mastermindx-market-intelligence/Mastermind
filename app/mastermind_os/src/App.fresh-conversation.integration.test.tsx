@@ -2,11 +2,13 @@
 // Independently authored parent Mac integration. Original Fabric9432 remains
 // unsettled/private-artifact-only; none of its unknown output is consumed.
 // Real App/NativeClient/composeMissionHost/controllers/IndexedDB. ONLY native
-// invoke/listen is inert. The exact source-issued raw fixture is retained below.
+// invoke/listen is inert. The sealed legacy fixture is retained below; the native
+// journey uses one signed owner cohort, including matching donor reply fragments.
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from 'fake-indexeddb';
 import {App} from './App';
+import nativeFixture from './fixtures/native-fresh-app-owner.json';
 import {createNativeClient} from './host';
 import {composeMissionHost} from './compose-mission-host';
 import {decodeLaunchBindingConfig} from './launch-config';
@@ -21,10 +23,18 @@ interface Fixture {
  preview:unknown;create:Record<string,unknown>;status?:unknown;read:{data:{result:{envelope:{summary:string}}}};
  programs:{ok:boolean;result:unknown};programs_before:{ok:boolean;result:unknown};executive_context:{principal_scope:string;verified_expiry:number};clock:{verified_at_seconds:number;exported_at_seconds:number;verified_expiry:number};mission:{ok:boolean;result:unknown};session_context:{http_status:number;body:unknown};
 }
-const actual=JSON.parse(fixtureText) as Fixture;
+const legacy=JSON.parse(fixtureText) as Fixture;
+const actual=nativeFixture;
 // Context and clock are EXACT operands from the same coherent signed owner run.
 const nativeReadAuth={clock_seconds:actual.clock.verified_at_seconds,context:actual.executive_context};
-const summary=actual.read.data.result.envelope.summary;
+const summary=actual.answer;
+// The native content owner validates exact source bytes and every fragment below.
+// Markdown omits the terminal paragraph newline; preserve all visible content.
+const renderedSummary=summary.slice(0,-1);
+const answerMatcher=(_text:string,node:Element|null)=>
+ node?.classList.contains('source-markdown')===true&&node.textContent===renderedSummary;
+const answerNode=()=>screen.queryByText(answerMatcher);
+const findAnswer=()=>screen.findByText(answerMatcher);
 const lookup={work_ref:actual.request.work_ref,operation_key:actual.request.operation_key};
 const disposals:Array<()=>void>=[];
 beforeEach(async()=>{
@@ -32,15 +42,17 @@ beforeEach(async()=>{
  delete (window as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;
  const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');vi.stubGlobal('crypto',webcrypto);
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(nativeReadAuth.clock_seconds*1000));
+ expect(summary.endsWith('\n')).toBe(true);
  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(fixtureText)))).map(value=>value.toString(16).padStart(2,'0')).join('');
  expect(digest).toBe('ad40b0beb2af5656fac926c0c5796c1ba338f1403c6b250b6f05a20c275cf265');
+ expect(legacy.request.operation_key).toMatch(/^mmos-conversation-create-[0-9a-f]{40}$/);
 });
 afterEach(()=>{cleanup();disposals.splice(0).forEach(dispose=>dispose());vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();delete window.MastermindMissionHost;});
 async function setup({holdRead=false,loseCreateReturn=false,pendingAttended=null as 'conversation_consume'|'conversation_turn'|null,removeFreshTransport=false}={}){
  const events=new Map<string,Set<(event:{payload:unknown})=>void>>();
  let finish!:(value:unknown)=>void;
  const pending=new Promise(resolve=>{finish=resolve;});
- let created=false;
+ let created=false,kept=false;
  const invoke=vi.fn(async(command:string,input?:Record<string,unknown>):Promise<unknown>=>{
   if(command==='auth_status')return {status:'signed_in',reason:null,acquisition:true,content:true};
   if(command==='executive_auth_status')return {generation:1,available:true};
@@ -51,14 +63,34 @@ async function setup({holdRead=false,loseCreateReturn=false,pendingAttended=null
   // that exact body. Keep all producer fields unchanged at the correct seam.
   if(command==='read_programs')return structuredClone((created?actual.programs:actual.programs_before).result);
   if(command==='read_mission_v3')return structuredClone(actual.mission.result);
-  if(command==='executive_session_context')return structuredClone(actual.session_context.body);
+  if(command==='executive_project_history_context'){
+   expect(input).toEqual({workRef:actual.request.work_ref});return structuredClone(actual.history_context);
+  }
+  if(command==='executive_project_conversations_read'){
+   const operation=input?.operation,args=input?.arguments as any;
+   if(operation==='fresh_references'){
+    expect(args).toEqual({work_ref:actual.request.work_ref});return structuredClone(kept?actual.catalogue_after_consumed:actual.catalogue);
+   }
+   if(operation==='fresh_read'){
+    if(args.content){
+     const part=actual.fragments.find(part=>part.request.content.offset_bytes===args.content.offset_bytes);
+     expect(part).toBeTruthy();expect(args).toEqual(part!.request);return structuredClone(part!.response);
+    }
+    expect(args).toEqual(actual.window.reference);return structuredClone(kept?actual.window_after_consumed:actual.window);
+   }
+  }
   if(command==='executive_fresh_conversation'){
    const operation=input?.operation;
-   expect(input?.arguments).toEqual(operation==='preview'?actual.request:operation==='create'?actual.create_request:lookup);
+   expect(input?.contract).toBe('native-v2');
+   expect(input?.arguments).toEqual(operation==='preview'?actual.request:operation==='create'?actual.create_request:
+     operation==='consume'||operation==='consume_status'?actual.consume_request:lookup);
    if(operation==='preview')return structuredClone(actual.preview);
    if(operation==='create'){created=true;if(loseCreateReturn)throw Error('EXECUTIVE_TRANSPORT_UNAVAILABLE');return structuredClone(actual.create);}
-   if(operation==='status'){if(!actual.status)throw Error('Source-issued original status fixture required');return structuredClone(actual.status);}
-   if(operation==='read')return holdRead?pending:structuredClone(actual.read);
+   if(operation==='recover')return structuredClone(actual.recover);
+   if(operation==='status')return structuredClone(actual.status);
+   if(operation==='read')return holdRead?pending:structuredClone(kept?actual.read_after_consumed:actual.read);
+   if(operation==='consume'){kept=true;return structuredClone(actual.consume);}
+   if(operation==='consume_status')return structuredClone(kept?actual.consume_status:actual.consume_status_before);
   }
   throw Error('Unlisted inert native command');
  });
@@ -75,7 +107,7 @@ async function setup({holdRead=false,loseCreateReturn=false,pendingAttended=null
  expect(composed.host.commandBinding?.port.context()).not.toBeNull();
  window.MastermindMissionHost=composed.host;
  const seededPointer=pendingAttended?{kind:pendingAttended,
-  operationKey:`mmos-${pendingAttended.replace('_','-')}-`+'b'.repeat(40),
+   operationKey:'mmos-native-'+pendingAttended.slice('conversation_'.length)+'-'+'b'.repeat(40),
   targetKey:freshConversationTarget(lookup)!}:null;
  if(seededPointer){
   expect(await composed.host.commandBinding!.store.reserve(nativeReadAuth.context.principal_scope,seededPointer)).toEqual({reserved:true});
@@ -98,7 +130,7 @@ async function prepare(e:Awaited<ReturnType<typeof setup>>){
  await waitFor(()=>expect((project as HTMLSelectElement).disabled).toBe(false));
  fireEvent.change(project,{target:{value:actual.request.work_ref}});
  fireEvent.change(screen.getByRole('textbox',{name:'First message'}),{target:{value:actual.request.message}});
- vi.spyOn(crypto,'getRandomValues').mockImplementation(value=>{for(let i=0;i<20;i++)(value as Uint8Array)[i]=i+1;return value;});
+ vi.spyOn(crypto,'getRandomValues').mockImplementation(value=>{for(let i=0;i<20;i++)(value as Uint8Array)[i]=0xaa;return value;});
  // The real IDB owner must finish its pending-first lookup before Review.
  // A disabled click is deliberately inert; source data/field readiness alone
  // does not prove this original-operation check has settled.
@@ -112,12 +144,26 @@ async function create(e:Awaited<ReturnType<typeof setup>>){
  await prepare(e);fireEvent.click(screen.getByRole('button',{name:'Create conversation'}));
  await screen.findByRole('button',{name:'Open initial response'});
  expect(e.calls('create')).toHaveLength(1);
- expect(screen.queryByText(summary)).toBeNull();
+ expect(answerNode()).toBeNull();
+}
+async function openAnswer(e:Awaited<ReturnType<typeof setup>>){
+ fireEvent.click(await screen.findByRole('button',{name:'Open initial response'}));
+ const read=await screen.findByRole('button',{name:'Read recorded conversation'});
+ const count=(op:string)=>e.invoke.mock.calls.filter(([name,args])=>name==='executive_project_conversations_read'&&args?.operation===op).length;
+ const beforeCatalogue=count('fresh_references'),beforeWindow=count('fresh_read');
+ await waitFor(()=>{expect(read).toHaveProperty('disabled',false);fireEvent.click(read);});
+ await waitFor(()=>expect(count('fresh_references')).toBeGreaterThan(beforeCatalogue));
+ await waitFor(()=>expect(count('fresh_read')).toBeGreaterThan(beforeWindow));
+ const beforeContent=e.invoke.mock.calls.filter(([name,args])=>name==='executive_project_conversations_read'&&
+  args?.operation==='fresh_read'&&(args.arguments as any)?.content).length;
+ fireEvent.click(await screen.findByRole('button',{name:'Read reply'}));
+ await findAnswer();
+ expect(e.invoke.mock.calls.filter(([name,args])=>name==='executive_project_conversations_read'&&
+  args?.operation==='fresh_read'&&(args.arguments as any)?.content)).toHaveLength(beforeContent+actual.fragments.length);
 }
 it('joins global New/project/message/Preview/Create once to the exact initial response and Back query/focus',async()=>{
  const e=await setup();await create(e);
- fireEvent.click(screen.getByRole('button',{name:'Open initial response'}));
- await screen.findByText(summary);
+ await openAnswer(e);
  expect(e.calls('preview')).toHaveLength(1);expect(e.calls('create')).toHaveLength(1);
  expect(e.invoke.mock.calls.filter(([name])=>['executive_submit','executive_session_reply','executive_session_send'].includes(name))).toHaveLength(0);
  fireEvent.click(screen.getByRole('button',{name:'Back to conversations'}));
@@ -131,20 +177,22 @@ it('keeps a timed-out Create UNKNOWN and recovers the same original across pendi
  const store=e.host.commandBinding!.store,scope=nativeReadAuth.context.principal_scope;
  expect(await store.read(scope)).toEqual({kind:'conversation_create',operationKey:actual.request.operation_key,targetKey:actual.request.work_ref});
  const originalUrl=location.href;expect(originalUrl).toContain(actual.request.operation_key);
+ const readsBeforeRemount=e.calls('read').length;
  e.view.unmount();history.replaceState(null,'',originalUrl);const reopened=e.mount();
- const check=await screen.findByRole('button',{name:'Check original request'});
- expect(e.calls('status')).toHaveLength(0);expect(e.calls('read')).toHaveLength(0);
+ const check=await screen.findByRole('button',{name:'Check initial request'});
+ expect(e.calls('recover')).toHaveLength(0);expect(e.calls('status')).toHaveLength(0);expect(e.calls('read')).toHaveLength(readsBeforeRemount);
  fireEvent.click(check);
  await screen.findByRole('button',{name:'Open initial response'});
- expect(e.calls('status')).toHaveLength(1);expect(await store.read(scope)).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Open initial response'}));await screen.findByText(summary);
+ expect(e.calls('recover')).toHaveLength(1);expect(e.calls('status')).toHaveLength(0);expect(await store.read(scope)).toBeNull();
+ await openAnswer(e);
  reopened.unmount();history.replaceState(null,'',originalUrl);e.mount();
- const terminalCheck=await screen.findByRole('button',{name:'Check original request'});
+ const terminalCheck=await screen.findByRole('button',{name:'Check initial request'});
  const before=e.calls('read').length;fireEvent.click(terminalCheck);
  await waitFor(()=>expect(e.calls('read').length).toBeGreaterThan(before));
- fireEvent.click(await screen.findByRole('button',{name:'Open initial response'}));await screen.findByText(summary);
+ await openAnswer(e);
  expect(e.calls('preview')).toHaveLength(1);expect(e.calls('create')).toHaveLength(1);
- for(const [,args] of [...e.calls('read'),...e.calls('status')])expect(args?.arguments).toEqual(lookup);
+ expect(e.calls('recover')).toHaveLength(1);expect(e.calls('status')).toHaveLength(0);
+ for(const [,args] of [...e.calls('read'),...e.calls('recover'),...e.calls('status')])expect(args?.arguments).toEqual(lookup);
 });
 it('refuses a prepared Create after global Host replacement without any render or notification',async()=>{
  const e=await setup();await prepare(e);
@@ -152,20 +200,20 @@ it('refuses a prepared Create after global Host replacement without any render o
  window.MastermindMissionHost={...e.host};
  fireEvent.click(createButton);await act(async()=>{});
  expect(e.calls('create')).toHaveLength(0);expect(e.calls('read')).toHaveLength(0);
- expect(screen.queryByText(summary)).toBeNull();
+ expect(answerNode()).toBeNull();
 });
 it('withholds the exact late initial result after actual native Executive epoch loss without replay',async()=>{
  const e=await setup({holdRead:true});await prepare(e);
  fireEvent.click(screen.getByRole('button',{name:'Create conversation'}));
  await waitFor(()=>expect(e.calls('read')).toHaveLength(1));
  act(()=>e.withdrawExecutive());await act(async()=>e.finish(structuredClone(actual.read)));
- expect(screen.queryByText(summary)).toBeNull();expect(e.calls('create')).toHaveLength(1);
+ expect(answerNode()).toBeNull();expect(e.calls('create')).toHaveLength(1);
  expect(e.calls('preview')).toHaveLength(1);expect(location.href).toContain(actual.request.operation_key);
 });
 
 it.each(['conversation_consume','conversation_turn'] as const)('routes closed attended pointers to their original Fresh owner without a generic corruption banner (%s)',async kind=>{
  const e=await setup({pendingAttended:kind});
- const check=await screen.findByRole('button',{name:'Check original request'});
+ const check=await screen.findByRole('button',{name:'Check initial request'});
  await waitFor(()=>expect(check).toHaveProperty('disabled',false));
  expect(screen.queryByText('MALFORMED_POINTER')).toBeNull();
  expect(screen.queryByRole('heading',{name:'Operation recovery'})).toBeNull();

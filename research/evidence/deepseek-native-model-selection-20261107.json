@@ -1,0 +1,182 @@
+{
+  "actual_python_syntax": {
+    "compiled_source_paths": [
+      "integrations/deepseek_harness/native_connection.py",
+      "integrations/deepseek_harness/operator_adapter.py",
+      "control_plane/executive_worker_broker.py",
+      "scripts/ohf/acp_probe_boundary.py"
+    ],
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ],
+    "interpreter": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "version": "3.12.10"
+  },
+  "changes": {
+    "control_plane/executive_worker_broker.py": "0161051fee4f90bf9c5c108c6dbd9e42d5444bfa97f4c456e9b7570d15ee785c",
+    "integrations/deepseek_harness/native_connection.py": "35d71e4bc51666ef0a9a019624f37c2ab6ae983d65c97138c99a1eaee4f4b437",
+    "integrations/deepseek_harness/operator_adapter.py": "eb775d58e7453083b52f540a85a5eecb4a4c7d24089299febfc4f3652ef98fa0",
+    "scripts/ohf/acp_probe_boundary.py": "3b50cc064b4ea78980786b3471d740eeaed4067f78173bcfabe3e539f2256bca",
+    "tests/test_dsh_native_model_selection.py": "78b4c3a40c8d0b07c46c9f392b342ea81980c29da78fd17fdf1464e3b336c614"
+  },
+  "diagnostics": [
+    "The first real SDK test found the frame reader rejects setup config notices before the callback; existing trusted finite frame policy now admits the exact bound notice.",
+    "The final source-only review checked pinned SDK notification scheduling and found no current response/callback counter race; no extra callback-drain owner added."
+  ],
+  "governing_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "operation": "deepseek-mastermind-chat-20261106-c2",
+  "parent_source_sha": "0e27ef6fd430f45d627d6bbdb1b520cff70a2151",
+  "pr": 2177,
+  "preserved": [
+    "original materialization coroutine/future/receipt",
+    "original SDK request and sender queue",
+    "original Session/model-control configuration protocol",
+    "unchanged original test assertions",
+    "closed ordinary prompt callback window"
+  ],
+  "proof_scope": {
+    "accepted_canary_repeated": false,
+    "external_provider_called": false,
+    "installed_acceptance_proven": false,
+    "process_principal": "explicitly inert test fixture",
+    "production_session_created": false,
+    "sdk": "actual agent-client-protocol 0.12.1",
+    "service_restarted": false,
+    "transport": "real local socketpair"
+  },
+  "remaining": [
+    "original donor final model-control assignment guard",
+    "native input and policy ceilings",
+    "same-process native entry",
+    "truthful original account/model/workspace/capability observations",
+    "original installed Worker/quota/host/profile/router registration",
+    "protected source/release identity and signed-in packaged DeepSeek journey"
+  ],
+  "schema": "mastermind.deepseek_native_model_selection_qualification/v1",
+  "tests": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "--junitxml=/private/tmp/mmx-dsh-c27-model-selection-20261107-pro1.xml",
+        "tests/test_dsh_native_model_selection.py",
+        "tests/test_dsh_native_protocol.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_acp_worker_turn.py"
+      ],
+      "base_sha": "0e27ef6fd430f45d627d6bbdb1b520cff70a2151",
+      "completed_at": "2026-11-07T22:25:58.706164+00:00",
+      "input_count": 4441,
+      "inputs_unchanged": true,
+      "junit": [
+        {
+          "errors": "0",
+          "failures": "1",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "6",
+          "time": "1.449",
+          "timestamp": "2026-11-07T15:25:56.705495-07:00"
+        }
+      ],
+      "log_sha256": "aeb0ed5df444836e2488473ad49dcc26cfe3c035846099d27527e20d8818d877",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "raw_receipt": {
+        "path": "/private/tmp/mmx-dsh-c27-model-selection-20261107-pro1.json",
+        "sha256": "2f80d25b79affc5f60e2ef7958ce27f183b5420ce1c5d854beab6c9d7b26a1a8"
+      },
+      "returncode": 1,
+      "schema": "mastermind.source_test_receipt/v1",
+      "started_at": "2026-11-07T22:25:55.511810+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "--junitxml=/private/tmp/mmx-dsh-c27-model-selection-20261107-pro2.xml",
+        "tests/test_dsh_native_model_selection.py",
+        "tests/test_dsh_native_protocol.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_acp_worker_turn.py"
+      ],
+      "base_sha": "0e27ef6fd430f45d627d6bbdb1b520cff70a2151",
+      "completed_at": "2026-11-07T22:29:46.111004+00:00",
+      "input_count": 4441,
+      "inputs_unchanged": true,
+      "junit": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "135",
+          "time": "2.320",
+          "timestamp": "2026-11-07T15:29:43.286257-07:00"
+        }
+      ],
+      "log_sha256": "e457fc2e0b95de26724745c670c51a3e4feafbfcbf71b8cc9b56702d9f2deccf",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "raw_receipt": {
+        "path": "/private/tmp/mmx-dsh-c27-model-selection-20261107-pro2.json",
+        "sha256": "4d3c4ee466baee34f2db83244e4e5ec5d0c816eae367139cfd912b6fb340c3b8"
+      },
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "started_at": "2026-11-07T22:29:42.134607+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "--junitxml=/private/tmp/mmx-dsh-c27-model-selection-20261107-pro3.xml",
+        "tests/test_dsh_native_model_selection.py",
+        "tests/test_dsh_native_protocol.py",
+        "tests/test_dsh_native_operator.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_acp_worker_turn.py",
+        "tests/test_acp_probe_boundary.py",
+        "tests/test_native_deepseek_worker_factory.py"
+      ],
+      "base_sha": "0e27ef6fd430f45d627d6bbdb1b520cff70a2151",
+      "completed_at": "2026-11-07T22:32:13.773562+00:00",
+      "input_count": 4441,
+      "inputs_unchanged": true,
+      "junit": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "244",
+          "time": "2.805",
+          "timestamp": "2026-11-07T15:32:10.429809-07:00"
+        }
+      ],
+      "log_sha256": "5ea1acd96c022257efdd835d03967bb312e9aaff7d5c70954b841ae59b8d0f7f",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "raw_receipt": {
+        "path": "/private/tmp/mmx-dsh-c27-model-selection-20261107-pro3.json",
+        "sha256": "087f2cfe8e233ff653d49186a9d02ce73ede2a80bc271b414fa403bb9de4ac5d"
+      },
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "started_at": "2026-11-07T22:32:09.980987+00:00"
+    }
+  ]
+}

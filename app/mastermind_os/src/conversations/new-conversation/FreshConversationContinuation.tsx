@@ -1,7 +1,7 @@
-import {useEffect,useLayoutEffect,useMemo} from "react";
+import {useLayoutEffect,useMemo} from "react";
 import {freshConversationTarget} from "../../orchestration/fresh-conversation-target";
 import type {OwnerContext} from "../../orchestration/operation-controller";
-import type {FreshConversationWindow} from "../fresh-conversation-reference";
+import type {FreshConversationHistoryWindow as FreshConversationWindow} from "../fresh-conversation-reference";
 import type {FreshConversationOriginalRead} from "./fresh-conversation-attended-binding";
 import type {FreshConversationTurnConsumption} from "./fresh-conversation-turn";
 import {useFreshConversationContinuation,type FreshConversationContinuationProps as HookProps} from "./useFreshConversationContinuation";
@@ -34,14 +34,14 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
   const read=useMemo<FreshConversationOriginalRead|null>(()=>{
     if(entry.kind==="initial")return entry.read;
     const {window,current}=entry,locator=window.locator;
-    if(!window.initial_result||!locator.job_id||!locator.attempt_id)return null;
+    if(window.schema==="mastermind.fresh_conversation_window.v3"||!window.initial_result||!locator.job_id||!locator.attempt_id)return null;
     return {selection:{work_ref:window.reference.work_ref,reference:window.reference},
       result:window.initial_result,locator:{work_ref:locator.work_ref,root_job_id:locator.root_job_id,
         job_id:locator.job_id,attempt_id:locator.attempt_id},current};
   },[entry.kind,source,witness]);
   const selection=entry.kind==="initial"?entry.read.selection:
     {work_ref:entry.window.reference.work_ref,reference:entry.window.reference};
-  const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.length>0);
+  const sourceReadOnly=entry.kind==="reference"&&(entry.window.schema==="mastermind.fresh_conversation_window.v3"||entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.some(turn=>turn.state==="RECONCILIATION_REQUIRED"));
   const readIsCurrent=props.active&&read?.current()===true;
   useLayoutEffect(()=>{
     props.onReadCurrent?.(props.active&&read?.current()===true?read:null);
@@ -62,8 +62,10 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
     onMessageChange:message=>{if(props.turnDraft){if(matchesDraft())props.turnDraft.onMessageChange(message);}else props.onMessageChange?.(message);},
     initialConsumption:entry.kind==="reference"?entry.window.initial_consumption:entry.initialConsumption,
     readOnly:props.readOnly||sourceReadOnly});
-  useEffect(()=>{onUnresolvedChange(view.hasUnresolvedOriginal);},[onUnresolvedChange,view.hasUnresolvedOriginal]);
-  useEffect(()=>()=>{onUnresolvedChange(false);},[onUnresolvedChange]);
+  // Close sibling actions before paint when a new read/owner scope starts its
+  // local pending-hint discovery. A passive report can expose a transient action.
+  useLayoutEffect(()=>{onUnresolvedChange(view.hasUnresolvedOriginal);},[onUnresolvedChange,view.hasUnresolvedOriginal]);
+  useLayoutEffect(()=>()=>{onUnresolvedChange(false);},[onUnresolvedChange]);
   // The existing recorded reader renders its own initial and later turns.
   // Only a genuine unresolved original contributes recovery controls here.
   return sourceReadOnly&&!view.hasUnresolvedOriginal?null:view.panel;

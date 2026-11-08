@@ -484,6 +484,11 @@ _COMPONENT_BINDING_ARCHIVES = (
 # The closed shape of the OPTIONAL nested selection member of a component
 # marker.  It is a STRUCTURED member, not a digest: it carries hashes,
 # EXPLICIT presence, the derived destination and the ordered effect.
+_COMPONENT_NATIVE_BINDING_ARCHIVES = (
+    "prior-component-binding-selection.json",
+    "prior-component-native-conversation-input.json",
+    "component-binding-candidate.json",
+)
 _COMPONENT_BINDING_MANIFEST_KEYS = frozenset(
     {
         "input_sha256",
@@ -1370,6 +1375,14 @@ def _parser() -> argparse.ArgumentParser:
         action=_StoreOnce,
         default=None,
     )
+    component_plan.add_argument(
+        "--native-conversation-input", type=_canonical_absolute_path,
+        action=_StoreOnce, default=None,
+    )
+    component_plan.add_argument(
+        "--native-conversation-sha256", type=_exact_digest,
+        action=_StoreOnce, default=None,
+    )
     component_apply = sub.add_parser(
         "apply-control-component",
         help="Publish exactly the approved Control component plan.",
@@ -1391,6 +1404,14 @@ def _parser() -> argparse.ArgumentParser:
         type=_exact_digest,
         action=_StoreOnce,
         default=None,
+    )
+    component_apply.add_argument(
+        "--native-conversation-input", type=_canonical_absolute_path,
+        action=_StoreOnce, default=None,
+    )
+    component_apply.add_argument(
+        "--native-conversation-sha256", type=_exact_digest,
+        action=_StoreOnce, default=None,
     )
     component_reconcile = sub.add_parser(
         "reconcile-control-component",
@@ -8289,6 +8310,10 @@ _COMPONENT_REFUSAL_CODES = frozenset(
         "control_component_plan_digest_mismatch",
         "control_component_hermes_read_selector_incomplete",
         "control_component_hermes_read_input_invalid",
+        "control_component_native_conversation_selector_incomplete",
+        "control_component_native_conversation_input_invalid",
+        "control_component_native_conversation_binding_conflict",
+        "control_component_selection_conflict",
         "control_component_hermes_read_binding_invalid",
         "control_component_hermes_read_binding_conflict",
         "control_component_binding_config_not_switched",
@@ -8332,7 +8357,11 @@ def _component_archive_names(manifest: Mapping[str, Any]) -> tuple[str, ...]:
 
     names = list(_COMPONENT_ARCHIVES)
     if type(manifest.get("component_binding")) is dict:
-        names.extend(_COMPONENT_BINDING_ARCHIVES)
+        member = manifest["component_binding"]
+        _require_component_binding_member(member)
+        names.extend(_COMPONENT_NATIVE_BINDING_ARCHIVES
+                     if member.get("input_kind") == "native_conversation"
+                     else _COMPONENT_BINDING_ARCHIVES)
     return tuple(names)
 
 
@@ -8348,7 +8377,11 @@ def _require_component_binding_member(value: Any) -> None:
 
     from ops.executive_os import control_component_update as compiler
 
-    if type(value) is not dict or set(value) != _COMPONENT_BINDING_MANIFEST_KEYS:
+    if type(value) is not dict:
+        raise TransactionEffectUnknown()
+    native = value.get("input_kind") == "native_conversation"
+    expected_keys = _COMPONENT_BINDING_MANIFEST_KEYS | ({"input_kind"} if native else set())
+    if set(value) != expected_keys or native and value.get("prior_selector_present") is not True:
         raise TransactionEffectUnknown()
     for field in ("destination_present", "prior_selector_present", "execution_present"):
         if type(value.get(field)) is not bool:
@@ -9097,7 +9130,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         return True, raw
 
     def _component_binding_selection(
-        self, hermes_read: tuple[str, str], control: Mapping[str, Any]
+        self, hermes_read: tuple[str, str], control: Mapping[str, Any], *,
+        input_kind: str | None = None,
     ) -> dict[str, Any]:
         """Qualify ONE Hermes host-read selection and compose its candidate.
 
@@ -9126,7 +9160,10 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             # The EXISTING validator qualifies the read member: its schema,
             # its host reference, its source pins and its TLS transport.
             # There is no second validator here.
-            composition.HermesHostObservationBinding.from_document(input_document)
+            if input_kind is None:
+                composition.HermesHostObservationBinding.from_document(input_document)
+            elif input_kind != "native_conversation":
+                raise composition.FabricCompositionError("Unknown component selection kind")
         except (composition.FabricCompositionError, OSError, ValueError) as exc:
             raise _component_refusal(
                 "control_component_hermes_read_input_invalid"
@@ -9139,6 +9176,9 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         prior_transports: tuple[Mapping[str, Any], ...] = ()
         prior_secretary_conversation = None
         prior_meta_conversation = None
+        prior_native_conversation = None
+        prior_document = {}
+        prior_parts = None
         prior_raw = b""
         prior_binding_sha256 = ""
         if selector_present:
@@ -9165,7 +9205,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                     composition._absolute_path(prior_path), prior_digest
                 )
                 # The incumbent closed parser qualifies the complete prior binding.
-                composition._composition(prior_raw)
+                prior_parts = composition._composition_parts(prior_raw)
                 prior_document = composition._document(prior_raw)
             except (composition.FabricCompositionError, OSError, ValueError) as exc:
                 raise _component_refusal(
@@ -9175,6 +9215,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             prior_transports = tuple(prior_document.get("remote_transports") or ())
             prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
             prior_meta_conversation = prior_document.get("hermes_meta_conversation")
+            prior_native_conversation = prior_document.get("native_conversation")
             prior_binding_sha256 = sha256_bytes(prior_raw)
             if "canonical_paid_fabric" in control and (
                 prior_bindings or prior_transports
@@ -9186,12 +9227,31 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                     "control_component_hermes_read_binding_conflict"
                 )
 
+        if input_kind == "native_conversation":
+            try:
+                if (not selector_present or prior_parts is None
+                        or prior_document.get("schema_version") not in (
+                            composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                            composition.NATIVE_CONFIG_SCHEMA_VERSION)
+                        or prior_secretary_conversation is None or prior_meta_conversation is None
+                        or prior_native_conversation is not None
+                        and prior_native_conversation != input_document):
+                    raise composition.FabricCompositionError("Original native selection cannot be replaced")
+                # These are expected facts, not a live Worker/account admission.
+                # The original Runtime binding still joins its own registry.
+                composition.NativeOperatorHostSelection.from_document(input_document, prior_parts[2])
+                prior_native_conversation = input_document
+                input_document = prior_document["hermes_role_metadata_read"]
+            except (composition.FabricCompositionError, KeyError, ValueError) as exc:
+                raise _component_refusal("control_component_native_conversation_binding_conflict") from exc
+
         composed = compiler.compose_binding_candidate(
             input_document=input_document,
             prior_bindings=prior_bindings,
             prior_remote_transports=prior_transports,
             prior_secretary_conversation=prior_secretary_conversation,
             prior_meta_conversation=prior_meta_conversation,
+            prior_native_conversation=prior_native_conversation,
         )
         try:
             # Use the actual consumer's byte ceiling before the transaction
@@ -9223,12 +9283,14 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             )
         return {
             "input_document": input_document,
+            "input_kind": input_kind,
             "input_raw": input_raw,
             "input_sha256": input_sha256,
             "prior_bindings": prior_bindings,
             "prior_remote_transports": prior_transports,
             "prior_secretary_conversation": prior_secretary_conversation,
             "prior_meta_conversation": prior_meta_conversation,
+            "prior_native_conversation": prior_native_conversation,
             "prior_raw": prior_raw,
             "prior_binding_sha256": prior_binding_sha256,
             "prior_selector_present": selector_present,
@@ -9239,7 +9301,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         }
 
     def observe_control_component_update(
-        self, *, target_sha: str, hermes_read: tuple[str, str] | None = None
+        self, *, target_sha: str, hermes_read: tuple[str, str] | None = None,
+        native_conversation: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         """Read-only observation: the plan and the exact candidate it binds.
 
@@ -9366,14 +9429,21 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         try:
             selection = None
             binding = None
-            if hermes_read is not None:
-                binding = self._component_binding_selection(hermes_read, control)
+            if hermes_read is not None and native_conversation is not None:
+                raise _component_refusal("control_component_selection_conflict")
+            if hermes_read is not None or native_conversation is not None:
+                binding = (self._component_binding_selection(
+                    native_conversation, control, input_kind="native_conversation")
+                    if native_conversation is not None
+                    else self._component_binding_selection(hermes_read, control))
                 selection = compiler.BindingSelectionInputs(
                     input_document=binding["input_document"],
+                    input_kind=binding.get("input_kind"),
                     prior_bindings=binding["prior_bindings"],
                     prior_remote_transports=binding["prior_remote_transports"],
                     prior_secretary_conversation=binding["prior_secretary_conversation"],
                     prior_meta_conversation=binding["prior_meta_conversation"],
+                    prior_native_conversation=binding["prior_native_conversation"],
                     input_sha256=binding["input_sha256"],
                     prior_binding_sha256=binding["prior_binding_sha256"],
                     prior_selector_present=binding["prior_selector_present"],
@@ -9554,11 +9624,9 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         ProductionTransactionHost._seal_generation(
             self, generation, transaction, operation=operation
         )
-        archives = list(_COMPONENT_ARCHIVES)
-        if "component-binding-candidate.json" in self._component_prior_archives:
-            # The coordinated selection archives exist only for a
-            # transaction that sealed a selection.
-            archives.extend(_COMPONENT_BINDING_ARCHIVES)
+        archives = _component_archive_names(
+            {"component_binding": self._component_binding_metadata}
+            if self._component_binding_metadata is not None else {})
         for name in archives:
             _atomic_file(
                 generation / name,
@@ -10347,6 +10415,7 @@ def execute_control_component_update(
     target_sha: str,
     plan_sha256: str,
     hermes_read: tuple[str, str] | None = None,
+    native_conversation: tuple[str, str] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Publish exactly the approved Control component plan.
@@ -10366,9 +10435,10 @@ def execute_control_component_update(
     from ops.executive_os import control_component_update as compiler
 
     host.effective_uid()
-    observation = host.observe_control_component_update(
-        target_sha=target_sha, hermes_read=hermes_read
-    )
+    options = dict(target_sha=target_sha, hermes_read=hermes_read)
+    if native_conversation is not None:
+        options["native_conversation"] = native_conversation
+    observation = host.observe_control_component_update(**options)
     document = observation["plan"]
     if compiler.plan_digest(document) != plan_sha256:
         raise _component_refusal("control_component_plan_digest_mismatch")
@@ -10438,7 +10508,7 @@ def execute_control_component_update(
         host._component_binding_metadata = dict(candidate.selection.document())
         host._component_binding_candidate_bytes = binding["candidate_bytes"]
         host._component_binding_input = (
-            hermes_read if hermes_read is not None else None
+            native_conversation if native_conversation is not None else hermes_read
         )
         host._component_binding_prior_raw = binding["prior_raw"]
         host._component_binding_prior_selector_present = bool(
@@ -10447,7 +10517,9 @@ def execute_control_component_update(
         host._component_prior_archives.update(
             {
                 "prior-component-binding-selection.json": binding["prior_raw"],
-                "prior-component-hermes-read-input.json": binding["input_raw"],
+                ("prior-component-native-conversation-input.json"
+                 if candidate.selection.input_kind == "native_conversation"
+                 else "prior-component-hermes-read-input.json"): binding["input_raw"],
                 "component-binding-candidate.json": binding["candidate_bytes"],
             }
         )
@@ -10663,7 +10735,9 @@ def _reconcile_control_component_update(
         from control_plane import executive_fabric_composition as composition
 
         try:
-            input_raw = archives["prior-component-hermes-read-input.json"]
+            native_input = member.get("input_kind") == "native_conversation"
+            input_raw = archives["prior-component-native-conversation-input.json"
+                                 if native_input else "prior-component-hermes-read-input.json"]
             prior_raw = archives["prior-component-binding-selection.json"]
             candidate_raw = archives["component-binding-candidate.json"]
             # Recovery joins every original archive to its sealed bytes,
@@ -10701,24 +10775,48 @@ def _reconcile_control_component_update(
                 prior_transports = ()
             # The original sealed candidate identifies its composition policy.
             # Historical v3 transactions retain their original bytes even when
-            # an older writer omitted a prior conversation. New v4/v5 candidates
+            # an older writer omitted a prior conversation. New v4/v5/v6 candidates
             # preserve the complete matching prior family; never reinterpret a
             # claimed transaction from fresh installed selections.
             prior_secretary_conversation = None
             prior_meta_conversation = None
+            prior_native_conversation = None
             candidate_schema = candidate_document.get("schema_version")
-            if candidate_schema in (
+            if native_input:
+                if (not member["prior_selector_present"]
+                        or candidate_schema != composition.NATIVE_CONFIG_SCHEMA_VERSION
+                        or prior_document.get("schema_version") not in (
+                            composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                            composition.NATIVE_CONFIG_SCHEMA_VERSION)):
+                    raise TransactionEffectUnknown()
+                prior_parts = composition._composition_parts(prior_raw)
+                if (prior_document.get("native_conversation") is not None
+                        and prior_document["native_conversation"] != input_document):
+                    raise TransactionEffectUnknown()
+                composition.NativeOperatorHostSelection.from_document(input_document, prior_parts[2])
+                prior_native_conversation = input_document
+                input_document = prior_document["hermes_role_metadata_read"]
+                prior_secretary_conversation = prior_document["hermes_secretary_conversation"]
+                prior_meta_conversation = prior_document["hermes_meta_conversation"]
+                composition._composition_parts(candidate_raw)
+            elif candidate_schema in (
                 composition.SECRETARY_CONFIG_SCHEMA_VERSION,
                 composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                composition.NATIVE_CONFIG_SCHEMA_VERSION,
             ):
                 if prior_document.get("schema_version") != candidate_schema:
                     raise TransactionEffectUnknown()
                 prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
                 if type(prior_secretary_conversation) is not dict:
                     raise TransactionEffectUnknown()
-                if candidate_schema == composition.CONVERSATION_CONFIG_SCHEMA_VERSION:
+                if candidate_schema in (composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                                        composition.NATIVE_CONFIG_SCHEMA_VERSION):
                     prior_meta_conversation = prior_document.get("hermes_meta_conversation")
                     if type(prior_meta_conversation) is not dict:
+                        raise TransactionEffectUnknown()
+                if candidate_schema == composition.NATIVE_CONFIG_SCHEMA_VERSION:
+                    prior_native_conversation = prior_document.get("native_conversation")
+                    if type(prior_native_conversation) is not dict:
                         raise TransactionEffectUnknown()
             elif candidate_schema != composition.HOST_READ_CONFIG_SCHEMA_VERSION:
                 raise TransactionEffectUnknown()
@@ -10728,6 +10826,7 @@ def _reconcile_control_component_update(
                 prior_remote_transports=prior_transports,
                 prior_secretary_conversation=prior_secretary_conversation,
                 prior_meta_conversation=prior_meta_conversation,
+                prior_native_conversation=prior_native_conversation,
             )
         except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
             raise TransactionEffectUnknown() from exc
@@ -10746,6 +10845,8 @@ def _reconcile_control_component_update(
             prior_remote_transports=prior_transports,
             prior_secretary_conversation=prior_secretary_conversation,
             prior_meta_conversation=prior_meta_conversation,
+            prior_native_conversation=prior_native_conversation,
+            input_kind=member.get("input_kind"),
             input_sha256=str(member["input_sha256"]),
             prior_binding_sha256=str(member["prior_binding_sha256"]),
             prior_selector_present=bool(member["prior_selector_present"]),
@@ -11074,6 +11175,8 @@ def _run_control_component_command(
                 hermes_read_sha256=getattr(
                     args, "hermes_role_metadata_read_sha256", None
                 ),
+                native_conversation_input=getattr(args, "native_conversation_input", None),
+                native_conversation_sha256=getattr(args, "native_conversation_sha256", None),
             )
         elif args.command == "apply-control-component":
             document = compiler.apply(
@@ -11086,6 +11189,8 @@ def _run_control_component_command(
                 hermes_read_sha256=getattr(
                     args, "hermes_role_metadata_read_sha256", None
                 ),
+                native_conversation_input=getattr(args, "native_conversation_input", None),
+                native_conversation_sha256=getattr(args, "native_conversation_sha256", None),
             )
         else:
             document = compiler.reconcile(host, target_sha=args.expected_sha)

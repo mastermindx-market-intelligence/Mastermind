@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Protocol, Sequence
 
 from control_plane.operator_harness_contract import (
@@ -50,6 +50,11 @@ from control_plane.executive_orchestration_result import (
     RawRoleResultObservation,
 )
 
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT, NativeConversationResultAdapter,
+    NativeConversationResultObservation, NativeConversationResultRef, NativeConversationBeginObservation,
+)
+
 
 class OperatorHarnessOrchestrationError(RuntimeError):
     """A rich-harness operation could not be completed safely."""
@@ -57,6 +62,16 @@ class OperatorHarnessOrchestrationError(RuntimeError):
 
 class OperatorEffectUnknown(OperatorHarnessOrchestrationError):
     """A provider side effect may have occurred and must not be replayed."""
+
+
+class NativeTurnPending(OperatorEffectUnknown):
+    """Custody of one original native turn, without a retry or ACK claim."""
+
+    def __init__(self, message, turn, operation_id, cursor=None):
+        super().__init__(message)
+        if type(turn) is not TurnRef or type(operation_id) is not OperationId:
+            raise ValueError("pending native turn needs original typed identities")
+        self.turn, self.operation_id, self.cursor = turn, operation_id, cursor
 
 
 class OperatorOperationApplied(OperatorHarnessOrchestrationError):
@@ -154,6 +169,9 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         operation_kind: str,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None: ...
 
     def begin_operator_checkpoint(
@@ -177,6 +195,9 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         observation: ReconcileObservation,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None: ...
 
     def cancel_operator_generation(
@@ -265,6 +286,7 @@ class OperatorTurnReceipt:
     events: tuple[NormalizedEvent, ...]
     cursor: EventCursor
     candidate: CandidateResult
+    native_result: NativeConversationResultRef | None = None
 
 
 class OperatorHarnessOrchestrator:
@@ -318,6 +340,23 @@ class OperatorHarnessOrchestrator:
         raise OperatorOperationApplied(
             f"operation {operation_id.command_id} was durably applied before local failure"
         ) from error
+
+    def _mark_turn_effect_unknown(self, session, *, turn, operation_id, phase, error,
+                                  native, cursor, proven_no_effect=False):
+        try:
+            self._mark_effect_unknown(attempt_id=session.attempt_id, operation_id=operation_id,
+                                      phase=phase, error=error)
+        except OperatorOperationApplied:
+            if not native:
+                raise
+        except Exception as exc:
+            if native and not proven_no_effect:
+                # The original dispatch may already have reached the provider.
+                # Failure to persist its uncertainty must not enter cleanup.
+                self._effect_unknown.add(operation_id.command_id)
+                raise NativeTurnPending("original native receipt could not be persisted",
+                                        turn, operation_id, cursor) from exc
+            raise
 
     def _observe_required_principal(
         self,
@@ -505,12 +544,15 @@ class OperatorHarnessOrchestrator:
         _before_role_seal: Callable[
             [OperatorTurnReceipt, RawRoleResultObservation], None
         ] | None = None,
+        _on_turn_applied: Callable[[TurnRef], None] | None = None,
     ) -> OperatorTurnReceipt:
         """Issue one turn and persist only a candidate result, never Job completion."""
 
         self._assert_replayable(operation_id)
         if _before_role_seal is not None and not callable(_before_role_seal):
             raise OperatorHarnessOrchestrationError("trusted turn consumer is invalid")
+        if _on_turn_applied is not None and not callable(_on_turn_applied):
+            raise OperatorHarnessOrchestrationError("active turn observer is invalid")
         bounded_timeout = float(timeout_seconds)
         if (
             not math.isfinite(bounded_timeout)
@@ -525,6 +567,20 @@ class OperatorHarnessOrchestrator:
                 "work turn refused by observed launch comparison: "
                 + session.launch.decision.value
             )
+        contract_reader = getattr(self.runtime, "operator_result_contract", None)
+        if contract_reader is not None and not callable(contract_reader):
+            raise OperatorHarnessOrchestrationError("result contract reader is invalid")
+        contract = contract_reader(session.attempt_id) if contract_reader is not None else ROLE_RESULT_CONTRACT
+        if contract not in {ROLE_RESULT_CONTRACT, DSH_NATIVE_RESULT_CONTRACT}:
+            raise OperatorHarnessOrchestrationError("unknown immutable result contract")
+        declared_contract = getattr(self.adapter, "result_contract", ROLE_RESULT_CONTRACT)
+        if declared_contract != contract:
+            raise OperatorHarnessOrchestrationError("adapter differs from original result contract")
+        native = contract == DSH_NATIVE_RESULT_CONTRACT
+        native_sealer = getattr(self.runtime, "seal_operator_native_result", None)
+        if native and (not isinstance(self.adapter, NativeConversationResultAdapter)
+                       or not callable(native_sealer) or _before_role_seal is not None):
+            raise OperatorHarnessOrchestrationError("native result requires its original typed consumer")
         # The optional owner read keeps ordinary RuntimePort implementations
         # on their original role-sealing path. Models cannot select this policy.
         plan_reader = getattr(self.runtime, "existing_interactive_plan_seal", None)
@@ -532,7 +588,7 @@ class OperatorHarnessOrchestrator:
             raise OperatorHarnessOrchestrationError("interactive plan reader is invalid")
         initial_plan = (
             plan_reader(session.attempt_id, session.generation)
-            if plan_reader is not None else None
+            if plan_reader is not None and not native else None
         )
         if initial_plan is not None and (
             type(initial_plan) is not str or len(initial_plan) != 64
@@ -564,36 +620,138 @@ class OperatorHarnessOrchestrator:
                 launch=session.launch,
             )
         except Exception as exc:
-            self._mark_effect_unknown(
-                attempt_id=session.attempt_id,
-                operation_id=operation_id,
-                phase="begin_turn",
-                error=exc,
-            )
+            from control_plane.remote_worker_transport import TransportError, TransportEffect
+            proven_no_effect = isinstance(exc, TransportError) and exc.classification is TransportEffect.NO_EFFECT
+            self._mark_turn_effect_unknown(session, turn=turn, operation_id=operation_id,
+                phase="begin_turn", error=exc, native=native, cursor=cursor, proven_no_effect=proven_no_effect)
+            if native and not proven_no_effect:
+                return self.recover_native_turn(session, operation_id=operation_id,
+                    expected_turn=turn, cursor=cursor, timeout_seconds=bounded_timeout,
+                    _on_turn_applied=_on_turn_applied)
             raise OperatorEffectUnknown(
                 "begin_turn external effect is unknown"
             ) from exc
         if not started.acknowledged:
             exc = OperatorEffectUnknown("provider did not acknowledge begin_turn")
-            self._mark_effect_unknown(
-                attempt_id=session.attempt_id,
-                operation_id=operation_id,
-                phase="begin_turn_ack",
-                error=exc,
-            )
+            self._mark_turn_effect_unknown(session, turn=turn, operation_id=operation_id,
+                phase="begin_turn_ack", error=exc, native=native, cursor=cursor)
+            if native:
+                return self.recover_native_turn(session, operation_id=operation_id,
+                    expected_turn=turn, cursor=cursor, timeout_seconds=bounded_timeout,
+                    _on_turn_applied=_on_turn_applied)
             raise OperatorEffectUnknown(
                 "provider did not acknowledge begin_turn"
             ) from exc
         try:
             self.runtime.apply_operator_turn(session.attempt_id, operation_id, started)
         except Exception as exc:
-            self._mark_effect_unknown(
-                attempt_id=session.attempt_id,
-                operation_id=operation_id,
-                phase="bind_turn_result",
-                error=exc,
-            )
+            self._mark_turn_effect_unknown(session, turn=turn, operation_id=operation_id,
+                phase="bind_turn_result", error=exc, native=native, cursor=cursor)
+            if native:
+                return self.recover_native_turn(session, operation_id=operation_id,
+                    expected_turn=turn, cursor=cursor, timeout_seconds=bounded_timeout,
+                    _on_turn_applied=_on_turn_applied)
             raise OperatorEffectUnknown("turn result could not be bound") from exc
+
+        return self._collect_acknowledged_turn(session, operation_id=operation_id, turn=turn,
+            started=started, cursor=cursor, bounded_timeout=bounded_timeout, native=native,
+            initial_plan=initial_plan, plan_reader=plan_reader, native_sealer=native_sealer,
+            _before_role_seal=_before_role_seal, _on_turn_applied=_on_turn_applied)
+
+
+    def recover_native_turn(
+        self, session, *, operation_id, expected_turn=None, cursor=None,
+        timeout_seconds=30.0, _on_turn_applied=None,
+    ):
+        """Keep custody even when an original recovery read loses its source."""
+        if (type(expected_turn) is not TurnRef or type(operation_id) is not OperationId
+                or expected_turn.attempt_id != session.attempt_id
+                or expected_turn.session_epoch_id != session.epoch.session_epoch_id
+                or expected_turn.process_generation_id != session.generation.process_generation_id):
+            raise OperatorHarnessOrchestrationError("native recovery needs its retained original target")
+        try:
+            return self._recover_native_turn(session, operation_id=operation_id, expected_turn=expected_turn,
+                cursor=cursor, timeout_seconds=timeout_seconds, _on_turn_applied=_on_turn_applied)
+        except NativeTurnPending:
+            raise
+        except Exception as exc:
+            raise NativeTurnPending("original native recovery source remains unavailable",
+                                    expected_turn, operation_id, cursor) from exc
+
+    def _recover_native_turn(
+        self, session, *, operation_id, expected_turn, cursor=None,
+        timeout_seconds=30.0, _on_turn_applied=None,
+    ):
+        """Observe and collect the original native call; never reserve or send."""
+        seconds = float(timeout_seconds)
+        contract_reader = getattr(self.runtime, "operator_result_contract", None)
+        target_reader = getattr(self.runtime, "original_operator_native_turn", None)
+        reconciler = getattr(self.runtime, "reconcile_operator_native_begin", None)
+        observer = getattr(self.adapter, "observe_native_begin", None)
+        native_sealer = getattr(self.runtime, "seal_operator_native_result", None)
+        if (not math.isfinite(seconds) or not 0 < seconds <= 300
+                or not all(callable(method) for method in (contract_reader, target_reader, reconciler, observer, native_sealer))
+                or contract_reader(session.attempt_id) != DSH_NATIVE_RESULT_CONTRACT
+                or getattr(self.adapter, "result_contract", None) != DSH_NATIVE_RESULT_CONTRACT
+                or not isinstance(self.adapter, NativeConversationResultAdapter)
+                or (_on_turn_applied is not None and not callable(_on_turn_applied))):
+            raise OperatorHarnessOrchestrationError("native recovery requires the original typed consumer")
+        turn = target_reader(session.attempt_id, session.generation, operation_id)
+        if expected_turn is not None and expected_turn != turn:
+            raise OperatorHarnessOrchestrationError("native recovery target changed")
+        material_reader = getattr(self.runtime, "operator_native_turn_result_material", None)
+        if not callable(material_reader):
+            raise OperatorHarnessOrchestrationError("native recovery lacks its original result reader")
+        material = material_reader(session.attempt_id, turn, operation_id)
+        if material is not None:
+            started, candidate, events, next_cursor, reference = material
+            receipt = OperatorTurnReceipt(session.attempt_id, turn, started, events, next_cursor, candidate,
+                                          native_result=reference)
+            if reference is not None:
+                return receipt
+            # The original candidate has already been collected. It is no
+            # longer an active Send/Stop observation, but its seal can finish.
+            return self._seal_native_turn_result(session, operation_id, receipt, native_sealer, cursor)
+        prepare = getattr(self.runtime, "prepare_operator_native_begin_recovery", None)
+        if not callable(prepare):
+            raise OperatorHarnessOrchestrationError("native recovery lacks its original uncertainty writer")
+        prepare(session.attempt_id, session.generation, operation_id, expected_turn)
+        self.runtime.extend_operator_lease(session.attempt_id, int(math.ceil(seconds))+30)
+        try:
+            observed = observer(operation_id=operation_id, turn=turn, generation=session.generation)
+            if observed is None:
+                raise NativeTurnPending("original native claim remains unobserved", turn, operation_id, cursor)
+            if type(observed) is not NativeConversationBeginObservation:
+                raise ValueError("closed original native begin observation required")
+            observed.require_origin(operation_id, turn, session.generation, session.observation.provider_session_id)
+            reconciler(session.attempt_id, operation_id, observed)
+        except NativeTurnPending:
+            raise
+        except Exception as exc:
+            raise NativeTurnPending("original native begin requires reconciliation", turn, operation_id, cursor) from exc
+        return self._collect_acknowledged_turn(session, operation_id=operation_id, turn=turn,
+            started=observed.start, cursor=cursor, bounded_timeout=seconds, native=True,
+            initial_plan=None, plan_reader=None, native_sealer=native_sealer,
+            _before_role_seal=None, _on_turn_applied=_on_turn_applied, recovered=True)
+
+    def _collect_acknowledged_turn(
+        self, session, *, operation_id, turn, started, cursor, bounded_timeout,
+        native, initial_plan, plan_reader, native_sealer, _before_role_seal,
+        _on_turn_applied, recovered=False,
+    ):
+        if _on_turn_applied is not None:
+            try:
+                if _on_turn_applied(turn) is not None:
+                    raise ValueError("active turn observer must return no authority")
+            except Exception as exc:
+                # TX5 is already APPLIED. Keep that receipt and let the same
+                # caller own reconciliation/cleanup; do not relabel it unsent.
+                if native:
+                    raise NativeTurnPending("acknowledged turn could not be exposed to its existing owner",
+                                            turn, operation_id, cursor) from exc
+                raise OperatorHarnessOrchestrationError(
+                    "acknowledged turn could not be exposed to its existing owner"
+                ) from exc
 
         current = cursor or EventCursor(
             attempt_id=session.attempt_id,
@@ -601,10 +759,10 @@ class OperatorHarnessOrchestrator:
             process_generation_id=session.generation.process_generation_id,
             turn_id=turn.turn_id,
         )
-        self.runtime.extend_operator_lease(
-            session.attempt_id, int(math.ceil(bounded_timeout)) + 30
-        )
         try:
+            self.runtime.extend_operator_lease(
+                session.attempt_id, int(math.ceil(bounded_timeout)) + 30
+            )
             events, next_cursor = self.adapter.read_events(
                 current, timeout_seconds=bounded_timeout
             )
@@ -617,12 +775,11 @@ class OperatorHarnessOrchestrator:
                 session.attempt_id, turn, candidate, events, next_cursor
             )
         except Exception as exc:
-            self._mark_effect_unknown(
-                attempt_id=session.attempt_id,
-                operation_id=operation_id,
-                phase="collect_turn_result",
-                error=exc,
-            )
+            if not recovered:
+                self._mark_turn_effect_unknown(session, turn=turn, operation_id=operation_id,
+                    phase="collect_turn_result", error=exc, native=native, cursor=cursor)
+            if native:
+                raise NativeTurnPending("original native result remains uncollected", turn, operation_id, cursor) from exc
             raise OperatorEffectUnknown("turn result effect is unknown") from exc
         receipt = OperatorTurnReceipt(
             attempt_id=session.attempt_id,
@@ -632,7 +789,9 @@ class OperatorHarnessOrchestrator:
             cursor=next_cursor,
             candidate=candidate,
         )
-        if initial_plan is not None:
+        if native:
+            return self._seal_native_turn_result(session, operation_id, receipt, native_sealer, cursor)
+        elif initial_plan is not None:
             # The follow-up candidate is already recorded by Runtime. It is
             # not a new plan and must not replace the initial accepted seal.
             if plan_reader(session.attempt_id, session.generation) != initial_plan:
@@ -662,18 +821,41 @@ class OperatorHarnessOrchestrator:
                 ) from exc
         return receipt
 
+    def _seal_native_turn_result(self, session, operation_id, receipt, native_sealer, cursor):
+        turn = receipt.turn
+        try:
+            observation = self.adapter.observe_native_conversation_result(turn)
+            if type(observation) is not NativeConversationResultObservation:
+                raise ValueError("closed native observation required")
+            observation.require_turn(turn)
+            reference = native_sealer(session.attempt_id, turn, observation)
+            if (type(reference) is not NativeConversationResultRef
+                    or reference.command_id != f"ohf-native-result:{turn.turn_id}"):
+                raise ValueError("original native result reference required")
+            return replace(receipt, native_result=reference)
+        except Exception as exc:
+            raise NativeTurnPending("original native result remains unsealed", turn, operation_id, cursor) from exc
+
     def graceful_stop(
         self,
         session: OperatorSessionReceipt | OperatorStartHandle,
         *,
         operation_id: OperationId,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> ReconcileObservation:
         self._assert_replayable(operation_id)
+        closure_options = {}
+        if native_idle_result is not None:
+            closure_options["native_idle_result"] = native_idle_result
+        if native_terminal_result is not None:
+            closure_options["native_terminal_result"] = native_terminal_result
         self.runtime.begin_operator_generation_operation(
             session.attempt_id,
             session.generation,
             operation_id,
             "graceful_stop",
+            **closure_options,
         )
         self.runtime.extend_operator_lease(session.attempt_id, 60)
         try:
@@ -685,7 +867,13 @@ class OperatorHarnessOrchestrator:
                 session.generation,
                 operation_id,
                 observed,
+                **closure_options,
             )
+            if native_idle_result is not None or native_terminal_result is not None:
+                # Same physical stop observation, persisted by the incumbent
+                # reconcile owner for TX-10; no synthetic writer release.
+                self.runtime.observe_operator_reconcile(
+                    session.attempt_id, session.generation, observed)
             return observed
         except Exception as exc:
             self._mark_effect_unknown(

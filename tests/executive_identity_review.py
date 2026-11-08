@@ -322,6 +322,45 @@ def reviewed_literal_spans(path: str, source: str):
             start = anchor.index("0o700")
             spans.append((sites[0], start, start + len("0o700"), "int"))
         return tuple(sorted(spans))
+    # Exact native upload HTTP statuses; changed source or identity data remains visible.
+    if path == "integrations/deepseek_harness/runtime_compat/native-owner-access.patch":
+        if hashlib.sha256(source.encode()).hexdigest() != (
+                "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00"):
+            return ()
+        anchors = (
+            ("-          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))", '403'),
+            ("+          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))", '403'),
+            ("+      return new Response('forbidden', { status: 403 })", '403'),
+            ("     return new Response(null, { status: 405, headers: { allow: 'POST' } })", '405'),
+        )
+        lines, spans = source.splitlines(), []
+        for anchor, spelling in anchors:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count(spelling) != 1:
+                return ()
+            start = anchor.index(spelling)
+            spans.append((sites[0], start, start + len(spelling), "int"))
+        return tuple(spans)
+    # PR #2177: two exact HTTP Forbidden response statuses in the original
+    # native-owner hold patch. Preserve every surrounding condition, source
+    # byte and identity token; no generic HTTP or patch-file exemption.
+    if path == "integrations/deepseek_harness/runtime_compat/native-host-admission.patch":
+        if hashlib.sha256(source.encode()).hexdigest() != (
+                "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597"):
+            return ()
+        anchors = (
+            "-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))",
+            "+          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))",
+        )
+        lines = source.splitlines()
+        spans = []
+        for anchor in anchors:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count("403") != 1:
+                return ()
+            start = anchor.index("403")
+            spans.append((sites[0], start, start + 3, "int"))
+        return tuple(spans)
     # Independent scoped review of the fixed ten-minute telemetry age, not a UID.
     # The complete production patch is pinned; a changed or duplicated site is
     # fully visible to D8 again. Never derive this digest from current source.

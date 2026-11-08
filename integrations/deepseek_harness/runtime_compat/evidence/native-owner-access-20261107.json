@@ -1,0 +1,56 @@
+{
+  "schema": "mastermind.dsh_native_access_reconciled.v1",
+  "source_commit": "96d6d9efc81ba941e7219c941dfe8f7baad9ba46",
+  "qualification_commit": "8b56f227e5e1256c0da9c0d2ff395064dcfd61dd",
+  "source_sha256": {
+    "integrations/deepseek_harness/package_attended.py": "4ad71b6585f1b57680edbb5a1788426e7670fcf8735bb27618ddc5ad11702bad",
+    "tests/test_dsh_native_owner_package.py": "93bd154e329af6b0dffa7fb59a951802681262b7f6f7093d632a81bf59199876",
+    "integrations/deepseek_harness/runtime_compat/check-native-access.mjs": "e6cb8d5be76df52830aa501e7c7a141822598bee7fa82d5ee6b8c19b60d05efa",
+    "integrations/deepseek_harness/runtime_compat/native-access-source.json": "15b9d2ae15792886c40878415ea3cd37cc4f40c5391ca6dfaa7fbff6105d5c25",
+    "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "396ce2c75267a007c30e1969e82b2b5c7305caac74e635e92c86bd4e82e4d969",
+    "integrations/deepseek_harness/runtime_compat/native-owner-access.test.ts": "5d49204443a0b64919c4d4f29b3286019e2ec9a33102b7cfa937585b9e6b0957",
+    "integrations/deepseek_harness/runtime_compat/native_access_package.py": "043c31f901b1a25203f761fcc5f93c013f6a02d4b8ffdba1a56f4583e0b37d61",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_access.py": "7c85166ce2fa48768524ca0772a49f709f9b52bc985dcad1dbc21b34050ea127",
+    "integrations/deepseek_harness/runtime_compat/vitest.owner-access.config.mts": "de68b0ffb0931bab97d77209c86699259600e9e4abd0e1d53af454271208bb95"
+  },
+  "native_proof": [
+    {
+      "name": "typecheck",
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v2-typecheck-20261107-c2.log",
+      "sha256": "c1c100447eb89158bd303d31bc21fa0d9b3305e7ae90d8d74e7478030f2f4e6f"
+    },
+    {
+      "name": "search-original",
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v2-search-original-20261107-c2.log",
+      "sha256": "7d3f2ab8ef16eb029825b4bfe34b13f0acdffe5b7c7564cebc2b72674b002ea8"
+    },
+    {
+      "name": "focused",
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v2-focused-20261107-c2.log",
+      "sha256": "95dc6134cfe178a56354899b72699365cd4551508857e1800aafc8ab8fe9f484"
+    },
+    {
+      "name": "gateway-original",
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v2-gateway-original-20261107-c2.log",
+      "sha256": "abe81c860c4467d3888b5d6f0253191ed287019c3d05c5642b1619366aef2447"
+    }
+  ],
+  "package_cases": 23,
+  "export_cases": 3,
+  "package_manifest_sha256": "aafbf51ce1c110ada3d5c48acc3e176a9fe7ef5d91eaae77349702c312611322",
+  "app_config_sha256": "52139a052badc0159185b9d3ccc9350ceb0379f86b7f11d1fc667069c51e59ca",
+  "build_log_sha256": "1cd5047da20cb91a328dc008af2aef0fc48324d12d32e6081b29cfa0522eea03",
+  "launcher_check": {
+    "state": "CHECKED",
+    "exit_code": 0,
+    "log_sha256": "aa25acd74533ba4f9e75a9c1da2b790480c36d27e924c63f1568e9f0c95bed27"
+  },
+  "original_publication": "NOT_STARTED",
+  "installed": false,
+  "provider_calls": 0,
+  "production_armed": false
+}

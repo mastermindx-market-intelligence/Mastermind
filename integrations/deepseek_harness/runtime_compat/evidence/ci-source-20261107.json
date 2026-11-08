@@ -1,0 +1,64 @@
+{
+  "schema": "mastermind.dsh_ci_source_qualification.v1",
+  "hosted_head": "691f2207a3ca6facfc8411b37efaf254701005d1",
+  "local_base": "7e91dc0b8ee71427ef4a5744b2ce846dd4a226d9",
+  "hosted_run": 42353239729,
+  "failed_jobs": [
+    128346061413,
+    128346061396
+  ],
+  "repairs": [
+    "exact full-source pin; installed-entry AST unchanged",
+    "shorter native read fixture token lifetime; identity scanner unchanged",
+    "real Runtime Job/Attempt and immutable creation evidence in callback fixture",
+    "exact full-source witness for two HTTP Forbidden tokens, with drift refusals"
+  ],
+  "source_sha256": {
+    "tests/executive_identity_review.py": "342228d8510a770061e6a946421e55213c8c7fb1b29804632810f20395fc2482",
+    "tests/test_ceo_submit_armed_composition.py": "b48f40306e8c94bb233a65e01abe9c1da9e54eb82efce53caa21f26d9145149d",
+    "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py": "920f7a109933286bce20873332fedb1b7d3f8273dfb74cfe9270e7c10a97196e",
+    "integrations/deepseek_harness/company_plugin/native.read-fixture.ts": "45fdae2f7d2a3bcbb8d92b510b96598666acc2aee7b13dc1d6e27121e1f4ac14"
+  },
+  "logs": {
+    "original_three_failures": {
+      "file": "mmx-dsh-c5-ci-reproducer-20261107.log",
+      "pid": 36107,
+      "cases": 3,
+      "exit_code": 1,
+      "sha256": "8022e4eb68def9081e269f4b34466be0d7c769fdb53c8556489ea3ba0c701268"
+    },
+    "source_identity_negative_controls": {
+      "file": "mmx-dsh-c5-ci-candidate-final-20261107.log",
+      "pid": 93717,
+      "cases": 294,
+      "exit_code": 0,
+      "sha256": "c8d5ae7ad5beefa04e4ec55e6cf04d6c682be678c8048ed3688cd372904d43eb"
+    },
+    "callback_and_creation_evidence": {
+      "file": "mmx-dsh-c5-callback-final-20261107.log",
+      "pid": 93937,
+      "cases": 15,
+      "exit_code": 0,
+      "sha256": "511fb971caf59261241ec2a3919d9d10c7dcb9ec044ee07d50b2db465184f057"
+    },
+    "short_grant_native_read_host": {
+      "file": "mmx-dsh-native-read-short-grant-20261107.log",
+      "pid": 60834,
+      "cases": 22,
+      "skipped": 1,
+      "exit_code": 0,
+      "sha256": "d4c11019aa19499113961376ab5768e941ae655fae219cfaf1c5c0460db83353"
+    }
+  },
+  "candidate_identity_guard": {
+    "pid": 11796,
+    "exit_code": 0,
+    "source_files": 115,
+    "base": "5199647e89166d163392905574097b2cfa16ca5b",
+    "findings": []
+  },
+  "committed_head_gate": "pending publication: d8 full-HEAD test intentionally not relabelled as working-tree proof",
+  "installed": false,
+  "provider_calls": 0,
+  "production_armed": false
+}

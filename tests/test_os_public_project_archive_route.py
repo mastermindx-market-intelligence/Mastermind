@@ -7,7 +7,7 @@ ROUTE = "/workspace/projects/archive/current"
 def test_archive_is_a_single_fixed_get_with_exact_predecessor():
     later = {"/workspace/project-knowledge/current", "/workspace/project-memory/current",
              "/workspace/project-source/current", "/workspace/source-operation/context",
-             "/workspace/source-operation/operation", '/workspace/project-instructions/current', '/workspace/instruction-admission/current', '/workspace/instruction-admission/operation', '/workspace/project-access/current', '/workspace/source-operation/options', '/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current'}
+             "/workspace/source-operation/operation", '/workspace/project-instructions/current', '/workspace/instruction-admission/current', '/workspace/instruction-admission/operation', '/workspace/project-access/current', '/workspace/source-operation/options', '/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current', '/workspace/resources/models/current'}
     assert set(GET_ROUTES) - set(PRE_ARCHIVE_GET_ROUTES) == {ROUTE, *later}
     assert GET_ROUTES.count(ROUTE) == 1 and ROUTE not in POST_ROUTES
     assert (PRE_ARCHIVE_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES

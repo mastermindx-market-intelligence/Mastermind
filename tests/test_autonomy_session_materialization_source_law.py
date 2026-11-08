@@ -384,6 +384,9 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     port = text(PORT)
     broker_dispatch = definition(BROKER, "ExecutiveWorkerBroker._dispatch")
     broker_start = definition(BROKER, "ExecutiveWorkerBroker._ohf_start")
+    transaction = definition(BROKER, "ExecutiveWorkerBroker._operator_materialization_transaction")
+    complete = definition(BROKER, "ExecutiveWorkerBroker._complete_operator_materialization")
+    unknown = definition(BROKER, "ExecutiveWorkerBroker._mark_materialization_unknown")
     broker_status = definition(
         BROKER, "ExecutiveWorkerBroker._ohf_materialization_status"
     )
@@ -430,17 +433,33 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     assert "operator_materialization_status(result)" in remote_status
     assert "receipt.operation_command_id == operation_id.command_id" in remote_status
     assert remote_status.count("request_sync(") == 1
-    assert broker_start.count("adapter.start_session") == 1
-    assert broker_start.count("adapter.resume_session") == 1
+    # The original owner installs one retained task before provider dispatch.
+    # Check ordering within each real function, never concatenated source.
+    assert broker_start.count("self._operator_materialization_transaction(") == 1
     assert broker_start.index("if existing is not None:") < broker_start.index(
-        "provider_dispatch_committed = True"
+        "self._operator_materialization_transaction("
     )
-    assert broker_start.index("provider_dispatch_committed = True") < broker_start.index(
+    assert broker_start.index("self._operator_run = state") < broker_start.index(
+        "self._operator_materialization_transaction("
+    )
+    assert "asyncio.shield(task)" in broker_start
+    assert transaction.count("adapter.start_session") == 1
+    assert transaction.count("adapter.resume_session") == 1
+    assert transaction.index("state.provider_dispatch_committed = True") < transaction.index(
         "adapter.start_session"
     )
-    assert "if provider_dispatch_committed and state is None:" in broker_start
-    assert broker_start.count('"operator materialization effect unknown"') == 2
-    assert "provider dispatch has no durable" in broker_start
+    assert transaction.index("state.provider_dispatch_committed = True") < transaction.index(
+        "adapter.resume_session"
+    )
+    assert "if state.provider_dispatch_committed and state.materialization_receipt is None:" in transaction
+    assert "self._mark_materialization_unknown(state)" in transaction
+    assert 'self._quarantined_reason = "operator materialization effect unknown"' in unknown
+    assert "if self._quarantined_reason is None:" in unknown
+    assert 'and self._quarantined_reason == "operator materialization effect unknown"' in complete
+    assert complete.index("state.materialization_receipt = receipt") < complete.index(
+        "self._quarantined_reason = None"
+    )
+    assert "provider dispatch has no durable" in transaction
     assert "supports_provider_native_idempotency=False" in remote
     assert "Generic automatic requeue is intentionally not" in restart
     assert "runtime.current_harness_binding_source" in binding_facts

@@ -438,11 +438,15 @@ class CeoIngressClient:
         from common import project_planning_private_contract as planning_wire
         planning_frame=isinstance(frame,Mapping) and frame.get('schema')==planning_wire.SCHEMA
         from common import fresh_conversation_contract as fresh_wire
-        fresh_frame=isinstance(frame,Mapping) and frame.get("schema")==fresh_wire.SCHEMA
+        fresh_frame=isinstance(frame,Mapping) and frame.get("schema") in {fresh_wire.SCHEMA, fresh_wire.NATIVE_SCHEMA}
         if fresh_frame:
             try: frame=fresh_wire.validate_private_frame(dict(frame))
             except (ValueError,TypeError):
                 return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail="conversation frame invalid")
+            if frame["schema"] == fresh_wire.NATIVE_SCHEMA:
+                request_ceiling = fresh_wire.NATIVE_MAX_REQUEST_BYTES
+                response_ceiling = fresh_wire.NATIVE_MAX_RESPONSE_BYTES
+                stream_limit = response_ceiling + 4096
         from common import project_conversation_read_contract as conversation_read_wire
         conversation_read_frame = isinstance(frame, Mapping) and frame.get("schema") == conversation_read_wire.SCHEMA
         if conversation_read_frame:

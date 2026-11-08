@@ -55,13 +55,22 @@ def _config(raw):
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
 
 
-def main() -> int:
+def _main_for_purpose(purpose) -> int:
+    """Shared sealed entry mechanism; standalone entrypoints fix the purpose."""
+    purpose = os_tunnel_entry.closed_application_purpose(purpose)
+    config_path = CONFIG if purpose is os_tunnel_entry.FABRIC_APPLICATION else (
+        os_tunnel_entry.ROOT / "config/deepseek-tunnel.json")
+    credential_path = CREDENTIAL if purpose is os_tunnel_entry.FABRIC_APPLICATION else (
+        os_tunnel_entry.ROOT / "config/deepseek-tunnel.auth")
+    compile_spec = (os_tunnel_entry.application_launch_spec
+                    if purpose is os_tunnel_entry.FABRIC_APPLICATION
+                    else os_tunnel_entry.deepseek_launch_spec)
     try:
         if len(sys.argv) != 1 or not sys.flags.isolated or not sys.dont_write_bytecode or os.geteuid() != 0:
             raise ValueError("fixed root invocation required")
-        config = _config(_read_application_sealed(CONFIG, limit=4096))
-        binary, argv, env = os_tunnel_entry.application_launch_spec(
-            config, _read_application_sealed(CREDENTIAL, limit=1024, private=True))
+        config = _config(_read_application_sealed(config_path, limit=4096))
+        binary, argv, env = compile_spec(
+            config, _read_application_sealed(credential_path, limit=1024, private=True))
         encoded = _read_application_sealed(Path(binary), limit=64 * 1024 * 1024)
         if hashlib.sha256(encoded).hexdigest() != config["binary_sha256"]:
             raise ValueError("application tunnel executable changed")
@@ -72,6 +81,10 @@ def main() -> int:
         sys.stderr.write("Application transport refused\n")
         return 1
     return 0
+
+
+def main() -> int:
+    return _main_for_purpose(os_tunnel_entry.FABRIC_APPLICATION)
 
 
 if __name__ == "__main__":

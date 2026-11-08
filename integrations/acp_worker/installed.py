@@ -208,6 +208,9 @@ def _security_projection(packet: "AcpInstalledHostPacket") -> dict[str, Any]:
             "artifact_sha256": gate.artifact_sha256,
             "tools": [dataclasses.asdict(item) for item in gate.tools],
             "artifacts": [list(row) for row in gate.artifacts],
+            # Preserve the historical v1/v2 packet digest. An opted-in v3
+            # requirement is a distinct, sealed host composition.
+            **({"native_session_required": True} if gate.native_session_required else {}),
         },
     }
 

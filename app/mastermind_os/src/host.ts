@@ -530,8 +530,8 @@ export function bindMissionHost(
         return decodeAutonomyPolicy(raw, selected);
       },
     } : {}),
-    ...(client.executive?.freshConversation ? {freshConversation:{request:async(operation,arguments_,signal)=>{
-      const closed=freshConversationArguments(operation,arguments_);
+    ...(client.executive?.freshConversation ? {freshConversation:{request:async(operation,arguments_,signal,contract)=>{
+      const closed=freshConversationArguments(operation,arguments_,contract);
       const transport=client.executive!,group=transport.freshConversation!,method=group.request;
       const getter=client.getState,sourceMethod=client.invalidationGeneration;
       const started=epoch,source=sourceMethod?.call(client),executiveEpoch=transport.authGeneration();
@@ -540,10 +540,10 @@ export function bindMissionHost(
           || group.request!==method || client.getState!==getter || client.invalidationGeneration!==sourceMethod
           || sourceMethod?.call(client)!==source || transport.authGeneration()!==executiveEpoch || !transport.available())return false;
         const state=getter.call(client);
-        return state.status==='signed_in' && (!freshConversationNeedsWorkspace(operation) || state.acquisition===true);
+        return state.status==='signed_in' && (!freshConversationNeedsWorkspace(operation,contract) || state.acquisition===true);
       };
       if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
-      const result=await method.call(group,operation,closed,signal);
+      const result=await method.call(group,operation,closed,signal,contract);
       if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
       return result;
     }}} : {}),

@@ -1,5 +1,5 @@
 import {hostObservationWebMethods} from "./resources/host-observation-web";
-import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
+import {freshConversationArguments,freshConversationPath,FRESH_CONVERSATION_PATHS,NATIVE_FRESH_PATHS} from "./orchestration/fresh-conversation-transport";
 import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
 import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
@@ -1142,13 +1142,15 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "company-priorities" | "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
+    route: "company-priorities" | "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof NATIVE_FRESH_PATHS[keyof typeof NATIVE_FRESH_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
     const planning=route.startsWith("project-planning/"), execution=route.startsWith("project-execution/"), fresh=route.startsWith("conversation/");
-    const dual=planning || execution || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
+    const nativeFresh=Object.values(NATIVE_FRESH_PATHS).includes(route as typeof NATIVE_FRESH_PATHS[keyof typeof NATIVE_FRESH_PATHS]);
+    const dual=planning || execution || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview' ||
+      [NATIVE_FRESH_PATHS.preview,NATIVE_FRESH_PATHS.create,NATIVE_FRESH_PATHS.consume,NATIVE_FRESH_PATHS.turn,NATIVE_FRESH_PATHS.turn_preview,NATIVE_FRESH_PATHS.resume_preview,NATIVE_FRESH_PATHS.resume,NATIVE_FRESH_PATHS.stop].some(path=>path===route);
     const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
@@ -1159,7 +1161,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
     const body = JSON.stringify((route === "context" || route === "company-priorities") ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
-    if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
+    if (new TextEncoder().encode(body).length > (direct ? 4096 : nativeFresh ? 524_288 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
@@ -1190,7 +1192,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
         if (!response.ok && !direct && !execution) throw new Error("EXECUTIVE_REQUEST_FAILED");
-        const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
+        const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : nativeFresh ? 32_768 : 262_144, direct ? parseDirectNativeJson : JSON.parse);
         if (!response.ok) {
           const errorStatuses = execution ? [400, 401, 403, 409, 503] : [401, 403, 409, 503];
           if (!errorStatuses.includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
@@ -1236,8 +1238,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
       projectExecution: { request: (operation,arguments_,signal) =>
         executivePost(`project-execution/${operation}`,projectExecutionArguments(operation,arguments_),signal) },
-      freshConversation: {request:(operation,arguments_,signal)=>
-        executivePost(FRESH_CONVERSATION_PATHS[operation],freshConversationArguments(operation,arguments_),signal)},
+      freshConversation: {request:(operation,arguments_,signal,contract)=>
+        executivePost(freshConversationPath(operation,contract),freshConversationArguments(operation,arguments_,contract),signal)},
       directNative: {
         correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {

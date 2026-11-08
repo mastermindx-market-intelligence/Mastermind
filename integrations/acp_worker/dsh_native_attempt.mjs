@@ -28,8 +28,8 @@ function canonical(x) {
 }
 // Pure parsing: callers cannot self-grant tools from a seed. The incumbent
 // native owner still verifies nonce, process, artifact and live Attempt.
-export function validateNativeDshAttemptSeed(seed, projectionDigest, artifactDigest, now = Date.now()) {
-  if (!obj(seed, SEED_KEYS) || seed.schema !== 'mastermind.acp_tools_ready/v2'
+function validateSeedForSchema(seed, projectionDigest, artifactDigest, now, schema) {
+  if (!obj(seed, SEED_KEYS) || seed.schema !== schema
     || seed.pid !== process.pid || !/^[a-f0-9]{32}$/.test(seed.launch_nonce)
     || ![seed.run_id, seed.job_id, seed.worker_id].every(x => typeof x === 'string' && ID.test(x))
     || !SHA40.test(seed.base_sha) || !SHA64.test(seed.projection_sha256)
@@ -62,12 +62,21 @@ export function validateNativeDshAttemptSeed(seed, projectionDigest, artifactDig
     digest: createHash('sha256').update(canonical(overlay)).digest('hex'),
   })
 }
+// Preserve the existing generic v2 parser and its fourth positional clock.
+export function validateNativeDshAttemptSeed(seed, projectionDigest, artifactDigest, now = Date.now()) {
+  return validateSeedForSchema(seed, projectionDigest, artifactDigest, now, 'mastermind.acp_tools_ready/v2')
+}
 // One-shot client for the existing inherited ACP admission FD. No separate
 // socket, provider request, Retry, auth, Job/Attempt or worker owner.
-export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, artifactDigest, activate }) {
+export async function acceptNativeDshAttempt({
+  fd, signal, projectionDigest, artifactDigest, activate,
+  nativeSessionRequired = false, observeNativeSession,
+}) {
   if (!Number.isInteger(fd) || fd < 3 || !(signal instanceof AbortSignal)
     || !SHA64.test(projectionDigest ?? '') || !SHA64.test(artifactDigest ?? '')
-    || typeof activate !== 'function') throw refuse()
+    || typeof activate !== 'function' || typeof nativeSessionRequired !== 'boolean'
+    || (nativeSessionRequired ? typeof observeNativeSession !== 'function'
+      : observeNativeSession !== undefined)) throw refuse()
   signal.throwIfAborted()
   const socket = new Socket({ fd, readable: true, writable: true })
   let held = '', pending, error, rejectActivation, expiryTimer
@@ -103,7 +112,8 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
   let opened
   try {
     const seed = JSON.parse(await line())
-    const verified = validateNativeDshAttemptSeed(seed, projectionDigest, artifactDigest)
+    const verified = validateSeedForSchema(seed, projectionDigest, artifactDigest, Date.now(),
+      nativeSessionRequired ? 'mastermind.acp_tools_ready/v3' : 'mastermind.acp_tools_ready/v2')
     const deadline = Number(verified.attemptOverlay.env.MMX_ACP_DEADLINE_MS)
     // The native parent owns admission. The child must not wait indefinitely
     // on a stalled SDK discovery, an abandoned socket or a revoked Attempt.
@@ -137,7 +147,14 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
     // No parent early ACK, duplicate seed or second command may be queued.
     if (queue.length || held.length) throw refuse()
     if (Date.now() >= Number(verified.attemptOverlay.env.MMX_ACP_DEADLINE_MS)) throw refuse()
-    const echo = JSON.stringify({ ...seed, ready: true, attempt_overlay_sha256: verified.digest }) + '\n'
+    // The parent does not choose this ID. Only the fixed actual-Agent producer
+    // can observe it, after governed discovery and immediately before readiness.
+    const nativeSessionId = nativeSessionRequired ? observeNativeSession() : undefined
+    if (nativeSessionRequired && (typeof nativeSessionId !== 'string' || !ID.test(nativeSessionId)))
+      throw refuse()
+    const echo = JSON.stringify({ ...seed, ready: true, attempt_overlay_sha256: verified.digest,
+      ...nativeSessionRequired ? { native_session_id: nativeSessionId } : {},
+    }) + '\n'
     if (Buffer.byteLength(echo) > FRAME) throw refuse()
     await new Promise((resolve, reject) => socket.write(echo, e => e ? reject(refuse()) : resolve()))
     const ack = JSON.parse(await line())
@@ -145,7 +162,10 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
       || queue.length || held.length) throw refuse()
     signal.throwIfAborted()
     if (Date.now() >= Number(verified.attemptOverlay.env.MMX_ACP_DEADLINE_MS)) throw refuse()
-    return { activation: opened, attemptOverlay: verified.attemptOverlay }
+    if (nativeSessionRequired && observeNativeSession() !== nativeSessionId) throw refuse()
+    return { activation: opened, attemptOverlay: verified.attemptOverlay,
+      ...nativeSessionRequired ? { nativeSessionId } : {},
+    }
   } catch {
     try { await opened?.dispose?.() } catch { /* incumbent settles child */ }
     throw refuse()

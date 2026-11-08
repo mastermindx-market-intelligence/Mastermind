@@ -21,6 +21,7 @@ import subprocess
 
 from integrations.mastermind_executive_app.os_assets import OS_ASSET_PROFILE_FILE_COUNTS
 from ops.executive_os import os_public_edge_transition as planner
+from ops.executive_os import deepseek_public_edge as dsh_planner
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest
 from ops.executive_os.executive_mcp_entry import load_os_app
@@ -301,8 +302,13 @@ def _load_stage(stage, expected_digest):
     live, prepared, final = (decode(contents[name + ".json"]) for name in ("live", "prepare", "final"))
     kwargs = dict(fullconfig=live, current_manifest=manifests["old"],
                   candidate_manifest=manifests["new"], relay_port=d["relay_port"])
-    require(d["plan"] == planner.plan(old_source=d["old"]["source"], new_source=d["new"]["source"], **kwargs)
-            and prepared == planner.prepare_config(**kwargs) and final == planner.final_config(**kwargs),
+    # Canonical equality preserves numeric types. Python dict equality would
+    # accept a floating-point body cap as equal to the required integer after
+    # a forged stage repaired its outer file digests.
+    require(canonical(d["plan"]) == canonical(planner.plan(
+                old_source=d["old"]["source"], new_source=d["new"]["source"], **kwargs))
+            and canonical(prepared) == canonical(planner.prepare_config(**kwargs))
+            and canonical(final) == canonical(planner.final_config(**kwargs)),
             "transition bindings differ")
     return d, manifests, live, prepared, final
 
@@ -310,6 +316,11 @@ def _load_stage(stage, expected_digest):
 def _http(port, method, path, *, body=None, headers=None, maximum=MAX_BYTES):
     """Fixed numeric loopback peer: no proxies, redirects or automatic retry."""
     require(port == 2019 or 49152 <= port <= 50200, "fixed loopback port required")
+    return _loopback_http(port, method, path, body=body, headers=headers, maximum=maximum)
+
+
+def _loopback_http(port, method, path, *, body=None, headers=None, maximum=MAX_BYTES):
+    require(port in (2019, 4181) or 49152 <= port <= 50200, "closed loopback port required")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
     try:
         connection.request(method, path, body=body, headers=headers or {})
@@ -356,6 +367,11 @@ def _served(manifest, port):
 
 def _validate(stage, phase, candidate):
     name = "prepare.json" if phase == "prepare" else "final.json"
+    return _validate_file(stage, name, candidate)
+
+
+def _validate_file(stage, name, candidate):
+    require(name in ("prepare.json", "final.json", "candidate.json"), "fixed candidate required")
     require(decode(stage.read(name)) == candidate, "validation bytes differ")
     subprocess.run(["/usr/bin/caddy", "validate", "--config", str(stage.path / name)],
                    capture_output=True, timeout=30, check=True)
@@ -402,7 +418,7 @@ def verify_cutover(*, stage_path, stage_digest, new_sha, new_digest):
             predecessor = _success(stage, operation, d, stage_digest, "prepare", live, prepared, None)
             intent = decode(operation.read("prepare-intent.json"))
             _listener(d["relay_port"], intent["listener_pid"])
-            require(_config()[0] == prepared, "prepared configuration no longer current")
+            require(canonical(_config()[0]) == canonical(prepared), "prepared configuration no longer current")
             return {"schema": SCHEMA, "state": "CUTOVER_READY", "stage_digest": stage_digest,
                     "prepare_receipt_digest": predecessor, "new_source": new_sha,
                     "new_bundle_digest": new_digest, "installed": False}
@@ -424,12 +440,14 @@ def publish(*, stage_path, stage_digest, listener_pid, phase):
                 predecessor = _success(stage, operation, d, stage_digest, "prepare", live, prepared, None)
             base, candidate, manifest = prepared, final, manifests["new"]
         current, etag = _config()
-        require(current == base, "live full configuration drift")
+        require(canonical(current) == canonical(base), "live full configuration drift")
         _listener(d["relay_port"], listener_pid)
         _validate(stage, phase, candidate)
         _served(manifest, d["relay_port"])
         _listener(d["relay_port"], listener_pid)
-        require(_config() == (base, etag), "configuration or ETag changed during qualification")
+        observed_config, observed_etag = _config()
+        require(canonical(observed_config) == canonical(base) and observed_etag == etag,
+                "configuration or ETag changed during qualification")
         require(_load_stage(stage, stage_digest)[0] == d, "stage changed during qualification")
         if phase == "prepare":
             _new_directory(stage.path / OPERATION)
@@ -439,33 +457,229 @@ def publish(*, stage_path, stage_digest, listener_pid, phase):
                 require(_success(stage, operation, d, stage_digest, "prepare", live, prepared, None)
                         == predecessor, "prepare receipt changed")
             binding = _binding(stage, operation, d, stage_digest, phase, base, candidate, predecessor)
-            intent = {**binding, "etag": etag, "listener_pid": listener_pid}
-            # Any exception from here, including fsync/readback/receipt failure,
-            # leaves immutable evidence that prevents replay and dependent use.
-            try:
-                operation.write(phase + "-intent.json", canonical(intent))
-                stage.check()
-                operation.check()
-                status, _, _ = _http(2019, "POST", "/config/", body=canonical(candidate),
-                                     headers={"Content-Type": "application/json", "If-Match": etag})
-                require(status == 200, "publication status refused; reconciliation required")
-                after, _ = _config()
-                require(after == candidate, "publication readback differs; reconciliation required")
-                require(_load_stage(stage, stage_digest)[0] == d, "stage changed after publication")
-                receipt = {**binding, "state": "PREPARED" if phase == "prepare" else "FINAL",
-                           "intent_digest": digest(canonical(intent)), "http_status": status}
-                operation.write(phase + "-receipt.json", canonical(receipt))
-                _success(stage, operation, d, stage_digest, phase, base, candidate, predecessor)
-                return receipt
-            except BaseException as exc:
-                # In particular, a failure *after* a complete receipt write must
-                # not become success merely because its bytes can be read later.
-                # If custody/storage also prevents this marker, the command's
-                # failed/unknown result still forbids adoption through the owner.
-                operation.write(phase + "-reconciliation.json", canonical({
-                    "schema": SCHEMA, "state": "RECONCILIATION_REQUIRED", "phase": phase,
-                    "stage_digest": stage_digest, "error_type": type(exc).__name__}))
-                raise
+            return _commit_publication(
+                stage, operation, schema=SCHEMA, phase=phase, binding=binding, etag=etag,
+                candidate=candidate, listener_pid=listener_pid,
+                state="PREPARED" if phase == "prepare" else "FINAL",
+                requalify=lambda: require(_load_stage(stage, stage_digest)[0] == d,
+                                          "stage changed after publication"),
+                verify_success=lambda: _success(stage, operation, d, stage_digest, phase,
+                                                 base, candidate, predecessor),
+            )
+
+def _commit_publication(stage, operation, *, schema, phase, binding, etag, candidate,
+                        listener_pid, state, requalify, verify_success):
+    """The one intent/ETag/POST/readback/receipt transaction for both consumers."""
+    intent = {**binding, "etag": etag, "listener_pid": listener_pid}
+    try:
+        operation.write(phase + "-intent.json", canonical(intent))
+        stage.check()
+        operation.check()
+        status, _, _ = _http(2019, "POST", "/config/", body=canonical(candidate),
+                             headers={"Content-Type": "application/json", "If-Match": etag})
+        require(status == 200, "publication status refused; reconciliation required")
+        after, _ = _config()
+        require(canonical(after) == canonical(candidate), "publication readback differs; reconciliation required")
+        requalify()
+        receipt = {**binding, "state": state, "intent_digest": digest(canonical(intent)),
+                   "http_status": status}
+        operation.write(phase + "-receipt.json", canonical(receipt))
+        verify_success()
+        return receipt
+    except BaseException as exc:
+        operation.write(phase + "-reconciliation.json", canonical({
+            "schema": schema, "state": "RECONCILIATION_REQUIRED", "phase": phase,
+            "stage_digest": binding["stage_digest"], "error_type": type(exc).__name__}))
+        raise
+
+
+DSH_SCHEMA = "mastermind.dsh_public_edge_publication.v1"
+
+
+def _dsh_artifact(area, expected_digest):
+    from integrations.deepseek_harness.package_attended import (
+        PIN, PUBLICATION_SCHEMA, PUBLICATION_CUSTODY,
+    )
+    raw = area.read("artifact-receipt.json")
+    require(digest(raw) == _sha(expected_digest), "native artifact receipt digest differs")
+    record = decode(raw)
+    require(type(record) is dict and set(record) == {
+        "schema", "custody", "source", "donor_sha", "host", "native_port", "relay_port",
+        "package_manifest_sha256", "build_qualification_sha256", "package_entries", "app_config_sha256",
+        "company_client_sha256", "company_patch_sha256", "native_client_build_sha256",
+        "assets", "installed", "public_route_qualified", "provider_calls"},
+        "native artifact receipt shape differs")
+    require(record["schema"] == PUBLICATION_SCHEMA and record["custody"] == PUBLICATION_CUSTODY
+            and record["donor_sha"] == PIN and record["host"] == dsh_planner.HOST
+            and record["native_port"] == 4180 and record["relay_port"] == 4181
+            and record["installed"] is False and record["public_route_qualified"] is False
+            and type(record["provider_calls"]) is int and record["provider_calls"] == 0
+            and type(record["package_entries"]) is int and record["package_entries"] > 0,
+            "native artifact qualification differs")
+    require(type(record["source"]) is dict and set(record["source"]) == {"sha", "tree"},
+            "native source binding required")
+    for value in record["source"].values():
+        _sha(value, 40)
+    for key in ("package_manifest_sha256", "build_qualification_sha256", "app_config_sha256", "company_client_sha256",
+                "company_patch_sha256", "native_client_build_sha256"):
+        _sha(record[key])
+    require(type(record["assets"]) is list and len(record["assets"]) == 2,
+            "native script and stylesheet evidence required")
+    captures = {"artifact-receipt.json": raw}
+    for row, suffix, mime in zip(record["assets"], ("js", "css"), ("text/javascript", "text/css")):
+        require(type(row) is dict and set(row) == {"url", "mime", "bytes", "sha256", "capture"}
+                and type(row["url"]) is str and re.fullmatch(
+                    r"/assets/index-[A-Za-z0-9_-]+\." + suffix, row["url"])
+                and row["mime"] == mime and row["capture"] == "client." + suffix + ".blob"
+                and type(row["bytes"]) is int and 0 < row["bytes"] <= MAX_BYTES,
+                "native public asset binding refused")
+        payload = area.read(row["capture"])
+        require(len(payload) == row["bytes"] and digest(payload) == _sha(row["sha256"]),
+                "native captured asset bytes differ")
+        captures[row["capture"]] = payload
+    return record, captures
+
+
+def stage_dsh(*, artifact_path, artifact_digest, source_repo, source_sha, source_tree, out):
+    """Capture one closed DSH site addition through the incumbent edge owner."""
+    _root()
+    _sha(source_sha, 40)
+    _sha(source_tree, 40)
+    require(validate_acceptance_source(source_repo=Path(source_repo), expected_sha=source_sha)
+            == source_tree, "native protected source tree differs")
+    with private(artifact_path) as artifact:
+        record, captured = _dsh_artifact(artifact, artifact_digest)
+        require(artifact.names() == set(captured), "unexpected native artifact entry")
+    require(record["source"] == {"sha": source_sha, "tree": source_tree},
+            "native export source differs from protected source")
+    from integrations.deepseek_harness.package_attended import protected_build
+    build_raw, build = protected_build(Path(source_repo), source_sha)
+    require(digest(build_raw) == record["build_qualification_sha256"]
+            and all(build[key] == record[key] for key in ("package_manifest_sha256",
+                "app_config_sha256", "company_client_sha256", "native_client_build_sha256")),
+            "native artifact differs from protected build qualification")
+    live, etag = _config()
+    candidate = dsh_planner.candidate_config(live)
+    captured.update({"live.json": canonical(live), "candidate.json": canonical(candidate)})
+    descriptor = {
+        "schema": DSH_SCHEMA, "host": dsh_planner.HOST, "relay_port": 4181,
+        "source": record["source"], "artifact_digest": artifact_digest, "observed_etag": etag,
+        "custody": "root-owned transport required; not a remote signature",
+        "files": {name: {"sha256": digest(raw), "bytes": len(raw)}
+                  for name, raw in sorted(captured.items())},
+    }
+    require(validate_acceptance_source(source_repo=Path(source_repo), expected_sha=source_sha)
+            == source_tree, "native source changed during capture")
+    _new_directory(out)
+    with private(out) as area:
+        for name, raw in captured.items():
+            area.write(name, raw)
+        raw = canonical(descriptor)
+        area.write(DESCRIPTOR, raw)
+        _load_dsh_stage(area, digest(raw))
+    return {"schema": DSH_SCHEMA, "state": "STAGED", "stage_digest": digest(raw),
+            "published": False, "installed": False}
+
+
+def _load_dsh_stage(stage, expected_digest):
+    raw = stage.read(DESCRIPTOR)
+    require(digest(raw) == _sha(expected_digest), "native stage digest differs")
+    d = decode(raw)
+    require(type(d) is dict and set(d) == {"schema", "host", "relay_port", "source",
+        "artifact_digest", "observed_etag", "custody", "files"}
+        and d["schema"] == DSH_SCHEMA and d["host"] == dsh_planner.HOST
+        and d["relay_port"] == 4181
+        and d["custody"] == "root-owned transport required; not a remote signature"
+        and type(d["observed_etag"]) is str and 0 < len(d["observed_etag"]) <= 1024,
+        "native stage descriptor refused")
+    expected_names = {"artifact-receipt.json", "client.js.blob", "client.css.blob",
+                      "live.json", "candidate.json"}
+    require(type(d["files"]) is dict and set(d["files"]) == expected_names
+            and stage.names() <= expected_names | {DESCRIPTOR, OPERATION},
+            "native stage file set differs")
+    contents = {}
+    for name, meta in d["files"].items():
+        payload = stage.read(name)
+        require(type(meta) is dict and set(meta) == {"sha256", "bytes"}
+                and meta == {"sha256": digest(payload), "bytes": len(payload)},
+                "native stage bytes differ")
+        contents[name] = payload
+    record, _ = _dsh_artifact(stage, d["artifact_digest"])
+    require(record["source"] == d["source"], "native stage source differs")
+    live, candidate = decode(contents["live.json"]), decode(contents["candidate.json"])
+    require(canonical(candidate) == canonical(dsh_planner.candidate_config(live)), "native candidate differs")
+    return d, record, live, candidate
+
+
+def _dsh_http(path, *, maximum):
+    require(path == "/" or re.fullmatch(r"/assets/index-[A-Za-z0-9_-]+\.(?:js|css)", path),
+            "fixed native probe path required")
+    return _loopback_http(4181, "GET", path, maximum=maximum,
+                          headers={"Host": dsh_planner.HOST, "Accept-Encoding": "identity"})
+
+
+def _served_dsh(record):
+    status, headers, raw = _dsh_http("/", maximum=1024)
+    require(status == 401 and headers.get("cache-control") == "no-store"
+            and headers.get("content-type") == "text/plain; charset=utf-8"
+            and raw == b"dsh web authentication required; reopen the URL printed by dsh web.\n",
+            "native unauthenticated index differs")
+    for row in record["assets"]:
+        status, headers, raw = _dsh_http(row["url"], maximum=row["bytes"])
+        require(status == 200 and headers.get("content-type", "").split(";")[0] == row["mime"]
+                and len(raw) == row["bytes"] and digest(raw) == row["sha256"],
+                "native public asset served bytes differ")
+
+
+def _dsh_binding(stage, operation, d, expected_digest, base, candidate):
+    return {"schema": DSH_SCHEMA, "phase": "dsh", "stage_digest": expected_digest,
+            "stage_identity": stage.identity, "operation_identity": operation.identity,
+            "source": d["source"], "artifact_digest": d["artifact_digest"],
+            "base_digest": digest(canonical(base)), "config_digest": digest(canonical(candidate))}
+
+
+def _dsh_success(stage, operation, d, expected_digest, base, candidate):
+    require(operation.names() == {"dsh-intent.json", "dsh-receipt.json"},
+            "native publication journal unresolved or changed")
+    binding = _dsh_binding(stage, operation, d, expected_digest, base, candidate)
+    intent = decode(operation.read("dsh-intent.json"))
+    require(type(intent) is dict and set(intent) == {*binding, "etag", "listener_pid"}
+            and all(intent[key] == value for key, value in binding.items())
+            and type(intent["etag"]) is str and 0 < len(intent["etag"]) <= 1024
+            and type(intent["listener_pid"]) is int and intent["listener_pid"] > 0,
+            "native publication intent differs")
+    receipt = decode(operation.read("dsh-receipt.json"))
+    require(receipt == {**binding, "state": "PUBLISHED", "intent_digest": digest(canonical(intent)),
+                        "http_status": 200}, "native publication receipt differs")
+    return receipt
+
+
+def publish_dsh(*, stage_path, stage_digest, listener_pid):
+    _root()
+    with private(stage_path) as stage:
+        d, record, base, candidate = _load_dsh_stage(stage, stage_digest)
+        require(OPERATION not in stage.names(), "original operation already exists; no replay")
+        current, etag = _config()
+        require(canonical(current) == canonical(base) and etag == d["observed_etag"], "native full configuration drift")
+        _listener(4181, listener_pid)
+        _validate_file(stage, "candidate.json", candidate)
+        _served_dsh(record)
+        _listener(4181, listener_pid)
+        observed_config, observed_etag = _config()
+        require(canonical(observed_config) == canonical(base) and observed_etag == etag,
+                "configuration or ETag changed during qualification")
+        require(_load_dsh_stage(stage, stage_digest)[0] == d, "native stage changed during qualification")
+        _new_directory(stage.path / OPERATION)
+        with private(stage.path / OPERATION) as operation:
+            binding = _dsh_binding(stage, operation, d, stage_digest, base, candidate)
+            return _commit_publication(
+                stage, operation, schema=DSH_SCHEMA, phase="dsh", binding=binding, etag=etag,
+                candidate=candidate, listener_pid=listener_pid, state="PUBLISHED",
+                requalify=lambda: require(_load_dsh_stage(stage, stage_digest)[0] == d,
+                                          "native stage changed after publication"),
+                verify_success=lambda: _dsh_success(stage, operation, d, stage_digest, base, candidate),
+            )
+
 
 
 def main(argv=None):
@@ -477,7 +691,12 @@ def main(argv=None):
     for name in ("old-sha", "old-tree", "new-sha", "new-tree", "new-digest"):
         stage.add_argument("--" + name, required=True)
     stage.add_argument("--relay-port", type=int, required=True)
-    for name in ("prepare", "verify-cutover", "finalize"):
+    dsh = sub.add_parser("stage-dsh")
+    for name in ("artifact-path", "source-repo", "out"):
+        dsh.add_argument("--" + name, type=Path, required=True)
+    for name in ("artifact-digest", "source-sha", "source-tree"):
+        dsh.add_argument("--" + name, required=True)
+    for name in ("prepare", "verify-cutover", "finalize", "publish-dsh"):
         command = sub.add_parser(name)
         command.add_argument("--stage-path", type=Path, required=True)
         command.add_argument("--stage-digest", required=True)
@@ -490,6 +709,10 @@ def main(argv=None):
     command = args.pop("command")
     if command == "stage-host":
         result = stage_host(**args)
+    elif command == "stage-dsh":
+        result = stage_dsh(**args)
+    elif command == "publish-dsh":
+        result = publish_dsh(**args)
     elif command == "verify-cutover":
         result = verify_cutover(**args)
     else:

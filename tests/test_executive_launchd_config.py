@@ -1047,6 +1047,8 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
         '"/usr/bin/git",\n'
         '                "--no-optional-locks",\n'
         '                "-c",\n'
+        '                "gc.auto=0",\n'
+        '                "-c",\n'
         '                f"safe.directory={trust_value}",\n'
         '                "-C",\n'
         '                trust_value,\n'

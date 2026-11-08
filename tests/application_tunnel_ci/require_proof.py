@@ -14,6 +14,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     suites = ["tests/test_application_tunnel_entry.py", "tests/test_application_tunnel_control.py",
               "tests/test_application_tunnel_lifecycle.py", "tests/test_os_tunnel_entry.py",
+              "tests/test_deepseek_tunnel_control.py",
               "tests/test_hermes_primary_application_tunnel.py"]
     with tempfile.TemporaryDirectory(prefix="application-transport-proof-") as directory:
         report = Path(directory) / "proof.xml"
@@ -25,7 +26,13 @@ def main():
         document = ET.parse(report).getroot()
         totals = {key: sum(int(node.get(key, "0")) for node in document.iter("testsuite"))
                   for key in ("tests", "failures", "errors", "skipped")}
-        required = {"test_role_successor_preserves_credential_inode_and_original_journals",
+        required = {"test_deepseek_real_stage_apply_start_stop_preserves_native_owner",
+                    "test_deepseek_role_aliases_refuse_before_any_custody_lock",
+                    "test_unresolved_fabric_role_journal_blocks_deepseek_before_new_intent",
+                    "test_settled_fabric_role_and_deepseek_keep_original_receipts_and_exact_grants",
+                    "test_fabric_settled_deepseek_adds_fabric_observes_without_writes",
+                    "test_unresolved_peer_blocks_new_intent_but_original_can_reconcile",
+                    "test_role_successor_preserves_credential_inode_and_original_journals",
                     "test_role_server_lost_ack_reconciles_original_acl_once",
                     "test_role_partial_client_publication_recovers_from_original_v2_intent",
                     "test_role_client_stage_requires_no_server_filesystem",
@@ -45,4 +52,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

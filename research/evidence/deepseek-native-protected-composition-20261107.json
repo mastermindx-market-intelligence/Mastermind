@@ -1,0 +1,255 @@
+{
+  "schema": "mastermind.deepseek_protected_composition_evidence.v1",
+  "recorded": "2026-11-07T18:38:58.758563+00:00",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "source_parent": "2963bcbc6d16e5fd4c4c2f1c3b80e6a45bf3d06e",
+  "protected_base": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "procedure_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "prepared_source_tree": "2d097b9152e773e6e0ec214850809fb17722be5b",
+  "tests": [
+    {
+      "name": "frontend",
+      "receipt_path": "/private/tmp/mmx-dsh-c17-native-protected-consumer-20261107-pro1.json",
+      "receipt_sha256": "ede16488579db3813889e93e94fddd0a865a94a3221de1efb8c8654f75721f1d",
+      "summary": {
+        "passed": 6961,
+        "skipped": 12,
+        "files_passed": 408
+      },
+      "receipt": {
+        "started": "2026-11-07T18:30:20.565402+00:00",
+        "finished": "2026-11-07T18:32:47.440132+00:00",
+        "results": [
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/tsc",
+              "--noEmit"
+            ],
+            "returncode": 0
+          },
+          {
+            "argv": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/.bin/vitest",
+              "run",
+              "--maxWorkers",
+              "4"
+            ],
+            "returncode": 0
+          }
+        ],
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1318b2b155ff853bfa9302bcb54d00b735812703e58ac52fbb81398cda50e300.json",
+          "sha256": "1318b2b155ff853bfa9302bcb54d00b735812703e58ac52fbb81398cda50e300",
+          "entries": 812
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1318b2b155ff853bfa9302bcb54d00b735812703e58ac52fbb81398cda50e300.json",
+          "sha256": "1318b2b155ff853bfa9302bcb54d00b735812703e58ac52fbb81398cda50e300",
+          "entries": 812
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "14083aa117afcca156297e84bb86fe633691002bd09e810aaa10d79d6633fe28"
+      }
+    },
+    {
+      "name": "rust",
+      "receipt_path": "/private/tmp/mmx-dsh-c17-native-protected-rust-20261107-pro1.json",
+      "receipt_sha256": "f6ce1f3f6cb9c0061ab73b8be17075120775656e2137759d389bfac31f0781f1",
+      "summary": {
+        "passed": 272,
+        "ignored": 8
+      },
+      "receipt": {
+        "started": "2026-11-07T18:31:10.755656+00:00",
+        "finished": "2026-11-07T18:31:21.156209+00:00",
+        "argv": [
+          "/Users/chriswong/.cargo/bin/cargo",
+          "test",
+          "--",
+          "--nocapture"
+        ],
+        "returncode": 0,
+        "inputs_unchanged": true,
+        "inputs": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/3cacc59f5a27ab123ee7d277b63c69c0d266c7191c6d6b59325dc50ba727a054.json",
+          "sha256": "3cacc59f5a27ab123ee7d277b63c69c0d266c7191c6d6b59325dc50ba727a054",
+          "entries": 134
+        },
+        "build_environment": {
+          "MM_SOURCE_REVISION": "2963bcbc6d16e5fd4c4c2f1c3b80e6a45bf3d06e",
+          "MM_BUILD_IDENTITY": "deepseek-native-protected-test-pro1"
+        },
+        "log_sha256": "f163c4a159639be9840e49fa0b0f9411214beb2c41777b4a02751465e3e6be7b"
+      }
+    },
+    {
+      "name": "backend",
+      "receipt_path": "/private/tmp/mmx-dsh-c20-native-protected-backend-20261107-pro2.json",
+      "receipt_sha256": "bd20f2293321f734e7ceab6bf9c42422e473e456b8499c8437044d7d1ca0bc6a",
+      "summary": {
+        "passed": 673
+      },
+      "receipt": {
+        "started": "2026-11-07T18:37:27.196112+00:00",
+        "finished": "2026-11-07T18:38:14.052749+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_office_company_priorities.py",
+          "tests/test_mastermind_os_session_transport.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_conversation_gateway_framing.py",
+          "tests/test_project_conversation_gateway_framing.py",
+          "tests/test_mastermind_executive_app_asgi.py",
+          "tests/test_executive_mcp_session_bridge.py",
+          "tests/test_workspace_read_app.py",
+          "tests/test_executive_mcp_app_composition.py",
+          "tests/test_executive_mcp_entry.py",
+          "tests/test_executive_mcp_web_ceo_app.py",
+          "tests/test_executive_fabric_release_identity_review.py"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1a26e740a60eaac4f7b962cec7fb6763605541582da2ee07ede0abe5dc43b31d.json",
+          "sha256": "1a26e740a60eaac4f7b962cec7fb6763605541582da2ee07ede0abe5dc43b31d",
+          "entries": 1424
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1a26e740a60eaac4f7b962cec7fb6763605541582da2ee07ede0abe5dc43b31d.json",
+          "sha256": "1a26e740a60eaac4f7b962cec7fb6763605541582da2ee07ede0abe5dc43b31d",
+          "entries": 1424
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "f26cab1421b9389664d1829a8e086d6a0f77a3926d66e9337376809fe90b4a99"
+      }
+    },
+    {
+      "name": "backend_pre_guard_repair",
+      "receipt_path": "/private/tmp/mmx-dsh-c20-native-protected-backend-20261107-pro1.json",
+      "receipt_sha256": "fdfe1a18e7763ae4d03f7c03f490417bdcefa6d90f373880defbba6aef43177b",
+      "summary": {
+        "passed": 545,
+        "failed": 1
+      },
+      "receipt": {
+        "started": "2026-11-07T18:31:20.644209+00:00",
+        "finished": "2026-11-07T18:32:02.592776+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_office_company_priorities.py",
+          "tests/test_mastermind_os_session_transport.py",
+          "tests/test_dsh_native_fresh_http.py",
+          "tests/test_conversation_gateway_framing.py",
+          "tests/test_project_conversation_gateway_framing.py",
+          "tests/test_mastermind_executive_app_asgi.py",
+          "tests/test_executive_mcp_session_bridge.py",
+          "tests/test_workspace_read_app.py",
+          "tests/test_executive_mcp_app_composition.py",
+          "tests/test_executive_mcp_entry.py",
+          "tests/test_executive_mcp_web_ceo_app.py",
+          "tests/test_executive_fabric_release_identity_review.py"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1a5b6998172e8a223302c078997559d553e8043208a068aa47cfa42026645eb3.json",
+          "sha256": "1a5b6998172e8a223302c078997559d553e8043208a068aa47cfa42026645eb3",
+          "entries": 1424
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1a5b6998172e8a223302c078997559d553e8043208a068aa47cfa42026645eb3.json",
+          "sha256": "1a5b6998172e8a223302c078997559d553e8043208a068aa47cfa42026645eb3",
+          "entries": 1424
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "cdfb669301938edd1984edbb8427e5edae30088c842be0856745e171cb72ebc5"
+      }
+    }
+  ],
+  "composition": {
+    "conflicts_resolved": [
+      "app/mastermind_os/src/web-auth.ts",
+      "app/mastermind_os/src/web-auth.test.ts"
+    ],
+    "preserved": [
+      "Paperclip organization view",
+      "Company priorities authenticated consumer",
+      "merged Hermes source and controls",
+      "native v2 conversation journey"
+    ],
+    "source_guard_reconciliation": [
+      {
+        "path": "app/mastermind_os/src-tauri/src/auth.rs",
+        "sha256": "90f49b0b038762e4ac554e3a4c0b67115b1358f704573349a7f9e76e5f3eb7da",
+        "sites": [
+          [
+            3618,
+            68,
+            71,
+            "int",
+            "503"
+          ],
+          [
+            3623,
+            69,
+            72,
+            "int",
+            "503"
+          ],
+          [
+            3627,
+            67,
+            70,
+            "int",
+            "503"
+          ]
+        ]
+      },
+      {
+        "path": "integrations/mastermind_executive_app/fresh_conversation_transport.py",
+        "sha256": "7213ad3122ca5038b759f1aeb02fbb97fc2bec990dd2d660f9bad7c247e73385",
+        "sites": [
+          [
+            98,
+            39,
+            42,
+            "int",
+            "404"
+          ]
+        ],
+        "unchanged_rejection_if_ast_sha256": "15d725a6e9a5f171070a6d36df069b66467e116576f45a0cfa567f5163e9827a"
+      }
+    ]
+  },
+  "release": {
+    "production_armed": false,
+    "native_installed_acceptance": false,
+    "committed_head_d8": "pending after merge checkpoint",
+    "holds": [
+      "Original installed Worker/quota/host/account binding has not yet been established.",
+      "Native v2 passive observation and same-process launcher are the next implementation slice.",
+      "Signed-in packaged DeepSeek journey, Stop and same-Session G1-to-G2 resume are not claimed."
+    ]
+  },
+  "effects": {
+    "merge": "prepared exact protected merge; no protected-master merge",
+    "services_restarted": false,
+    "new_session_owner": false,
+    "native_canary_repeated": false,
+    "optional_gc": "Automatic optional GC/repack encountered foreign-worktree index permission denial. No maintenance retry, denied-index inspection, log deletion or permissions change; later source git uses gc.auto=0."
+  },
+  "input_manifest_encoding": {
+    "description": "Large exact input-hash maps are deduplicated in source-linked JSON leaves. At each input_manifest reference, replace the reference object with its verified leaf map to reconstruct the original receipt fields. Original receipt/log SHA-256 values remain unchanged.",
+    "preimage_commit": "80f716ef74846a6ad6d58865c6db1f5710ca43ab",
+    "preimage_path": "research/evidence/deepseek-native-protected-composition-20261107.json",
+    "preimage_sha256": "b156bc4a91515675a82fb3157c8f9ad0ca89eab5708a98cf5084c7c8d3568138",
+    "preimage_bytes": 1219470,
+    "reason": "Preserve the original 1 MiB evidence-document guard without dropping input hashes or changing tests."
+  }
+}

@@ -15,19 +15,19 @@ function refuse(check) {
  * This is behavior evidence, not artifact authentication or execution admission.
  * The host retains the outer deadline and must reconcile an unsettled runtime.
  */
-export async function qualifyLoadedDispatchRuntime(ctx, { signal } = {}) {
+export async function qualifyLoadedDispatchRuntime(ctx, { signal, agent } = {}) {
   if (!(signal instanceof AbortSignal)) throw new TypeError('Owner AbortSignal required')
   signal.throwIfAborted()
   const checks = []
   for (const check of ['positive', 'revocation', 'replacement', 'result-owner']) {
     signal.throwIfAborted()
-    checks.push(Object.freeze(await probe(ctx, signal, check)))
+    checks.push(Object.freeze(await probe(ctx, signal, check, agent)))
   }
   signal.throwIfAborted()
   return Object.freeze({ verified: true, checks: Object.freeze(checks) })
 }
 
-async function probe(ctx, signal, check) {
+async function probe(ctx, signal, check, agent) {
   const name = `mmx_dispatch_probe_${randomUUID().replaceAll('-', '')}`
   let bodyCalls = 0, replacementCalls = 0, guardAllowed = false
   let wrapperEntered = false, changed = false, allowed = true
@@ -75,6 +75,7 @@ async function probe(ctx, signal, check) {
     }))
     const result = await ctx.tools.execute({
       signal, name, callId: name, arguments: {},
+      ...agent === undefined ? {} : { agent },
     })
     signal.throwIfAborted()
     if (!guardAllowed || !wrapperEntered || replacementCalls !== 0) throw refuse(check)

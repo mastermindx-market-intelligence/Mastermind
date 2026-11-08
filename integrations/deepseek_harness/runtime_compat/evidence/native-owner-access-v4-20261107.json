@@ -1,0 +1,106 @@
+{
+  "schema": "mastermind.dsh_native_owner_access_v4_evidence.v1",
+  "commit": {
+    "schema": "mastermind.scoped_source_commit.v1",
+    "before": "26b4d293a26e05ee9130cea93a39dfe8ae4f378c",
+    "paths_sha256": {
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+      "integrations/deepseek_harness/runtime_compat/native-access-source.json": "87f6007a593e6aa845524e741bc59606d646e577fdf6177e09a15ec00276f778",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_access.py": "5d6792e7eaffbe976ededcffa68c7d5ced83260d4a5249550dab6497414a7c42",
+      "integrations/deepseek_harness/runtime_compat/check-native-access.mjs": "47a38d370c98461589e2708edccc5330c6e365fcf22d2ad648d5e893459a8b08",
+      "integrations/deepseek_harness/runtime_compat/vitest.owner-access.config.mts": "917073ba864c2a71497c48df5d6630e86989751b526517eb71871df9971b3891",
+      "integrations/deepseek_harness/runtime_compat/native-owner-changes.test.ts": "6c2aafb323528058397eed0e12a6b399681fb341394f70ec77d8982fa450981a",
+      "tests/executive_identity_review.py": "f75e5e5633b7f7ce4844d830e150178b8fb2efc730b33922ce1633a159883af0",
+      "tests/test_dsh_native_owner_identity.py": "f57b80bdaf3a3793f6ceae937423a78c71b05a1696879ab56adc108151375c9f",
+      "tests/test_dsh_native_owner_package.py": "83fee703512e2b253cfc7aa28e8d40772f876683756c888c27a9817d6d927882"
+    },
+    "state": "COMMITTED",
+    "publication": "NOT_STARTED",
+    "provider_calls": 0,
+    "return_code": 0,
+    "after": "988b6890d26bebc211ca3d01949ca161ff414d32"
+  },
+  "qualification": [
+    {
+      "name": "native",
+      "exit_code": 0,
+      "seconds": 9.93,
+      "log": "/tmp/mmx-native-owner-v4-final-native-20261107-c2.log",
+      "sha256": "5e4cadc6a1bdf645fab98caf4eafc896aa3c82ab0dc6be4efd09a896e18b3675",
+      "tail": "\n RUN  v4.1.11 /Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat\n\n \u2713 native-owner-changes.test.ts (10 tests) 388ms\n \u2713 native-owner-access.test.ts (33 tests) 1536ms\n \u2713 native-owner-upload.test.ts (13 tests) 542ms\n \u2713 native-owner-hold.test.ts (18 tests) 146ms\n\n Test Files  4 passed (4)\n      Tests  74 passed (74)\n   Start at  02:12:40\n   Duration  8.80s (transform 3.61s, setup 0ms, import 5.35s, tests 2.61s, environment 0ms)\n\n"
+    },
+    {
+      "name": "typecheck",
+      "exit_code": 0,
+      "seconds": 4.17,
+      "log": "/tmp/mmx-native-owner-v4-final-typecheck-20261107-c2.log",
+      "sha256": "c1c100447eb89158bd303d31bc21fa0d9b3305e7ae90d8d74e7478030f2f4e6f",
+      "tail": "NATIVE_ACCESS_TYPECHECK_DIAGNOSTICS 0\n"
+    },
+    {
+      "name": "changes-original",
+      "exit_code": 0,
+      "seconds": 4.19,
+      "log": "/tmp/mmx-native-owner-v4-final-changes-original-20261107-c2.log",
+      "sha256": "7a50f2e76f89163a1e58ba630696e74c1016230a74c1b62b297896bf1037d240",
+      "tail": "\n RUN  v4.1.11 /Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat\n\n \u2713 ../../../../../dsh-donor-20261022/packages/client/ui-deliverables/tests/changes-open.host.spec.ts (16 tests) 347ms\n \u2713 ../../../../../dsh-donor-20261022/packages/client/ui-deliverables/tests/present-open.host.spec.ts (30 tests) 409ms\n\n Test Files  2 passed (2)\n      Tests  46 passed (46)\n   Start at  02:12:40\n   Duration  3.08s (transform 1.43s, setup 0ms, import 1.93s, tests 756ms, environment 0ms)\n\n"
+    },
+    {
+      "name": "package",
+      "exit_code": 0,
+      "seconds": 18.39,
+      "log": "/tmp/mmx-native-owner-v4-final-package-20261107-c2.log",
+      "sha256": "b1caae85ec31d08a00b70488af9cc30676ea609b8012c2800620e199adf3bcb2",
+      "tail": "........................................                                 [100%]\n"
+    }
+  ],
+  "original_build": {
+    "schema": "mastermind.attended_build_effect.v1",
+    "state": "BUILT",
+    "source_commit": "988b6890d26bebc211ca3d01949ca161ff414d32",
+    "release": "/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/releases/dsh-687f282e-owner-access-v4-20261107-c2",
+    "state_root": "/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/state-owner-access-v4-20261107-c2",
+    "inputs_sha256": {
+      "integrations/deepseek_harness/package_attended.py": "8c7841c3d39ecf1f22dd04a5ebf1376ce63af829c6f5775e0887a409e20643ec",
+      "integrations/deepseek_harness/launch_attended.mjs": "8fd96f972aedcd5208ecd2b6a57cef6acc9eae97515835b9e2c96140a0a98c15",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_session.py": "52aa4d1258015e368ae9cc8f92366d1fa09a32baf44a6ae166487410923c317d",
+      "integrations/deepseek_harness/runtime_compat/native-session-source.json": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+      "integrations/deepseek_harness/runtime_compat/native-session-generation.patch": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "ca8da73ab3b2aade864ceb5fbdee688680eceec115f4cbb13bf7ceea1302246a",
+      "integrations/deepseek_harness/runtime_compat/native-host-source.json": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
+      "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_access.py": "5d6792e7eaffbe976ededcffa68c7d5ced83260d4a5249550dab6497414a7c42",
+      "integrations/deepseek_harness/runtime_compat/native-access-source.json": "87f6007a593e6aa845524e741bc59606d646e577fdf6177e09a15ec00276f778",
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+      "integrations/deepseek_harness/runtime_compat/native_access_package.py": "88b53abc23728468fe30e1cf19866f69801adad620efec3e32d78939d05f1db8",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+      "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "644bb9e7ed6ba59c522d12b3c8cf01ba8edd80eefd24ab98d426d7a02a3bd885",
+      "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
+      "integrations/deepseek_harness/runtime_compat/native_acp_package.py": "86ce186d3ffa7f98dc776ba6ed59f7f183c2ed54bc01ae9dc30f72afb820029a",
+      "integrations/deepseek_harness/company_plugin/package.json": "f6ae65d09b42299940283ee9dc7d1d4286baf9e51b32b2166e08560a59171b52",
+      "integrations/deepseek_harness/company_plugin/src/protocol.ts": "2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41",
+      "integrations/deepseek_harness/company_plugin/src/index.ts": "1585af52430af853c86d6b8073dc48053020e63bf54966ca9186fb584eaa44b3",
+      "integrations/deepseek_harness/company_plugin/src/company-peer.ts": "60bd663c0a501f9ac8f2019f3d2e85f69a9e56226cc85b6c0e42450ffb17e9ea",
+      "integrations/deepseek_harness/company_plugin/src/executive-read-port.ts": "19d10b20820968b6748b0a8b924b3c3ebc84d8b985955840e2fa79495b213a88",
+      "integrations/deepseek_harness/company_plugin/src/client/connection.ts": "d914331d4783c8a829f6ae5d34bc13ee8d2980b53d9877ea4d45eee3702186eb",
+      "integrations/deepseek_harness/company_plugin/src/client/index.ts": "ff20e3065c14add6432ea00686dcc5db567bd13a0495a709e89990f5add04567",
+      "integrations/deepseek_harness/company_plugin/src/client/styles.ts": "b3d27b10963634ba74d5544fbf74fed155472b095bd2233a3a7abdd7b02bc479",
+      "integrations/deepseek_harness/company_plugin/lib/client.js": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+      "integrations/deepseek_harness/company_plugin/lib/executive-read-port.js": "2907c91681b1a649a6c26948c1dff7466e5b10a62a8539c0c67ade0355470608",
+      "integrations/deepseek_harness/company_plugin/lib/index.js": "7f523566dcc06c1d99ee263dff52d1b53a707be8a2855d8986aee2c12657e031",
+      "integrations/deepseek_harness/company_plugin/lib/build-manifest.json": "9a1415d46104f124c176916383cbb9e21d95893f2bab7e10c587635a02df2328",
+      "integrations/deepseek_harness/company_plugin/lib/company-peer.js": "26100e77cdfeee7afb493f93f2eb7dec5e0aa594ca8caab5d0ae59ca8161f587"
+    },
+    "provider_calls": 0,
+    "installed": false,
+    "exit_code": 0,
+    "seconds": 310.0,
+    "changed_inputs": [],
+    "log_sha256": "9e4b70e0f2b7f2f8d1985fb4907172cd254298bada0f842402c10ea78855c562",
+    "app.json_sha256": "e9f6272dc869536a3e2cf3b3e326c8d56f8a0e92240d218baab04f03182d1b26",
+    "package-manifest.json_sha256": "a75cbb2d050ada3570425bfd458586dd69bec07a48a398153f0fae9181cdd2c5"
+  },
+  "source_and_receipt_hashes_verified": true,
+  "note": "Original scoped writer and original package effect; no root rebuild, installation or source overlap.",
+  "production_acceptance": false
+}

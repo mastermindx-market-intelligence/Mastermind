@@ -1,6 +1,6 @@
 import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
 import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
-import type { OperationPointer } from "./operation-controller";
+import type { OperationPointer, PendingControlRead } from "./operation-controller";
 import { readNativePending } from "../hermes-native/pending-pointer";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
@@ -8,6 +8,10 @@ import {parseFreshConversationTarget} from './fresh-conversation-target';
 import {parsePlanProposalTarget} from '../planning/project-plan-proposal';
 
 export interface DurablePendingPointerStore {
+  readControl?(scope:string,parent:OperationPointer,signal?:AbortSignal):Promise<PendingControlRead>;
+  attachControlIfEqual?(scope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):Promise<boolean>;
+  clearControlIfEqual?(scope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):Promise<boolean>;
+
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
   reserve(
     scope: string,
@@ -39,7 +43,7 @@ export const PENDING_POINTER_ERRORS = {
 } as const;
 
 type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
-type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn" | "conversation_resume" | "conversation_stop";
 type ClosedRecord = {
   readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
 } | {
@@ -77,6 +81,17 @@ type ClosedRecord = {
 } | {
   /** Original PLAN publication lookup only; no private body or preview witness. */
   readonly v: 15; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+
+} | {
+  readonly v:16;readonly operationKey:string;readonly kind:"conversation_create";readonly targetKey:string;
+} | {
+  readonly v:17;readonly operationKey:string;readonly kind:"conversation_consume";readonly targetKey:string;
+} | {
+  readonly v:18;readonly operationKey:string;readonly kind:"conversation_turn";readonly targetKey:string;
+} | {
+  readonly v:19;readonly operationKey:string;readonly kind:"conversation_resume";readonly targetKey:string;
+} | {
+  readonly v:20;readonly operationKey:string;readonly kind:"conversation_stop";readonly targetKey:string;
 };
 
 type DurableReservation =
@@ -140,6 +155,8 @@ const KIND_RECORDS = {
   conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
   conversation_consume: { v: 10, key: /^mmos-conversation-consume-[0-9a-f]{40}$/, consume: false },
   conversation_turn: { v: 11, key: /^mmos-conversation-turn-[0-9a-f]{40}$/, consume: false },
+  conversation_resume:{v:19,key:/^mmos-native-resume-[0-9a-f]{40}$/,consume:false},
+  conversation_stop:{v:20,key:/^mmos-native-stop-[0-9a-f]{40}$/,consume:false},
 } as const;
 /**
  * Extra closed shapes of an EXISTING kind, discriminated by the exact issued
@@ -148,8 +165,9 @@ const KIND_RECORDS = {
  * versa; the prefix grammars are disjoint from every legacy key grammar.
  */
 const KIND_VARIANTS = {
-  conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
-  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false }],
+  conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false },{v:16,key:/^mmos-native-create-[0-9a-f]{40}$/,consume:false}],
+  conversation_consume:[{v:17,key:/^mmos-native-consume-[0-9a-f]{40}$/,consume:false}],
+  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false },{v:18,key:/^mmos-native-turn-[0-9a-f]{40}$/,consume:false}],
   project_source_write: [{v:15,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false}],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
@@ -200,6 +218,11 @@ function planningTargetMatches(targetKey: unknown): boolean {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  if(spec.v===16)return typeof raw.targetKey==="string"&&CONVERSATION_WORK_RE.exec(raw.targetKey)?.[0]===raw.targetKey;
+  if(spec.v===17||spec.v===18||spec.v===19||spec.v===20){
+    const target=parseFreshConversationTarget(raw.targetKey);
+    return target!==null&&(!("operation_key"in target)||/^mmos-native-create-[0-9a-f]{40}$/.exec(target.operation_key)?.[0]===target.operation_key);
+  }
   if (spec.v === 13 || spec.v === 14) {
     return readNativePending(raw as unknown as OperationPointer) !== null;
   }
@@ -224,7 +247,10 @@ function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<
   if (spec.v === 9) return planningTargetMatches(raw.targetKey);
   if (spec.v === 12) return typeof raw.targetKey === "string" && raw.targetKey.length >= 5 && raw.targetKey.length <= 67
     && CREATE_WORK_RE.exec(raw.targetKey)?.[0] === raw.targetKey;
-  if (spec.v === 10 || spec.v === 11) return parseFreshConversationTarget(raw.targetKey)!==null;
+  if(spec.v===10||spec.v===11){
+    const target=parseFreshConversationTarget(raw.targetKey);
+    return target!==null&&(!("operation_key"in target)||/^mmos-conversation-create-[0-9a-f]{40}$/.exec(target.operation_key)?.[0]===target.operation_key);
+  }
   return typeof raw.targetKey === "string"
     && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
     && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);
@@ -464,7 +490,7 @@ async function readInStore(
 ): Promise<OperationPointer | null> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value === undefined) return null;
-  return decodeRecord(value, scope);
+  return decodeStored(value, scope).parent;
 }
 
 async function reserveInStore(
@@ -474,7 +500,7 @@ async function reserveInStore(
 ): Promise<DurableReservation> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value !== undefined) {
-    const existing = decodeRecord(value, scope);
+    const existing = decodeStored(value, scope).parent;
     return { reserved: false, pointer: existing };
   }
   await requestToPromise(store.add(record, scope) as IDBRequest<IDBValidKey>);
@@ -488,9 +514,51 @@ async function clearIfEqualInStore(
 ): Promise<boolean> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value === undefined) return false;
-  const existing = decodeRecord(value, scope);
-  if (!canonicalFieldsEqual(record, existing)) return false;
+  const row = decodeStored(value, scope);
+  if (row.control!==null || !canonicalFieldsEqual(record, row.parent)) return false;
   await requestToPromise(store.delete(scope) as IDBRequest<undefined>);
+  return true;
+}
+
+
+/** Validate one closed Stop lookup against the exact occupied native parent. */
+function controlMatchesParent(parent:ClosedRecord,control:ClosedRecord):boolean {
+  if(control.v!==20||(parent.v!==16&&parent.v!==18))return false;
+  const expected=parent.v===16?canonicalJson({work_ref:parent.targetKey,operation_key:parent.operationKey}):parent.targetKey;
+  return control.targetKey===expected;
+}
+function decodeStored(value:unknown,scope:string):{parent:OperationPointer;control:OperationPointer|null;record:ClosedRecord} {
+  if(isPlainObject(value)&&value.v===21){
+    const keys=Reflect.ownKeys(value);
+    if(keys.length!==3||keys.some(k=>k!=="v"&&k!=="parent"&&k!=="control"))fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
+    const parent=decodeRecord(value.parent,scope),control=decodeRecord(value.control,scope);
+    const record=parsePointer(parent,scope),child=parsePointer(control,scope);
+    if(!controlMatchesParent(record,child))fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
+    return {parent,control,record};
+  }
+  const parent=decodeRecord(value,scope);return {parent,control:null,record:parsePointer(parent,scope)};
+}
+async function readControlInStore(store:IDBObjectStore,scope:string,parent:ClosedRecord):Promise<PendingControlRead>{
+  const value=await requestToPromise(store.get(scope) as IDBRequest<unknown>);
+  if(value===undefined)return {matched:false};
+  const row=decodeStored(value,scope);
+  return canonicalFieldsEqual(parent,row.parent)?{matched:true,control:row.control}:{matched:false};
+}
+async function attachControlInStore(store:IDBObjectStore,scope:string,parent:ClosedRecord,control:ClosedRecord):Promise<boolean>{
+  const value=await requestToPromise(store.get(scope) as IDBRequest<unknown>);
+  if(value===undefined)return false;
+  const row=decodeStored(value,scope);
+  if(row.control!==null||!canonicalFieldsEqual(parent,row.parent))return false;
+  await requestToPromise(store.put({v:21,parent:row.record,control},scope) as IDBRequest<IDBValidKey>);
+  return true;
+}
+async function clearControlInStore(store:IDBObjectStore,scope:string,parent:ClosedRecord,control:ClosedRecord):Promise<boolean>{
+  const value=await requestToPromise(store.get(scope) as IDBRequest<unknown>);
+  if(value===undefined)return false;
+  const row=decodeStored(value,scope);
+  if(!canonicalFieldsEqual(parent,row.parent)||row.control===null||!canonicalFieldsEqual(control,row.control))return false;
+  // Restore the exact original closed record; never erase or advance its parent.
+  await requestToPromise(store.put(row.record,scope) as IDBRequest<IDBValidKey>);
   return true;
 }
 
@@ -505,6 +573,26 @@ export function createIndexedDbPendingPointerStore(
   };
 
   return {
+
+    async readControl(scope:string,parent:OperationPointer,signal?:AbortSignal):Promise<PendingControlRead>{
+      assertScope(scope);const expected=parsePointer(parent,scope),db=await openDatabase(requireFactory(),signal);
+      try{return await runTransaction(db,"readonly",false,s=>readControlInStore(s,scope,expected),signal);}
+      finally{closeQuietly(db);}
+    },
+    async attachControlIfEqual(scope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):Promise<boolean>{
+      assertScope(scope);const expected=parsePointer(parent,scope),child=parsePointer(control,scope);
+      if(!controlMatchesParent(expected,child))fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+      const db=await openDatabase(requireFactory(),signal);
+      try{return await runTransaction(db,"readwrite",true,s=>attachControlInStore(s,scope,expected,child),signal);}
+      finally{closeQuietly(db);}
+    },
+    async clearControlIfEqual(scope:string,parent:OperationPointer,control:OperationPointer,signal?:AbortSignal):Promise<boolean>{
+      assertScope(scope);const expected=parsePointer(parent,scope),child=parsePointer(control,scope);
+      if(!controlMatchesParent(expected,child))fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+      const db=await openDatabase(requireFactory(),signal);
+      try{return await runTransaction(db,"readwrite",true,s=>clearControlInStore(s,scope,expected,child),signal);}
+      finally{closeQuietly(db);}
+    },
     async read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null> {
       assertScope(scope);
       const idb = requireFactory();

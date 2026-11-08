@@ -1,0 +1,34 @@
+{
+  "name": "@mastermind/dsh-company",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mastermind OS company view inside the complete pinned DeepSeek application",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./company-peer": "./lib/company-peer.js",
+    "./executive-read-port": "./lib/executive-read-port.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "files": [
+    "lib",
+    "NOTICE.md"
+  ],
+  "license": "MIT"
+}

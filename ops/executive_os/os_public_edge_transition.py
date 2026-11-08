@@ -32,6 +32,8 @@ import stat
 from ops.executive_os.os_public_edge import (
     COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, GET_ROUTES, HOST, LEGACY_GET_ROUTES,
     LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTES, MCP_ROUTES,
+    NATIVE_CONVERSATION_POST_ROUTES, NATIVE_MAX_BODY,
+    PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES,
     POST_ROUTES, SOURCE_MAX_BODY, SOURCE_POST_ROUTES, TRANSITION_ROUTE_PROFILES,
     asset_routes,
 )
@@ -195,10 +197,18 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
     # dedicated source-operation POST branch in its canonical position between
     # the legacy POST branch and the MCP branches. Arbitrary reordering,
     # partial upgrades and mixtures cannot pass.
-    if len(inner) not in (3, 4, 5, 6):
+    # A native branch is accepted only immediately before the terminal abort.
+    # Remove only that exact matcher from topology counting; its entire body
+    # and proxy are still qualified below. Malformed or displaced branches
+    # cannot be treated as an absent native family.
+    has_native = (len(inner) >= 2 and type(inner[-2]) is dict
+        and inner[-2].get("match") == [{
+            "method": ["POST"], "path": list(NATIVE_CONVERSATION_POST_ROUTES)}])
+    incumbent_count = len(inner) - int(has_native)
+    if incumbent_count not in (3, 4, 5, 6):
         raise ValueError("OS edge transition inner route set refused")
-    has_source = len(inner) in (4, 6)
-    has_mcp = len(inner) in (5, 6)
+    has_source = incumbent_count in (4, 6)
+    has_mcp = incumbent_count in (5, 6)
     mcp_meta_position = 3 if has_source else 2
     mcp_post_position = mcp_meta_position + 1
     # Match a complete admitted pair, not independent subsets or a cross-product.
@@ -232,7 +242,13 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
                 or type(paths) is not list or any(type(value) is not str for value in paths)):
             raise ValueError("OS edge transition inner matcher refused")
         handlers = _branch_handlers(item["handle"])
-        if has_mcp and position == mcp_meta_position:
+        if has_native and position == len(inner) - 2:
+            if (method != ["POST"] or paths != list(NATIVE_CONVERSATION_POST_ROUTES)
+                    or len(handlers) != 2
+                    or handlers[0] != {"handler": "request_body", "max_size": NATIVE_MAX_BODY}
+                    or type(handlers[0].get("max_size")) is not int):
+                raise ValueError("OS edge transition observed native route differs")
+        elif has_mcp and position == mcp_meta_position:
             # Fixed, immutable MCP branches: only the two OS path lists change.
             # The metadata matcher carries exactly the CEO-only list or the
             # complete CEO+COO list, in that order. A partial COO upgrade, a
@@ -322,8 +338,19 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
         mcp_post_path = path + (mcp_post_position, "match", 0, "path")
     else:
         mcp_profile = "absent"
+    if has_native:
+        native_profiles = {
+            TRANSITION_ROUTE_PROFILES.index(profile)
+            for profile in (
+                (PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES),
+                (GET_ROUTES, POST_ROUTES),
+            )
+        }
+        if (not has_source or not native_profiles.intersection(get_matches, post_matches)
+                or mcp_profile not in {"absent", "complete"}):
+            raise ValueError("OS edge transition native profile incomplete")
     return {"inner": path, "get": get_path, "post": post_path, "source": source_path,
-            "source_branch": has_source, "post_group": post_group,
+            "source_branch": has_source, "native_branch": has_native, "post_group": post_group,
             "mcp_meta": mcp_meta_path, "mcp_post": mcp_post_path,
             "mcp_profile": mcp_profile}
 
@@ -344,6 +371,19 @@ def _source_branch(relay_port: int, group: object) -> dict:
     return branch
 
 
+def _native_branch(relay_port: int, group: object) -> dict:
+    branch = {
+        "match": [{"method": ["POST"], "path": list(NATIVE_CONVERSATION_POST_ROUTES)}],
+        "handle": [
+            {"handler": "request_body", "max_size": NATIVE_MAX_BODY},
+            _expected_proxy(relay_port, HOST),
+        ],
+    }
+    if group is not None:
+        branch = {"group": group, **branch}
+    return branch
+
+
 def _transition(*, fullconfig: object, current_manifest: object,
                 candidate_manifest: object, relay_port: int) -> dict:
     current_routes, candidate_routes, shared = _asset_pair(current_manifest, candidate_manifest)
@@ -353,6 +393,7 @@ def _transition(*, fullconfig: object, current_manifest: object,
         "post_position": located["post"],
         "source_position": located["source"],
         "source_branch": located["source_branch"],
+        "native_branch": located["native_branch"],
         "inner_position": located["inner"],
         "post_group": located["post_group"],
         "mcp_meta_position": located["mcp_meta"],
@@ -412,7 +453,7 @@ def _rebuilt(fullconfig: object, data: dict, get_paths: list[str], relay_port: i
     if not data["source_branch"]:
         insert = (data["inner_position"], 2,
                   _source_branch(relay_port, data["post_group"]))
-    return _rebuild(fullconfig, data["position"], get_paths,
+    rebuilt = _rebuild(fullconfig, data["position"], get_paths,
                     post_position=data["post_position"], post_paths=POST_ROUTES,
                     source_position=data["source_position"],
                     source_paths=SOURCE_POST_ROUTES,
@@ -421,6 +462,12 @@ def _rebuilt(fullconfig: object, data: dict, get_paths: list[str], relay_port: i
                     mcp_post_position=data["mcp_post_position"],
                     mcp_post_paths=COMPLETE_MCP_ROUTES,
                     insert=insert)
+    if not data["native_branch"]:
+        target = rebuilt
+        for key in data["inner_position"]:
+            target = target[key]
+        target.insert(len(target) - 1, _native_branch(relay_port, data["post_group"]))
+    return rebuilt
 
 
 def plan(*, old_source: str, new_source: str, fullconfig: object, current_manifest: object,
@@ -451,6 +498,9 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
         },
         "post_routes": list(POST_ROUTES),
         "source_post_routes": list(SOURCE_POST_ROUTES),
+        "native_post_routes": list(NATIVE_CONVERSATION_POST_ROUTES),
+        "native_max_body": NATIVE_MAX_BODY,
+        "observed_native_branch": data["native_branch"],
         # Existing MCP profiles upgrade to the complete CEO+COO pair.
         # An absent MCP family stays absent in both planned configurations.
         "mcp_routes": {

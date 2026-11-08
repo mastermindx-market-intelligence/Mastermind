@@ -4,6 +4,11 @@
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
+    "acp": {
+      "adapter_id": "dsh-native-acp",
+      "enabled": true,
+      "autonomous_allowed": true
+    },
     "minimax": {
       "adapter_id": "attended-fabric",
       "enabled": false,
@@ -56,6 +61,15 @@
     }
   },
   "model_aliases": {
+    "dsh.native.conversation": {
+      "provider_alias": "acp",
+      "execution_profile_id": "operator.dsh.native-conversation.v1",
+      "model": "deepseek-chat",
+      "effort": "default",
+      "cost_class": "small",
+      "capabilities": ["read"],
+      "worker_eligible": true
+    },
     "experiential.flash.candidate": {
       "provider_alias": "experiential",
       "execution_profile_id": "sealed.worker.write.no-extensions.v1",

@@ -173,7 +173,7 @@ def test_empty_ceiling_and_legacy_profile_remain_explicit(launch):
 def test_failed_open_retains_evidence_but_settles_capture_descriptors(launch, monkeypatch, failure):
     profile, spec = launch
     opened, closed = [], []
-    from integrations.acp_worker import native
+    from integrations.acp_worker import native, process_resource
     create, close = native._create_private_file, os.close
     def track_create(path):
         if ((failure == "stderr" and path.name == "acp-stderr.log")
@@ -188,13 +188,14 @@ def test_failed_open_retains_evidence_but_settles_capture_descriptors(launch, mo
     async def failed_spawn(*args, **kwargs):
         raise OSError("fixture open failure")
     monkeypatch.setattr(native, "_create_private_file", track_create)
+    monkeypatch.setattr(process_resource, "_create_private_file", track_create)
     monkeypatch.setattr(os, "close", track_close)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", failed_spawn)
     owner = AcpNativeProcessOwner(profile, environment_loader=lambda: {})
     with pytest.raises(OSError, match="fixture open failure"):
         asyncio.run(owner.open_run(spec))
     assert set(opened).issubset(closed)
-    assert len(opened) == {"stderr": 1, "result": 2, "spawn": 3}[failure]
+    assert len(opened) == {"stderr": 2, "result": 0, "spawn": 3}[failure]
     assert owner._active is None and not owner._runs
     # Failed-run artifacts are retained for reconciliation, never silently
     # deleted to authorize a retry. The adapter also quarantines open failure.
@@ -280,3 +281,133 @@ def test_launch_argv_builder_refuses_unattested_or_invalid_exec_before_spawn(
     with pytest.raises(AcpNativeProcessError, match="launch argv"):
         asyncio.run(owner.open_run(spec))
     assert calls == []
+
+
+def test_completed_native_child_gets_existing_budget_for_cooperative_teardown(launch, tmp_path):
+    profile, spec = launch
+    probe = tmp_path / "cooperative-teardown.py"
+    probe.write_text(
+        "import sys,time\n"
+        "print('READY', flush=True)\n"
+        "sys.stdin.read()\n"
+        "time.sleep(0.45)\n"
+        "print('CLEAN_SHUTDOWN', flush=True)\n"
+    )
+    profile = dataclasses.replace(profile, argv=(profile.argv[0], "-B", str(probe)))
+    owner = AcpNativeProcessOwner(profile, environment_loader=lambda: {})
+
+    async def run():
+        resources = await owner.open_run(spec)
+        assert await asyncio.wait_for(resources.reader.readline(), 3) == b"READY\n"
+        completion = await asyncio.wait_for(resources.finish(None), spec.cancel_grace_seconds)
+        assert completion.settled
+        assert completion.exit_code == 0
+        assert completion.cancellation is None
+        assert b"CLEAN_SHUTDOWN" in Path(resources.process_ref.stdout_path).read_bytes()
+        assert owner._active is None and not owner._identity_matches(resources.process_ref)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("signal_refused", [False, True])
+def test_rejected_launch_group_never_becomes_a_signal_target(launch, tmp_path, monkeypatch, signal_refused):
+    from types import SimpleNamespace
+    from integrations.acp_worker import process_resource as resource
+    profile, _spec = launch
+    killed, descriptors = [], []
+    create = resource._create_private_file
+    def capture_file(path):
+        fd = create(path)
+        descriptors.append(fd)
+        return fd
+    class Child:
+        pid = 123456
+        returncode = None
+        stdin = stdout = stderr = object()
+        def kill(self):
+            killed.append(self.pid)
+            if signal_refused:
+                raise PermissionError("fixture signaling denied")
+            self.returncode = -9
+        async def communicate(self):
+            return b"", b""
+    child = Child()
+    async def spawn(*_args, **_kwargs):
+        return child
+    class Inspector:
+        def boot_session_id(self):
+            return "fixture-boot"
+        def inspect(self, _pid):
+            return SimpleNamespace(pgid=1, session_id=1, start_identity="fixture-start",
+                                   effective_uid=os.geteuid(), effective_gid=os.getegid(),
+                                   real_uid=os.getuid(), real_gid=os.getgid())
+    def foreign_group(*_args):
+        raise AssertionError("rejected process group was signaled")
+    monkeypatch.setattr(resource, "_create_private_file", capture_file)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(os, "killpg", foreign_group)
+    with pytest.raises(AcpNativeProcessError, match="own process/session generation"):
+        asyncio.run(resource.NativeProcessResource.open(
+            binary=profile.binary, argv=profile.argv, environment={}, cwd=tmp_path,
+            stdout_path=tmp_path/"stdout", stderr_path=tmp_path/"stderr",
+            stdout_limit_bytes=1024, stderr_limit_bytes=1024, settle_seconds=1,
+            inspector=Inspector(),
+        ))
+    assert killed == [child.pid]
+    assert len(descriptors) == 2
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+def test_cancelled_writer_close_is_not_physical_settlement():
+    from types import SimpleNamespace
+    from integrations.acp_worker.process_resource import NativeCapture, NativeProcessResource
+    async def exercise():
+        resource = NativeProcessResource()
+        resource.settle_seconds, resource.close_hook = 1.0, None
+        resource.process = SimpleNamespace(returncode=0)
+        class Writer:
+            def is_closing(self):
+                return True
+            async def wait_closed(self):
+                raise asyncio.CancelledError
+        resource.writer = Writer()
+        loop = asyncio.get_running_loop()
+        resource.wait_task = loop.create_future()
+        resource.wait_task.set_result(0)
+        for name in ("stdout_task", "stderr_task"):
+            task = loop.create_future()
+            task.set_result(NativeCapture(hashlib.sha256(b"").hexdigest(), 0, False))
+            setattr(resource, name, task)
+        result = await resource.finish(None)
+        assert result.exit_code == 0 and result.already_exited
+        assert result.settled is False
+        assert await resource.finish(None) is result
+    asyncio.run(exercise())
+
+
+def test_failed_post_spawn_admission_retains_unsettled_original_resource(launch, monkeypatch):
+    from integrations.acp_worker import native
+    from integrations.acp_worker.process_resource import NativeProcessResource
+    profile, spec = launch
+    finish = NativeProcessResource.finish
+    async def unproven_finish(resource, reason):
+        # Settle the actual fixture child; model the missing settlement receipt.
+        actual = await finish(resource, reason)
+        assert actual.settled
+        return dataclasses.replace(actual, settled=False)
+    def failed_worker_ref(**_kwargs):
+        raise ValueError("fixture post-spawn admission failed")
+    monkeypatch.setattr(NativeProcessResource, "finish", unproven_finish)
+    monkeypatch.setattr(native, "WorkerProcessRef", failed_worker_ref)
+    owner = AcpNativeProcessOwner(profile, environment_loader=lambda: {})
+    async def exercise():
+        with pytest.raises(ValueError, match="post-spawn admission"):
+            await owner.open_run(spec)
+        assert owner._opening is not None and owner._opening.finish_task is not None
+        assert not owner._opening.identity_matches()
+        assert not owner._runs and owner._active is None
+        with pytest.raises(AcpNativeProcessError, match="active or known work"):
+            await owner.open_run(dataclasses.replace(spec, run_id="different-run"))
+    asyncio.run(exercise())

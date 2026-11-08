@@ -14,6 +14,8 @@ from common.fresh_conversation_contract import canonical_digest
 from control_plane.foreground_operation import ForegroundOperation, current_foreground_operation
 
 SCHEMA = "mastermind.fresh_conversation_creation.v1"
+NATIVE_SCHEMA = "mastermind.fresh_conversation_creation.v2"
+_NATIVE_FIELDS = frozenset({"initial_message", "initial_message_sha256", "initial_message_utf8_bytes", "result_contract"})
 TASK_KIND = "fresh_conversation"
 _SEAL = object()
 _FIELDS = frozenset({"schema", "intent_id", "command_id", "work_ref", "intent_fingerprint",
@@ -23,14 +25,33 @@ _DIGESTS = _FIELDS - {"schema", "intent_id", "command_id", "work_ref", "principa
 
 
 def validate_restriction(value):
-    if (type(value) is not dict or set(value) != _FIELDS or value["schema"] != SCHEMA
+    native = type(value) is dict and value.get("schema") == NATIVE_SCHEMA
+    fields = _FIELDS | _NATIVE_FIELDS if native else _FIELDS
+    if (type(value) is not dict or set(value) != fields or value["schema"] not in {SCHEMA, NATIVE_SCHEMA}
             or type(value["intent_id"]) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value["intent_id"])
             or value["command_id"] != "ceo-intent:" + value["intent_id"]
             or type(value["work_ref"]) is not str or not re.fullmatch(r"WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}", value["work_ref"])
             or type(value["principal_expires_at"]) is not int or value["principal_expires_at"] <= 0
             or any(type(value[key]) is not str or not re.fullmatch(r"[0-9a-f]{64}", value[key]) for key in _DIGESTS)):
         raise ValueError("FRESH_CONVERSATION_SOURCE_INVALID")
+    if native:
+        from common.fresh_conversation_contract import native_message_identity, NATIVE_RESULT_CONTRACT
+        identity = native_message_identity(value["initial_message"])
+        if (value["result_contract"] != NATIVE_RESULT_CONTRACT
+                or value["initial_message_sha256"] != identity["sha256"]
+                or type(value["initial_message_utf8_bytes"]) is not int
+                or value["initial_message_utf8_bytes"] != identity["utf8_bytes"]):
+            raise ValueError("FRESH_CONVERSATION_SOURCE_INVALID")
     return dict(value)
+
+
+def native_input_material(message):
+    """Closed immutable material only; issuing authority stays with the owner."""
+    from common.fresh_conversation_contract import native_message_identity, NATIVE_RESULT_CONTRACT
+    identity = native_message_identity(message)
+    return dict(schema=NATIVE_SCHEMA, initial_message=message,
+        initial_message_sha256=identity["sha256"], initial_message_utf8_bytes=identity["utf8_bytes"],
+        result_contract=NATIVE_RESULT_CONTRACT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +182,35 @@ def _issue_creation_source(issuer, operation, material, guard, *, public_operati
     return source
 
 
+def _validated_creation_record(root, command_id, payload):
+    """Pure original-record join; callers own bounded snapshot acquisition."""
+    provenance = payload.get("provenance")
+    provenance = {} if provenance is None else provenance
+    if type(provenance) is not dict:
+        raise ValueError()
+    marked = (root.constraints.get("task_kind") == TASK_KIND
+        or "fresh_conversation_admission" in payload
+        or any(key in provenance for key in ("fresh_conversation", "fresh_conversation_digest")))
+    if not marked:
+        return None
+    material = validate_restriction(provenance.get("fresh_conversation"))
+    admission = payload.get("fresh_conversation_admission")
+    if (root.parent_job_id is not None or root.root_job_id != root.job_id or root.orchestration_role != "aggregation"
+            or root.constraints.get("task_kind") != TASK_KIND
+            or type(admission) is not dict or set(admission) != {"schema", "task_kind", "source", "source_digest"}
+            or admission["schema"] != "mastermind.fresh_conversation_driven_root.v1" or admission["task_kind"] != TASK_KIND
+            or admission["source"] != material or admission["source_digest"] != canonical_digest(material)
+            or provenance.get("fresh_conversation_digest") != canonical_digest(material)
+            or material["command_id"] != command_id
+            or root.orchestration_provenance.get("command_id") != material["command_id"]
+            or provenance.get("intent_id") != material["intent_id"]
+            or provenance.get("workstream") != material["work_ref"]
+            or provenance.get("fingerprint") != material["intent_fingerprint"]
+            or root.orchestration_provenance.get("source_digest") != material["intent_fingerprint"]):
+        raise ValueError()
+    return material
+
+
 def read_creation_restriction(runtime, root):
     """Rejoin BOTH current Job and immutable creation evidence before routing.
 
@@ -178,31 +228,7 @@ def read_creation_restriction(runtime, root):
             if len(rows) != 1:
                 raise ValueError()
             payload = json.loads(rows[0]["payload_json"])
-        provenance = payload.get("provenance")
-        provenance = {} if provenance is None else provenance
-        if type(provenance) is not dict:
-            raise ValueError()
-        marked = (root.constraints.get("task_kind") == TASK_KIND
-            or "fresh_conversation_admission" in payload
-            or any(key in provenance for key in ("fresh_conversation", "fresh_conversation_digest")))
-        if not marked:
-            return None
-        material = validate_restriction(provenance.get("fresh_conversation"))
-        admission = payload.get("fresh_conversation_admission")
-        if (root.parent_job_id is not None or root.root_job_id != root.job_id or root.orchestration_role != "aggregation"
-                or root.constraints.get("task_kind") != TASK_KIND
-                or type(admission) is not dict or set(admission) != {"schema", "task_kind", "source", "source_digest"}
-                or admission["schema"] != "mastermind.fresh_conversation_driven_root.v1" or admission["task_kind"] != TASK_KIND
-                or admission["source"] != material or admission["source_digest"] != canonical_digest(material)
-                or provenance.get("fresh_conversation_digest") != canonical_digest(material)
-                or material["command_id"] != rows[0]["command_id"]
-                or root.orchestration_provenance.get("command_id") != material["command_id"]
-                or provenance.get("intent_id") != material["intent_id"]
-                or provenance.get("workstream") != material["work_ref"]
-                or provenance.get("fingerprint") != material["intent_fingerprint"]
-                or root.orchestration_provenance.get("source_digest") != material["intent_fingerprint"]):
-            raise ValueError()
-        return material
+        return _validated_creation_record(root, rows[0]["command_id"], payload)
     except (ValueError, TypeError, KeyError, AttributeError):
         raise StateConflict("FRESH_CONVERSATION_CREATION_RECORD_INVALID") from None
 
@@ -223,9 +249,79 @@ def require_original_creation_request(runtime, root, operation):
     return material
 
 
+def require_native_initial_record(runtime, active, operation):
+    """Validate only custody of an already acknowledged original native input.
+
+    This is not admission: the exact active handle must independently resolve
+    the original validated TX5 ACK. Request expiry/EOF cannot erase its result.
+    """
+    from control_plane.executive_runtime import Runtime
+    from control_plane.executive_operator_supervisor import ActiveNativeOperatorTurn, ExecutiveOperatorSupervisor
+    from control_plane.fresh_conversation import FreshConversationOwner, admission_arguments, _IDENTITY
+    from control_plane.foreground_operation import _digest
+    from control_plane import ceo_request
+    from common import fresh_conversation_contract as wire
+    if (type(runtime) is not Runtime or type(active) is not ActiveNativeOperatorTurn
+            or type(operation) is not ForegroundOperation
+            or type(active.owner) is not ExecutiveOperatorSupervisor or active.owner.runtime is not runtime):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_REQUIRED")
+    active.owner._require_active_native_turn(active)
+    job = runtime.jobs.get_job(active.job.job_id)
+    root = runtime.jobs.get_job(active.job.root_job_id)
+    issued = getattr(operation, "_fresh_conversation_creation_source", None)
+    if (job is None or root is None or job.parent_job_id != root.job_id
+            or job.root_job_id != root.job_id or job.constraints != active.job.constraints
+            or type(issued) is not tuple or len(issued) != 2
+            or type(issued[0]) is not FreshConversationCreationSource):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    source = issued[0]
+    material = read_creation_restriction(runtime, root)
+    event = runtime.store.find_event_by_command_id(operation._command)
+    if (source._seal is not _SEAL or source._operation is not operation
+            or type(source._issuer) is not FreshConversationOwner
+            or source._issuer._runtime is not runtime or operation._runtime is not runtime
+            or source._issuer._service.operator_supervisor is not active.owner
+            or source._issuer._service._require_runtime() is not runtime
+            or material is None or material["schema"] not in {SCHEMA, NATIVE_SCHEMA}
+            or source.material() != material or issued[1] != canonical_digest(material)
+            or operation._preexisting is not None or operation._command != material["command_id"]
+            or operation._arguments_sha256 != material["arguments_sha256"]
+            or operation._principal.expires_at != material["principal_expires_at"]
+            or canonical_digest({key: getattr(operation._principal, key) for key in _IDENTITY}) != material["principal_scope_sha256"]
+            or event is None or event.get("event_type") != "JOB_CREATED" or event.get("job_id") != root.job_id
+            or _digest(event) != operation._root_event_sha256):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    from control_plane.fresh_conversation import scoped_operation_key
+    from control_plane import ceo_intent
+    key = scoped_operation_key(operation._principal, source._public_operation_key)
+    if (operation._operation_key != key or ceo_intent.command_id_for(
+            ceo_request.automated_intent_id(ceo_request.app_request_ref(key))) != material["command_id"]):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    if material["schema"] == NATIVE_SCHEMA:
+        arguments = admission_arguments(operation._principal, dict(work_ref=material["work_ref"],
+            operation_key=source._public_operation_key, message=material["initial_message"]), schema=wire.NATIVE_SCHEMA)
+        if canonical_digest(ceo_request.normalize_app_request(arguments)) != material["arguments_sha256"]:
+            raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    # Legacy v1 has no inline input material. Its exact nominal issuance,
+    # accepted-argument digest and immutable root Event above remain the proof;
+    # mutable objective text cannot invalidate an acknowledged turn's collection.
+    binding = runtime.jobs.assert_native_conversation_execution(job.job_id)
+    if binding["root_job_id"] != root.job_id or binding["result_contract"] != wire.NATIVE_RESULT_CONTRACT:
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    with runtime.store.read() as connection:
+        first = connection.execute(
+            "SELECT command_id FROM events WHERE event_type=? AND attempt_id=? AND json_extract(payload_json,'$.operation_kind')='begin_turn' ORDER BY event_id LIMIT 1",
+            ("OPERATOR_OPERATION_INTENT", active.session.attempt_id)).fetchone()
+    if first is None or first["command_id"] != active.operation_id.command_id:
+        raise ValueError("FRESH_NATIVE_ORIGINAL_RECORD_CHANGED")
+    active.owner._require_active_native_turn(active)
+    return material
+
+
 def require_initial_native_claim(store, *, root_job_id, role, profile):
     from control_plane.executive_runtime import JobRegistry, NATIVE_RETURN_TX5_EXECUTION_PROFILE
-    if role != "plan" or profile != NATIVE_RETURN_TX5_EXECUTION_PROFILE:
+    from control_plane.executive_agent_capabilities import DSH_NATIVE_CONVERSATION_PROFILE_ID
+    if role != "plan" or profile not in {NATIVE_RETURN_TX5_EXECUTION_PROFILE, DSH_NATIVE_CONVERSATION_PROFILE_ID}:
         return None
     root = JobRegistry(store).get_job(root_job_id)
     if read_creation_restriction(store, root) is None:
@@ -241,3 +337,69 @@ def _fresh_root_validation_scope(operation):
     if type(issued) is not tuple or len(issued) != 2 or type(issued[0]) is not FreshConversationCreationSource:
         raise ValueError("FRESH_CONVERSATION_SOURCE_REQUIRED")
     return issued[0]._root_validation_scope(operation)
+
+
+def require_native_initial_message(runtime, job, operation, *, supervisor):
+    """Read only the original user's text under its live post-commit source.
+
+    The root objective is mutable presentation data, not message authority. Its
+    parsed message must reproduce the complete original accepted arguments. The
+    nominal source, Runtime creator and final write guard remain the owners.
+    """
+    from control_plane.executive_runtime import Runtime, Job
+    from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+    from control_plane.native_conversation_result import DSH_NATIVE_RESULT_CONTRACT
+    from control_plane.fresh_conversation import admission_arguments
+    if (type(runtime) is not Runtime or type(job) is not Job
+            or type(operation) is not ForegroundOperation
+            or type(supervisor) is not ExecutiveOperatorSupervisor
+            or supervisor.runtime is not runtime):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_REQUIRED")
+    current = runtime.jobs.get_job(job.job_id)
+    root = runtime.jobs.get_job(job.root_job_id)
+    if (current is None or root is None or current.root_job_id != root.job_id
+            or current.parent_job_id != root.job_id or job.parent_job_id != root.job_id
+            or current.constraints != job.constraints):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_CHANGED")
+    material = require_original_creation_request(runtime, root, operation)
+    issued = getattr(operation, "_fresh_conversation_creation_source", None)
+    if (material is None or type(issued) is not tuple or len(issued) != 2
+            or type(issued[0]) is not FreshConversationCreationSource):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_REQUIRED")
+    source = issued[0]
+    if (source._operation is not operation or source._issuer._runtime is not runtime
+            or source._issuer._service.operator_supervisor is not supervisor
+            or source._issuer._service._require_runtime() is not runtime
+            or source._require_root_validation_issuer(operation) != material):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_CHANGED")
+    binding = runtime.jobs.assert_native_conversation_execution(current.job_id)
+    if (binding["root_job_id"] != root.job_id or binding["job_id"] != current.job_id
+            or binding["result_contract"] != DSH_NATIVE_RESULT_CONTRACT):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_CHANGED")
+    try:
+        from common import fresh_conversation_contract as wire
+        schema = wire.SCHEMA
+        if material["schema"] == NATIVE_SCHEMA:
+            message = material["initial_message"]
+            schema = wire.NATIVE_SCHEMA
+        else:
+            objective = json.loads(root.objective)
+            if (type(objective) is not dict or set(objective) != {"mode", "message", "response"}
+                    or objective["mode"] != "fresh_conversation"):
+                raise ValueError()
+            message = objective["message"]
+        arguments = admission_arguments(operation._principal, dict(
+            work_ref=material["work_ref"], operation_key=source._public_operation_key,
+            message=message), schema=schema)
+        if arguments["objective"] != root.objective:
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_CHANGED") from None
+    operation.require_arguments(arguments)
+    operation.require_qualification_request(arguments["operation_key"], material["arguments_sha256"])
+    if (require_original_creation_request(runtime, root, operation) != material
+            or source._require_root_validation_issuer(operation) != material
+            or runtime.jobs.assert_native_conversation_execution(current.job_id) != binding):
+        raise ValueError("FRESH_NATIVE_ORIGINAL_INPUT_CHANGED")
+    operation._require_live()
+    return message

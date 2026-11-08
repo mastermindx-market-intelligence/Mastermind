@@ -1,0 +1,102 @@
+--- a/packages/core/tools/src/index.ts
++++ b/packages/core/tools/src/index.ts
+@@ -684,6 +684,8 @@
+    * in `toolOrder` are invalid.
+    */
+   mode?: ToolPresentationMode
++  /** Opt-in immutable dispatch identity and repeatable live guards. */
++  strictDispatchBinding?: boolean
+   /**
+    * Concurrency cap for a `run_code` program's overlapping sub-calls
+    * (default 10, the loop scheduler's own default). Sub-calls follow the
+@@ -810,6 +812,7 @@
+ 
+   static Config: z<Config> = z.object({
+     mode: z.union(['native', 'ptc'] as const).default('native'),
++    strictDispatchBinding: z.boolean().default(false),
+     maxParallelSubCalls: z.natural().min(1).default(10),
+   })
+ 
+@@ -831,6 +834,8 @@
+   private contentFinalizers = new WeakMap<ToolRunContext, ToolDefinition['finalizeContent']>()
+   /** Execution-prepared content installed before post-execute policy. */
+   private contentProjectors = new WeakMap<ToolRunContext, ToolDefinition['projectContent']>()
++  /** Same captured definition owns dispatch and all later output conversion. */
++  private preparedDefinitions = new WeakMap<ToolExecution, ToolDefinition | undefined>()
+   private readonly layers = new ScopedLayers(
+     scope => new ToolLayer(scope),
+     () => { this.ctx.emit('tools/change') },
+@@ -838,6 +843,7 @@
+   /** Presentation for scopes that declare none; {@link presentAs} shadows it per scope. */
+   private readonly defaultMode: ToolPresentationMode
+   private readonly maxParallelSubCalls: number
++  private readonly strictDispatchBinding: boolean
+   /**
+    * Reserved presentation transport, kept outside the filterable registration
+    * layers. Built on first need rather than at construction: which agents run
+@@ -854,6 +860,7 @@
+     // optional-input type for direct (non-Loader) construction in tests.
+     this.defaultMode = config.mode ?? 'native'
+     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
++    this.strictDispatchBinding = config.strictDispatchBinding ?? false
+     ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
+     if (this.defaultMode !== 'native') {
+       ctx.systemPrompt.section(this.collapseSection())
+@@ -1453,6 +1460,7 @@
+       const execution: MutableToolRunContext = { ...base, arguments: deepFreeze(detached) }
+       this.deferredContexts.set(execution, deferredContexts)
+       this.contentFinalizers.set(execution, finalizerFor())
++      if (this.strictDispatchBinding) this.preparedDefinitions.set(execution, visible)
+       if (!collapsed) this.contentProjectors.set(execution, capturedProjector)
+       this.cancellationStates.set(execution, {
+         callerSignal: signal,
+@@ -1583,7 +1591,17 @@
+     }
+     exec.signal = signal
+     try {
++      // Wrappers and the scheduler may have awaited after preparation. No await
++      // may separate these repeatable checks from the captured body's invocation.
++      if (this.strictDispatchBinding) {
++        const reason = this.guardReason(exec)
++        if (reason !== undefined) return toolErrorResult(new Error(reason))
++        if (isAborted(signal)) return toolAbortedBeforeDispatchResult()
++      }
+       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++      if (this.strictDispatchBinding && tool !== this.preparedDefinitions.get(exec)) {
++        throw new Error('TOOL_DISPATCH_BINDING_CHANGED')
++      }
+       if (!tool) throw new ToolNotFoundError(exec.name)
+       state.bodyInvoked = true
+       const returned = await tool.execute(exec.arguments, exec)
+@@ -1812,7 +1830,7 @@
+       if (result.isError) {
+         throw new TypeError('tools/post-execute cannot replace the value of a failed result')
+       }
+-      const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++      const tool = this.resultDefinition(exec)
+       if (tool === undefined) throw new ToolNotFoundError(exec.name)
+       const replaced = this.createSuccessResult(exec, tool, decision.value)
+       return this.markCanonical(exec, {
+@@ -1869,6 +1887,13 @@
+     }) as ToolExecutionSuccess)
+   }
+ 
++  /** A started effect retains its original output owner after registry movement. */
++  private resultDefinition(exec: ToolExecution): ToolDefinition | undefined {
++    return this.strictDispatchBinding
++      ? this.preparedDefinitions.get(exec)
++      : this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++  }
++
+   /** Normalize an around-dispatch wrapper's authored result through the owning output contract. */
+   private normalizeDispatchResult(exec: ToolExecution, result: ToolExecutionResult): ToolExecutionResult {
+     if (this.canonicalResults.get(result) === exec.token) return result
+@@ -1881,7 +1906,7 @@
+         ...result.additionalContexts !== undefined ? { additionalContexts: result.additionalContexts } : {},
+       })
+     }
+-    const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++    const tool = this.resultDefinition(exec)
+     if (tool === undefined) throw new ToolNotFoundError(exec.name)
+     const normalized = this.createSuccessResult(exec, tool, result.value)
+     return this.markCanonical(exec, {

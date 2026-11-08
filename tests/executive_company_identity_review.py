@@ -28,71 +28,23 @@ REVIEWED_ANCHORS = {
     # The complete ingress-method AST binds its admission, source selection
     # and release-time permission checks; a change to any of them invalidates
     # all three status sites without changing the historical Company record.
-    "_handle_ceo_ingress_connection": {'node_type': 'AsyncFunctionDef',
- 'source_sha256': '4deb96d70ff9ed7386f48c5170aeb855db251090893c88e1da7e1395ff6de553',
- 'ast_sha256': '6ddae8da5ef235a74e212fc72e56da950dfe4b24c6d1e1b9eab4fe730f89d3ca',
- 'sites': ((('body',
-             3,
-             'body',
-             58,
-             'body',
-             3,
-             'orelse',
-             0,
-             'body',
-             2,
-             'body',
-             0,
-             'value',
-             'args',
-             1),
-            'int',
-            403,
-            '403'),
-           (('body',
-             3,
-             'body',
-             58,
-             'body',
-             3,
-             'orelse',
-             0,
-             'body',
-             2,
-             'orelse',
-             0,
-             'body',
-             4,
-             'body',
-             0,
-             'value',
-             'args',
-             1),
-            'int',
-            403,
-            '403'),
-           (('body',
-             3,
-             'body',
-             58,
-             'body',
-             3,
-             'orelse',
-             0,
-             'body',
-             2,
-             'orelse',
-             0,
-             'handlers',
-             0,
-             'body',
-             0,
-             'value',
-             'args',
-             1),
-            'int',
-            503,
-            '503'))},
+    "_handle_ceo_ingress_connection": {
+        "node_type": "AsyncFunctionDef",
+        # Existing section-sign/em-dash prose needs an exact full-source pin
+        # in addition to the method AST; all three literal lines are ASCII.
+        # Selected-child App-peer admission changes the enclosing ingress AST.
+        # The original Fabric reply operands and Company listener remain unchanged.
+        "source_sha256": "7a082151202b959a7a623f8350c6a269c8cce95208e028f5afac7dadfb76bf63",
+        "ast_sha256": "8d1bee6bf8b9408a9e04fe4bf5b6a6818c617c8a03929a7111369bf0a265f931",
+        "sites": (
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
+              "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
+        ),
+    },
 }
 
 # BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
@@ -126,9 +78,10 @@ REVIEWED_ANCHORS = {
 # H5 joins protected779fc3be: exact Company listener and Fabric response subtree
 # remain AST-identical; only the composed full-source and ingress pins change.
 
-# H6 joins current552 and H5 at exact source. The complete original Fabric
-# response subtree and Company listener AST are unchanged; only enclosing
-# source/method identity and mapped positions are requalified.
+# Native Session admission, protected model READ and attended Fabric composition
+# retain all six reviewed operands. The three original Fabric paths now share
+# enclosing position60. The historical Company AST and installed entry AST stay
+# unchanged; these source/AST pins do not claim installed acceptance.
 # Discovery correction extends the original authenticated App-peer branch.
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole

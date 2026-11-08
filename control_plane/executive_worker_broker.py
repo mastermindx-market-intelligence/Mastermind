@@ -63,9 +63,15 @@ from control_plane.worker_adapter import (
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
+    digest as source_digest,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_RESULT_CONTRACT, NativeConversationResultAdapter,
+    NativeConversationBeginObservation, NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+    NativeConversationResultError, NativeConversationResultObservation, result_contract_for_profile,
+)
 from control_plane.operator_harness_contract import (
     CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
@@ -178,6 +184,8 @@ _OHF_OPERATIONS = frozenset(
         "ohf-validate",
         "ohf-identity",
         "ohf-materialization-status",
+        "ohf-native-begin-status",
+        "ohf-native-read-binding", "ohf-native-read",
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
@@ -976,7 +984,19 @@ class _BrokerOperatorRun:
     requested: RequestedExecutionProfile
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
-    provider_session_id: str
+    provider_session_id: str | None
+    materialization_operation: OperationId
+    materialization_handoff: ProviderSessionHandoff | None = None
+    materialization_task: asyncio.Task[dict[str, Any]] | None = None
+    provider_dispatch_committed: bool = False
+    native_connection: Any = None
+    materialization_unknown: bool = False
+    # Accepted call identities outlive their socket waiter and ACK. These are
+    # transient custody on the original run, never Runtime operation authority.
+    current_begin: tuple[OperationId, TurnRef] | None = None
+    pending_begin: tuple[OperationId, TurnRef] | None = None
+    current_interrupt: tuple[OperationId, TurnRef] | None = None
+    begin_task: asyncio.Task[dict[str, Any]] | None = None
     materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -990,6 +1010,12 @@ class _BrokerOperatorRun:
     )
     terminal_error: str | None = None
     busy: bool = False
+    # Transient physical-call ownership; Runtime retains operation authority.
+    collecting_turn: TurnRef | None = None
+    collection_interrupt_operation: OperationId | None = None
+    collection_task: asyncio.Task[dict[str, Any]] | None = None
+    interrupt_task: asyncio.Task[None] | None = None
+    native_read_task: asyncio.Task[dict[str, Any]] | None = None
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -1409,6 +1435,8 @@ class ExecutiveWorkerBroker:
         validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
+        native_read_adapter_type: type | None = None,
+        native_history_reader: Any | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
@@ -1504,6 +1532,19 @@ class ExecutiveWorkerBroker:
             raise WorkerBrokerError("assignment sealing needs the original flat broker")
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
+        if native_read_adapter_type is not None and (
+                not self._operator_only or type(native_read_adapter_type) is not type):
+            raise WorkerBrokerError("native read requires the trusted operator-only class binding")
+        self._native_read_binding = (
+            (native_read_adapter_type, operator_adapter_factory)
+            if native_read_adapter_type is not None else None)
+        if native_history_reader is not None and (
+                self._native_read_binding is None or not callable(native_history_reader)):
+            raise WorkerBrokerError("native history requires the original installed native reader")
+        self._native_history_binding = (native_history_reader, self._native_read_binding)
+        self._native_history_task = None
+        self._native_history_shutdown = False
+        self._native_history_unknown = False
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
@@ -1717,6 +1758,10 @@ class ExecutiveWorkerBroker:
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation in {"ohf-native-read-binding", "ohf-native-read"}:
+            return await self._ohf_native_read(payload, content=operation == "ohf-native-read")
+        if operation == "ohf-native-begin-status":
+            return await self._ohf_native_begin_status(payload)
         if operation == "ohf-deliver-attention":
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
@@ -1762,6 +1807,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError("capacity observation requires an idle broker")
             observed = observer()
@@ -1786,6 +1833,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError("the worker broker already has active work")
             self._validation_busy = True
@@ -2015,6 +2064,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                or self._native_history_unknown
+                or self._native_history_shutdown
             ):
                 raise BrokerStateError("the worker broker already has active work")
             self._starting = True
@@ -2160,6 +2211,8 @@ class ExecutiveWorkerBroker:
         operation, requested, epoch, generation, handoff = (
             self._materialization_request(payload, resume=resume)
         )
+        await self._recover_materialization_outcome(
+            operation, requested, epoch, generation, handoff)
         # Status is one atomic classification over the durable receipt and the
         # process-local effect state.  Holding the existing state lock across
         # the bounded read prevents a start/quarantine/terminal transition
@@ -2285,191 +2338,328 @@ class ExecutiveWorkerBroker:
                         "provider session cannot be reused across Executive Attempts"
                     )
             self._starting = True
-        adapter: OperatorAdapter | None = None
-        resource: OperatorAttemptResource | None = None
-        state: _BrokerOperatorRun | None = None
-        provider_dispatch_committed = False
-        try:
-            adapter, prompts, workspace = self._operator_factory(requested)
-            if self.operator_resource_factory is not None:
-                try:
-                    resource = self.operator_resource_factory(
-                        workspace, requested, epoch, generation
-                    )
-                except Exception as exc:
-                    raise BrokerStateError(
-                        "operator resource construction failed: "
-                        f"{type(exc).__name__}"
-                    ) from exc
-            if resource is not None:
-                await self._operator_call("resource start", resource.start)
-                binder = getattr(adapter, "bind_attempt_resource", None)
-                if not callable(binder):
-                    raise BrokerStateError(
-                        "browser resource requires an adapter binding seam"
-                    )
-                await self._operator_call(
-                    "resource bind",
-                    binder,
-                    resource,
-                    requested=requested,
-                    epoch=epoch,
-                    generation=generation,
-                )
-            # From this assignment onward no caller may infer that an adapter
-            # exception means "no provider effect".  The provider has no native
-            # idempotency key, so missing durable evidence is EFFECT_UNKNOWN.
-            provider_dispatch_committed = True
-            if resume:
-                assert handoff is not None
-                observation = await self._operator_call(
-                    "resume",
-                    adapter.resume_session,
-                    operation_id=operation,
-                    epoch=epoch,
-                    generation=generation,
-                    provider_session=handoff,
-                    requested=requested,
-                )
-            else:
-                observation = await self._operator_call(
-                    "start",
-                    adapter.start_session,
-                    operation_id=operation,
-                    requested=requested,
-                    epoch=epoch,
-                    generation=generation,
-                )
-            provider_session_id = str(
-                getattr(observation, "provider_session_id", "") or ""
-            )
-            if not isinstance(observation, SessionStartObservation) or not provider_session_id:
-                raise BrokerStateError(
-                    "operator start returned no typed provider session identity"
-                )
-            if handoff is not None and provider_session_id != handoff.provider_session_id:
-                raise BrokerStateError(
-                    "operator resume returned a different provider session identity"
-                )
-            observed = await self._operator_call(
-                "attestation", adapter.observed_attestation, generation
-            )
-            credentials = await self._operator_call(
-                "process principal", adapter.observe_process_credentials, generation
-            )
-            provider_home = await self._operator_call(
-                "provider home", adapter.observe_provider_home_identity, generation
-            )
-            if (
-                not isinstance(observed, ObservedHarnessAttestation)
-                or not isinstance(credentials, OSProcessCredentialObservation)
-                or not isinstance(provider_home, ProviderHomeIdentityObservation)
-            ):
-                raise BrokerStateError(
-                    "operator start returned untyped attestation or principal evidence"
-                )
+            state: _BrokerOperatorRun | None = None
             try:
+                adapter, prompts, workspace = self._operator_factory(requested)
+                state = _BrokerOperatorRun(
+                    adapter=adapter, requested=requested, epoch=epoch,
+                    generation=generation,
+                    provider_session_id=handoff.provider_session_id if handoff else None,
+                    materialization_operation=operation,
+                    materialization_handoff=handoff, prompts=prompts, busy=True,
+                )
+                # Retain the exact adapter before resource/provider dispatch.
+                # A failed or late native call must never lose this owner.
+                self._operator_run = state
+                task = asyncio.create_task(
+                    self._operator_materialization_transaction(state, workspace),
+                    name=f"operator-materialize-{generation.process_generation_id}",
+                )
+                state.materialization_task = task
+                task.add_done_callback(self._observe_operator_task)
+            except BaseException:
+                self._starting = False
+                if self._operator_run is state:
+                    self._operator_run = None
+                raise
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            async with self._state_lock:
+                if (self._operator_run is state and state.provider_dispatch_committed
+                        and state.materialization_receipt is None):
+                    self._mark_materialization_unknown(state)
+            raise
+
+    def _mark_materialization_unknown(self, state: _BrokerOperatorRun) -> None:
+        state.materialization_unknown = True
+        if self._quarantined_reason is None:
+            self._quarantined_reason = "operator materialization effect unknown"
+
+    def _require_materialization_owner(self, state: _BrokerOperatorRun) -> None:
+        if (self._operator_run is not state
+                or state.materialization_task is not asyncio.current_task()
+                or state.generation.process_generation_id in self._operator_terminal):
+            raise BrokerStateError("original materialization owner changed")
+
+    async def _complete_operator_materialization(
+        self, state: _BrokerOperatorRun, observation: Any,
+    ) -> dict[str, Any]:
+        self._require_materialization_owner(state)
+        operation, requested = state.materialization_operation, state.requested
+        epoch, generation = state.epoch, state.generation
+        handoff = state.materialization_handoff
+        if (not isinstance(observation, SessionStartObservation)
+                or not observation.provider_session_id
+                or (state.provider_session_id is not None
+                    and observation.provider_session_id != state.provider_session_id)):
+            raise BrokerStateError("operator start returned no exact typed provider session identity")
+        provider_session_id = observation.provider_session_id
+        observed = await self._operator_call(
+            "attestation", state.adapter.observed_attestation, generation)
+        self._require_materialization_owner(state)
+        credentials = await self._operator_call(
+            "process principal", state.adapter.observe_process_credentials, generation)
+        self._require_materialization_owner(state)
+        provider_home = await self._operator_call(
+            "provider home", state.adapter.observe_provider_home_identity, generation)
+        self._require_materialization_owner(state)
+        if (not isinstance(observed, ObservedHarnessAttestation)
+                or not isinstance(credentials, OSProcessCredentialObservation)
+                or not isinstance(provider_home, ProviderHomeIdentityObservation)):
+            raise BrokerStateError("operator start returned untyped attestation or principal evidence")
+        try:
+            # Reconcile the original target before any publication. A prior
+            # successful write with a lost reply keeps its exact timestamp.
+            receipt = await asyncio.to_thread(
+                read_operator_materialization_receipt, self.policy.run_root,
+                operation.command_id, expected_owner_uid=self.policy.worker_uid)
+            self._require_materialization_owner(state)
+            if receipt is not None:
+                if (not self._receipt_matches_request(receipt, operation=operation,
+                        requested=requested, epoch=epoch, generation=generation, handoff=handoff)
+                        or receipt.provider_session_id != provider_session_id
+                        or receipt.process_identity != operator_to_wire(observation.process)
+                        or receipt.observed_attestation != operator_to_wire(observed)
+                        or receipt.process_credentials != operator_to_wire(credentials)
+                        or receipt.provider_home_identity != operator_to_wire(provider_home)["provider_home_identity"]):
+                    raise OperatorMaterializationReceiptError("original materialization evidence changed")
+            else:
                 receipt = build_operator_materialization_receipt(
                     operation_command_id=operation.command_id,
-                    operation_kind=(
-                        "resume_session" if handoff is not None else "start_session"
-                    ),
-                    attempt_id=epoch.attempt_id,
-                    worker_id=epoch.worker_id,
+                    operation_kind="resume_session" if handoff else "start_session",
+                    attempt_id=epoch.attempt_id, worker_id=epoch.worker_id,
                     session_epoch_id=epoch.session_epoch_id,
                     process_generation_id=generation.process_generation_id,
                     generation_number=generation.generation_number,
-                    requested_profile_digest=requested_profile_digest(
-                        operator_to_wire(requested)
-                    ),
+                    requested_profile_digest=requested_profile_digest(operator_to_wire(requested)),
                     provider_session_id=provider_session_id,
                     process_identity=operator_to_wire(observation.process),
                     observed_attestation=operator_to_wire(observed),
                     process_credentials=operator_to_wire(credentials),
-                    provider_home_identity=operator_to_wire(provider_home)[
-                        "provider_home_identity"
-                    ],
+                    provider_home_identity=operator_to_wire(provider_home)["provider_home_identity"],
                     created_at=_utc_now(),
                 )
                 receipt = await asyncio.to_thread(
-                    persist_operator_materialization_receipt,
-                    self.policy.run_root,
-                    receipt,
-                    expected_owner_uid=self.policy.worker_uid,
-                )
-            except OperatorMaterializationReceiptError as exc:
-                async with self._state_lock:
-                    self._quarantined_reason = (
-                        "operator materialization effect unknown"
-                    )
-                raise BrokerStateError(
-                    "operator materialization receipt persistence failed; "
-                    "provider effect is unknown"
-                ) from exc
-            state = _BrokerOperatorRun(
-                adapter=adapter,
-                requested=requested,
-                epoch=epoch,
-                generation=generation,
-                provider_session_id=provider_session_id,
-                materialization_receipt=receipt,
-                resource=resource,
-                prompts=prompts,
-            )
-            async with self._state_lock:
-                self._operator_run = state
-                self._operator_session_attempts[provider_session_id] = epoch.attempt_id
-                self._operator_session_attempts.move_to_end(provider_session_id)
-                while len(self._operator_session_attempts) > 64:
-                    self._operator_session_attempts.popitem(last=False)
-            return self._materialization_result(receipt)
+                    persist_operator_materialization_receipt, self.policy.run_root,
+                    receipt, expected_owner_uid=self.policy.worker_uid)
+                self._require_materialization_owner(state)
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerStateError(
+                "operator materialization receipt persistence failed; provider effect is unknown"
+            ) from exc
+        async with self._state_lock:
+            self._require_materialization_owner(state)
+            state.provider_session_id = provider_session_id
+            state.materialization_receipt = receipt
+            if (state.materialization_unknown
+                    and self._quarantined_reason == "operator materialization effect unknown"):
+                self._quarantined_reason = None
+            state.materialization_unknown = False
+            self._operator_session_attempts[provider_session_id] = epoch.attempt_id
+            self._operator_session_attempts.move_to_end(provider_session_id)
+            while len(self._operator_session_attempts) > 64:
+                self._operator_session_attempts.popitem(last=False)
+        return self._materialization_result(receipt)
+
+    async def _operator_materialization_transaction(
+        self, state: _BrokerOperatorRun, workspace: Path, *, recover: bool = False,
+    ) -> dict[str, Any]:
+        adapter, requested = state.adapter, state.requested
+        epoch, generation = state.epoch, state.generation
+        operation, handoff = state.materialization_operation, state.materialization_handoff
+        try:
+            self._require_materialization_owner(state)
+            if recover:
+                # This observer reads the one retained original launch future;
+                # it never calls start/resume or sends another native request.
+                observation = await self._operator_call(
+                    "materialization observation", adapter.observe_materialization_result,
+                    operation_id=operation, requested=requested, epoch=epoch,
+                    generation=generation)
+                self._require_materialization_owner(state)
+                if observation is None:
+                    raise BrokerStateError("original materialization outcome is unobserved")
+            else:
+                if self.operator_resource_factory is not None:
+                    try:
+                        state.resource = self.operator_resource_factory(workspace, requested, epoch, generation)
+                    except Exception as exc:
+                        raise BrokerStateError(
+                            f"operator resource construction failed: {type(exc).__name__}") from exc
+                if state.resource is not None:
+                    await self._operator_call("resource start", state.resource.start)
+                    self._require_materialization_owner(state)
+                    binder = getattr(adapter, "bind_attempt_resource", None)
+                    if not callable(binder):
+                        raise BrokerStateError("browser resource requires an adapter binding seam")
+                    await self._operator_call("resource bind", binder, state.resource,
+                        requested=requested, epoch=epoch, generation=generation)
+                    self._require_materialization_owner(state)
+                state.provider_dispatch_committed = True
+                if handoff is not None:
+                    observation = await self._operator_call("resume", adapter.resume_session,
+                        operation_id=operation, epoch=epoch, generation=generation,
+                        provider_session=handoff, requested=requested)
+                else:
+                    observation = await self._operator_call("start", adapter.start_session,
+                        operation_id=operation, requested=requested, epoch=epoch, generation=generation)
+                self._require_materialization_owner(state)
+            return await self._complete_operator_materialization(state, observation)
         except BaseException as exc:
-            if provider_dispatch_committed and state is None:
+            if state.provider_dispatch_committed and state.materialization_receipt is None:
                 async with self._state_lock:
-                    self._quarantined_reason = (
-                        "operator materialization effect unknown"
-                    )
+                    if self._operator_run is state:
+                        self._mark_materialization_unknown(state)
                 if not isinstance(exc, Exception):
                     raise
                 raise BrokerStateError(
-                    "operator materialization provider dispatch has no durable "
-                    "receipt; provider effect is unknown"
+                    "operator materialization provider dispatch has no durable receipt; provider effect is unknown"
                 ) from exc
-            if adapter is not None and state is None and isinstance(exc, Exception):
+            if not state.provider_dispatch_committed and isinstance(exc, Exception):
                 try:
-                    if resource is not None:
-                        await self._operator_call(
-                            "resource start cleanup", resource.stop
-                        )
-                    cleanup = await asyncio.to_thread(
-                        self.sweeper.sweep, "operator_start_failed"
-                    )
+                    if state.resource is not None:
+                        await self._operator_call("resource start cleanup", state.resource.stop)
+                    cleanup = await asyncio.to_thread(self.sweeper.sweep, "operator_start_failed")
                     self.last_sweep = cleanup
                     if not uid_sweep_receipt_is_passing(cleanup.to_dict()):
-                        raise BrokerStateError(
-                            "operator start cleanup did not prove exact quiescence"
-                        )
+                        raise BrokerStateError("operator start cleanup did not prove exact quiescence")
+                    async with self._state_lock:
+                        if self._operator_run is state:
+                            self._operator_run = None
                 except Exception as sweep_exc:
                     async with self._state_lock:
-                        self._quarantined_reason = (
-                            "operator start cleanup failed: "
-                            f"{type(sweep_exc).__name__}"
-                        )
+                        self._quarantined_reason = f"operator start cleanup failed: {type(sweep_exc).__name__}"
             raise
         finally:
             async with self._state_lock:
+                if self._operator_run is state:
+                    state.busy = False
                 self._starting = False
 
-    async def _operator_state(
-        self, generation: ProcessGenerationRef
-    ) -> _BrokerOperatorRun:
+    async def _recover_materialization_outcome(
+        self, operation: OperationId, requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef, generation: ProcessGenerationRef,
+        handoff: ProviderSessionHandoff | None,
+    ) -> None:
         async with self._state_lock:
             state = self._operator_run
-            if state is None or state.generation != generation:
+            if (state is None or state.materialization_receipt is not None
+                    or not state.materialization_unknown or state.busy or self._starting
+                    or state.materialization_operation != operation or state.requested != requested
+                    or state.epoch != epoch or state.generation != generation
+                    or state.materialization_handoff != handoff
+                    or not callable(getattr(state.adapter, "observe_materialization_result", None))
+                    or (state.materialization_task is not None and not state.materialization_task.done())):
+                return
+            state.busy = self._starting = True
+            task = asyncio.create_task(
+                self._operator_materialization_transaction(
+                    state, Path(requested.workspace.workspace_path), recover=True),
+                name=f"operator-materialization-observe-{generation.process_generation_id}")
+            state.materialization_task = task
+            task.add_done_callback(self._observe_operator_task)
+        try:
+            await asyncio.shield(task)
+        except WorkerBrokerError:
+            pass  # The existing status contract truthfully remains CONFLICT.
+
+    def require_native_operator_effect(
+        self, adapter: OperatorAdapter, operation: OperationId, epoch: SessionEpochRef,
+        generation: ProcessGenerationRef, method: str, provider_session_id: str | None,
+    ) -> None:
+        """Synchronous final-write join to this broker's retained original call."""
+        state = self._operator_run
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            raise BrokerStateError("native effect requires the original broker loop") from None
+        if (state is None or state.adapter is not adapter
+                or state.epoch != epoch or state.generation != generation
+                or state.materialization_task is None
+                or loop is not state.materialization_task.get_loop()
+                or not state.provider_dispatch_committed):
+            raise BrokerStateError("original native effect owner differs")
+        native = getattr(adapter, "native", None)
+        if native is None:
+            raise BrokerStateError("original native connection is unavailable")
+        if state.native_connection is None:
+            state.native_connection = native
+        elif state.native_connection is not native:
+            raise BrokerStateError("original native connection changed")
+        actual_session = getattr(native, "provider_session_id", None)
+        handoff_id = (state.materialization_handoff.provider_session_id
+                      if state.materialization_handoff else None)
+        if provider_session_id != (actual_session or handoff_id):
+            raise BrokerStateError("original native session differs")
+        if state.provider_session_id is None:
+            if actual_session is not None:
+                if not isinstance(actual_session, str) or not 0 < len(actual_session) <= 512:
+                    raise BrokerStateError("original native session is invalid")
+                state.provider_session_id = actual_session
+        elif provider_session_id != state.provider_session_id:
+            raise BrokerStateError("original native session changed")
+        if method in {"session/new", "session/resume"}:
+            expected_method = "session/resume" if state.materialization_handoff else "session/new"
+            if (method != expected_method or operation != state.materialization_operation
+                    or getattr(adapter, "current", None) is not None):
+                raise BrokerStateError("original native materialization operation differs")
+        elif method == "session/set_config_option":
+            if (operation != state.materialization_operation or actual_session is None
+                    or state.materialization_receipt is not None
+                    or getattr(adapter, "current", None) is not None
+                    or getattr(adapter, "close_operation", None) is not None
+                    or getattr(native, "_closing", None) is not None
+                    or state.current_begin is not None or state.pending_begin is not None
+                    or state.current_interrupt is not None):
+                raise BrokerStateError("original native model-selection operation differs")
+        elif method in {"session/prompt", "_mastermind/native_cancel"}:
+            current = getattr(adapter, "current", None)
+            if method == "session/prompt":
+                accepted = next((pair for pair in (state.current_begin, state.pending_begin)
+                                 if pair is not None and pair[0] == operation), None)
+            else:
+                accepted = state.current_interrupt
+            if (accepted is None or accepted[0] != operation or current is None
+                    or getattr(current, "ref", None) != accepted[1]
+                    or (method == "session/prompt" and getattr(current, "operation", None) != operation)
+                    or (method == "_mastermind/native_cancel"
+                        and getattr(current, "interrupt_operation", None) != operation)):
+                raise BrokerStateError("original native turn operation differs")
+        else:
+            raise BrokerStateError("native effect method is unsupported")
+        self._require_current_autonomy()
+
+    async def _operator_state(
+        self, generation: ProcessGenerationRef, *, allow_unmaterialized: bool = False, join_native_read: bool = True
+    ) -> _BrokerOperatorRun:
+        async with self._state_lock:
+            original = self._operator_run
+            read = None if original is None else original.native_read_task
+            if (join_native_read and original is not None and original.generation == generation and original.busy
+                    and read is not None and original.interrupt_task is None
+                    and original.pending_begin is None and original.collecting_turn is None):
+                join = read
+            else:
+                join = None
+        if join is not None:
+            # Join this one incumbent finite observation. No queue or new task;
+            # a Send/idle operation cannot fail merely because history is reading.
+            try:
+                async with asyncio.timeout(6.0):
+                    await asyncio.shield(join)
+            except asyncio.TimeoutError:
+                raise BrokerStateError("original native read remains in progress") from None
+        async with self._state_lock:
+            state = self._operator_run
+            if (state is None or state.generation != generation
+                    or join is not None and (state is not original or state.native_read_task is not None)):
                 raise BrokerStateError(
                     "operator generation is not active in this worker broker"
                 )
-            if state.busy:
+            if not allow_unmaterialized and state.materialization_receipt is None:
+                raise BrokerStateError("operator materialization remains unobserved")
+            if state.busy or state.interrupt_task is not None:
                 raise BrokerStateError("operator generation already has an active operation")
             state.busy = True
             return state
@@ -2477,6 +2667,133 @@ class ExecutiveWorkerBroker:
     async def _operator_release_busy(self, state: _BrokerOperatorRun) -> None:
         async with self._state_lock:
             state.busy = False
+
+
+    async def _ohf_native_read(self, payload: dict[str, Any], *, content: bool) -> dict[str, Any]:
+        """One finite observation on the original READY run; never constructs an adapter."""
+        from control_plane.native_conversation_read_contract import NativeReadUnavailable
+        if "history" in payload:
+            return await self._ohf_native_history_read(payload, content=content)
+        expected = {"epoch", "generation"} | ({"association", "request"} if content else set())
+        if set(payload) != expected:
+            raise BrokerProtocolError("native read payload fields are invalid")
+        self._require_current_autonomy()
+        try:
+            epoch = wire_session_epoch_ref(payload["epoch"])
+            generation = wire_process_generation_ref(payload["generation"])
+        except (OperatorHarnessWireError, ValueError) as exc:
+            raise BrokerProtocolError("native read generation is invalid") from exc
+        state = await self._operator_state(generation, join_native_read=False)
+        try:
+            adapter, native = state.adapter, state.native_connection
+            binding = self._native_read_binding
+            if (binding is None or type(adapter) is not binding[0]
+                    or self.operator_adapter_factory is not binding[1] or native is None
+                    or adapter.native is not native or epoch != state.epoch
+                    or state.pending_begin is not None or state.collecting_turn is not None
+                    or state.native_read_task is not None or state.terminal_error is not None
+                    or state.provider_session_id != native.provider_session_id):
+                raise BrokerStateError("original native reader is unavailable")
+            task = None
+            def current():
+                self._require_current_autonomy()
+                if (self._operator_run is not state or state.adapter is not adapter
+                        or self._native_read_binding is not binding
+                        or self.operator_adapter_factory is not binding[1]
+                        or type(adapter) is not binding[0]
+                        or state.native_read_task is not task
+                        or state.native_connection is not native or adapter.native is not native
+                        or state.epoch != epoch or state.generation != generation or not state.busy
+                        or state.provider_session_id != native.provider_session_id
+                        or state.materialization_receipt is None or state.pending_begin is not None
+                        or state.collecting_turn is not None or state.interrupt_task is not None
+                        or state.terminal_error is not None):
+                    raise NativeReadUnavailable()
+            current()
+            task = asyncio.create_task(self._native_read_transaction(
+                state, epoch, generation, payload, content, current),
+                name=f"operator-native-read-{generation.process_generation_id}")
+            state.native_read_task = task
+            task.add_done_callback(self._observe_operator_task)
+        except BaseException:
+            await self._operator_release_busy(state)
+            raise
+        # A disconnected reader cannot release busy over original thread/SDK work.
+        return await asyncio.shield(task)
+
+    async def _ohf_native_history_read(self, payload, *, content):
+        """Finite cold observation; the shielded broker task owns lock and cleanup."""
+        from control_plane.native_conversation_read_contract import canonical
+        expected = {"epoch", "generation", "history"} | ({"association", "request"} if content else set())
+        if set(payload) != expected:
+            raise BrokerProtocolError("native history payload fields are invalid")
+        binding = self._native_history_binding
+        reader = binding[0]
+        if reader is None or self._native_history_task is not None:
+            raise BrokerStateError("original native history reader is unavailable")
+        frozen = canonical(payload)
+        task = asyncio.create_task(self._native_history_transaction(
+            payload, content, frozen, binding), name="operator-native-history-read")
+        self._native_history_task = task
+        task.add_done_callback(self._observe_operator_task)
+        return await asyncio.shield(task)
+
+    async def _native_history_transaction(self, payload, content, frozen, binding):
+        from control_plane.native_conversation_read_contract import (
+            NativeReadUnavailable, NativeReadPhysicalUnknown, canonical)
+        task = asyncio.current_task()
+        try:
+            async with self._state_lock:
+                def current():
+                    self._require_current_autonomy()
+                    if (self._native_history_task is not task or self._native_history_binding is not binding
+                            or self._native_read_binding is not binding[1]
+                            or self.operator_adapter_factory is not binding[1][1]
+                            or self._native_history_shutdown or self._native_history_unknown
+                            or self._quarantined_reason is not None or self._active_run_id is not None
+                            or self._operator_run is not None or self._starting
+                            or self._validation_busy or self._status_sweep_busy
+                            or canonical(payload) != frozen):
+                        raise NativeReadUnavailable()
+                try:
+                    current()
+                    value = await binding[0](payload, content=content, current=current)
+                    current()
+                    return {"native_read": value}
+                except NativeReadPhysicalUnknown:
+                    self._native_history_unknown = True
+                    self._quarantined_reason = "original native history child requires physical reconciliation"
+                    return {"native_read": None}
+                except Exception:
+                    return {"native_read": None}
+                except BaseException:
+                    self._native_history_unknown = True
+                    self._quarantined_reason = "original native history task was interrupted"
+                    raise
+        finally:
+            if self._native_history_task is task:
+                self._native_history_task = None
+
+    async def _native_read_transaction(self, state, epoch, generation, payload, content, current):
+        try:
+            current()
+            function = state.adapter.read_native_content if content else state.adapter.read_native_binding
+            kwargs = dict(epoch=epoch, generation=generation, before_read=current)
+            if content:
+                kwargs.update(association=payload["association"], request=payload["request"])
+            value = await self._operator_call("native read", function, **kwargs)
+            current()
+            return {"native_read": value}
+        except Exception:
+            # This observation cannot grant an effect. Source retirement is a
+            # closed unavailable result; original process cleanup remains owned.
+            return {"native_read": None}
+        finally:
+            async with self._state_lock:
+                if state.native_read_task is asyncio.current_task():
+                    state.native_read_task = None
+                    state.busy = False
+
 
     async def _ohf_begin_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_current_autonomy()
@@ -2515,7 +2832,29 @@ class ExecutiveWorkerBroker:
                 raise BrokerProtocolError(
                     "operator turn or launch decision is outside the active generation"
                 )
-            state.prompts[turn.turn_id] = prompt
+            async with self._state_lock:
+                if state.pending_begin is not None:
+                    raise BrokerStateError("original begin operation remains unobserved")
+                if state.current_begin is not None and (
+                        state.current_begin[0] == operation or state.current_begin[1] == turn):
+                    raise BrokerStateError("original begin operation is already owned")
+                state.pending_begin = (operation, turn)
+                state.prompts[turn.turn_id] = prompt
+                task = asyncio.create_task(
+                    self._operator_begin_transaction(state, operation, turn, generation, launch),
+                    name=f"operator-begin-{generation.process_generation_id}-{turn.turn_id}")
+                state.begin_task = task
+                task.add_done_callback(self._observe_operator_task)
+        except BaseException:
+            await self._operator_release_busy(state)
+            raise
+        return await asyncio.shield(task)
+
+    async def _operator_begin_transaction(
+        self, state: _BrokerOperatorRun, operation: OperationId, turn: TurnRef,
+        generation: ProcessGenerationRef, launch: LaunchComparison,
+    ) -> dict[str, Any]:
+        try:
             try:
                 observation = await self._operator_call(
                     "begin turn",
@@ -2531,6 +2870,15 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
                 )
+            async with self._state_lock:
+                if self._operator_run is not state or state.pending_begin != (operation, turn):
+                    raise BrokerStateError("original begin operation owner changed")
+                native_ack = (result_contract_for_profile(state.requested) != DSH_NATIVE_RESULT_CONTRACT
+                              or (type(observation.provider_native_turn_id) is str
+                                  and bool(observation.provider_native_turn_id)))
+                if observation.acknowledged is True and native_ack:
+                    state.current_begin, state.pending_begin = (operation, turn), None
+                    state.current_interrupt = None
             if (operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
                     and observation.acknowledged is True
                     and type(observation.provider_native_turn_id) is str
@@ -2543,6 +2891,66 @@ class ExecutiveWorkerBroker:
             return {"observation": operator_to_wire(observation)}
         finally:
             await self._operator_release_busy(state)
+
+    async def _ohf_native_begin_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Read the original accepted native claim; never invoke begin again."""
+        if set(payload) != {"operation_id", "turn", "generation"}:
+            raise BrokerProtocolError("native begin status fields are invalid")
+        try:
+            operation = wire_operation_id(payload["operation_id"])
+            turn = wire_turn_ref(payload["turn"])
+            generation = wire_process_generation_ref(payload["generation"])
+        except OperatorHarnessWireError as exc:
+            raise BrokerProtocolError(str(exc)) from exc
+        pair = (operation, turn)
+        pending = {"schema_version": NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+                   "status": "PENDING", "observation": None}
+        async with self._state_lock:
+            state = self._operator_run
+            if (state is None or state.generation != generation
+                    or state.epoch.attempt_id != turn.attempt_id
+                    or turn.session_epoch_id != generation.session_epoch_id
+                    or turn.process_generation_id != generation.process_generation_id
+                    or state.materialization_receipt is None
+                    or result_contract_for_profile(state.requested) != DSH_NATIVE_RESULT_CONTRACT
+                    or pair not in (state.current_begin, state.pending_begin)
+                    or state.native_connection is None
+                    or state.native_connection is not getattr(state.adapter, "native", None)
+                    or not callable(getattr(state.adapter, "observe_native_begin", None))):
+                raise BrokerStateError("original native begin owner is unavailable")
+            if state.busy or (state.begin_task is not None and not state.begin_task.done()):
+                return pending
+            receipt = state.materialization_receipt
+        observed = await self._operator_call(
+            "native begin status", state.adapter.observe_native_begin,
+            operation_id=operation, turn=turn, generation=generation)
+        async with self._state_lock:
+            if (self._operator_run is not state or state.generation != generation
+                    or state.materialization_receipt is not receipt
+                    or pair not in (state.current_begin, state.pending_begin)
+                    or state.native_connection is not getattr(state.adapter, "native", None)
+                    or getattr(state.adapter, "close_operation", None) is not None):
+                raise BrokerStateError("original native begin owner changed")
+            if state.busy:
+                return pending
+            if observed is None:
+                return pending
+            if type(observed) is not NativeConversationBeginObservation:
+                raise BrokerStateError("original native begin evidence is untyped")
+            try:
+                observed.require_origin(operation, turn, generation, state.provider_session_id)
+            except NativeConversationResultError as exc:
+                raise BrokerStateError("original native begin evidence differs") from exc
+            if (observed.requested_profile_digest != receipt.requested_profile_digest
+                    or observed.observed_attestation_digest != source_digest(receipt.observed_attestation)):
+                raise BrokerStateError("original native begin source seals differ")
+            if state.pending_begin == pair:
+                state.current_begin, state.pending_begin = pair, None
+                state.current_interrupt = None
+            if operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX):
+                state.retained_plain_turns[turn] = generation
+            return {"schema_version": NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+                    "status": "ACKNOWLEDGED", "observation": observed.to_wire()}
 
     async def _ohf_observer_lifecycle(self, operation, payload):
         payload = dict(payload)
@@ -2889,6 +3297,34 @@ class ExecutiveWorkerBroker:
                 raise BrokerProtocolError(
                     "operator turn cursor is outside the active generation"
                 )
+            async with self._state_lock:
+                state.collecting_turn = turn
+                state.collection_interrupt_operation = None
+                task = asyncio.create_task(
+                    self._operator_collection_transaction(state, turn, cursor, float(timeout)),
+                    name=f"operator-collect-{turn.process_generation_id}-{turn.turn_id}",
+                )
+                state.collection_task = task
+                task.add_done_callback(self._observe_operator_task)
+        except BaseException:
+            # No physical call exists until the owned task is installed.
+            await self._operator_release_busy(state)
+            raise
+        return await asyncio.shield(task)
+
+    @staticmethod
+    def _observe_operator_task(task: asyncio.Task[Any]) -> None:
+        # Retrieve late failures when a socket waiter has gone away. Awaiters
+        # still receive the original exception; this grants no retry authority.
+        if not task.cancelled():
+            task.exception()
+
+    async def _operator_collection_transaction(
+        self, state: _BrokerOperatorRun, turn: TurnRef, cursor: EventCursor,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Keep the original adapter drain owned after caller cancellation."""
+        try:
             events, next_cursor = await self._operator_call(
                 "read events",
                 state.adapter.read_events,
@@ -2898,25 +3334,40 @@ class ExecutiveWorkerBroker:
             candidate = await self._operator_call(
                 "collect candidate", state.adapter.collect_candidate_result, turn
             )
-            raw = await self._operator_call(
-                "observe raw role result", state.adapter.observe_raw_role_result, turn
-            )
+            native_contract = result_contract_for_profile(state.requested) == DSH_NATIVE_RESULT_CONTRACT
+            if native_contract:
+                if not isinstance(state.adapter, NativeConversationResultAdapter):
+                    raise BrokerStateError("native result observer is unavailable")
+                raw = await self._operator_call(
+                    "observe native conversation result", state.adapter.observe_native_conversation_result, turn)
+            else:
+                raw = await self._operator_call(
+                    "observe raw role result", state.adapter.observe_raw_role_result, turn)
             events = tuple(events)
             if (
                 len(events) > 4096
                 or any(not isinstance(item, NormalizedEvent) for item in events)
                 or not isinstance(next_cursor, EventCursor)
                 or not isinstance(candidate, CandidateResult)
-                or not isinstance(raw, RawRoleResultObservation)
+                or not isinstance(raw, NativeConversationResultObservation if native_contract else RawRoleResultObservation)
             ):
                 raise BrokerStateError(
                     "operator collection returned untyped or oversized evidence"
                 )
+            if native_contract:
+                try:
+                    raw.require_turn(turn)
+                except NativeConversationResultError as exc:
+                    raise BrokerStateError("native result is outside the original turn") from exc
+                if ((candidate.attempt_id, candidate.session_epoch_id, candidate.process_generation_id)
+                        != (turn.attempt_id, turn.session_epoch_id, turn.process_generation_id)
+                        or candidate.artifact_digest != raw.provider_turn_artifact_digest):
+                    raise BrokerStateError("native result and candidate differ")
             response = {
                 "events": operator_to_wire(events),
                 "cursor": operator_to_wire(next_cursor),
                 "candidate": operator_to_wire(candidate),
-                "raw_role_result": operator_to_wire(raw),
+                ("native_conversation_result" if native_contract else "raw_role_result"): operator_to_wire(raw),
             }
             if state.retained_plain_turns.get(turn) == state.generation:
                 # The accepted collector runs only for a turn marked at
@@ -2927,7 +3378,12 @@ class ExecutiveWorkerBroker:
                 )
             return response
         finally:
-            await self._operator_release_busy(state)
+            async with self._state_lock:
+                if state.collection_task is asyncio.current_task():
+                    state.collecting_turn = None
+                    state.collection_interrupt_operation = None
+                    state.collection_task = None
+                    state.busy = False
 
     async def _retained_plain_input_evidence(
         self, state: _BrokerOperatorRun, turn: TurnRef
@@ -2972,15 +3428,52 @@ class ExecutiveWorkerBroker:
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError(str(exc)) from exc
         async with self._state_lock:
-            active = self._operator_run
-            if active is None or (
-                active.generation.process_generation_id != turn.process_generation_id
-                or active.epoch.session_epoch_id != turn.session_epoch_id
-                or active.epoch.attempt_id != turn.attempt_id
+            state = self._operator_run
+            if state is None or (
+                state.generation.process_generation_id != turn.process_generation_id
+                or state.epoch.session_epoch_id != turn.session_epoch_id
+                or state.epoch.attempt_id != turn.attempt_id
             ):
                 raise BrokerStateError("operator turn generation is not active")
-            generation = active.generation
-        state = await self._operator_state(generation)
+            if state.interrupt_task is not None:
+                raise BrokerStateError("operator generation already has an active operation")
+            if state.collection_interrupt_operation is not None:
+                raise BrokerStateError(
+                    "operator turn interrupt already attempted during collection"
+                )
+            if state.busy and state.collecting_turn != turn:
+                raise BrokerStateError("operator generation already has an active operation")
+            if state.materialization_receipt is None:
+                raise BrokerStateError("operator materialization remains unobserved")
+            if not any(pair is not None and pair[1] == turn
+                       for pair in (state.current_begin, state.pending_begin)):
+                raise BrokerStateError("operator turn was not admitted")
+            if state.current_interrupt is not None:
+                raise BrokerStateError("operator turn interrupt is already owned")
+            owns_busy = not state.busy
+            if state.busy:
+                if state.collecting_turn != turn:
+                    raise BrokerStateError("operator generation already has an active operation")
+                state.collection_interrupt_operation = operation
+            else:
+                state.busy = True
+            state.current_interrupt = (operation, turn)
+            task = asyncio.create_task(
+                self._operator_interrupt_transaction(
+                    state, turn, operation, owns_busy=owns_busy,
+                ),
+                name=f"operator-interrupt-{turn.process_generation_id}-{turn.turn_id}",
+            )
+            state.interrupt_task = task
+            task.add_done_callback(self._observe_operator_task)
+        await asyncio.shield(task)
+        return {"interrupted": True}
+
+    async def _operator_interrupt_transaction(
+        self, state: _BrokerOperatorRun, turn: TurnRef, operation: OperationId,
+        *, owns_busy: bool,
+    ) -> None:
+        """Retain the actual adapter call, never its cancelled socket waiter."""
         try:
             await self._operator_call(
                 "interrupt turn",
@@ -2988,9 +3481,17 @@ class ExecutiveWorkerBroker:
                 turn,
                 operation_id=operation,
             )
-            return {"interrupted": True}
         finally:
-            await self._operator_release_busy(state)
+            async with self._state_lock:
+                if state.interrupt_task is asyncio.current_task():
+                    state.interrupt_task = None
+                    if owns_busy:
+                        state.busy = False
+
+    def _require_operator_calls_settled(self, state: _BrokerOperatorRun) -> None:
+        pending = getattr(state.adapter, "has_pending_native_calls", None)
+        if callable(pending) and pending() is not False:
+            raise BrokerStateError("original native calls remain unsettled")
 
     async def _terminal_operator_sweep(self, reason: str) -> UIDSweepReceipt:
         try:
@@ -3045,7 +3546,7 @@ class ExecutiveWorkerBroker:
             generation = wire_process_generation_ref(payload["generation"])
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError(str(exc)) from exc
-        state = await self._operator_state(generation)
+        state = await self._operator_state(generation, allow_unmaterialized=True)
         try:
             adapter_error: Exception | None = None
             resource_error: Exception | None = None
@@ -3066,6 +3567,7 @@ class ExecutiveWorkerBroker:
                     )
                 except Exception as exc:
                     resource_error = exc
+            self._require_operator_calls_settled(state)
             sweep = await self._terminal_operator_sweep("operator_terminal")
             if adapter_error is not None or resource_error is not None:
                 async with self._state_lock:
@@ -3185,7 +3687,7 @@ class ExecutiveWorkerBroker:
         reason = payload["reason"]
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
             raise BrokerProtocolError("operator cancellation reason is invalid")
-        state = await self._operator_state(generation)
+        state = await self._operator_state(generation, allow_unmaterialized=True)
         try:
             adapter_error: Exception | None = None
             resource_error: Exception | None = None
@@ -3207,6 +3709,7 @@ class ExecutiveWorkerBroker:
                     )
                 except Exception as exc:
                     resource_error = exc
+            self._require_operator_calls_settled(state)
             sweep = await self._terminal_operator_sweep("operator_terminal")
             if adapter_error is not None or resource_error is not None:
                 async with self._state_lock:
@@ -3264,7 +3767,7 @@ class ExecutiveWorkerBroker:
                     else None
                 ),
             }
-        state = await self._operator_state(generation)
+        state = await self._operator_state(generation, allow_unmaterialized=True)
         try:
             observation = await self._operator_call(
                 "reconcile", state.adapter.reconcile, generation
@@ -3328,6 +3831,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError(
                     "OHF absence proof requires an idle worker broker"
@@ -3476,6 +3981,8 @@ class ExecutiveWorkerBroker:
                     or self._starting
                     or self._validation_busy
                     or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
                 ):
                     raise BrokerStateError(
                         "a fresh status UID sweep requires an idle worker broker"
@@ -3883,6 +4390,8 @@ class ExecutiveWorkerBroker:
                     or self._starting
                     or self._validation_busy
                     or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
                 ):
                     raise BrokerStateError(
                         "validation is serialized after worker collection"
@@ -3915,6 +4424,10 @@ class ExecutiveWorkerBroker:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
 
         async with self._state_lock:
+            if self._native_history_binding[0] is not None:
+                self._native_history_shutdown = True
+            if self._native_history_unknown:
+                raise BrokerStateError("original native history resource remains unresolved")
             if self.policy.require_assignment_seal:
                 self._quarantined_reason = "broker shutdown"
             active_run_id = self._active_run_id
@@ -3926,7 +4439,19 @@ class ExecutiveWorkerBroker:
                 )
             except WorkerBrokerError:
                 pass
+        operator_settlement_failed = False
         if operator is not None:
+            # These calls run in adapter threads. A disconnected request cannot
+            # release their generation or let the final sweep overtake them.
+            async with self._state_lock:
+                owned_operator = tuple(task for task in (
+                    operator.materialization_task, operator.begin_task,
+                    operator.collection_task, operator.interrupt_task, operator.native_read_task,
+                ) if task is not None)
+            outcomes = await asyncio.gather(
+                *(asyncio.shield(task) for task in owned_operator), return_exceptions=True,
+            )
+            operator_settlement_failed = any(isinstance(value, BaseException) for value in outcomes)
             try:
                 await self._ohf_cancel(
                     {
@@ -3955,7 +4480,11 @@ class ExecutiveWorkerBroker:
                                             return_exceptions=True)
             if any(isinstance(value, BaseException) for value in outcomes):
                 raise BrokerStateError("original assignment shutdown settlement failed")
+        if operator is not None:
+            self._require_operator_calls_settled(operator)
         self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "broker_shutdown")
+        if operator_settlement_failed:
+            raise BrokerStateError("original operator shutdown settlement failed")
 
     async def _write_interrupted_envelope(
         self,
@@ -4266,7 +4795,7 @@ class WorkerBrokerClient:
                     raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 if before_write is not None:
                     try:
-                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn", "ohf-native-read-binding", "ohf-native-read"}
                                 or not callable(before_write)
                                 or before_write(operation, json.loads(encoded)["payload"]) is not None):
                             raise ValueError("invalid local foreground guard")

@@ -80,9 +80,11 @@ class ProbeClient:
 
     def admit_update(self, update: Any) -> int:
         """Apply this client's semantic update policy and return its text size."""
-        text = _update_text(update)
-        self._digest.update(text)
-        return len(text)
+        return len(_update_text(update))
+
+    def commit_update(self, update: Any) -> None:
+        """Hash only an accepted SDK callback, after structural/budget checks."""
+        self._digest.update(_update_text(update))
 
     def bind_session(self, session_id: str) -> None:
         if self.session_id is not None:
@@ -125,6 +127,11 @@ class ProbeClient:
             return
         if self._text_bytes + size > self.limits.text_bytes:
             self.poison("TEXT_BUDGET_EXCEEDED")
+            return
+        try:
+            self.commit_update(update)
+        except (ValueError, TypeError, UnicodeError):
+            self.poison("UPDATE_NOT_ADMITTED")
             return
         self._updates += 1
         self._text_bytes += size
@@ -221,6 +228,14 @@ def _validate_rpc_frame(message: Any) -> None:
     _validate_json_structure(message)
 
 
+class ExtensionFramePolicy(Protocol):
+    """Trusted consumer's finite semantic policy, below the one SDK decoder."""
+
+    def admit_frame(self, message: dict[str, Any]) -> None: ...
+
+    def admit_extension_frame(self, message: dict[str, Any]) -> bool: ...
+
+
 class StrictFrameReader:
     """Borrowed byte reader guarding SDK NDJSON parsing, not a JSON-RPC stack.
 
@@ -230,8 +245,10 @@ class StrictFrameReader:
     here. Malformed bytes are never forwarded to the SDK's skip-and-continue path.
     """
 
-    def __init__(self, reader: asyncio.StreamReader, client: ProbeClient):
+    def __init__(self, reader: asyncio.StreamReader, client: ProbeClient, *,
+                 extension_policy: ExtensionFramePolicy | None = None):
         self.reader, self.client = reader, client
+        self.extension_policy = extension_policy
         self._frames = 0
         # asyncio exposes no public getter for its configured frame limit. This
         # probe binds that implementation seam explicitly, not by optimistic default.
@@ -267,12 +284,27 @@ class StrictFrameReader:
             self.client.poison("INVALID_FRAME")
             raise BoundaryViolation("INVALID_FRAME") from None
         self._frames += 1
+        if self.extension_policy is not None:
+            try:
+                self.extension_policy.admit_frame(obj)
+            except (ValueError, TypeError, UnicodeError):
+                self.client.poison("FRAME_POLICY_REFUSED")
+                raise BoundaryViolation(self.client.violation) from None
         params = obj.get("params", {})
         method = obj.get("method")
         if method is not None:
+            # A trusted native consumer may admit an exact finite setup notice
+            # through its existing semantic frame policy. Without that explicit
+            # acceptance, every standard callback keeps the original prompt fence.
+            try:
+                if (self.extension_policy is not None
+                        and self.extension_policy.admit_extension_frame(obj) is True):
+                    return line
+            except (ValueError, TypeError, UnicodeError):
+                pass
             if method not in {"session/update", "session/request_permission"}:
                 self.client.poison("TOOL_NOT_GRANTED")
-                raise BoundaryViolation("TOOL_NOT_GRANTED")
+                raise BoundaryViolation(self.client.violation)
             if not self.client._callback_allowed(params.get("sessionId")):
                 raise BoundaryViolation(self.client.violation)
             try:

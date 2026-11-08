@@ -2,7 +2,7 @@
 /** Same immutable D4B signed-source run: real Create/Runtime/seal/reference
  * reader/consume/follow-up/archive DTO. Client transport/auth are synthetic;
  * these tests do not invoke creation, consumption, send or a live provider. */
-import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import fixture from '../fixtures/project-fresh-conversation-owner.json';
 import {canonicalJson,sha256Hex} from '../orchestration/operation-key';
@@ -138,11 +138,17 @@ it('the optional attended slot receives a stable issued read witness and only ex
   expect(captured.current()).toBe(true);expect(captured.reference).toEqual(reference);
   view.rerender(<ProjectConversations workRef={work} owner={s.owner} locale="zh-CN" renderFreshContinuation={slot}/>);
   expect(supplied).toBe(captured);expect(captured.current()).toBe(true);
-  act(()=>captured.invalidate());expect(captured.current()).toBe(false);
+  act(()=>captured.refresh());
+  await waitFor(()=>expect(s.transport.readFreshReference).toHaveBeenCalledTimes(2));
+  await waitFor(()=>expect(supplied!.current()).toBe(true));
+  expect(captured.current()).toBe(false);
+  expect(screen.getByRole('button',{name:'返回对话列表'})).toBeTruthy();
+  expect(s.transport.freshReferences).toHaveBeenCalledTimes(1);
+  const refreshed=supplied!;
+  act(()=>refreshed.invalidate());expect(refreshed.current()).toBe(false);
   expect(screen.queryByText(fixture.initial_read.initial_result.envelope.summary)).toBeNull();
-  act(()=>captured.refresh());await screen.findByRole('button',{name:'打开'});
-  expect(s.transport.freshReferences).toHaveBeenCalledTimes(2);expect(s.transport.readFreshReference).toHaveBeenCalledTimes(1);
-  view.unmount();expect(captured.current()).toBe(false);
+  act(()=>captured.refresh());expect(s.transport.readFreshReference).toHaveBeenCalledTimes(2);
+  view.unmount();expect(refreshed.current()).toBe(false);
 });
 
 it('keeps real archived turns visible beside an optional attended component that returns no controls',async()=>{

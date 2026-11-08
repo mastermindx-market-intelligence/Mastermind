@@ -1158,7 +1158,11 @@ class CooCycle:
             planner = children[0]
             planner_provenance = planner.orchestration_provenance
             interactive_profile_id = planner.constraints.get("execution_profile_id")
-            retained_native = (
+            try:
+                native_conversation = self.runtime.jobs.get_native_conversation_binding(planner.job_id) is not None
+            except StateConflict:
+                return self._block(root_id, planner.job_id, "lineage_invalid")
+            retained_native = native_conversation or (
                 interactive_profile_id == NATIVE_RETURN_TX5_EXECUTION_PROFILE
                 and isinstance(planner_provenance, dict)
                 and planner_provenance.get("command_id")

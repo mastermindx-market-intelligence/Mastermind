@@ -17,6 +17,9 @@ import { useFreshConversationJourney } from "./conversations/new-conversation/us
 import { createFreshConversationBinding } from "./conversations/new-conversation/fresh-conversation-command-binding";
 import { createFreshConversationAttendedBinding, type FreshConversationOriginalRead } from "./conversations/new-conversation/fresh-conversation-attended-binding";
 import { FreshConversationContinuation } from "./conversations/new-conversation/FreshConversationContinuation";
+import {NativeJourneyContinuation,NativeReferenceContinuation} from "./conversations/new-conversation/NativeConversationContinuation";
+import {decodeConversationResult,conversationContractForKey} from "./conversations/new-conversation/fresh-conversation-contract";
+import type {FreshConversationContract} from "./orchestration/fresh-conversation-transport";
 import { useFreshConversationTurnDraftState } from "./conversations/new-conversation/useFreshConversationTurnDraftState";
 import { sameConversationOwner } from "./conversations/new-conversation/fresh-conversation-binding";
 import { decodeFreshConversationResult } from "./conversations/new-conversation/fresh-conversation";
@@ -84,6 +87,8 @@ import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginal
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import { ConversationsList } from "./conversations/ConversationsList";
+import { DeepSeekConversations } from "./conversations/deepseek/DeepSeekConversations";
+import type { ConversationProjectLocator } from "./conversations/conversation-list-contract";
 import { composeConversationsList, isListedCurrentConversation, isListedConversationProject } from "./conversations/conversation-list-source";
 import { captureConversationListOwner, conversationListOwnerCurrent, type ConversationListOwnerCapture } from "./conversations/conversation-list-owner";
 import { useConversationListNavigation } from "./conversations/useConversationListNavigation";
@@ -311,8 +316,9 @@ function isFreshRetainedOperation(value: unknown): value is OperationPointer {
     const kind = fields.kind.value, operationKey = fields.operationKey.value, targetKey = fields.targetKey.value;
     if (kind === "conversation_create")
       return freshConversationOriginalSelector({work_ref: targetKey, operation_key: operationKey}) !== null;
-    if (kind !== "conversation_consume" && kind !== "conversation_turn") return false;
-    const pattern = kind === "conversation_consume" ? /^mmos-conversation-consume-[0-9a-f]{40}$/ : /^mmos-conversation-turn-[0-9a-f]{40}$/;
+    if (typeof kind!=="string"||!["conversation_consume","conversation_turn","conversation_resume","conversation_stop"].includes(kind)) return false;
+    const nativeOnly=kind==="conversation_resume"||kind==="conversation_stop";
+    const pattern=new RegExp("^mmos-"+(nativeOnly?"native":"(?:conversation|native)")+"-"+kind.slice("conversation_".length)+"-[0-9a-f]{40}$");
     return typeof operationKey === "string" && pattern.exec(operationKey)?.[0] === operationKey && parseFreshConversationTarget(targetKey) !== null;
   } catch { return false; }
 }
@@ -1777,17 +1783,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     const host = freshHost, transport = host?.freshConversation, request = transport?.request;
     if (!host || !transport || !request || !commandBinding?.store) return null;
     const current = () => !!freshExecutiveOwner() && host.freshConversation === transport && transport.request === request;
-    const send = (operation: "preview" | "create" | "status" | "read", arguments_: unknown, signal: AbortSignal) => {
+    const send = (operation: "preview" | "create" | "status" | "read", arguments_: unknown, signal: AbortSignal, contract?:FreshConversationContract) => {
       if (!current()) return Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"));
-      return request.call(transport, operation, arguments_, signal);
+      return contract==="native-v2"?request.call(transport,operation,arguments_,signal,contract):request.call(transport, operation, arguments_, signal);
     };
-    return createFreshConversationBinding({owner: () => current() ? freshExecutiveOwner() : null,
+    return createFreshConversationBinding({newContract:"native-v2",owner: () => current() ? freshExecutiveOwner() : null,
+      nativeTransport:{request:(operation,args,signal)=>current()?request.call(transport,operation,args,signal,"native-v2"):Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"))},
       canPreviewCreate: () => current() && host.auth?.getState().acquisition === true,
       store: commandBinding.store,
-      transport: {preview: (args, signal) => send("preview", args, signal),
-        create: (args, signal) => send("create", args, signal),
-        status: (args, signal) => send("status", args, signal),
-        read: (args, signal) => send("read", args, signal)}});
+      transport: {preview: (args, signal,contract) => send("preview", args, signal,contract),
+        create: (args, signal,contract) => send("create", args, signal,contract),
+        status: (args, signal,contract) => send("status", args, signal,contract),
+        read: (args, signal,contract) => send("read", args, signal,contract)}});
   }, [freshHost, freshExecutiveOwner, commandBinding?.store, freshDraft.navigationEpoch]);
   const freshReferenceReadFrame = useMemo(() => ({}), [freshHost, freshExecutiveOwner]);
   const freshReferenceRead = useRef<{frame: object; read: FreshConversationOriginalRead;
@@ -1810,20 +1817,37 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       host.commandBinding === commandBinding && commandBinding.store === store &&
       host.freshConversation === transport && transport.request === request;
     const send = (operation: "consume" | "consume_status" | "turn_preview" | "turn" | "turn_status" | "turn_read",
-      args: unknown, signal: AbortSignal) => current()
-        ? request.call(transport, operation, args, signal)
+      args: unknown, signal: AbortSignal,contract?:FreshConversationContract) => current()
+        ? contract==="native-v2"?request.call(transport,operation,args,signal,contract):request.call(transport, operation, args, signal)
         : Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"));
     return createFreshConversationAttendedBinding({owner: () => current() ? freshExecutiveOwner() : null,
+      nativeTransport:{request:(operation,args,signal)=>current()?request.call(transport,operation,args,signal,"native-v2"):Promise.reject(new Error("FRESH_CONVERSATION_UNAVAILABLE"))},
       canModify: () => current() && host.auth?.getState().acquisition === true,
       store,
-      transport: {consume: (args, signal) => send("consume", args, signal),
-        consumeStatus: (args, signal) => send("consume_status", args, signal),
-        turnPreview: (args, signal) => send("turn_preview", args, signal),
-        turn: (args, signal) => send("turn", args, signal),
-        turnStatus: (args, signal) => send("turn_status", args, signal),
-        turnRead: (args, signal) => send("turn_read", args, signal)},
-      readInitial: async (value, signal): Promise<FreshConversationOriginalRead | null> => {
+      transport: {consume: (args, signal,contract) => send("consume", args, signal,contract),
+        consumeStatus: (args, signal,contract) => send("consume_status", args, signal,contract),
+        turnPreview: (args, signal,contract) => send("turn_preview", args, signal,contract),
+        turn: (args, signal,contract) => send("turn", args, signal,contract),
+        turnStatus: (args, signal,contract) => send("turn_status", args, signal,contract),
+        turnRead: (args, signal,contract) => send("turn_read", args, signal,contract)},
+      readInitial: async (value, signal, requestedContract): Promise<FreshConversationOriginalRead | null> => {
         const selected = freshConversationOriginalSelector(value), owner = freshExecutiveOwner();
+        const contract=requestedContract??(selected&&"operation_key"in selected?conversationContractForKey(selected.operation_key):"legacy-v1");
+        if(contract==="native-v2"){
+          const live=()=>current()&&sameConversationOwner(owner,freshExecutiveOwner())&&!signal.aborted;
+          if(!selected||!owner||!live())return null;
+          const issued=freshReferenceRead.current;
+          if(issued&&issued.frame===freshReferenceReadFrame&&sameConversationOwner(issued.owner,owner)&&
+            issued.read.contract==="native-v2"&&freshConversationTarget(issued.read.selection)===freshConversationTarget(selected)&&
+            issued.read.current())return issued.read;
+          if(!("operation_key"in selected)||conversationContractForKey(selected.operation_key)!=="native-v2")return null;
+          const raw=await freshBinding.readOriginal(selected,signal);if(!live())return null;
+          const decoded=decodeConversationResult(raw,"read",selected),data=decoded?.ok?decoded.data:null,locator=data?.locator;
+          if(data?.schema!=="mastermind.executive.fresh_conversation_data.v2"||!data.result||!locator?.job_id||!locator.attempt_id)return null;
+          return {contract:"native-v2",selection:selected,result:data.result,
+            locator:{...locator,job_id:locator.job_id,attempt_id:locator.attempt_id},current:live};
+        }
+        if(contract!=="legacy-v1")return null;
         const sequence = ++attendedReadSequence.current;
         const live = () => current() && sequence === attendedReadSequence.current &&
           sameConversationOwner(owner, freshExecutiveOwner());
@@ -1841,7 +1865,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         // A hidden owner.readFresh would retire the UI's current witness. The
         // independent status/preflight endpoint reauthorizes every request.
         const issued = freshReferenceRead.current;
-        if (!issued || issued.frame !== freshReferenceReadFrame || !sameConversationOwner(issued.owner, owner) ||
+        if (!issued || issued.read.contract==="native-v2" || issued.frame !== freshReferenceReadFrame || !sameConversationOwner(issued.owner, owner) ||
             freshConversationTarget(issued.read.selection) !== freshConversationTarget(selected) ||
             issued.read.current() !== true) return null;
         return {selection: selected, result: issued.read.result, locator: issued.read.locator,
@@ -4785,11 +4809,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const projectHistoryOwner = retainedResultHost?.session?.createProjectHistoryReader
     ? projectConversationHistory.history?.owner : legacyProjectHistoryOwner;
   const projectConversations = useProjectConversations({...projectConversationReadScope,
-    renderFreshContinuation: source => <FreshConversationContinuation locale={locale}
+    renderFreshContinuation: source => source.window.schema==="mastermind.fresh_conversation_window.v3"&&freshAttendedBinding?.native
+      ? <NativeReferenceContinuation locale={locale} active={active==="Projects"} binding={freshAttendedBinding}
+        host={freshHost} authGeneration={authRevision} window={source.window} current={source.current}
+        turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal} onReadCurrent={reportFreshReferenceRead}
+        onOriginalSettled={()=>{onFreshOriginalSettled();source.refresh();}}/>
+      : <FreshConversationContinuation locale={locale}
       active={active === "Projects"} binding={freshAttendedBinding} host={freshHost} authGeneration={authRevision}
       entry={{kind: "reference", window: source.window, current: source.current}}
       turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}
-      onReadCurrent={reportFreshReferenceRead} onOriginalSettled={onFreshOriginalSettled}/>});
+      onReadCurrent={reportFreshReferenceRead} onOriginalSettled={()=>{onFreshOriginalSettled();source.refresh();}}/>});
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;
@@ -5115,7 +5144,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     },
     workRef: freshDraft.workRef, message: freshDraft.message, draftOwner: freshDraft.draftOwner,
     onWorkRefChange: freshDraft.onWorkRefChange, onMessageChange: freshDraft.onMessageChange,
-    onOriginalKeySelected: freshDraft.onOriginalKeySelected, originalLookup: freshDraft.originalLookup,
+    onOriginalKeySelected: value=>{
+      freshDraft.onOriginalKeySelected(value);
+      const current=conversationListSnapshot.current;
+      if(projectWorkRef!==value.work_ref&&current.catalogueOwner===catalogueListOwner.current&&
+        conversationListOwnerCurrent(current.catalogueOwner,false)&&current.index.state==="AVAILABLE"&&
+        current.index.programs.filter(row=>row.workRef===value.work_ref).length===1)
+        setCatalogueProject({workRef:value.work_ref,authRevision,epoch:current.epoch});
+    }, originalLookup: freshDraft.originalLookup,
+    renderNativeContinuation: observation=><NativeJourneyContinuation locale={locale}
+      active={active==="Conversations"&&freshDraft.shown} observation={observation} binding={freshAttendedBinding}
+      historyOwner={projectConversations.history?.owner} host={freshHost} authGeneration={authRevision}
+      turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal} onReadCurrent={reportFreshReferenceRead}
+      onControlSettled={async()=>{await refreshFreshPendingHint.current?.();}}
+      onOriginalSettled={onFreshOriginalSettled}/>,
     renderContinuation: read => <FreshConversationContinuation locale={locale}
       active={active === "Conversations" && freshDraft.shown} binding={freshAttendedBinding}
       host={freshHost} authGeneration={authRevision} entry={{kind: "initial", read}}
@@ -5155,7 +5197,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       return true;
     } catch { return false; }
   } : undefined;
-  const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
+  const openConversationProject = (locator: ConversationProjectLocator): boolean => {
+      const latest = conversationListSnapshot.current;
+      if (latest.catalogueOwner !== catalogueListOwner.current || !conversationListOwnerCurrent(latest.catalogueOwner, false) ||
+          !isListedConversationProject(latest.model, locator) || latest.index.state !== "AVAILABLE" ||
+          latest.index.programs.filter(card => card.workRef === locator.workRef).length !== 1) return false;
+      const row = latest.model.projects.find(item => item.locator.workRef === locator.workRef);
+      if (!row) return false;
+      conversationNavigation.rememberProject(locator.workRef, row.key);
+      setCatalogueProject({workRef: locator.workRef, authRevision, epoch: latest.epoch});
+      setProjectTab("More"); setActive("Projects"); return true;
+  };
+  const conversationListPanel = <DeepSeekConversations model={conversationListModel} signedIn={signedIn}
+    authGeneration={authRevision} locale={locale} theme={theme} selectedProject={selection?.workRef}
+    onOpenProject={openConversationProject} onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}>
+    <ConversationsList model={conversationListModel} locale={locale} theme={theme}
     onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}
     onOpenSessionRequests={openSessionRequests}
     query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
@@ -5170,23 +5226,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       if (!row) return false;
       conversationNavigation.showCurrentDetail(row.key); return true;
     }}
-    onOpenProject={locator => {
-      const latest = conversationListSnapshot.current;
-      if (latest.catalogueOwner !== catalogueListOwner.current || !conversationListOwnerCurrent(latest.catalogueOwner, false) ||
-          !isListedConversationProject(latest.model, locator) || latest.index.state !== "AVAILABLE" ||
-          latest.index.programs.filter(card => card.workRef === locator.workRef).length !== 1) return false;
-      const row = latest.model.projects.find(item => item.locator.workRef === locator.workRef);
-      if (!row) return false;
-      conversationNavigation.rememberProject(locator.workRef, row.key);
-      setCatalogueProject({workRef: locator.workRef, authRevision, epoch: latest.epoch});
-      setProjectTab("More"); setActive("Projects"); return true;
-    }}
+    onOpenProject={openConversationProject}
     onOpenMetaCeo={() => setActive("Meta-CEO")} onSourcesAndAccess={() => setActive("Sources")}
     onRefresh={() => {
       const owner = captureListReadOwner(retainedResultHost);
       if (!owner || owner.hostGeneration !== retainedHostGeneration || !conversationListOwnerCurrent(owner, false)) return;
       setProgramRevision(n => n + 1);setWindowRevision(n => n + 1);
-    }} />;
+    }} /></DeepSeekConversations>;
   const currentConversationPanel = (
       <>
         <ConversationWindow

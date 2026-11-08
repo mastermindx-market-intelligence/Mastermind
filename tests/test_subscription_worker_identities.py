@@ -167,7 +167,18 @@ def test_subscription_descriptors_do_not_change_native_provider_projection():
 
 # Frozen exact sites in the composed source. Tests never refresh these from a
 # changed file; the registry and these assertions must retain the reviewed scope.
-_SUBSCRIPTION_IDENTITY_SITES = ((168, 20, 44, "str", "\"_mastermind_alibaba_01\""), (169, 21, 45, "str", "\"_mastermind_alibaba_01\""), (170, 19, 22, "int", "459"), (171, 19, 22, "int", "459"), (180, 20, 44, "str", "\"_mastermind_minimax_01\""), (181, 21, 45, "str", "\"_mastermind_minimax_01\""), (182, 19, 22, "int", "460"), (183, 19, 22, "int", "460"), (288, 12, 36, "str", "\"_mastermind_alibaba_01\""), (296, 12, 36, "str", "\"_mastermind_minimax_01\""))
+_SUBSCRIPTION_IDENTITY_SITES = (
+    (170, 20, 44, 'str', '"_mastermind_alibaba_01"'),
+    (171, 21, 45, 'str', '"_mastermind_alibaba_01"'),
+    (172, 19, 22, 'int', '459'),
+    (173, 19, 22, 'int', '459'),
+    (182, 20, 44, 'str', '"_mastermind_minimax_01"'),
+    (183, 21, 45, 'str', '"_mastermind_minimax_01"'),
+    (184, 19, 22, 'int', '460'),
+    (185, 19, 22, 'int', '460'),
+    (290, 12, 36, 'str', '"_mastermind_alibaba_01"'),
+    (298, 12, 36, 'str', '"_mastermind_minimax_01"'),
+)
 _SUBSCRIPTION_BOOTSTRAP_SITES = ((784, 21, 43, "str", "_mastermind_[a-z0-9_]*"), (786, 97, 120, "str", "_mastermind_agent_relay"), (792, 89, 92, "int", "457"))
 _SUBSCRIPTION_IDENTITY_FINDINGS = [
     "_mastermind_alibaba_01", "_mastermind_alibaba_01", "459", "459",

@@ -1,0 +1,220 @@
+{
+  "archive": {
+    "comment_id": 6707499732,
+    "path": "research/evidence/deepseek-native-handoff-c29-20261108.md",
+    "sha256": "a3ca387018288336bd923fe722711e9fc393172221a3e1e7d47e68139f289f70"
+  },
+  "behavior": [
+    "Original account exposes a host-only native credential handle and passive nonsecret account snapshot. Both read the original grant through the captured credentials service, rechecking the original lifetime after both async boundaries.",
+    "Credential authority includes original service identity, closed/removal state and actual grant lifetime; profile-cache refresh does not revoke it. Passive cached identity has its own profile object/ID currentness and remains null until actually observed.",
+    "Legacy token eligibility is preserved; native capture additionally requires the exact configured issuer. Missing or malformed native APIs never fall back to legacy token lookup.",
+    "Account provider captures the actual account and API, root admission, token/signal/check fields; strict synchronous checks run before and after the captured witness callback.",
+    "The original 401 handler settles with the captured original account even after service replacement. Local cleanup failure does not replace the original provider failure.",
+    "Native Messages combines account cancellation with the original request. Final account check is followed by the original native write permit check before fetch.",
+    "Account withdrawal wrapped by extension preparation becomes terminal ABORTED. Actual classified HTTP failures retain status and original 401 settlement. HTTP success still accepts the original extension contribution after account withdrawal.",
+    "The original catalog retains its credential witness with the existing scope, retires stale same-token lifetimes, preserves its original single-flight owner, and discards late previous-scope success/failure without clearing a successor load.",
+    "Catalog callback and clock reentry cannot publish or start a refresh after retirement. State is committed only after final generation/currentness checks; diagnostics run after the final writes.",
+    "Native model listing checks captured credential immediately before the existing GET. Ordinary provider/account/catalog and file/image behavior remain covered by original suites."
+  ],
+  "diagnostics_preserved": [
+    {
+      "receipt": "/private/tmp/mmx-dsh-c30-account-20261108-pro1.json",
+      "result": "288 passed, one failed: original extension wrapper classified account cancellation as REQUEST_EXTENSION; corrected transport classification without weakening assertion.",
+      "sha256": "8ef176ca19f1ccec1a8d213d9d37ed4c19e7f8e712678a4bb260840a4b58d51a"
+    },
+    "Source-only judgment identified stale same-token catalog lifetime, callback/clock publication reentry, and final native permit ordering; all have passing regressions."
+  ],
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "external_provider_calls": 0,
+  "governing_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "holds": [
+    "actual root package/dependency custody",
+    "original enrolled Worker/quota/host/account/enabled-profile/router/source binding",
+    "signed-in packaged DeepSeek create/history/send/answer recovery/logout/reconnect/uncertain-send",
+    "original receipt-first Stop and same-Session resume",
+    "eligible governed-tool dispatch and settlement",
+    "installed backend readiness remains unobserved; closed access lanes remain closed"
+  ],
+  "installed": false,
+  "next": "C31 fixed same-process native_worker.mjs, original-owner observation and capability enforcement, package/factory source join; continue original signed-in production journey",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "parent_source_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+  "production_armed": false,
+  "production_sessions_created": 0,
+  "qualification_scope": "All final runs use the final production patch and retain 7097 unchanged inputs within each run. The LLM/type runs precede only three additional account regression cases and the fresh-wrapper fixture refinement; their relevant production/config/test inputs are unchanged.",
+  "recorded_at": "2026-11-08T00:08:53.176013+00:00",
+  "schema": "mastermind.dsh_native_account_qualification.v1",
+  "service_restarts": 0,
+  "source_sha256": {
+    "integrations/deepseek_harness/runtime_compat/check-native-host.mjs": "cfbb7d2e109be790558e1ff172ee3cfbaa39a9424c842a448bef6b1b1cfbbadf",
+    "integrations/deepseek_harness/runtime_compat/native-access-source.json": "dea8f16990b4608392561e7a5ecc600f5ae9e50215938a2947c6c6a2a6937091",
+    "integrations/deepseek_harness/runtime_compat/native-account-admission.test.ts": "2f9331a98a1a75425e25c8f2f0ab8b954967c522f125608c0e8876955a6d55cf",
+    "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "da377435bb68f886268227a5bdc724c5ba315b53bdc26ff2dfea85cdc62f829b",
+    "integrations/deepseek_harness/runtime_compat/native-host-source.json": "cdcdda7ffb13e91a88849a3605a7fd26a1b6e3017247bd67e00e4fc3aa6169c1",
+    "integrations/deepseek_harness/runtime_compat/native-llm-admission.test.ts": "fa118c10fb005eefc70f4a638e95a9a76dd527b48789bdab6829a52e39def0a7",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "edf052bbd20ac96087cfe689168c5abaa52dd83f699bea78adb0539257d322bf",
+    "integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "a04059ae69eeadb3442eb3517a4060ddeb137679bddcb8b97ee50f1c0c2c74f7",
+    "integrations/deepseek_harness/runtime_compat/vitest.host-admission.config.mts": "2fad53b355a9106465a6c7fa3f59f8f13a87ca8b5d98b0f6730f07f070680cdd",
+    "integrations/deepseek_harness/runtime_compat/vitest.native-account.config.mts": "d598092a2964fd3dbada80a3c0d9053696a4f905cfd60470bb433f325820a1de",
+    "integrations/deepseek_harness/runtime_compat/vitest.native-llm.config.mts": "5bf5eb6279cb21809b91363b9acf2e72c55047c1558feb1a3bd0c03785f886d2",
+    "tests/executive_identity_review.py": "33922f6784441665475155b9947a40f32b04df9fbe85b5f6ffa0b0eca41a1c51",
+    "tests/test_ceo_submit_armed_composition.py": "ac524834c8793f913752ca608f215e23a51e77ffbfae4699f0abf88f2cfd2005"
+  },
+  "strict_diagnostics": 0,
+  "strict_projects": [
+    "Agent",
+    "AgentLoop",
+    "LLM",
+    "DeepSeek",
+    "DeepSeekAccount",
+    "PlatformAccount",
+    "AccountProvider"
+  ],
+  "tests": [
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.native-account.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c30-account-final-20261108-pro1.xml"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:07:20.984144+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "account",
+      "log_sha256": "bd1d05746fa78a8c492fc0795ee7656f2042cee72e4ca938e8f83769ac430475",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-account-final-20261108-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "7e29985fce6dd57fa62b39a9597fcfae269753925c972911422da62ef7a1fa27",
+      "started_at": "2026-11-08T00:07:15.431849+00:00",
+      "tests_passed": 298
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.host-admission.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c30-host-final-20261108-pro1.xml"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:07:18.243982+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "host",
+      "log_sha256": "1893ecf83bfdc515ac594104fed198a18436eefdb631919eb3da9dd696f48b2c",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-host-final-20261108-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "4131b6efc9c6deffcba39ca7776a3ecaa2755f3e38032b340fa6375e1461314c",
+      "started_at": "2026-11-08T00:07:11.511823+00:00",
+      "tests_passed": 208
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.acp-lifecycle.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c30-acp-final-20261108-pro1.xml"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:07:29.392870+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "acp",
+      "log_sha256": "9e846e24ba607d485573f532d472da2dc3b1ea1ec1e98cda830bf526b505e7e9",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-acp-final-20261108-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "5e5b3a5e1cc619f3ed75bfa4c854c9aab737e7faf5d0d894f220a0b50651cd59",
+      "started_at": "2026-11-08T00:07:13.420342+00:00",
+      "tests_passed": 214
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.native-llm.config.mts",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c30-llm-20261108-pro2.xml"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:05:41.240860+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "llm",
+      "log_sha256": "b79a8a0e42ed90851504819868fe862ab77a3291803b4ca9f9b4a791b0eecb6d",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-llm-20261108-pro2.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "a8bf15100e2597b22967dadb2924fac1fc040ce3a52223a3ae00476a5915cffb",
+      "started_at": "2026-11-08T00:05:35.746976+00:00",
+      "tests_passed": 226
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "--junitxml=/private/tmp/mmx-dsh-c30-package-final-20261108-pro1.xml"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:07:29.226999+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "package",
+      "log_sha256": "3a105b429c566a6ab228658f80ae3094d2be8b3cd71c1dc02ddbcc5dceba360f",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-package-final-20261108-pro1.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "902424b37c8ef1d1d1f3c3c73f60fb8ed8a964241dc21dce25100f0ef966239e",
+      "started_at": "2026-11-08T00:07:17.813579+00:00",
+      "tests_passed": 54
+    },
+    {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "check-native-host.mjs"
+      ],
+      "base_sha": "b65b0db86f4f57e698e641113691841da1e68f8e",
+      "completed_at": "2026-11-08T00:05:39.566634+00:00",
+      "input_count": 7097,
+      "inputs_unchanged": true,
+      "kind": "types",
+      "log_sha256": "d4ad463a1beaaa524af3c5ebb1d1d1aecd10a6f136abbbdf006a07b3fd140445",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "path": "/private/tmp/mmx-dsh-c30-types-20261108-pro2.json",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "sha256": "1ec5d04e41a018d6c82066f1730e843271b7f4f6c5f18633b81e494f7487b11b",
+      "started_at": "2026-11-08T00:05:33.649941+00:00"
+    }
+  ],
+  "tests_passed": 1000
+}

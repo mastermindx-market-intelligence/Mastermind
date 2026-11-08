@@ -1,0 +1,112 @@
+{
+  "build": {
+    "app.json_sha256": "d72b07ad3a83ea7b07da90aef16200388be27ec8fe5e8bd401d755dacd0a7c4b",
+    "changed_inputs": [],
+    "exit_code": 0,
+    "inputs_sha256": {
+      "integrations/deepseek_harness/company_plugin/lib/build-manifest.json": "9a1415d46104f124c176916383cbb9e21d95893f2bab7e10c587635a02df2328",
+      "integrations/deepseek_harness/company_plugin/lib/client.js": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+      "integrations/deepseek_harness/company_plugin/lib/company-peer.js": "26100e77cdfeee7afb493f93f2eb7dec5e0aa594ca8caab5d0ae59ca8161f587",
+      "integrations/deepseek_harness/company_plugin/lib/executive-read-port.js": "2907c91681b1a649a6c26948c1dff7466e5b10a62a8539c0c67ade0355470608",
+      "integrations/deepseek_harness/company_plugin/lib/index.js": "7f523566dcc06c1d99ee263dff52d1b53a707be8a2855d8986aee2c12657e031",
+      "integrations/deepseek_harness/company_plugin/package.json": "f6ae65d09b42299940283ee9dc7d1d4286baf9e51b32b2166e08560a59171b52",
+      "integrations/deepseek_harness/company_plugin/src/client/connection.ts": "d914331d4783c8a829f6ae5d34bc13ee8d2980b53d9877ea4d45eee3702186eb",
+      "integrations/deepseek_harness/company_plugin/src/client/index.ts": "ff20e3065c14add6432ea00686dcc5db567bd13a0495a709e89990f5add04567",
+      "integrations/deepseek_harness/company_plugin/src/client/styles.ts": "b3d27b10963634ba74d5544fbf74fed155472b095bd2233a3a7abdd7b02bc479",
+      "integrations/deepseek_harness/company_plugin/src/company-peer.ts": "60bd663c0a501f9ac8f2019f3d2e85f69a9e56226cc85b6c0e42450ffb17e9ea",
+      "integrations/deepseek_harness/company_plugin/src/executive-read-port.ts": "19d10b20820968b6748b0a8b924b3c3ebc84d8b985955840e2fa79495b213a88",
+      "integrations/deepseek_harness/company_plugin/src/index.ts": "1585af52430af853c86d6b8073dc48053020e63bf54966ca9186fb584eaa44b3",
+      "integrations/deepseek_harness/company_plugin/src/protocol.ts": "2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41",
+      "integrations/deepseek_harness/launch_attended.mjs": "8fd96f972aedcd5208ecd2b6a57cef6acc9eae97515835b9e2c96140a0a98c15",
+      "integrations/deepseek_harness/package_attended.py": "8c7841c3d39ecf1f22dd04a5ebf1376ce63af829c6f5775e0887a409e20643ec",
+      "integrations/deepseek_harness/runtime_compat/native-access-source.json": "f66102f24159261559798e46e1cd8eaee54e3e54cce3e53795545b9503276a8f",
+      "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
+      "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "644bb9e7ed6ba59c522d12b3c8cf01ba8edd80eefd24ab98d426d7a02a3bd885",
+      "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
+      "integrations/deepseek_harness/runtime_compat/native-host-source.json": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208",
+      "integrations/deepseek_harness/runtime_compat/native-session-generation.patch": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+      "integrations/deepseek_harness/runtime_compat/native-session-source.json": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+      "integrations/deepseek_harness/runtime_compat/native_access_package.py": "88b53abc23728468fe30e1cf19866f69801adad620efec3e32d78939d05f1db8",
+      "integrations/deepseek_harness/runtime_compat/native_acp_package.py": "86ce186d3ffa7f98dc776ba6ed59f7f183c2ed54bc01ae9dc30f72afb820029a",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_access.py": "8c720198bec99907f57463cadde3d88270a30d6f7a9960d5f82c690e1f64470f",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "d3bd4194a339f2d661f598cb55f0c614c6d7818062d0fe49dd583b343c733fb8",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "ca8da73ab3b2aade864ceb5fbdee688680eceec115f4cbb13bf7ceea1302246a",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_session.py": "52aa4d1258015e368ae9cc8f92366d1fa09a32baf44a6ae166487410923c317d"
+    },
+    "installed": false,
+    "log_sha256": "178128ec10b41f607c57596ef7c223065f71661f1e94a58b939dd917bd5b60de",
+    "package-manifest.json_sha256": "e3062255d5cde50eb8cf1fda6464e8352620c44a4ba725998b4d09c5426a4625",
+    "provider_calls": 0,
+    "release": "/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/releases/dsh-687f282e-owner-access-v3-20261107-c2",
+    "schema": "mastermind.attended_build_effect.v1",
+    "seconds": 231.07,
+    "source_commit": "618a775edc7d3d96ef6b15d39f270f0ff57acf13",
+    "state": "BUILT",
+    "state_root": "/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/state-owner-access-v3-20261107-c2"
+  },
+  "closed_findings": [
+    "encoded upload retains original request.data in the final authorization question",
+    "payload permission withdrawal before receipt commit yields zero staged receipts",
+    "HTTP identity witness is exact full-source/path/hash/anchor bounded"
+  ],
+  "installed": false,
+  "production_accepted": false,
+  "provider_calls": 0,
+  "schema": "mastermind.dsh_native_access_qualification.v3",
+  "source_commit": {
+    "after": "618a775edc7d3d96ef6b15d39f270f0ff57acf13",
+    "before": "65b8896a543286e855000ca3a7e805bf74a52cf2",
+    "paths_sha256": {
+      "integrations/deepseek_harness/package_attended.py": "8c7841c3d39ecf1f22dd04a5ebf1376ce63af829c6f5775e0887a409e20643ec",
+      "integrations/deepseek_harness/runtime_compat/native-access-source.json": "f66102f24159261559798e46e1cd8eaee54e3e54cce3e53795545b9503276a8f",
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208",
+      "integrations/deepseek_harness/runtime_compat/native-owner-upload.test.ts": "ef1b701444acdca9b7864b2dedbcd166b9deab61b471bf2a3418f9d15a4ff68d",
+      "integrations/deepseek_harness/runtime_compat/native_acp_package.py": "86ce186d3ffa7f98dc776ba6ed59f7f183c2ed54bc01ae9dc30f72afb820029a",
+      "integrations/deepseek_harness/runtime_compat/vitest.owner-access.config.mts": "97a62af999e33bfc7185f9be09d3a0453701ab8530da35e84ac05ef1a9cde79a",
+      "tests/executive_identity_review.py": "ed9b072b03897cb3c861c42ce455263ee6713e94e8596660601b197556160e37",
+      "tests/test_dsh_native_acp_package.py": "f78fc0ee35d365311d229fe3ad48562bbb583502a385b8e98fa21967397739db",
+      "tests/test_dsh_native_owner_identity.py": "983b10efaaa5f4810da7baf77e27e9b8dafb2b0e27fba924ea6cc42ac8653113",
+      "tests/test_dsh_native_owner_package.py": "b3ad7a7557d6ec82e31e433ed47c1e182aab3ebad7c7dac8f055b16ef17abba9"
+    },
+    "provider_calls": 0,
+    "publication": "NOT_STARTED",
+    "return_code": 0,
+    "schema": "mastermind.scoped_source_commit.v1",
+    "state": "COMMITTED"
+  },
+  "tests": [
+    {
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v3-final-native-20261107-c2.log",
+      "name": "native",
+      "seconds": 4.74,
+      "sha256": "2e80186d55e77dc3b64af30787f1a4f2b49406b31e87f40c3c54de4dfa40b1e9",
+      "tail": "\n RUN  v4.1.11 /Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat\n\n \u2713 native-owner-upload.test.ts (13 tests) 404ms\n \u2713 native-owner-access.test.ts (33 tests) 1069ms\n \u2713 native-owner-hold.test.ts (18 tests) 74ms\n\n Test Files  3 passed (3)\n      Tests  64 passed (64)\n   Start at  01:52:09\n   Duration  4.04s (transform 1.53s, setup 0ms, import 2.17s, tests 1.55s, environment 0ms)\n\n"
+    },
+    {
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v3-final-typecheck-20261107-c2.log",
+      "name": "typecheck",
+      "seconds": 2.39,
+      "sha256": "c1c100447eb89158bd303d31bc21fa0d9b3305e7ae90d8d74e7478030f2f4e6f",
+      "tail": "NATIVE_ACCESS_TYPECHECK_DIAGNOSTICS 0\n"
+    },
+    {
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v3-final-upload-original-20261107-c2.log",
+      "name": "upload-original",
+      "seconds": 4.49,
+      "sha256": "3379ca9e37864b54a1d2a720ede3949c971bb29a5802113a12d85d825de81e74",
+      "tail": "\n RUN  v4.1.11 /Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat\n\n \u2713 ../../../../../dsh-donor-20261022/packages/client/connection/tests/binary-rpc.host.spec.ts (43 tests) 2553ms\n     \u2713 preserves gzip configuration through the HTTP bridge  1256ms\n     \u2713 preserves none configuration through the HTTP bridge  1251ms\n \u2713 ../../../../../dsh-donor-20261022/packages/client/connection/tests/http-bridge.host.spec.ts (7 tests) 131ms\n \u2713 ../../../../../dsh-donor-20261022/packages/client/connection/tests/fetch-routes.host.spec.ts (5 tests) 34ms\n \u2713 ../../../../../dsh-donor-20261022/packages/client/file-upload/tests/file-upload-http.host.spec.ts (4 tests) 25ms\n\n Test Files  4 passed (4)\n      Tests  59 passed (59)\n   Start at  01:52:09\n   Duration  3.79s (transform 271ms, setup 0ms, import 577ms, tests 2.74s, environment 0ms)\n\n"
+    },
+    {
+      "exit_code": 0,
+      "log": "/tmp/mmx-native-owner-v3-final-package-20261107-c2.log",
+      "name": "package",
+      "seconds": 11.74,
+      "sha256": "07c2eef926162e0090994bc913805aa08a8b2cbb5b21d2c933b937a10300713f",
+      "tail": ".......................................                                  [100%]\n"
+    }
+  ]
+}

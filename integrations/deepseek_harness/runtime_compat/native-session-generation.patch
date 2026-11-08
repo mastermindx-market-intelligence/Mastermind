@@ -1,0 +1,222 @@
+--- a/packages/api/session-controller/src/index.ts
++++ b/packages/api/session-controller/src/index.ts
+@@ -172,7 +172,7 @@
+     ctx.effect(() => async () => {
+       await Promise.allSettled([...this.promotions])
+     }, 'session-controller.promotions')
+-    this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation) })
++    this.history = new SessionHistoryController(ctx, (observation, signal) => { this.promote(observation, signal) })
+     this.listState = new ApiSessionList(ctx, resolved.listWorkSliceMs)
+     this.fileApplications = internals.fileApplications ?? nativeFileApplications
+     this.openFileApplication = internals.openFileApplication ?? openNativeFileApplication
+@@ -222,14 +222,14 @@
+     })
+   }
+ 
+-  private promote(observation: SessionObservation): void {
++  private promote(observation: SessionObservation, signal: AbortSignal): void {
+     const sessionId = observation.header.id
+     const task = (async () => {
+       using ownedObservation = observation
+-      const result = await this.agents.resolveObservedAgent(ownedObservation)
++      const result = await this.agents.resolveObservedAgent(ownedObservation, signal)
+       if ('error' in result) this.ctx.emit('api-session/error', sessionId, result.error.message)
+     })().catch((error: unknown) => {
+-      this.ctx.logger.error(`session-controller: background activation for "${sessionId}" failed: ${errorChain(error)}`)
++      if (!signal.aborted) this.ctx.logger.error(`session-controller: background activation for "${sessionId}" failed: ${errorChain(error)}`)
+     })
+     this.promotions.add(task)
+     void task.finally(() => { this.promotions.delete(task) })
+@@ -482,7 +482,7 @@
+       ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
+       ...(principal === undefined ? {} : { principal }),
+     }
+-    return this.commands.prompt(request, source)
++    return this.commands.prompt(request, source, signal)
+   }
+ 
+   /**
+@@ -512,6 +512,8 @@
+    */
+   @Remote('cancel')
+   cancel(request: SessionCancelRequest): SessionCancelValue {
++    // A company carrier joins its current generation into the existing invocation.
++    this.ctx.invocation?.signal.throwIfAborted()
+     return this.commands.cancel(request)
+   }
+ 
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -316,15 +316,19 @@
+    * @param source - the `user-rpc` source recorded on the accepted message.
+    * @returns acknowledgement that the Agent accepted the prompt.
+    */
+-  async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
+-    const agent = await this.resolveAgent(request.sessionId)
++  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal): Promise<SessionPromptValue> {
++    signal?.throwIfAborted()
++    const agent = await this.resolveAgent(request.sessionId, signal)
++    signal?.throwIfAborted()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     const hasImage = request.content.some(part => part.type === 'image')
+     const admit = async (): Promise<SessionPromptValue> => {
++      signal?.throwIfAborted()
+       try {
+         if (hasImage) {
+           const current = this.agents.selectionFor(agent).current
+           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
++          signal?.throwIfAborted()
+           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+             throw new RemoteError(
+               'session/attachment-invalid',
+@@ -338,6 +342,7 @@
+           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+         )
+         const content = await this.ctx.attachments.admitPromptContent(admission.content)
++        signal?.throwIfAborted()
+         const message: UserMessage = createUserMessage({ content, source })
+         if (this.ctx.agents.get(agent.id) !== agent) {
+           throw new RemoteError(
+@@ -346,6 +351,8 @@
+             { sessionId: agent.id },
+           )
+         }
++        // No await separates current cancellation from the original durable enqueue.
++        signal?.throwIfAborted()
+         using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
+         if (request.mode === 'steer') agent.steer(message)
+         else agent.followup(message)
+@@ -510,8 +517,8 @@
+     return { accepted: true }
+   }
+ 
+-  private async resolveAgent(sessionId: SessionId): Promise<Agent> {
+-    const found = await this.agents.resolveAgent(sessionId)
++  private async resolveAgent(sessionId: SessionId, signal?: AbortSignal): Promise<Agent> {
++    const found = await this.agents.resolveAgent(sessionId, signal)
+     if ('error' in found) throw found.error
+     return found.agent
+   }
+--- a/packages/api/session-controller/src/agent.ts
++++ b/packages/api/session-controller/src/agent.ts
+@@ -197,8 +197,8 @@
+    * @param sessionId - ordinary Session identity.
+    * @returns the live Agent or a stable Session-domain failure.
+    */
+-  async resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult> {
+-    return this.resolve(sessionId)
++  async resolveAgent(sessionId: SessionId, signal?: AbortSignal): Promise<ApiSessionAgentResult> {
++    return this.resolve(sessionId, undefined, signal)
+   }
+ 
+   /**
+@@ -206,14 +206,16 @@
+    * @param observation - Host-owned observation whose preparation stays pinned through setup.
+    * @returns the live Agent or a stable Session-domain failure.
+    */
+-  async resolveObservedAgent(observation: SessionObservation): Promise<ApiSessionAgentResult> {
+-    return this.resolve(observation.header.id, observation)
++  async resolveObservedAgent(observation: SessionObservation, signal?: AbortSignal): Promise<ApiSessionAgentResult> {
++    return this.resolve(observation.header.id, observation, signal)
+   }
+ 
+   private async resolve(
+     sessionId: SessionId,
+     observation?: SessionObservation,
++    signal?: AbortSignal,
+   ): Promise<ApiSessionAgentResult> {
++    signal?.throwIfAborted()
+     const live = this.liveAgent(sessionId)
+     if (live !== undefined) return live
+     const attached = this.ctx.sessions.get(sessionId)
+@@ -223,16 +225,20 @@
+ 
+     let resume = this.resumes.get(sessionId)
+     if (resume === undefined) {
+-      resume = this.resume(sessionId, observation).finally(() => { this.resumes.delete(sessionId) })
++      // Only the initiating caller owns creation cancellation. A later waiter
++      // checks its own signal without cancelling this original shared resume.
++      resume = this.resume(sessionId, observation, signal).finally(() => { this.resumes.delete(sessionId) })
+       this.resumes.set(sessionId, resume)
+     }
+     try {
+       const agent = await resume
++      signal?.throwIfAborted()
+       // A shared resume can publish an identity that subagent routing adopts
+       // before every waiter observes it; apply the live ownership policy again.
+       const published = this.liveAgent(sessionId)
+       return published ?? { agent }
+     } catch (error: unknown) {
++      signal?.throwIfAborted()
+       if (error instanceof ApiSessionNotFound) {
+         return { error: new RemoteError('session/not-found', error.message, { sessionId }) }
+       }
+@@ -407,11 +413,13 @@
+       : { agent }
+   }
+ 
+-  private async resume(sessionId: SessionId, supplied?: SessionObservation): Promise<Agent> {
+-    if (supplied !== undefined) return this.resumeObserved(sessionId, supplied)
++  private async resume(sessionId: SessionId, supplied?: SessionObservation, signal?: AbortSignal): Promise<Agent> {
++    signal?.throwIfAborted()
++    if (supplied !== undefined) return this.resumeObserved(sessionId, supplied, signal)
+     try {
+-      using observation = await this.ctx.sessionQuery.observeSession(sessionId)
+-      return await this.resumeObserved(sessionId, observation)
++      using observation = await this.ctx.sessionQuery.observeSession(sessionId, signal === undefined ? {} : { signal })
++      signal?.throwIfAborted()
++      return await this.resumeObserved(sessionId, observation, signal)
+     } catch (error: unknown) {
+       if (error instanceof SessionQueryError
+         && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') {
+@@ -424,7 +432,9 @@
+   private async resumeObserved(
+     sessionId: SessionId,
+     observation: SessionObservation,
++    signal?: AbortSignal,
+   ): Promise<Agent> {
++    signal?.throwIfAborted()
+     if (observation.header.id !== sessionId || observation.header.cwd === undefined) {
+       throw new ApiSessionNotFound(`session "${sessionId}" not found`)
+     }
+@@ -432,6 +442,7 @@
+       throw new ApiSessionSubagentOwnership(sessionId)
+     }
+     const composition = await this.composeAgent(this.presetForObservation(observation))
++    signal?.throwIfAborted()
+     const published = this.ctx.sessions.get(sessionId)
+     const live = this.ctx.agents.get(sessionId)
+     if (published !== undefined && hasApiSessionSubagentOwner(this.ctx, published, live)) {
+@@ -441,6 +452,7 @@
+       resumeSessionId: sessionId,
+       agentOptions: this.agentOptions(),
+       setup: composition.setup,
++      ...(signal === undefined ? {} : { signal }),
+     })).agent
+   }
+ 
+--- a/packages/api/session-controller/src/history.ts
++++ b/packages/api/session-controller/src/history.ts
+@@ -49,7 +49,7 @@
+    */
+   constructor(
+     private readonly ctx: Context,
+-    private readonly promote: (observation: SessionObservation) => void,
++    private readonly promote: (observation: SessionObservation, signal: AbortSignal) => void,
+   ) {
+     ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+       let stream = this.assistantStreams.get(agent.session.id)
+@@ -201,10 +201,12 @@
+           : projectionBlock(source.projections),
+         ...assistantStream === undefined ? {} : { assistantStream },
+       }
++      // A paused snapshot consumer may have retired before requesting its next frame.
++      signal.throwIfAborted()
+       if (address.kind === 'session' && source.source === 'prepared') {
+         const promotion = source.retain()
+         try {
+-          this.promote(promotion)
++          this.promote(promotion, signal)
+         } catch (error: unknown) {
+           promotion[Symbol.dispose]()
+           throw error
