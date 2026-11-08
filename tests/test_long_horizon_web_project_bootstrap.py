@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KERNEL = ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md"
 EXPORT = ROOT / "docs/evidence/2026-11-07-mission-continuation-project-instructions.txt"
 ACCOUNT = ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"
+GLOBAL = ROOT / "docs/evidence/2026-11-07-global-continuation-custom-instructions.txt"
 
 
 def _block() -> str:
@@ -103,3 +104,22 @@ def test_manual_rollout_remains_explicit_and_not_claimed_installed():
     ):
         assert phrase in account, phrase
     assert "source publication does not install live ChatGPT Project settings" in kernel
+
+def test_account_global_overlay_covers_outside_project_without_overclaiming():
+    global_text = GLOBAL.read_text(encoding="utf-8")
+    account = _flat(ACCOUNT.read_text(encoding="utf-8"))
+    assert len(global_text) <= 1500
+    for phrase in (
+        "LONG-HORIZON EXECUTION DEFAULT",
+        "not simple questions",
+        "VERIFY -> SAVE material progress -> REASSESS",
+        "START the next safe, authorized, in-scope action",
+        "Do not end just to ask me to say",
+        "Is DONE_WHEN really proved?",
+        "Respect real permission/safety denials",
+        "No bypasses, busywork, guaranteed hours or fictional background work",
+    ):
+        assert phrase in global_text, phrase
+    assert "Project instructions apply" in account
+    assert "override global custom instructions" in account
+    assert "This is a **supplement**" in account
