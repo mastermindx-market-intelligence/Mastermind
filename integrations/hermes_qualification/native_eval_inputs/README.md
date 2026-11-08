@@ -13,3 +13,49 @@ The common schema adds nullable `eval_publication_json` to the original admissio
 The release recipe must explicitly select this kind and its exact patch hash, frozen inventory and postimages. Existing derivation names retain their bytes and meanings. Source qualification neither enables a service nor proves a provider request, valid EVAL run or improvement.
 
 Tests reuse the existing Workspace OAuth fixture preimages and the pinned request-observation authority fixture. `qualify.py --donor-root PATH` verifies the actual pinned checkout in a disposable tree and leaves the donor unchanged.
+
+
+## Managed-worker retirement
+
+The cumulative derivation also repairs the original native worker custody in
+`gateway/session_managed_worker.py`, `gateway/session_runtime_workers.py` and
+`gateway/session_authority.py`. The immutable upstream donor remains
+`1c0cd667746d3395fe9e1b6c74f8f85952486f18`; the two additional donor fixtures
+retain exact bytes and the existing MIT license provenance.
+
+The `closed` event retains its I/O-stop meaning. A separate bounded observation
+requires the tracked process handle to be reaped, any separately verified
+interpreter identity to be absent or replaced, the owned I/O threads to have
+ended, and their pipes to be closed. Ambiguous identity or permission failure
+remains pending. The observer never signals, waits, spawns or reconciles.
+
+Bounded close retains the original worker map entry while that observation is
+incomplete. Stdin closure follows its existing sender lock without waiting on
+an active writer; the sender closes its pipe when it relinquishes ownership.
+An allocated but unstarted reader does not receive an invalid thread join.
+Existing work counting and profile joining include retained managed workers.
+
+Before successor preflight or claim, the original admission gate observes
+same-session retirement. Its distinct `managed_retiring` state reuses the
+existing claim/drain wait and stopping boundary; late physical completion lets
+that same drain claim its original queued head. Unknown admission precedence
+and original result settlement remain intact. No reaper, watcher, queue,
+worker replacement, runtime activation or EVAL completeness claim is added.
+
+This observation covers only the tracked process/interpreter and I/O resources.
+It does not prove descendant cleanup, absence of external effects, enforced
+sandbox/network coverage, or production availability. Incomplete native EVAL
+runs keep their existing invalid/unknown status.
+
+Process custody is registered before fallible stderr setup. The original
+tracked reservation completion binds a verified interpreter identity even if
+its caller has been cancelled. An already closing worker completes bounded
+teardown after that new identity is bound; the original close mutex serializes
+those calls. This never bootstraps or repeats the admission. A reservation
+error that cannot establish the identity deliberately remains counted; this
+is conservative retention, not automatic recovery of an unknown reservation.
+
+Cleanup and inspection errors remain separate from the original execution
+outcome. They cannot replace an accepted answer or its existing unknown
+classification. The full map snapshot is checked before any pruning or yield,
+and individual finalizers recheck map and worker identity after inspection.

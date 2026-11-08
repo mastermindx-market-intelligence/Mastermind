@@ -1152,3 +1152,54 @@ it changes no forbidden prefix, core import/environment rule, effective-delta
 calculation, dependency subtraction, parent ordering or shared ownership rule.
 The gate must still reject adjacent unlisted paths. It does not authorize access
 to any previously denied source or resolve the outstanding integration conflict.
+
+
+### Original managed-worker behavior qualification
+
+The four regression cases reproduced the preceding owner's defects: capacity
+forgot an I/O-stopped live process, profile joining released ownership too soon,
+stdin closure ignored an active sender's lock, and teardown began after map
+removal. Regression-baseline JUnit SHA-256:
+`a31767d03de70d7e4612f07f5ae0964a4fdfa0daed64a95fc3899ccd6cb24b06`.
+An earlier fixture setup error was corrected before this behavioral baseline.
+
+The refined owner cohort passes **39 cases with zero failures, errors or
+skips**. It executes the source-qualified owner functions, including a complete
+synthetic finished-result/teardown/queued-successor sequence, the original
+tracked reservation completion after caller cancellation, stderr startup
+failure, cleanup-error preservation of an unknown result, full snapshot and
+individual finalizer identity replacement, ambiguous process identity,
+unstarted I/O threads, concurrent pipe ownership, and an ordinary finite local
+child. Ledger, provider and process-signal fixture boundaries remain explicit;
+this is not an installed native execution or external-effect audit. Qualified
+JUnit SHA-256:
+`0fa7697d80f94a3ffed42eaecc6d0fd4327c2d738309fec6cb02d137450f44aa`.
+
+The three new owned-path cases fail before registration. After the exact
+amendment, **34 owned-path and neighboring-path gate cases pass**, with zero
+failures, errors or skips. They preserve refusal of nearby unlisted fixtures,
+tests and forbidden surfaces; the fence algorithms and contextual set are
+unchanged. Baseline and qualified JUnit SHA-256, respectively:
+`f1ac8c0238c008cb2819a492b5b4d1ebed1e7ff3960fa801912b0e683d6bdcfb`
+and `64034304e60d3a96d54caa2bb07dba78050301fa66d8b7443f231d6209e7a5f7`.
+
+An attempted broader owner/input cohort exceeded its test time budget and is
+not a completed passing receipt. An added sequence fixture was corrected before
+the refined owner cohort above. Qualification cohorts are reported separately;
+no partial run or overlapping population is added into an acceptance total.
+The native producer's effects, descendant cleanup and complete coverage remain
+unproven. The source integration and installed acceptance boundaries remain
+separate from this bounded operational repair.
+
+The final targeted compatibility cohort passes **nine cases with zero failures,
+errors or skips** across six existing native-input tests. It verifies unchanged
+privacy postimages, declarative publication schema, original admission replay,
+terminal input retention, transaction-guard composition, and refusal of an
+unqualified newer selected-input schema. Compatibility JUnit SHA-256:
+`bc634cf78ebffabcffde11bd932df1fec2662c93e7f53e331e437970b4bccfcf`.
+The cumulative patch digest is
+`123bd25188aa844afceeb0a97f1e023797740116e89bf886b2b8686efd04012d`.
+Its three changed owner postimages and all unchanged privacy/EVAL postimages
+are verified through the existing manifest and held source-binding constants.
+A reservation error without a qualified interpreter binding deliberately stays
+counted; this repair does not claim automatic reconciliation of that uncertainty.

@@ -3,7 +3,7 @@
   "commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
   "license": "MIT",
   "license_file": "../../../../hermes_qualification/native_eval_inputs/UPSTREAM_LICENSE",
-  "proof_scope": "Pinned resolver, reasoning profile and original admission/retirement source; config, credentials and service remain explicit fixture edges.",
+  "proof_scope": "Pinned resolver, reasoning profile and original admission/retirement source; config, credentials and service remain explicit fixture edges. Managed worker/runtime source is exact upstream; physical retirement does not attest effects or descendants.",
   "files": {
     "hermes_cli/runtime_provider.py": {
       "fixture": "hermes_cli__runtime_provider.py.source",
@@ -58,6 +58,18 @@
       "bytes": 83019,
       "git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
       "sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37"
+    },
+    "gateway/session_managed_worker.py": {
+      "fixture": "gateway__session_managed_worker.py.source",
+      "bytes": 37625,
+      "git_blob": "86baeb5c76304465f14e685a5e48828d5cbb695c",
+      "sha256": "0d2bed13ce549ac192b9f49653a77a68851de544a3416050a5d80cdea08920fa"
+    },
+    "gateway/session_runtime_workers.py": {
+      "fixture": "gateway__session_runtime_workers.py.source",
+      "bytes": 7831,
+      "git_blob": "a22f82587ed5c80ae2641d589d5f8856eca59d0f",
+      "sha256": "dd10aadcce77376a04ddb03ff1587b61c9cc0910ccb04cd0e25bbaa89f32e1b4"
     }
   }
 }

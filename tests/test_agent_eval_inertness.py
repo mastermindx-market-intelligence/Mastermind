@@ -743,6 +743,12 @@ ALLOWED_PATHS = frozenset(
         "integrations/hermes_qualification/native_eval_inputs/guard.patch",
         "integrations/hermes_qualification/native_eval_inputs/manifest.json",
         "integrations/hermes_qualification/native_eval_inputs/qualify.py",
+        # Assigned-principal original worker-retirement amendment:
+        # git:mastermindx-market-intelligence/Mastermind@c3faca882e34105df95fe934d680b5ea185168b3
+        # docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md; exact owned paths only.
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_managed_worker.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_runtime_workers.py.source",
+        "integrations/hermes_runtime/tests/test_native_worker_retirement.py",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/agent__reasoning_effort.py.source",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_cli__runtime_provider.py.source",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_cli__runtime_provider_custom.py.source",
@@ -1564,6 +1570,9 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
 
 
 @pytest.mark.parametrize("owned", [
+    "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_managed_worker.py.source",
+    "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_runtime_workers.py.source",
+    "integrations/hermes_runtime/tests/test_native_worker_retirement.py",
     "docs/hermes/APPLICATION_OBSERVATION_V4.md",
     "integrations/hermes_runtime/native_application_observation.py",
     "integrations/hermes_runtime/tests/test_native_application_observation.py",
@@ -1588,6 +1597,9 @@ def test_native_eval_contribution_evidence_reaches_both_real_fences(tmp_path, mo
 
 
 @pytest.mark.parametrize("foreign", [
+    "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_managed_worker_unlisted.py.source",
+    "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_runtime_workers_unlisted.py.source",
+    "integrations/hermes_runtime/tests/test_native_worker_retirement_unlisted.py",
     "docs/hermes/APPLICATION_OBSERVATION_UNLISTED.md",
     "integrations/hermes_runtime/native_application_observation_unlisted.py",
     "integrations/hermes_runtime/tests/test_native_application_observation_unlisted.py",

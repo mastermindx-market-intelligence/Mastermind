@@ -386,12 +386,14 @@ _WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_pr
 # Explicit cumulative source selection. Historical derivation meanings and
 # postimages remain unchanged; no arbitrary patch stack is admitted.
 EVAL_INPUTS_DERIVATION_KIND = "native_eval_inputs"
-EVAL_INPUTS_DERIVATION_PATCH = "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211"
+EVAL_INPUTS_DERIVATION_PATCH = "123bd25188aa844afceeb0a97f1e023797740116e89bf886b2b8686efd04012d"
 EVAL_INPUTS_DERIVATION_POSTIMAGES = {**WORKSPACE_OAUTH_DERIVATION_POSTIMAGES,
     "hermes_state_common.py": "bc77e0f3b74596030016ff72bc6c8eff959507e9cc414dfc102c8e8140a972e8",
     "hermes_state_runtime.py": "5b30be6913da982c7cb50dd3ad8c37700229288eab0eb101dce1843b27777340",
     "hermes_state_schema.py": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37",
-    "gateway/session_authority.py": "7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99",
+    "gateway/session_authority.py": "2cf93a511edd77943440eb63c23d45e8e11adb12e31a7d979a38d4cb56ff4bf1",
+    "gateway/session_managed_worker.py": "3d61709dc368addcb21b871fb4b34aac1994b9f52ee85b17b692ad4bf6ffb30a",
+    "gateway/session_runtime_workers.py": "dc5924b1180b9660342eef0f74a317cb32a8e0327531f706f794d3bfd2a74d0e",
     "hermes_state_mutation_retirement.py": "12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c"}
 _EVAL_INPUTS_PACKAGE = "integrations/hermes_qualification/native_eval_inputs"
 

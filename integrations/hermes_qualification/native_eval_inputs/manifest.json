@@ -4,11 +4,11 @@
   "qualified_source_commits": [
     "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
   ],
-  "patch_sha256": "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211",
+  "patch_sha256": "123bd25188aa844afceeb0a97f1e023797740116e89bf886b2b8686efd04012d",
   "license": "MIT",
   "license_file": "UPSTREAM_LICENSE",
   "installed": false,
-  "proof_scope": "Cumulative privacy/OAuth, original EVAL admission/retirement and private publication column; existing declarative schema owner; no alternate result envelope or execution grant",
+  "proof_scope": "Cumulative privacy/OAuth, original EVAL admission/retirement and private publication column; original managed process/I/O retirement and queued-claim accounting; no descendant-cleanup, whole-effect or execution grant",
   "files": {
     "agent/agent_init.py": {
       "before_bytes": 126617,
@@ -86,9 +86,9 @@
       "before_bytes": 86045,
       "before_git_blob": "3bc6c596c77c495c1cf318495a84319c211dd523",
       "before_sha256": "f6eba4d4e17f35e9bcaaf664d1dece93bca8ceccddba3d6d2ad99aa7983bb15f",
-      "after_bytes": 87326,
-      "after_git_blob": "7a0241bd920adb2bc75b5adb1d3eede7fac8bccc",
-      "after_sha256": "7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99"
+      "after_bytes": 87731,
+      "after_git_blob": "8648b8c2b275f95bce02e5992588e5449338a372",
+      "after_sha256": "2cf93a511edd77943440eb63c23d45e8e11adb12e31a7d979a38d4cb56ff4bf1"
     },
     "hermes_state_mutation_retirement.py": {
       "before_bytes": 25909,
@@ -121,6 +121,22 @@
       "after_bytes": 83019,
       "after_git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
       "after_sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37"
+    },
+    "gateway/session_managed_worker.py": {
+      "before_bytes": 37625,
+      "before_git_blob": "86baeb5c76304465f14e685a5e48828d5cbb695c",
+      "before_sha256": "0d2bed13ce549ac192b9f49653a77a68851de544a3416050a5d80cdea08920fa",
+      "after_bytes": 42679,
+      "after_git_blob": "96a443347088499cb2931b4bc0cc2618733263a5",
+      "after_sha256": "3d61709dc368addcb21b871fb4b34aac1994b9f52ee85b17b692ad4bf6ffb30a"
+    },
+    "gateway/session_runtime_workers.py": {
+      "before_bytes": 7831,
+      "before_git_blob": "a22f82587ed5c80ae2641d589d5f8856eca59d0f",
+      "before_sha256": "dd10aadcce77376a04ddb03ff1587b61c9cc0910ccb04cd0e25bbaa89f32e1b4",
+      "after_bytes": 9083,
+      "after_git_blob": "f19338fdb55ce08380bf6af2a69db4141d6e6740",
+      "after_sha256": "dc5924b1180b9660342eef0f74a317cb32a8e0327531f706f794d3bfd2a74d0e"
     }
   }
 }

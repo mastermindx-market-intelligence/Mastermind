@@ -293,6 +293,8 @@ def test_qualification_patch_preserves_existing_privacy_and_extends_original_adm
     source["hermes_state_mutation_retirement.py"] = (Path(__file__).parent / "fixtures/native_eval_inputs/hermes_state_mutation_retirement.py.source").read_bytes()
     for name in ("hermes_state_common.py", "hermes_state_runtime.py", "hermes_state_schema.py"):
         source[name] = (Path(__file__).parent / "fixtures/native_eval_inputs" / (name + ".source")).read_bytes()
+    for name in ("gateway/session_managed_worker.py", "gateway/session_runtime_workers.py"):
+        source[name] = (Path(__file__).parent / "fixtures/native_eval_inputs" / (name.replace("/", "__") + ".source")).read_bytes()
     before = dict(source)
     patched = qualify.prepare_sources(source)
     assert source == before
@@ -916,7 +918,8 @@ def qualified_sources():
     values = {}
     for path in qualify.PATHS:
         source_root = (fixtures / "request_observation" if path == "gateway/session_authority.py" else
-            fixtures / "native_eval_inputs" if path.startswith("hermes_state_") else root)
+            fixtures / "native_eval_inputs" if path.startswith("hermes_state_")
+            or path in {"gateway/session_managed_worker.py", "gateway/session_runtime_workers.py"} else root)
         values[path] = (source_root / (path.replace("/", "__") + ".source")).read_bytes()
     return qualify.prepare_sources(values)
 

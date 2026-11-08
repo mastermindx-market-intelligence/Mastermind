@@ -16,7 +16,7 @@ import tempfile
 from typing import Mapping
 
 ROOT = Path(__file__).resolve().parent
-PATHS = ('hermes_state_mutation_retirement.py', 'gateway/session_authority.py', 'agent/agent_init.py', 'agent/memory_caller_scope.py', 'agent/redact.py', 'hermes_cli/mcp_config.py', 'tools/mcp_oauth_manager.py', 'tools/mcp_oauth_provider.py', 'tools/mcp_tool_errors.py', 'tools/mcp_tool_server_run.py', 'tools/mcp_tool_transport.py', 'hermes_state_common.py', 'hermes_state_runtime.py', 'hermes_state_schema.py')
+PATHS = ('hermes_state_mutation_retirement.py', 'gateway/session_authority.py', 'agent/agent_init.py', 'agent/memory_caller_scope.py', 'agent/redact.py', 'hermes_cli/mcp_config.py', 'tools/mcp_oauth_manager.py', 'tools/mcp_oauth_provider.py', 'tools/mcp_tool_errors.py', 'tools/mcp_tool_server_run.py', 'tools/mcp_tool_transport.py', 'hermes_state_common.py', 'hermes_state_runtime.py', 'hermes_state_schema.py', 'gateway/session_managed_worker.py', 'gateway/session_runtime_workers.py')
 MAX_SOURCE_BYTES = 128 * 1024
 ERROR = "NATIVE_EVAL_SOURCE_QUALIFICATION_FAILED"
 

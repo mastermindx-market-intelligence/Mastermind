@@ -1,8 +1,128 @@
+--- a/hermes_state_mutation_retirement.py
++++ b/hermes_state_mutation_retirement.py
+@@ -109,8 +109,10 @@
+             row = dict(raw)
+             from hermes_state_media import retire_media
+             retire_media(conn, json.loads(row['payload_json']), row['request_id'])
+-            # Keep the digest for exact retries, not another copy of user input/history.
+-            row['payload_json'] = '{}'
++            # Ordinary input/history expires unchanged. Selected PUBLIC_SAFE EVAL
++            # input retains its original binding; malformed markers keep only a fence.
++            from integrations.hermes_runtime.native_eval_inputs import retained_admission_payload
++            row['payload_json'] = _json(retained_admission_payload(json.loads(row['payload_json'])))
+             row['lineage_json'] = '[]'
+             row['retired_at'] = time.time()
+             _compact_result(conn, row['admission_id'])
+@@ -426,6 +428,12 @@
+     for key, raw in conn.execute(f'SELECT key,value FROM state_meta WHERE key GLOB ? AND {_EXPIRED}',
+                                  (ADMISSION_PREFIX + '*', cutoff)).fetchall():
+         row = json.loads(raw)
++        payload = json.loads(row['payload_json'])
++        if isinstance(payload, dict) and 'mastermind_eval_inputs_v1' in payload:
++            # Selected PUBLIC_SAFE EVAL input keeps its original admission identity.
++            # Output privacy is separate: preserve the normal result expiry.
++            conn.execute('DELETE FROM state_meta WHERE key=?', (RESULT_PREFIX + row['admission_id'],))
++            continue
+         conn.execute('DELETE FROM state_meta WHERE key IN (?,?,?)', (key, RESULT_PREFIX + row['admission_id'],
+                      identity_key(row['principal_id'], row['target_session_id'], row['request_id'])))
+     conn.execute(f'DELETE FROM state_meta WHERE key GLOB ? AND {_EXPIRED}', (WORKER_PREFIX + '*', cutoff))
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -634,7 +634,7 @@
+         return results
+
+     async def submit(self, actor: Principal, request: Submission, *, _authorize_write=None, queue_while_restarting=False,
+-                     _replay_guard=None, _kanban_card=None):
++                     _replay_guard=None, _kanban_card=None, _mmx_eval=None):
+         """``queue_while_restarting``: the caller is an interactive client attached to a restart's
+         after-turn wait, which commits the input queued for the next owner. Machine callers (a2a,
+         kanban, hosted rooms) keep the plain ``runtime_draining`` refusal and retry against the next
+@@ -644,6 +644,12 @@
+         only): committed as ``kanban_card_v1``, it lets a card attempt lost across an owner restart
+         settle interrupted (#134889 KB-8). Never a payload field: a client cannot supply it."""
+         self.authorize(actor, request.ref, 'session:submit')
++        if _mmx_eval is not None:
++            if _kanban_card is not None or queue_while_restarting is not False:
++                raise RuntimeStoreError('invalid_params')
++            from integrations.hermes_runtime.native_eval_inputs import private_inputs_payload
++            # The private producer holds immutable bytes before the first await.
++            private_inputs_payload(self, actor, request, _mmx_eval)
+         async with self.sessions[request.ref.session_id].mutation_lock:
+             # Deletion can retire this session while the caller waits on its writer.
+             self.authorize(actor, request.ref, 'session:submit')
+@@ -651,10 +657,10 @@
+             with capture_lease():  # captured bytes are held from capture until commit or refusal
+                 return await self._submit(actor, request, _authorize_write=_authorize_write,
+                                           queue_only=queue_while_restarting is True, _replay_guard=_replay_guard,
+-                                          _kanban_card=_kanban_card)
++                                          _kanban_card=_kanban_card, _mmx_eval=_mmx_eval)
+
+     async def _submit(self, actor, request, *, _authorize_write=None, queue_only=False, _replay_guard=None,
+-                      _kanban_card=None):
++                      _kanban_card=None, _mmx_eval=None):
+         self._require_admission_open(queue_only=queue_only)
+         if (request.intent != 'queue' or not {'text'} <= set(request.payload) <= {
+                 'text', 'attachments', 'finite', 'unattended', 'surface', 'voice_context', 'interrupted',
+@@ -667,6 +673,15 @@
+         from gateway.session_display import admit_display
+         from gateway.session_cli_turn import admit_cli_turn
+         finite = admit_finite(request.payload)
++        evaluation = None
++        if _mmx_eval is not None:
++            if _kanban_card is not None or queue_only is not False:
++                raise RuntimeStoreError('invalid_params')
++            from integrations.hermes_runtime.native_eval_inputs import (
++                MARKER_KEY, private_inputs_payload, private_inputs_admission_guard)
++            evaluation = private_inputs_payload(self, actor, request, _mmx_eval)
++            _authorize_write = private_inputs_admission_guard(
++                self, actor, request, _mmx_eval, _authorize_write)
+         def admitted():
+             # The exact durable identity (authenticated principal + target + request id); the
+             # attachment fields it yields still pass the full payload-digest comparison below.
+@@ -678,6 +693,8 @@
+                    **admit_attachments(request.payload.get('attachments'), admitted=admitted)}
+         if _kanban_card is not None:
+             payload['kanban_card_v1'] = _kanban_card
++        if evaluation is not None:
++            payload[MARKER_KEY] = evaluation
+         source = self.sessions[request.ref.session_id].source
+         if source is not None and source.user_id != actor.subject:
+             # Durable server authorization, not a client payload field. The original
+@@ -689,6 +706,8 @@
+                 'principal_id': actor.subject}
+         def admit():
+             try:
++                if evaluation is not None and private_inputs_payload(self, actor, request, _mmx_eval) != evaluation:
++                    raise RuntimeStoreError('invalid_params')
+                 return admit_session_input(self.db, epoch=self.epoch, principal_id=actor.subject,
+                                            session_id=request.ref.session_id, request_id=request.request_id,
+                                            payload=payload, intent=request.intent, _replay_guard=_replay_guard,
+@@ -1010,6 +1029,11 @@
+             if any(row['status'] == 'unknown' for row in pending):
+                 raise RuntimeStoreError('unknown_execution')
+             first = next((row for row in pending if row['status'] == 'queued'), None)
++            from gateway.session_runtime_workers import managed_workers
++            if first is not None and any(sid == ref.session_id for sid, _ in managed_workers(self)):
++                # The original drain waits; no successor preflight, claim or
++                # replacement worker may overtake unresolved physical teardown.
++                return 'managed_retiring', first
+             from gateway.config import Platform
+             if live.source.platform == Platform.LOCAL:
+                 # A reasoning command or a model pick made while the previous turn ran lands here, at the
+@@ -1136,7 +1160,7 @@
+                 await asyncio.sleep(backoff)
+                 continue
+             backoff = 0.0
+-            if row != 'classic_busy':
++            if row not in ('classic_busy', 'managed_retiring'):
+                 return row, first
+             if self._drain_stopping(ref, live):
+                 return None
 --- a/agent/agent_init.py
 +++ b/agent/agent_init.py
 @@ -730,13 +730,11 @@
- 
- 
+
+
  def _print_key_banner(key, label: str, warn_missing: bool = False) -> None:
 -    """Masked credential line. A callable ``key`` (Entra ID, Vertex OAuth, key_cmd, ...) is labelled
 -    by its tagged source and never invoked. Keys ≤ 12 chars (incl. "dummy-key") are not shown."""
@@ -17,30 +137,30 @@
 +        print("🔑 Using credentials")
      elif warn_missing:
          print("⚠️  Warning: API key appears invalid or missing")
- 
+
 --- a/agent/memory_caller_scope.py
 +++ b/agent/memory_caller_scope.py
 @@ -11,8 +11,8 @@
  - one provider instance serves one profile: a plugin that hands several agents the same instance is
    refused for every profile after the first, instead of being rebound to it.
- 
+
 -Refusals log the check's code and both homes (errors.log on every host, gateway.log on a gateway); the
 -model/chat only ever sees a generic refusal.
 +Refusals log the check's code and reason without profile-home values (errors.log on every host,
 +gateway.log on a gateway); the model/chat only ever sees a generic refusal.
  """
- 
+
  from __future__ import annotations
 @@ -58,8 +58,8 @@
- 
- 
+
+
  def _refuse(label: str, reason: str, caller_home: Any, bound_home: Any, multiplexed: bool) -> None:
 -    logger.warning("Memory %s refused (%s): %s; caller profile home %r, provider bound to %r, multiplexed=%s",
 -                   label, CALLER_PROFILE_REFUSAL, reason, caller_home, bound_home, multiplexed)
 +    logger.warning("Memory %s refused (%s): %s; multiplexed=%s",
 +                   label, CALLER_PROFILE_REFUSAL, reason, multiplexed)
- 
- 
+
+
  def bound_scope(hermes_home: Any, agent_identity: Any = None) -> dict[str, Any]:
 @@ -120,17 +120,17 @@
          entry = _claims.get(pid)
@@ -68,14 +188,14 @@
 --- a/agent/redact.py
 +++ b/agent/redact.py
 @@ -507,7 +507,7 @@
- 
+
  # API-key style headers (single opaque value, no scheme word): non-vendor-prefix
  # values would otherwise leak when a curl command is echoed into tool output.
 -SECRET_HEADER_NAME_LIST = ("x-api-key", "x-goog-api-key", "api-key", "apikey", "x-api-token", "x-auth-token", "x-access-token")
 +SECRET_HEADER_NAME_LIST = ("x-api-key", "x-goog-api-key", "api-key", "apikey", "x-api-token", "x-auth-token", "x-access-token", "x-mastermind-workspace-authorization")
  _SECRET_HEADER_NAMES = rf"(?:{'|'.join(SECRET_HEADER_NAME_LIST)})"
  _SECRET_HEADER_RE = re.compile(rf"({_SECRET_HEADER_NAMES}\s*:\s*)(\S+)", re.IGNORECASE)
- 
+
 --- a/hermes_cli/mcp_config.py
 +++ b/hermes_cli/mcp_config.py
 @@ -474,6 +474,8 @@
@@ -89,7 +209,7 @@
                  try:
 @@ -896,7 +898,16 @@
          return False
- 
+
      oauth_cfg = server_config.get("oauth") or {}
 +    try:
 +        from tools.mcp_oauth_manager import workspace_oauth_descriptor, WORKSPACE_SERVER
@@ -118,7 +238,7 @@
 +            _error("WORKSPACE_OAUTH_UNAVAILABLE")
 +            return False
          _warning(f"Could not clear existing OAuth state: {exc}")
- 
+
      print()
 @@ -929,10 +944,16 @@
              from tools.mcp_oauth_device import login_device
@@ -152,7 +272,7 @@
 +++ b/tools/mcp_oauth_manager.py
 @@ -8,6 +8,9 @@
  from __future__ import annotations
- 
+
  import asyncio
 +from copy import deepcopy
 +import json
@@ -161,7 +281,7 @@
  import re
  import threading
 @@ -22,9 +25,281 @@
- 
+
  try:
      from mcp.client.auth.oauth2 import OAuthClientProvider as _SDKOAuthClientProvider
 +    from mcp.client.auth.oauth2 import OAuthFlowError as _OAuthFlowError
@@ -439,11 +559,11 @@
 +                        import anyio
 +                        with anyio.CancelScope(shield=True):
 +                            await identity_response.aclose()
- 
- 
+
+
  @dataclass
 @@ -35,6 +310,7 @@
- 
+
      server_url: str
      oauth_config: Optional[dict]
 +    revision: int = 0
@@ -452,7 +572,7 @@
      lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 @@ -70,7 +346,68 @@
          return self.context.storage if isinstance(self.context.storage, HermesTokenStorage) else None
- 
+
      def _log_nonfatal(self, what: str, exc: BaseException) -> None:
 +        if getattr(self, "_hermes_workspace_single_client", False):
 +            logger.debug("MCP OAuth fixed resource: non-fatal operation unavailable")
@@ -516,7 +636,7 @@
 +    def _add_auth_header(self, request):
 +        self._require_fixed_tokens(self.context.current_tokens)
 +        return super()._add_auth_header(request)
- 
+
      async def _initialize(self) -> None:
          """Load stored state, seed ``token_expiry_time``, restore/prefetch metadata. The SDK's
 @@ -81,6 +418,7 @@
@@ -565,7 +685,7 @@
 +        self._entry_revision = 0
          # Strong refs to in-flight 401 tasks so the loop's weak bookkeeping cannot GC them mid-run.
          self._inflight_tasks: set[asyncio.Task] = set()
- 
+
 @@ -323,16 +668,31 @@
          key = self._key(server_name)
          with self._entries_lock:
@@ -598,13 +718,13 @@
 +            raise WorkspaceOAuthError()
 +        primary._hermes_workspace_single_client = workspace._hermes_workspace_single_client = True
 +        return HermesWorkspaceOAuth(self, descriptor, primary, workspace, home)
- 
+
      @staticmethod
      def _key(server_name: str, hermes_home: str | Path | None = None) -> tuple[str, str]:
 @@ -340,7 +700,7 @@
          home = Path(hermes_home) if hermes_home is not None else get_hermes_home()
          return (str(home.expanduser().resolve(strict=False)), server_name)
- 
+
 -    def _build_provider(self, server_name: str, entry: _ProviderEntry) -> Optional[Any]:
 +    def _build_provider(self, server_name: str, entry: _ProviderEntry, *, hermes_home=None) -> Optional[Any]:
          """Build a ``HermesMCPOAuthProvider``; None if the SDK's OAuth support is unavailable."""
@@ -630,7 +750,7 @@
 +                self._entry_revision += 1
 +                entry.revision = self._entry_revision
 +                self._entries[key] = entry
- 
+
      def evict(self, server_name: str, *, hermes_home: str | Path | None = None) -> _ProviderEntry | None:
          """Drop only the in-process provider, preserving persisted OAuth state."""
          with self._entries_lock:
@@ -640,14 +760,14 @@
 +                self._entry_revision += 1
 +                entry.revision = self._entry_revision
 +            return entry
- 
+
      async def invalidate_if_disk_changed(self, server_name: str, *, hermes_home: str | Path | None = None) -> bool:
          """Force the SDK provider to reload when the tokens file mtime changed (e.g. a cron refresh); True if so."""
 --- a/tools/mcp_oauth_provider.py
 +++ b/tools/mcp_oauth_provider.py
 @@ -9,6 +9,7 @@
  from __future__ import annotations
- 
+
  import logging
 +from contextvars import ContextVar
  import re
@@ -659,7 +779,7 @@
  logger = logging.getLogger(__name__)
 +_REFRESH_FLOW_LEASE = ContextVar("hermes_oauth_refresh_flow_lease", default=None)
 +_CURRENT_REFRESH_LEASE = object()
- 
+
  # Authorization servers that advertise ``authorization_response_iss_parameter_supported`` and then
  # omit ``iss`` from the redirect (#111135). Exact issuer match, nothing else is relaxed.
 @@ -221,6 +224,21 @@
@@ -681,7 +801,7 @@
 +            return await inner.asend(sent)
 +        finally:
 +            _REFRESH_FLOW_LEASE.reset(token)
- 
+
      async def async_auth_flow(self, request):
          """Guarantee fence release even if the auth generator is abandoned.
 @@ -239,6 +257,7 @@
@@ -724,13 +844,13 @@
 +                        await self._hermes_advance_flow(inner, lease, close=True)
 +                    finally:
 +                        await self._hermes_release_refresh_fence(lease=lease)
- 
+
      async def _refresh_token(self):
          """Take the refresh fence, then build the request from the token we own.
 @@ -349,18 +373,28 @@
          """
          from tools.mcp_oauth import acquire_refresh_fence
- 
+
 -        await self._hermes_release_refresh_fence()
 +        lease = _REFRESH_FLOW_LEASE.get()
 +        await self._hermes_release_refresh_fence(lease=lease)
@@ -749,7 +869,7 @@
 +    async def _hermes_release_refresh_fence(self, *, lease=_CURRENT_REFRESH_LEASE) -> None:
          """Release the fence if held. Idempotent and never raises."""
          from tools.mcp_oauth import release_refresh_fence
- 
+
 +        if lease is _CURRENT_REFRESH_LEASE:
 +            lease = _REFRESH_FLOW_LEASE.get()
 +        if self._hermes_fence_lease is not lease:
@@ -758,20 +878,20 @@
 +        self._hermes_fence_lease = None
          if fd is not None:
              release_refresh_fence(fd)
- 
+
 --- a/tools/mcp_tool_errors.py
 +++ b/tools/mcp_tool_errors.py
 @@ -93,7 +93,7 @@
  _HTTP_REJECTION_BODY_CHARS = 300
- 
- 
+
+
 -def _make_http_rejection_recorder(sink: dict):
 +def _make_http_rejection_recorder(sink: dict, *, fixed_workspace_oauth: bool = False):
      """httpx response hook for the owned Streamable HTTP client: remembers the last 4xx/5xx the server
      sent (status, method, URL, head of the body). mcp >= 2.0 folds a non-2xx whose body it cannot
      parse as a JSON-RPC error into the opaque ``-32603 Server returned an error response`` — the
 @@ -103,6 +103,12 @@
- 
+
      async def _record(response):
          if response.status_code < 400:
 +            return
@@ -784,8 +904,8 @@
          body = ""
          if response.headers.get("content-type", "").split(";")[0].strip().lower() != "text/event-stream":
 @@ -284,7 +290,8 @@
- 
- 
+
+
  def _make_redirect_header_stripper(httpx_mod, original_url, *, strict: bool = False,
 -                                   configured_header_names: set[str] | frozenset[str] = frozenset()):
 +                                   configured_header_names: set[str] | frozenset[str] = frozenset(),
@@ -795,7 +915,7 @@
      every configured header (lowercase names in *configured_header_names*) is stripped too — v1 forbids
 @@ -305,6 +312,12 @@
          base_build = getattr(type(client), "_build_redirect_request", None)
- 
+
          def _build_redirect_request(request, response):
 +            if fixed_workspace_oauth:
 +                # This one client carries two fixed resources plus their real
@@ -816,7 +936,7 @@
 +            if workspace_oauth_descriptor(self.name, self._config.get("url"), self._config.get("oauth")) is not None:
 +                storage = WorkspaceCredentialStamps(get_hermes_home())
              self._auth_park = (storage, storage.credential_stamp())
- 
+
      async def start(self, config: dict):
 --- a/tools/mcp_tool_transport.py
 +++ b/tools/mcp_tool_transport.py
@@ -836,7 +956,7 @@
 +                raise WorkspaceOAuthError() from None
              logger.warning("MCP OAuth setup failed for '%s': %s", self.name, exc)
              raise
- 
+
 @@ -574,14 +580,18 @@
          # Explicit AsyncClient matching the SDK's create_mcp_http_client defaults; MUST come from the
          # SDK's httpx (httpx2 on mcp >= 2.0) since the SDK sends its own Requests through it.
@@ -889,105 +1009,6 @@
              # The SDK folds a non-2xx it cannot parse into ``-32603 Server returned an error response``;
              # the recorder hook kept the status/URL/body the server actually sent (#114350, #113359).
              http_detail = _describe_http_failure(exc, self._http_rejection)
---- a/gateway/session_authority.py
-+++ b/gateway/session_authority.py
-@@ -634,7 +634,7 @@
-         return results
- 
-     async def submit(self, actor: Principal, request: Submission, *, _authorize_write=None, queue_while_restarting=False,
--                     _replay_guard=None, _kanban_card=None):
-+                     _replay_guard=None, _kanban_card=None, _mmx_eval=None):
-         """``queue_while_restarting``: the caller is an interactive client attached to a restart's
-         after-turn wait, which commits the input queued for the next owner. Machine callers (a2a,
-         kanban, hosted rooms) keep the plain ``runtime_draining`` refusal and retry against the next
-@@ -644,6 +644,12 @@
-         only): committed as ``kanban_card_v1``, it lets a card attempt lost across an owner restart
-         settle interrupted (#134889 KB-8). Never a payload field: a client cannot supply it."""
-         self.authorize(actor, request.ref, 'session:submit')
-+        if _mmx_eval is not None:
-+            if _kanban_card is not None or queue_while_restarting is not False:
-+                raise RuntimeStoreError('invalid_params')
-+            from integrations.hermes_runtime.native_eval_inputs import private_inputs_payload
-+            # The private producer holds immutable bytes before the first await.
-+            private_inputs_payload(self, actor, request, _mmx_eval)
-         async with self.sessions[request.ref.session_id].mutation_lock:
-             # Deletion can retire this session while the caller waits on its writer.
-             self.authorize(actor, request.ref, 'session:submit')
-@@ -651,10 +657,10 @@
-             with capture_lease():  # captured bytes are held from capture until commit or refusal
-                 return await self._submit(actor, request, _authorize_write=_authorize_write,
-                                           queue_only=queue_while_restarting is True, _replay_guard=_replay_guard,
--                                          _kanban_card=_kanban_card)
-+                                          _kanban_card=_kanban_card, _mmx_eval=_mmx_eval)
- 
-     async def _submit(self, actor, request, *, _authorize_write=None, queue_only=False, _replay_guard=None,
--                      _kanban_card=None):
-+                      _kanban_card=None, _mmx_eval=None):
-         self._require_admission_open(queue_only=queue_only)
-         if (request.intent != 'queue' or not {'text'} <= set(request.payload) <= {
-                 'text', 'attachments', 'finite', 'unattended', 'surface', 'voice_context', 'interrupted',
-@@ -667,6 +673,15 @@
-         from gateway.session_display import admit_display
-         from gateway.session_cli_turn import admit_cli_turn
-         finite = admit_finite(request.payload)
-+        evaluation = None
-+        if _mmx_eval is not None:
-+            if _kanban_card is not None or queue_only is not False:
-+                raise RuntimeStoreError('invalid_params')
-+            from integrations.hermes_runtime.native_eval_inputs import (
-+                MARKER_KEY, private_inputs_payload, private_inputs_admission_guard)
-+            evaluation = private_inputs_payload(self, actor, request, _mmx_eval)
-+            _authorize_write = private_inputs_admission_guard(
-+                self, actor, request, _mmx_eval, _authorize_write)
-         def admitted():
-             # The exact durable identity (authenticated principal + target + request id); the
-             # attachment fields it yields still pass the full payload-digest comparison below.
-@@ -678,6 +693,8 @@
-                    **admit_attachments(request.payload.get('attachments'), admitted=admitted)}
-         if _kanban_card is not None:
-             payload['kanban_card_v1'] = _kanban_card
-+        if evaluation is not None:
-+            payload[MARKER_KEY] = evaluation
-         source = self.sessions[request.ref.session_id].source
-         if source is not None and source.user_id != actor.subject:
-             # Durable server authorization, not a client payload field. The original
-@@ -689,6 +706,8 @@
-                 'principal_id': actor.subject}
-         def admit():
-             try:
-+                if evaluation is not None and private_inputs_payload(self, actor, request, _mmx_eval) != evaluation:
-+                    raise RuntimeStoreError('invalid_params')
-                 return admit_session_input(self.db, epoch=self.epoch, principal_id=actor.subject,
-                                            session_id=request.ref.session_id, request_id=request.request_id,
-                                            payload=payload, intent=request.intent, _replay_guard=_replay_guard,
---- a/hermes_state_mutation_retirement.py
-+++ b/hermes_state_mutation_retirement.py
-@@ -109,8 +109,10 @@
-             row = dict(raw)
-             from hermes_state_media import retire_media
-             retire_media(conn, json.loads(row['payload_json']), row['request_id'])
--            # Keep the digest for exact retries, not another copy of user input/history.
--            row['payload_json'] = '{}'
-+            # Ordinary input/history expires unchanged. Selected PUBLIC_SAFE EVAL
-+            # input retains its original binding; malformed markers keep only a fence.
-+            from integrations.hermes_runtime.native_eval_inputs import retained_admission_payload
-+            row['payload_json'] = _json(retained_admission_payload(json.loads(row['payload_json'])))
-             row['lineage_json'] = '[]'
-             row['retired_at'] = time.time()
-             _compact_result(conn, row['admission_id'])
-@@ -426,6 +428,12 @@
-     for key, raw in conn.execute(f'SELECT key,value FROM state_meta WHERE key GLOB ? AND {_EXPIRED}',
-                                  (ADMISSION_PREFIX + '*', cutoff)).fetchall():
-         row = json.loads(raw)
-+        payload = json.loads(row['payload_json'])
-+        if isinstance(payload, dict) and 'mastermind_eval_inputs_v1' in payload:
-+            # Selected PUBLIC_SAFE EVAL input keeps its original admission identity.
-+            # Output privacy is separate: preserve the normal result expiry.
-+            conn.execute('DELETE FROM state_meta WHERE key=?', (RESULT_PREFIX + row['admission_id'],))
-+            continue
-         conn.execute('DELETE FROM state_meta WHERE key IN (?,?,?)', (key, RESULT_PREFIX + row['admission_id'],
-                      identity_key(row['principal_id'], row['target_session_id'], row['request_id'])))
-     conn.execute(f'DELETE FROM state_meta WHERE key GLOB ? AND {_EXPIRED}', (WORKER_PREFIX + '*', cutoff))
 --- a/hermes_state_common.py
 +++ b/hermes_state_common.py
 @@ -602,6 +602,7 @@
@@ -1006,5 +1027,275 @@
      result.pop('retired_at', None)  # tombstone retention stamp, not admission state
 +    result.pop('eval_publication_json', None)  # private immutable publication, never public admission state
      return result
- 
- 
+
+
+--- a/gateway/session_managed_worker.py
++++ b/gateway/session_managed_worker.py
+@@ -152,6 +152,10 @@
+         self.write_lock = threading.Lock()
+         self.commands = queue.Queue(maxsize=16)
+         self.closed = threading.Event()
++        self._close_lock = threading.Lock()
++        # The original shielded reservation may finish after its caller is
++        # cancelled. No positive retirement verdict precedes that identity join.
++        self.reservation_unresolved = False
+         # Latched the moment Stop is admitted, before any pipe write: the owner's read loop
+         # supervises it even while the child has not yet said hello or read its bootstrap.
+         self.stop = asyncio.Event()
+@@ -181,8 +185,12 @@
+                 except queue.Empty:
+                     continue
+                 self.send(frame)
+-        except (OSError, ValueError):
++        except (OSError, ValueError, RuntimeStoreError):
+             self.closed.set()
++        finally:
++            # Another direct sender may still own the buffered pipe. It closes
++            # stdin in its own finally; this thread never waits for that lock.
++            self._close_stdin_if_idle()
+
+     def _read_frames(self, loop):
+         """Reader thread body. It owns ``stdout``: no other thread closes it under a blocked read."""
+@@ -282,8 +290,59 @@
+
+     def send(self, frame):
+         with self.write_lock:
+-            self.process.stdin.write(encode_frame(frame))
+-            self.process.stdin.flush()
++            try:
++                if self.closed.is_set():
++                    raise RuntimeStoreError('managed_worker_lost')
++                self.process.stdin.write(encode_frame(frame))
++                self.process.stdin.flush()
++            finally:
++                if self.closed.is_set():
++                    with suppress(OSError, ValueError):
++                        self.process.stdin.close()
++
++    def _close_stdin_if_idle(self):
++        # A timed-out sender can still own BufferedWriter's internal lock.
++        # Never turn bounded retirement into a blocking close on that pipe.
++        if not self.write_lock.acquire(blocking=False):
++            return
++        try:
++            with suppress(OSError, ValueError):
++                self.process.stdin.close()
++        finally:
++            self.write_lock.release()
++
++    def retirement_complete(self):
++        """Observe the tracked handle/interpreter, I/O threads and pipes only.
++
++        closed is an I/O-stop signal. This bounded observer never waits, signals,
++        spawns, reconciles effects, or claims that all descendants are gone.
++        """
++        if not self.closed.is_set() or self.reservation_unresolved:
++            return False
++        try:
++            if self.process.poll() is None:
++                return False
++        except (OSError, ValueError):
++            return False
++        if self.worker is not None and self.worker[0] != self.process.pid:
++            try:
++                import psutil
++                from hermes_cli.process_identity import process_birth
++            except ImportError:
++                return False
++            try:
++                birth = process_birth(psutil.Process(self.worker[0]))
++                if birth is None or birth == self.worker[1]:
++                    return False
++            except psutil.NoSuchProcess:
++                pass
++            except (psutil.Error, OSError, ValueError):
++                return False
++        if any(thread is not None and thread.is_alive()
++               for thread in (self.writer, self.reader, self.stderr_drain)):
++            return False
++        return all(stream is None or stream.closed
++                   for stream in (self.process.stdin, self.process.stdout, self.process.stderr))
+
+     def _signal_worker(self, kill):
+         """Signal the verified interpreter, not only the handle: a launcher that exec-chained
+@@ -315,6 +374,12 @@
+
+     def close(self):
+         self.closed.set()
++        # A newly bound late interpreter identity may finish the same cleanup.
++        # Serialize those bounded calls; never run two signal/pipe teardowns.
++        with self._close_lock:
++            self._close_owned_resources()
++
++    def _close_owned_resources(self):
+         self._demand.release()  # a reader parked between frames exits; one mid-read ends at EOF
+         if self.process.poll() is None:
+             self._signal_worker(kill=False)
+@@ -331,12 +396,12 @@
+             self._signal_worker(kill=True)
+         if self.writer.ident is not None:
+             self.writer.join(timeout=5)
+-        self.process.stdin.close()
+-        if self.reader is None:
++        self._close_stdin_if_idle()
++        if self.reader is None or self.reader.ident is None:
+             self.process.stdout.close()
+         else:
+             self.reader.join(timeout=5)
+-        if self.stderr_drain is not None:
++        if self.stderr_drain is not None and self.stderr_drain.ident is not None:
+             self.stderr_drain.join(timeout=5)  # EOF once the child is gone; the thread closes it
+         elif self.process.stderr is not None:
+             self.process.stderr.close()
+@@ -545,6 +610,46 @@
+     return True
+
+
++async def _close_worker_safely(worker):
++    try:
++        await asyncio.to_thread(worker.close)
++    except Exception as exc:
++        import logging
++        logging.getLogger(__name__).warning(
++            'Managed worker cleanup incomplete: %s', type(exc).__name__)
++        return False
++    return True
++
++
++def _prune_retired_worker(authority, session_id, workers, worker):
++    try:
++        retired = worker.retirement_complete()
++    except Exception as exc:
++        import logging
++        logging.getLogger(__name__).warning(
++            'Managed worker retirement unavailable: %s', type(exc).__name__)
++        return False
++    # Inspection precedes both ownership fences. Its old verdict can never
++    # authorize deletion of a replacement map or worker.
++    if (retired and getattr(authority, '_managed_workers', None) is workers
++            and workers.get(session_id) is worker):
++        del workers[session_id]
++        return True
++    return False
++
++
++async def _bind_worker_reservation(worker, scope):
++    # Runs inside the ORIGINAL tracked write, including when its waiter left.
++    worker.worker = (scope['pid'], scope['birth'])
++    worker.reservation_unresolved = False
++    if worker.closed.is_set():
++        # New identity information completes the original teardown; it never
++        # bootstraps or repeats an admission. close serializes with an in-flight
++        # teardown, and unresolved resources remain in the same owner map.
++        await _close_worker_safely(worker)
++    return scope
++
++
+ async def _spawn_registered_worker(authority, ref, row):
+     """Spawn the turn's child and register it for Stops: ``(worker, process)``, or None when the spawn was cancelled (the
+     interrupted result is already recorded). The generation stays marked spawning until registration."""
+@@ -568,14 +673,21 @@
+         spawning.pop(ref.session_id, None)
+         raise
+     worker = ManagedWorker(process)
+-    if log_path is not None:
+-        worker.drain_stderr(log_path)
+     workers = getattr(authority, '_managed_workers', None)
+     if workers is None:
+         workers = authority._managed_workers = {}
+     workers[ref.session_id] = worker
+     spawning.pop(ref.session_id, None)
+     worker.stop_cause = _latched_stop_cause(authority, ref.session_id, generation)
++    try:
++        if log_path is not None:
++            worker.drain_stderr(log_path)
++    except BaseException:
++        # Custody is registered before fallible thread/log setup. Failure does
++        # not leave an acquired process outside either teardown or accounting.
++        if await _close_worker_safely(worker):
++            _prune_retired_worker(authority, ref.session_id, workers, worker)
++        raise
+     return worker, process
+
+
+@@ -626,9 +738,10 @@
+             raise RuntimeStoreError('managed_worker_stopped')
+         # psutil + BEGIN IMMEDIATE: off-loop and retirement-tracked, like admission and claim.
+         from gateway.session_runtime_workers import tracked_write
++        worker.reservation_unresolved = True
+         scope = await tracked_write(authority, partial(reserve_admission_worker, authority,
+-                    admission_id=row['admission_id'], process=process, principal_id=row['principal_id'], hello=hello))
+-        worker.worker = (scope['pid'], scope['birth'])
++                    admission_id=row['admission_id'], process=process, principal_id=row['principal_id'], hello=hello),
++                    then=partial(_bind_worker_reservation, worker))
+         # The child reads nothing else until the exact reservation has committed.
+         frame = await asyncio.to_thread(_bootstrap, authority, ref, row, policy, scope, text)
+         worker.secrets.extend(v for v in (frame['api_key'], scope['secret']) if isinstance(v, str) and v)
+@@ -700,5 +813,7 @@
+         # committed unknown row deliberately pauses every accepted follower.
+         raise ManagedExecutionUnknown('managed_worker_unknown') from exc
+     finally:
+-        workers.pop(ref.session_id, None)
+-        await asyncio.to_thread(worker.close)
++        # Cleanup uncertainty cannot replace an accepted result or the original
++        # ManagedExecutionUnknown. Cancellation still leaves the resource owned.
++        if await _close_worker_safely(worker):
++            _prune_retired_worker(authority, ref.session_id, workers, worker)
+--- a/gateway/session_runtime_workers.py
++++ b/gateway/session_runtime_workers.py
+@@ -12,12 +12,43 @@
+             yield sid, live, execution['execution_generation']
+
+
++def managed_workers(authority):
++    """Observe a complete snapshot of the existing managed-resource map.
++
++    No cleanup, signals, waits or effect reconciliation occur here. Inspection
++    failures remain counted. Validate the whole snapshot before pruning or
++    yielding, including to a consumer that stops at its first matching session.
++    """
++    from hermes_state_runtime import RuntimeStoreError
++    workers = getattr(authority, '_managed_workers', None)
++    if workers is None:
++        return
++    snapshot = list(workers.items())
++    verdicts = []
++    for sid, worker in snapshot:
++        observe = getattr(worker, 'retirement_complete', None)
++        try:
++            retired = callable(observe) and observe()
++        except Exception:
++            retired = False
++        verdicts.append((sid, worker, retired))
++    if (getattr(authority, '_managed_workers', None) is not workers
++            or len(workers) != len(snapshot)
++            or any(workers.get(sid) is not worker for sid, worker in snapshot)):
++        raise RuntimeStoreError('managed_worker_owner_changed')
++    for sid, worker, retired in verdicts:
++        if retired:
++            del workers[sid]
++    for sid, worker, retired in verdicts:
++        if not retired:
++            yield sid, worker
++
++
+ def uncounted_runtime_work(runner):
+     """Count claims absent from the ordinary agent map, including pre-bootstrap managed turns."""
+     running = getattr(runner, '_running_agents', {})
+     authorities = all_authorities(runner)
+-    managed = sum(not worker.closed.is_set() for authority in authorities
+-                  for worker in getattr(authority, '_managed_workers', {}).values())
++    managed = sum(1 for authority in authorities for _ in managed_workers(authority))
+     return (managed + sum(live.route not in running and sid not in getattr(authority, '_managed_workers', {})
+                 for authority in authorities for sid, live, _ in executing_sessions(authority))
+             + sum(len(mutation_tasks(authority)) + len(side_agents(authority)) for authority in authorities))
+@@ -163,7 +194,8 @@
+     deadline = asyncio.get_running_loop().time() + timeout
+     while True:
+         stop_authority_work(authority)
+-        if (not list(physical_workers(authority)) and not list(executing_sessions(authority))
++        if (not list(managed_workers(authority))
++                and not list(physical_workers(authority)) and not list(executing_sessions(authority))
+                 and not mutation_tasks(authority) and not side_agents(authority)):
+             return
+         if asyncio.get_running_loop().time() >= deadline:
