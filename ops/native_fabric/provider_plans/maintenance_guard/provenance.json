@@ -1,11 +1,25 @@
 {
   "accepted_guard_broker_sha256": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
   "accepted_guard_commit": "c43cda68a5fb8848ff6f648b5707534d9ba698da",
+  "active_parent": {
+    "CURRENT_sha256": "f038780b74d0a8d9ef3591dba3dc617787a15b64f10c4f3b105be0c21c3ace09",
+    "RELEASE_sha256": "6aa752aed743b078efcafdd3fa7f66d39197b10b6aa57f266eec428b79e83bcf",
+    "canonical_profile": "ops/native_fabric/provider_plans/remote_placement/profile.json",
+    "canonical_profile_commit": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+    "canonical_profile_sha256": "2c9010cdf653ce7a03b86193e161a7b45522132652b6f596b4c3b27dcf4ac596",
+    "picker_already_exact_current": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+    "selection": {
+      "generation": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
+      "previous": "296e522f5f236d764aa4ad1b9fa677d7eea32e6bdfe2fc97c0755c06a857908f",
+      "schema": "native-code-selection.v1",
+      "sequence": 39
+    },
+    "source_selection_is_not_runtime_admission": true
+  },
   "broker_current_sha256": "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640",
   "broker_pre_plan_sha256": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
   "composition_changed_paths": [
     "ext/lease_broker.py",
-    "ext/pick.py",
     "ext/remote_sub_exec.py"
   ],
   "first_profile_commit": "7bc8a208d5cf867fcc269d9c049d53e52445347b",
@@ -13,13 +27,15 @@
     "inspect_qualification_quiescence": "8dfe85c0bcd5d30c8ad51cf34fac640e6b76fd50c537d127ed6b4b6db0f14923",
     "qualification_maintenance_guard": "ae206e014ec4a895f9f7538f2ba03d2bbe223b362a862c0fefe04995e7392acc"
   },
+  "historical_component_source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "historical_sequence37_profile_commit": "efab46368e13e9553e489cb61a58ca28055df175",
   "picker_after_sha256": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
   "picker_before_sha256": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
   "picker_component_commit": "7b1ba72f1a7159ea04278e7901f4cdd4ffc2304f",
   "picker_patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2",
   "runtime_effects_performed": false,
   "schema": "mastermind.current116_guard_source_provenance.v1",
-  "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "source_commit": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
   "sparse_git_compatibility": {
     "accepted_common_executor_sha256": "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281",
     "accepted_source_commit": "fafa1c9a084dcd48489f6a0d6a2c193c11b9e479",

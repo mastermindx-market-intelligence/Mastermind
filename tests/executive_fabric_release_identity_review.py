@@ -319,6 +319,71 @@ REVIEWED_FILES['app/mastermind_os/src/product-acceptance/owner-observation.ts'] 
     'sites': ((34, 132, 135, 'int', '512'),),
 }
 
+# H4 capacity-bridge and native-writer receipts: the same class of proof record.
+# Each entry records the existing Darwin host's observed st_uid/uid in postimage
+# ownership metadata; observations, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these typed integer
+# tokens in the three exact files are reviewed; any byte or path drift restores
+# the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/capacity-bridge-source-install-20261107.json"] = {
+    "sha256": "28cd93c3521d615b85ea70d7cba1330c3aded05a0cb5727a9358bf55657d0b0a",
+    "sites": (),
+    "utf8_sites": (
+        (8, 11, 14, "int", "501"),
+        (19, 11, 14, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/combined-20261108/native-preimages.json"] = {
+    "sha256": "61348fd1bff786831f9ede279824dc749c9bb38472d42789374e0b5a9d3cc9e4",
+    "sites": (),
+    "utf8_sites": (
+        (39, 18, 21, "int", "501"),
+        (52, 18, 21, "int", "501"),
+        (65, 18, 21, "int", "501"),
+        (78, 18, 21, "int", "501"),
+        (91, 18, 21, "int", "501"),
+        (104, 18, 21, "int", "501"),
+        (121, 18, 21, "int", "501"),
+        (134, 18, 21, "int", "501"),
+        (147, 18, 21, "int", "501"),
+        (160, 18, 21, "int", "501"),
+        (173, 18, 21, "int", "501"),
+        (186, 18, 21, "int", "501"),
+        (199, 18, 21, "int", "501"),
+        (212, 18, 21, "int", "501"),
+        (229, 18, 21, "int", "501"),
+        (242, 18, 21, "int", "501"),
+        (263, 18, 21, "int", "501"),
+        (276, 18, 21, "int", "501"),
+        (289, 18, 21, "int", "501"),
+        (302, 18, 21, "int", "501"),
+        (319, 18, 21, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-writer-delta-20261107.json"] = {
+    "sha256": "b378d4f5b7194c8a05d7e52fe412c8db28139f16c8ed18ea4f60cca00b1a9340",
+    "sites": (),
+    "utf8_sites": (
+        (26, 18, 21, "int", "501"),
+        (39, 18, 21, "int", "501"),
+        (52, 18, 21, "int", "501"),
+        (65, 18, 21, "int", "501"),
+        (78, 18, 21, "int", "501"),
+        (91, 18, 21, "int", "501"),
+        (108, 18, 21, "int", "501"),
+        (121, 18, 21, "int", "501"),
+        (134, 18, 21, "int", "501"),
+        (151, 18, 21, "int", "501"),
+        (164, 18, 21, "int", "501"),
+        (177, 18, 21, "int", "501"),
+        (190, 18, 21, "int", "501"),
+        (203, 18, 21, "int", "501"),
+        (216, 18, 21, "int", "501"),
+        (229, 18, 21, "int", "501"),
+    ),
+}
+
+
 # Retained producer: existing private-directory permissions, not native UIDs.
 # Runtime bytes and both comparisons are unchanged; exact source and sites only.
 REVIEWED_FILES["integrations/session_bridge/r2_plain_review_scopes/candidate/artifact_production.py"] = {
