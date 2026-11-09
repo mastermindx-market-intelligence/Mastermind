@@ -1,0 +1,5281 @@
+{
+  "reviewer": "product_clarity",
+  "pins": {
+    "Mastermind": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+    "Macro": "b5674d8ef898e503d6164922654f5ff89be9981c"
+  },
+  "pages": [
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-5-0",
+      "pageName": "00 · Popups + Risk Radar · Start Here · Design Families",
+      "artboards": [
+        {
+          "id": "AFT-0",
+          "name": "00 · Design Family Directory · Popups and Risk Radar",
+          "width": 1440,
+          "height": 730,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 39,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-1-0",
+      "pageName": "01 · Risk Radar · Main + Evidence",
+      "artboards": [
+        {
+          "id": "10V-0",
+          "name": "00 · Risk Radar · Retained Work + Pickup Map",
+          "width": 900,
+          "height": 657,
+          "childCount": 1
+        },
+        {
+          "id": "1-0",
+          "name": "Risk Radar V2 · US · Primary",
+          "width": 1240,
+          "height": 1266,
+          "childCount": 8
+        },
+        {
+          "id": "8PS-0",
+          "name": "20 · Risk Radar · STATE · Evidence + Same-context Return",
+          "width": 1240,
+          "height": 1553,
+          "childCount": 8
+        },
+        {
+          "id": "8R6-0",
+          "name": "30 · Risk Radar · STATE · Mobile Main · Partial Data",
+          "width": 390,
+          "height": 1037,
+          "childCount": 6
+        },
+        {
+          "id": "8SH-0",
+          "name": "31 · Risk Radar · STATE · Mobile Evidence + Return",
+          "width": 390,
+          "height": 1711,
+          "childCount": 6
+        },
+        {
+          "id": "8YA-0",
+          "name": "32 · Risk Radar · Mobile Main · Light ZH",
+          "width": 390,
+          "height": 1017,
+          "childCount": 6
+        },
+        {
+          "id": "8ZF-0",
+          "name": "33 · Risk Radar · Mobile Evidence · Light ZH",
+          "width": 390,
+          "height": 1591,
+          "childCount": 6
+        },
+        {
+          "id": "97F-0",
+          "name": "34 · Risk Radar · Mobile Main · Light EN",
+          "width": 390,
+          "height": 1037,
+          "childCount": 6
+        },
+        {
+          "id": "98K-0",
+          "name": "35 · Risk Radar · Mobile Evidence · Light EN",
+          "width": 390,
+          "height": 1711,
+          "childCount": 6
+        },
+        {
+          "id": "99D-0",
+          "name": "36 · Risk Radar · Mobile Main · Dark ZH",
+          "width": 390,
+          "height": 1017,
+          "childCount": 6
+        },
+        {
+          "id": "9AI-0",
+          "name": "37 · Risk Radar · Mobile Evidence · Dark ZH",
+          "width": 390,
+          "height": 1591,
+          "childCount": 6
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 779,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-9-0",
+      "pageName": "Interaction states · Follow save",
+      "artboards": [
+        {
+          "id": "AJV-0",
+          "name": "FUTURE STATE REFERENCES · Follow save",
+          "width": 1800,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-9-0",
+      "nodeCount": 135,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-8-0",
+      "pageName": "Build · Popup interaction & future states",
+      "artboards": [
+        {
+          "id": "AHN-0",
+          "name": "BUILD · Popup return and future-state contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 13
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 245,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-6-0",
+      "pageName": "01B · Risk Radar · Pullback Underway · US + China",
+      "artboards": [
+        {
+          "id": "9TH-0",
+          "name": "40 · Pullback underway · US · Illustrative",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "9ZG-0",
+          "name": "42 · Pullback · Mobile · Stabilization watch",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "A5I-0",
+          "name": "45 · Pullback · US · Light EN · Forecast withheld",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "A7G-0",
+          "name": "46 · Pullback · US · Mobile Light · Observed only",
+          "width": 390,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "9WB-0",
+          "name": "41 · Pullback underway · China · Estimate unavailable",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "A1M-0",
+          "name": "43 · Pullback · China · Light EN",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "A9U-0",
+          "name": "47 · Pullback · China · Dark ZH · Estimate withheld",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "ABS-0",
+          "name": "48 · Pullback · China · Mobile Dark ZH · No forecast",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "A3K-0",
+          "name": "44 · Pullback · China · Light ZH",
+          "width": 1240,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "AD3-0",
+          "name": "49 · Pullback · China · Mobile Light ZH · No forecast",
+          "width": 390,
+          "height": null,
+          "childCount": 7
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 707,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-3-0",
+      "pageName": "China Intelligence · R2 · Progressive Disclosure",
+      "artboards": [
+        {
+          "id": "6P-0",
+          "name": "41 · R2 · Scorecard Explanations · Noir",
+          "width": 1440,
+          "height": 1060,
+          "childCount": 4
+        },
+        {
+          "id": "95-0",
+          "name": "10 · R2 · China Overview · Clean Front Door",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "EQ-0",
+          "name": "40 · R2 · Breadth Hover · In Context",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 2
+        },
+        {
+          "id": "JZ-0",
+          "name": "42 · R2 · Breadth Detail · Temporary Dashboard",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 3
+        },
+        {
+          "id": "T0-0",
+          "name": "43 · R2 · Evidence + Source Inspector",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "V8-0",
+          "name": "45 · R2 · Data Freshness · Claim Impact",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "XI-0",
+          "name": "46 · R2 · Touch Journey · Overview to Detail",
+          "width": 1440,
+          "height": 1130,
+          "childCount": 2
+        },
+        {
+          "id": "10W-0",
+          "name": "47 · R2 · Resilient States · No False Certainty",
+          "width": 1440,
+          "height": 1100,
+          "childCount": 4
+        },
+        {
+          "id": "133-0",
+          "name": "44 · R2 · Signal-Specific Detail Modules",
+          "width": 1440,
+          "height": 1130,
+          "childCount": 4
+        },
+        {
+          "id": "15J-0",
+          "name": "90 · R2 · Interaction Contract · Trigger to Return",
+          "width": 1440,
+          "height": 2420,
+          "childCount": 8
+        },
+        {
+          "id": "17Y-0",
+          "name": "00 · R2 · China Intelligence · Start Here",
+          "width": 1440,
+          "height": 1140,
+          "childCount": 7
+        },
+        {
+          "id": "19K-0",
+          "name": "48 · R2 · What Would Change the Read",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "1C4-0",
+          "name": "49 · R2 · Method and Coverage",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "1EQ-0",
+          "name": "50 · R2 · Sector to Company · Focused Exploration",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "1IM-0",
+          "name": "51 · R2 · Company Preview · Inspect Before Acting",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "1L5-0",
+          "name": "52 · R2 · Notify Me · A Precise Condition",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "1MW-0",
+          "name": "53 · R2 · Alert Feedback · Saved Is Not Yet Monitoring",
+          "width": 1440,
+          "height": 1280,
+          "childCount": 1
+        },
+        {
+          "id": "1P5-0",
+          "name": "54 · R2 · Mobile · Sector to Company to Alert",
+          "width": 1440,
+          "height": 1280,
+          "childCount": 1
+        },
+        {
+          "id": "1T4-0",
+          "name": "55 · R2 · Microinteractions · Numbers, Charts and Setup",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "3JO-0",
+          "name": "56 · R2 · Risk Appetite · The Balance of Evidence",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "533-0",
+          "name": "69 · R2 · Risk Change Conditions · Evidence That Broadens or Narrows",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "4MA-0",
+          "name": "66 · R2 · Risk Evidence · Agreement and Contradiction",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "5K1-0",
+          "name": "72 · R2 · Risk Method & Coverage · Claims Before Labels",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "3MC-0",
+          "name": "57 · R2 · PBoC Stance · From Decision to Demand",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "447-0",
+          "name": "63 · R2 · PBoC Evidence · Claim to Transmission",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "4FO-0",
+          "name": "65 · R2 · PBoC Method & Coverage · Scope Before Score",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "49I-0",
+          "name": "64 · R2 · PBoC Change Conditions · Evidence That Moves the Read",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "3OQ-0",
+          "name": "58 · R2 · Media Tone · Trace the Original Story",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "58I-0",
+          "name": "70 · R2 · Media Change Conditions · Independent Originals",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "4S4-0",
+          "name": "67 · R2 · Media Evidence · Source Groups and Lineage",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "5QG-0",
+          "name": "73 · R2 · Media Method & Coverage · Origins Before Volume",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "3RA-0",
+          "name": "59 · R2 · Confidence · Know What Is Still Uncertain",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "5DY-0",
+          "name": "71 · R2 · Confidence Change Conditions · Evidence Quality Moves",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "4X8-0",
+          "name": "68 · R2 · Confidence Method · Quality, Not Odds",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "5WV-0",
+          "name": "74 · R2 · Confidence Evidence · Agreement, Gaps and Claim Quality",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "3TL-0",
+          "name": "60 · R2 · Source Reader · Original Wording and Claim Scope",
+          "width": 1440,
+          "height": 1320,
+          "childCount": 1
+        },
+        {
+          "id": "3VV-0",
+          "name": "61 · R2 · Mobile · Risk, Policy and Original Source",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "3ZH-0",
+          "name": "62 · R2 · Mobile · Media, Confidence and Return",
+          "width": 1440,
+          "height": 1400,
+          "childCount": 1
+        },
+        {
+          "id": "64Y-0",
+          "name": "75 · R2 · Mobile · Evidence, Change and Method",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "6EZ-0",
+          "name": "76 · R2 · Builder Matrix · Four-Tab State Contract",
+          "width": 1440,
+          "height": 1500,
+          "childCount": 1
+        },
+        {
+          "id": "6N7-0",
+          "name": "77 · R2 · New Data Review · Preserve Opened Snapshot",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "6TG-0",
+          "name": "78 · R2 · Mobile · New Data Review and Adoption",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "70Q-0",
+          "name": "79 · R2 · Builder · Owner and Route Binding Map",
+          "width": 1440,
+          "height": 2050,
+          "childCount": 1
+        },
+        {
+          "id": "7B8-0",
+          "name": "80 · R2 · Acceptance Receipt Matrix · Proof Before Claim",
+          "width": 1440,
+          "height": 2100,
+          "childCount": 1
+        },
+        {
+          "id": "7KD-0",
+          "name": "81 · R2 · Spatial Continuity · Hover, Open, Inspect, Return",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "7ST-0",
+          "name": "82 · R2 · Component Anatomy · One System, Six Signals",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "85J-0",
+          "name": "83 · R2 · Implementation Blueprint · Upgrade Without a Parallel System",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "8FR-0",
+          "name": "84 · R2 · Implementation Handoff · Exact Files, Hooks and Proof",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 7535,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-4-0",
+      "pageName": "Events & News · R2 · Briefing to Evidence · 2026-09-29",
+      "artboards": [
+        {
+          "id": "1X5-0",
+          "name": "10 · Briefing · Desktop · Dark EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "20B-0",
+          "name": "11 · Briefing · Desktop · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "32J-0",
+          "name": "12 · Releases · Calendar Task · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "36F-0",
+          "name": "13 · Stories · Source-aware Reading · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "38E-0",
+          "name": "14 · Following · Saved Is Not Monitoring",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "24X-0",
+          "name": "30 · Release Guide · Desktop · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "231-0",
+          "name": "20 · Regime Change · Evidence · Dark EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "2ED-0",
+          "name": "40 · Story Detail · Fact vs Interpretation",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2LO-0",
+          "name": "43 · Ownership · Position Size Context",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "29V-0",
+          "name": "31 · Conditional Impact Map · Dark EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "2C0-0",
+          "name": "32 · Release Reaction · Study · Dark EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "2GD-0",
+          "name": "41 · Source Trail · Distinct Claims · Light EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2IS-0",
+          "name": "42 · Correction Impact · Light EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2NU-0",
+          "name": "50 · Follow Subject · Choices · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "2Q2-0",
+          "name": "51 · Follow Subject · Review · Light EN",
+          "width": 1440,
+          "height": 900,
+          "childCount": 1
+        },
+        {
+          "id": "2RX-0",
+          "name": "52 · Save Feedback · Four Honest Outcomes",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2SY-0",
+          "name": "60 · Briefing · Mobile · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2US-0",
+          "name": "61 · Briefing · Mobile · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2WC-0",
+          "name": "62 · Briefing · Mobile · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2XW-0",
+          "name": "63 · Briefing · Mobile · Light ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2ZG-0",
+          "name": "64 · Release Guide · Mobile · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "30X-0",
+          "name": "70 · Resilient States · Source Search History",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3C3-0",
+          "name": "00 · Start Here · Events News Journey Directory",
+          "width": 1440,
+          "height": 1260,
+          "childCount": 4
+        },
+        {
+          "id": "3DZ-0",
+          "name": "90 · Component Contract · Trigger to Return",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "3H3-0",
+          "name": "91 · Verified Source Map · Gaps and Real-path Proof",
+          "width": 1440,
+          "height": 1950,
+          "childCount": 5
+        },
+        {
+          "id": "8TG-0",
+          "name": "65 · Regime Evidence · Mobile · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8VD-0",
+          "name": "66 · Mobile Follow · Review + Unknown · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8Y4-0",
+          "name": "67 · Follow variants · Dark EN + ZH",
+          "width": 1282,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 2141,
+      "error": false
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-2-0",
+      "pageName": "Reference · Historical program handoff",
+      "artboards": [
+        {
+          "id": "61-0",
+          "name": "Popup Upgrade · Continuation Checkpoint",
+          "width": 900,
+          "height": 720,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 24,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-1-0",
+      "pageName": "00 · Start here · WTI journey + Scope",
+      "artboards": [
+        {
+          "id": "8Y-0",
+          "name": "00 · DESIGN REFERENCES · R1–R2 + R24 scope ruling",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "NG-0",
+          "name": "01 · R8 · Product reality + delivery priorities",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "U2-0",
+          "name": "00A · Workspace Map · References + Held Scope",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "2Z0-0",
+          "name": "27 · PORTFOLIO EXPOSURE · Impact Atlas · Desktop · R19",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "3AC-0",
+          "name": "28 · PORTFOLIO EXPOSURE · Mobile · R20",
+          "width": 390,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "3M1-0",
+          "name": "29 · PORTFOLIO EXPOSURE · State + Builder Map · R21",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "3VC-0",
+          "name": "30 · PRODUCT REALITY · X1 → North Star · R22",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "44L-0",
+          "name": "31 · WTI LIVE TRACE · Served Desktop · R23",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "4F5-0",
+          "name": "32 · WTI LIVE TRACE · Served Mobile · R24",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "4SA-0",
+          "name": "33 · BRAIN EVIDENCE · Match or recover · R25",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 2393,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-2-0",
+      "pageName": "01 · Answers, Context + Evidence",
+      "artboards": [
+        {
+          "id": "OX-0",
+          "name": "30 · R8 · WTI Live Path · First visit redesign",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "R1-0",
+          "name": "17 · CONTEXT HANDOFF · Desktop · Source-aware return · R9",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "UI-0",
+          "name": "18 · CONTEXT HANDOFF · Mobile · Verified + recovery · R10",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1-0",
+          "name": "MO-J1 · Joined Journey · Desktop Storyboard · V1",
+          "width": 1440,
+          "height": 1120,
+          "childCount": 4
+        },
+        {
+          "id": "18J-0",
+          "name": "21 · NORTH STAR · Answer Horizon · Desktop · R13",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "YB-0",
+          "name": "19 · AI ANSWER · Desktop · Evidence-linked visual response · R11",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "23-0",
+          "name": "10 · ATLAS · Light · Answer first · R1",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "DV-0",
+          "name": "20 · MOBILE · Light · Answer first · R1",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "5T-0",
+          "name": "11 · SCENARIO · Light · Sensitivity · R1",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "BJ-0",
+          "name": "12 · EVIDENCE · Light · Missing link · R1",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "FG-0",
+          "name": "13 · SOURCE LENS · Light · Read in context · R2",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "JI-0",
+          "name": "15 · THESIS REVIEW · Light · Before save · R2",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "M0-0",
+          "name": "16 · SOURCE CHANGE · Light · Review · R2",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 1401,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-3-0",
+      "pageName": "02 · Thesis Changes + Receipts",
+      "artboards": [
+        {
+          "id": "1S5-0",
+          "name": "23 · THESIS EVOLUTION · Change Horizon · Desktop · R15",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "27A-0",
+          "name": "24 · THESIS EVOLUTION · Change Horizon · Mobile · R16",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2G8-0",
+          "name": "25 · CHANGE RECEIPT · Before / After · Desktop · R17",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2Q4-0",
+          "name": "26 · CHANGE RECEIPT · Before / After · Mobile · R18",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 1436,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-4-0",
+      "pageName": "03 · Retained Shared Shell · Company Comparison + Evidence",
+      "artboards": [
+        {
+          "id": "6NX-0",
+          "name": "15 · R8 · DESKTOP · Prepared Companies",
+          "width": 1440,
+          "height": 1088,
+          "childCount": 2
+        },
+        {
+          "id": "6T1-0",
+          "name": "16 · R8 STATE of 15 · Desktop · Company Evidence",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "6ZB-0",
+          "name": "17 · R8 · MOBILE · Prepared Companies",
+          "width": 390,
+          "height": 1557,
+          "childCount": 3
+        },
+        {
+          "id": "728-0",
+          "name": "18 · R8 STATE of 17 · Mobile · Sources Inspector",
+          "width": 390,
+          "height": 1102,
+          "childCount": 2
+        },
+        {
+          "id": "73T-0",
+          "name": "19 · R8 · DESKTOP · Light · Prepared Companies",
+          "width": 1440,
+          "height": 1088,
+          "childCount": 2
+        },
+        {
+          "id": "78X-0",
+          "name": "20 · R9 STATE · Desktop · Revised Readings Ready",
+          "width": 1440,
+          "height": 1190,
+          "childCount": 2
+        },
+        {
+          "id": "7E7-0",
+          "name": "21 · R9 · DESKTOP · Review Revised Readings",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "7KT-0",
+          "name": "22 · R9 · MOBILE · Review Revised Readings",
+          "width": 390,
+          "height": 932,
+          "childCount": 2
+        },
+        {
+          "id": "7MG-0",
+          "name": "23 · R9 · TABLET · Review Revised Readings",
+          "width": 768,
+          "height": 981,
+          "childCount": 3
+        },
+        {
+          "id": "7O9-0",
+          "name": "24 · R9 · MOBILE · Light · Review Revised Readings",
+          "width": 390,
+          "height": 932,
+          "childCount": 2
+        },
+        {
+          "id": "7PW-0",
+          "name": "25 · R9 · MOBILE · Find Workspace",
+          "width": 390,
+          "height": 2114,
+          "childCount": 3
+        },
+        {
+          "id": "7TT-0",
+          "name": "27 · R10 · DESKTOP · Refine Comparison",
+          "width": 1440,
+          "height": 1088,
+          "childCount": 2
+        },
+        {
+          "id": "804-0",
+          "name": "28 · R40 · Refine comparison · Phone Dark",
+          "width": 390,
+          "height": 874,
+          "childCount": 2
+        },
+        {
+          "id": "81O-0",
+          "name": "29 · R40 · Comparison no matches · Phone Dark",
+          "width": 390,
+          "height": 726,
+          "childCount": 2
+        },
+        {
+          "id": "82O-0",
+          "name": "30 · R40 · Comparison no matches · Phone Light",
+          "width": 390,
+          "height": 726,
+          "childCount": 2
+        },
+        {
+          "id": "83O-0",
+          "name": "59 · R40 · Refine comparison · Phone Light",
+          "width": 390,
+          "height": 876,
+          "childCount": 2
+        },
+        {
+          "id": "858-0",
+          "name": "60 · R40 · Comparison filtered · Phone Dark",
+          "width": 390,
+          "height": 1465,
+          "childCount": 3
+        },
+        {
+          "id": "87M-0",
+          "name": "61 · R40 · Comparison filtered · Phone Light",
+          "width": 390,
+          "height": 1465,
+          "childCount": 3
+        },
+        {
+          "id": "8A0-0",
+          "name": "62 · R40 · Refine · 320 · Dark EN",
+          "width": 320,
+          "height": 993,
+          "childCount": 2
+        },
+        {
+          "id": "8BK-0",
+          "name": "63 · R40 · Refine · 320 · Light ZH",
+          "width": 320,
+          "height": 903,
+          "childCount": 2
+        },
+        {
+          "id": "8D4-0",
+          "name": "64 · R40 · No matches · 320 · Light ZH",
+          "width": 320,
+          "height": 730,
+          "childCount": 2
+        },
+        {
+          "id": "8E4-0",
+          "name": "65 · R40 · Comparison filtered · 320 · Light ZH",
+          "width": 320,
+          "height": 1443,
+          "childCount": 3
+        },
+        {
+          "id": "A93-0",
+          "name": "00 · START HERE · Retained Company Comparison References",
+          "width": 1440,
+          "height": 423,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 2321,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-8-0",
+      "pageName": "Build · Clarity & receipt contracts",
+      "artboards": [
+        {
+          "id": "ADK-0",
+          "name": "BUILD REFERENCES · Ontology contracts",
+          "width": 3120,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 212,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-6-0",
+      "pageName": "04 · Implementation + Visual Engine · References",
+      "artboards": [
+        {
+          "id": "13J-0",
+          "name": "20 · IMPLEMENTATION MAP · Existing Brain + Visual Engine · R12",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "9T-0",
+          "name": "90 · VISUAL ENGINE · Patterns + artwork · R1",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "1HF-0",
+          "name": "22 · INTERACTION SYSTEM · Inspect Challenge Save · R14",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 694,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-5-0",
+      "pageName": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+      "artboards": [
+        {
+          "id": "4VC-0",
+          "name": "15 · R8 · DESKTOP · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "50G-0",
+          "name": "16 · R8 STATE of 15 · Desktop · Company Evidence",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "56Q-0",
+          "name": "17 · R8 · MOBILE · Prepared Companies",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "59N-0",
+          "name": "18 · R8 STATE of 17 · Mobile · Sources Inspector",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5B8-0",
+          "name": "19 · R8 · DESKTOP · Light · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5GC-0",
+          "name": "20 · R9 STATE · Desktop · Revised Readings Ready",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5LM-0",
+          "name": "21 · R9 · DESKTOP · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5S8-0",
+          "name": "22 · R9 · MOBILE · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5TV-0",
+          "name": "23 · R9 · TABLET · Review Revised Readings",
+          "width": 768,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5VO-0",
+          "name": "24 · R9 · MOBILE · Light · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5XB-0",
+          "name": "25 · R9 · MOBILE · Find Workspace",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "618-0",
+          "name": "27 · R10 · DESKTOP · Refine Comparison",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "67J-0",
+          "name": "28 · R40 · Refine comparison · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "693-0",
+          "name": "29 · R40 · Comparison no matches · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6A3-0",
+          "name": "30 · R40 · Comparison no matches · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6B3-0",
+          "name": "59 · R40 · Refine comparison · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6CN-0",
+          "name": "60 · R40 · Comparison filtered · Phone Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6F1-0",
+          "name": "61 · R40 · Comparison filtered · Phone Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6HF-0",
+          "name": "62 · R40 · Refine · 320 · Dark EN",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6IZ-0",
+          "name": "63 · R40 · Refine · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6KJ-0",
+          "name": "64 · R40 · No matches · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6LJ-0",
+          "name": "65 · R40 · Comparison filtered · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8GI-0",
+          "name": "15 · R8 · DESKTOP · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8LM-0",
+          "name": "19 · R8 · DESKTOP · Light · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8QQ-0",
+          "name": "16 · R8 STATE of 15 · Desktop · Company Evidence",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8X0-0",
+          "name": "17 · R8 · MOBILE · Prepared Companies",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8ZX-0",
+          "name": "18 · R8 STATE of 17 · Mobile · Sources Inspector",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "91I-0",
+          "name": "20 · R9 STATE · Desktop · Revised Readings Ready",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "96S-0",
+          "name": "21 · R9 · DESKTOP · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9DE-0",
+          "name": "22 · R9 · MOBILE · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9F1-0",
+          "name": "23 · R9 · TABLET · Review Revised Readings",
+          "width": 768,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "9GU-0",
+          "name": "24 · R9 · MOBILE · Light · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9IH-0",
+          "name": "25 · R9 · MOBILE · Find Workspace",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "9ME-0",
+          "name": "27 · R10 · DESKTOP · Refine Comparison",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9SP-0",
+          "name": "28 · R40 · Refine comparison · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9U9-0",
+          "name": "29 · R40 · Comparison no matches · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9V9-0",
+          "name": "30 · R40 · Comparison no matches · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9W9-0",
+          "name": "59 · R40 · Refine comparison · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9XT-0",
+          "name": "60 · R40 · Comparison filtered · Phone Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "A07-0",
+          "name": "61 · R40 · Comparison filtered · Phone Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "A2L-0",
+          "name": "62 · R40 · Refine · 320 · Dark EN",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A45-0",
+          "name": "63 · R40 · Refine · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A5P-0",
+          "name": "64 · R40 · No matches · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A6P-0",
+          "name": "65 · R40 · Comparison filtered · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "HL-0",
+          "name": "14 · WIP · Company bridge · NOT FOR BUILD",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 4676,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-1-0",
+      "pageName": "00 · R14 · Market Guide · Start here",
+      "artboards": [
+        {
+          "id": "37N-0",
+          "name": "00 · Workspace Directory · Guide + Help System",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "1RQ-1",
+          "name": "R14 · Guide · Light · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1UC-1",
+          "name": "R14 · Guide · Dark · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1WO-1",
+          "name": "R14 · Guide · Light · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1Z0-1",
+          "name": "R14 · Guide · Light · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 387,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-2-0",
+      "pageName": "01 · Score Reading · Themes + Locales",
+      "artboards": [
+        {
+          "id": "TQ-0",
+          "name": "Score reading · light · en · 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "14C-0",
+          "name": "Score reading · dark · en · 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "172-0",
+          "name": "Score reading · light · zh · 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "19S-0",
+          "name": "Score reading · dark · zh · 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1CI-0",
+          "name": "Score reading · light · en · 390",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1F8-0",
+          "name": "Score reading · dark · en · 390",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1HY-0",
+          "name": "Score reading · light · zh · 390",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1KO-0",
+          "name": "Score reading · dark · zh · 390",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 545,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboards": [
+        {
+          "id": "2HN-1",
+          "name": "R16 · Contextual Help Library · EN · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2LJ-1",
+          "name": "R16 · Contextual Help Library · ZH · Dark",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2PF-1",
+          "name": "R17 · Macro Contextual Help Placement Map",
+          "width": 1800,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2RB-1",
+          "name": "R19 · Visual Detail Type System · EN · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "WG-0",
+          "name": "Context help · light · en · 520",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1NE-0",
+          "name": "Context help · dark · en · 520",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1OU-0",
+          "name": "Context help · light · zh · 520",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "1QA-0",
+          "name": "Context help · dark · zh · 520",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "21C-1",
+          "name": "R14 · Risk Help · Light · EN",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "224-1",
+          "name": "R14 · Risk Help · Dark · ZH",
+          "width": 520,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2VF-1",
+          "name": "R19 · 宏观象限 · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2VO-1",
+          "name": "R19 · 转换状态 · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2VX-1",
+          "name": "R19 · 证据矩阵 · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "2W6-1",
+          "name": "R19 · 板块热力 · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 756,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-4-0",
+      "pageName": "03 · Search, Aliases + Recovery",
+      "artboards": [
+        {
+          "id": "244-1",
+          "name": "R14 · Search Answer · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "26W-1",
+          "name": "R14 · Search Answer · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2AP-1",
+          "name": "R14 · No Match Recovery · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2Z4-1",
+          "name": "R20 · Search + Browse State System",
+          "width": 1320,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "32U-1",
+          "name": "R21 · Friendly Board + Alias Resolution",
+          "width": 1320,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "359-1",
+          "name": "R24 · Graceful Degraded States",
+          "width": 1040,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 498,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-6-0",
+      "pageName": "04 · Risk Radar Full Guide · Themes + Locales",
+      "artboards": [
+        {
+          "id": "3CJ-0",
+          "name": "Risk Radar · Full Guide · EN · Light · Desktop",
+          "width": 1440,
+          "height": 1270,
+          "childCount": 1
+        },
+        {
+          "id": "3IS-0",
+          "name": "Risk Radar · Full Guide · EN · Dark · Desktop",
+          "width": 1440,
+          "height": 1270,
+          "childCount": 1
+        },
+        {
+          "id": "3KW-0",
+          "name": "Risk Radar · Full Guide · ZH · Light · Desktop",
+          "width": 1440,
+          "height": 1248,
+          "childCount": 1
+        },
+        {
+          "id": "3N0-0",
+          "name": "Risk Radar · Full Guide · ZH · Dark · Desktop",
+          "width": 1440,
+          "height": 1248,
+          "childCount": 1
+        },
+        {
+          "id": "3P4-0",
+          "name": "Risk Radar · Full Guide · EN · Light · Mobile",
+          "width": 390,
+          "height": 2209,
+          "childCount": 2
+        },
+        {
+          "id": "3RI-0",
+          "name": "Risk Radar · Full Guide · EN · Dark · Mobile",
+          "width": 390,
+          "height": 2209,
+          "childCount": 2
+        },
+        {
+          "id": "3TW-0",
+          "name": "Risk Radar · Full Guide · ZH · Light · Mobile",
+          "width": 390,
+          "height": 2003,
+          "childCount": 2
+        },
+        {
+          "id": "3CK-0",
+          "name": "Risk Radar · Full Guide · ZH · Dark · Mobile",
+          "width": 390,
+          "height": 2003,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 649,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-8-0",
+      "pageName": "Proposed · Guide return clarity",
+      "artboards": [
+        {
+          "id": "44J-0",
+          "name": "PROPOSED · Guide return choices · EN/ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 231,
+      "error": false
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-5-0",
+      "pageName": "REF · Guide Baseline · Themes + Locales",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "Market Guide · Light · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3W-0",
+          "name": "Market Guide · Dark · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "EY-0",
+          "name": "Market Guide · Light · ZH · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "IO-0",
+          "name": "Market Guide · Dark · ZH · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "7M-0",
+          "name": "Market Guide · Light · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "BA-0",
+          "name": "Market Guide · Dark · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "ME-0",
+          "name": "Market Guide · Light · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "Q2-0",
+          "name": "Market Guide · Dark · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 698,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-1-0",
+      "pageName": "00 · Start · Core + Global Surveillance",
+      "artboards": [
+        {
+          "id": "3RW-0",
+          "name": "00 · R10 START HERE · Authority + TOC",
+          "width": 1440,
+          "height": 800,
+          "childCount": 5
+        },
+        {
+          "id": "41M-0",
+          "name": "00A · R10 Page Directory + Builder Notes",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 68,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-M-0",
+      "pageName": "Build · Clarity preservation",
+      "artboards": [
+        {
+          "id": "QQL-0",
+          "name": "BUILD REFERENCES · International preservation",
+          "width": 4800,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-M-0",
+      "nodeCount": 762,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-L-0",
+      "pageName": "Proposed · Scanner to dossier",
+      "artboards": [
+        {
+          "id": "OR0-0",
+          "name": "PROPOSED · Scanner ↔ dossier · EN journey",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "PD6-0",
+          "name": "PROPOSED · Brazil dossier · Mobile EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "PRG-0",
+          "name": "PROPOSED · 巴西档案 · Mobile ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "QQO-0",
+          "name": "PROPOSED · Dossier recovery · Mobile EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "QSJ-0",
+          "name": "PROPOSED · 档案恢复状态 · Mobile ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-L-0",
+      "nodeCount": 457,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-K-0",
+      "pageName": "Interaction states · Saved research",
+      "artboards": [
+        {
+          "id": "OPR-0",
+          "name": "STATE REFERENCES · Saved research",
+          "width": 2960,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-K-0",
+      "nodeCount": 60,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-J-0",
+      "pageName": "User help · Methods & saved research",
+      "artboards": [
+        {
+          "id": "OPL-0",
+          "name": "HELP REFERENCES · International",
+          "width": 1800,
+          "height": null,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-J-0",
+      "nodeCount": 752,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-2-0",
+      "pageName": "01 · Overview, Compare + Navigation",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "30 · R10 · Overview · Desktop · Dark EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6G-0",
+          "name": "31 · R10 · Compare + Rotation · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "268-0",
+          "name": "42 · R10 · Overview · Tablet · Dark EN",
+          "width": 768,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "VK-0",
+          "name": "40 · R10 · Overview · 390 · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "101-0",
+          "name": "50 · R10 · Overview · 390 · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "18Z-0",
+          "name": "52 · R10 · Overview · 390 · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "14I-0",
+          "name": "53 · R10 · Overview · 390 · Light ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "2AM-0",
+          "name": "43 · R10 · Mobile Compare · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1VC-0",
+          "name": "41 · R10 STATE · Research Views · 390 · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1ZF-0",
+          "name": "54 · R10 STATE · Research Views · 390 · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "20S-0",
+          "name": "55 · R10 STATE · Research Views · 390 · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1Y2-0",
+          "name": "51 · R10 STATE · Research Views · 390 · Light ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2D5-0",
+          "name": "44 · R10 STATE · Mobile Coverage · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2EJ-0",
+          "name": "45 · R10 STATE · Mobile Source Unavailable · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1QV-0",
+          "name": "60 · R10 · Overview · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1ME-0",
+          "name": "61 · R10 · Overview · 320 · Light EN",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1DG-0",
+          "name": "62 · R10 · Overview · 320 · Dark ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1HX-0",
+          "name": "63 · R10 · Overview · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1WP-0",
+          "name": "64 · R10 STATE · Research Views · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "225-0",
+          "name": "65 · R10 STATE · Research Views · 320 · Light EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "23I-0",
+          "name": "66 · R10 STATE · Research Views · 320 · Dark ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "24V-0",
+          "name": "67 · R10 STATE · Research Views · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 2830,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-E-0",
+      "pageName": "01A · Country Inspector & Follow · R10",
+      "artboards": [
+        {
+          "id": "805-0",
+          "name": "140 · R10 · Overview to Japan inspector · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8AM-0",
+          "name": "141 · R10 · Japan inspector · Evidence detail · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8KL-0",
+          "name": "142 · R10 · Japan inspector · Tablet",
+          "width": 768,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "50H-0",
+          "name": "121 · R10 · Country Inspector · Japan · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "547-0",
+          "name": "122 · R10 STATE · Evidence Drawer · Japan Policy · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "57H-0",
+          "name": "123 · R10 STATE · Follow Japan · Configure Draft · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5AN-0",
+          "name": "124 · R10 STATE · Follow Japan · Review + Confirm · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5DS-0",
+          "name": "125 · R10 STATE · Follow Japan · Outcome Checking · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5FM-0",
+          "name": "126 · R10 STATE · Following Japan · Success + Manage · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5OK-0",
+          "name": "128 · R10 STATE · Follow Japan · Material Change Delivered · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5QT-0",
+          "name": "129 · R10 STATE · Follow Japan · Pause Review · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5SK-0",
+          "name": "130 · R10 STATE · Follow Japan · Paused + Resume · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5UZ-0",
+          "name": "131 · R10 STATE · Follow Japan · Stop Review · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5X9-0",
+          "name": "132 · R10 STATE · Follow Japan · Stopped · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5ZI-0",
+          "name": "133 · R10 STATE · Follow Japan · Start Failed · Retry Safe · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5IR-0",
+          "name": "127 · R10 SPEC · Inspector, Evidence + Follow Contract",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        }
+      ],
+      "root": "root_node_p-E-0",
+      "nodeCount": 2148,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboards": [
+        {
+          "id": "9ML-0",
+          "name": "143 · R10 · Company exposure · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "9SC-0",
+          "name": "144 · R10 · Company exposure · Mobile 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9UA-0",
+          "name": "145 · R10 · Company disclosure · Source detail · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9WA-0",
+          "name": "146 · R10 · Regional disclosure · Japan unresolved · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9ZX-0",
+          "name": "148 · R10 · Company transmission · Hypothesis workspace",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "A40-0",
+          "name": "149 · R10 · Transmission hypothesis · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A6K-0",
+          "name": "150 · R10 · Compare the same sector mix · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "ACB-0",
+          "name": "151 · R10 · Same sector mix · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9XE-0",
+          "name": "147 · R10 SPEC · Company exposure + transmission binding",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        }
+      ],
+      "root": "root_node_p-F-0",
+      "nodeCount": 948,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboards": [
+        {
+          "id": "B4-0",
+          "name": "32 · R10 · Macro + Policy · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "GH-0",
+          "name": "33 · R10 · Risk + Transmission · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2HL-0",
+          "name": "46 · R10 · Macro + Policy · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2P9-0",
+          "name": "47 · R10 · Risk + Transmission · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2K5-0",
+          "name": "70 · R10 · Macro + Policy · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2RO-0",
+          "name": "71 · R10 · Risk + Transmission · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2MP-0",
+          "name": "72 · R10 · Macro · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2U3-0",
+          "name": "73 · R10 · Risk · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 896,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-4-0",
+      "pageName": "03 · History + Scenarios",
+      "artboards": [
+        {
+          "id": "L9-0",
+          "name": "34 · R10 · History + Scenarios · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2XD-0",
+          "name": "48 · R10 · History · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2Z7-0",
+          "name": "58 · R10 STATE · Scenarios · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "31D-0",
+          "name": "75 · R10 · Scenarios · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "33J-0",
+          "name": "77 · R10 · Scenarios · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 445,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-5-0",
+      "pageName": "04 · Research Library + Search",
+      "artboards": [
+        {
+          "id": "RU-0",
+          "name": "35 · R10 · Research Library · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "35T-0",
+          "name": "49 · R10 · Research Library · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "39M-0",
+          "name": "85 · R10 · Library · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "38A-0",
+          "name": "68 · R10 STATE · Library · Trace the Pressure · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3DH-0",
+          "name": "86 · R10 · Pressure · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3IN-0",
+          "name": "80 · R10 · Library · Leaders · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3JZ-0",
+          "name": "81 · R10 · Library · Recovery · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3LB-0",
+          "name": "82 · R10 · Library · Policy · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3MN-0",
+          "name": "83 · R10 · Library · Backdrop · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3NZ-0",
+          "name": "84 · R10 · Library · Challenge · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3C4-0",
+          "name": "102 · R10 STATE · Library Search · Matched · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3WS-0",
+          "name": "103 · R10 STATE · Library Search · No matches · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3YE-0",
+          "name": "104 · R10 STATE · Library Search · Loading · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "400-0",
+          "name": "105 · R10 STATE · Library Search · Unavailable · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3ET-0",
+          "name": "87 · R10 · Library · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3HB-0",
+          "name": "88 · R10 · Pressure · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 1001,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-C-0",
+      "pageName": "04A · Saved Research & Evidence Refresh · R10",
+      "artboards": [
+        {
+          "id": "5ZJ-0",
+          "name": "121 · R10 · Saved Research Workspace · Desktop · Dark EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6BY-0",
+          "name": "123 · R10 · Saved Research Workspace · Mobile · Dark EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6WR-0",
+          "name": "129 · R10 · Saved Research Workspace · Desktop · Dark ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "73O-0",
+          "name": "130 · R10 · Saved Research Workspace · Mobile · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6NG-0",
+          "name": "127 · R10 · Saved Research Workspace · Desktop · Light EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6UD-0",
+          "name": "128 · R10 · Saved Research Workspace · Mobile · Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "66Y-0",
+          "name": "122 · R10 · Saved Research Workspace · Tablet · Dark EN",
+          "width": 768,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6IO-0",
+          "name": "125 · R10 · Saved Research Workspace · 320 · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6L2-0",
+          "name": "126 · R10 · Saved Research · 320 · 200% Text · Dark EN",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "47Q-0",
+          "name": "107 · R10 STATE · Saved Research · Inventory · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "49K-0",
+          "name": "108 · R10 STATE · Saved Research · True Empty · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4BC-0",
+          "name": "109 · R10 STATE · Saved Research · Loading · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4D4-0",
+          "name": "110 · R10 STATE · Saved Research · Unavailable · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4F1-0",
+          "name": "111 · R10 STATE · Coverage · Field Ledger · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4I8-0",
+          "name": "112 · R10 STATE · Saved Research · Access Required · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4K3-0",
+          "name": "113 · R10 STATE · Saved Research · Filtered Empty · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4M2-0",
+          "name": "114 · R10 · Saved Research · Reopened Detail · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4OU-0",
+          "name": "115 · R10 STATE · Save Research · Review + Confirm · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4QU-0",
+          "name": "116 · R10 STATE · Save Research · Success + Undo · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4SM-0",
+          "name": "117 · R10 STATE · Save Research · Outcome Checking · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4UQ-0",
+          "name": "118 · R10 STATE · Save Research · Failed · Retry Safe · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4WY-0",
+          "name": "119 · R10 STATE · Remove Saved Research · Review + Confirm · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4YQ-0",
+          "name": "120 · R10 STATE · Remove Saved Research · Success + Undo · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-C-0",
+      "nodeCount": 2184,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboards": [
+        {
+          "id": "77R-0",
+          "name": "131 · R10 · Policy comparison · Draft preview",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7HX-0",
+          "name": "133 · R10 · Comparison setup · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7D2-0",
+          "name": "132 · R10 · Review comparison changes",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7JV-0",
+          "name": "134 · R10 · Comparison preview · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7MG-0",
+          "name": "135 · R10 · Review comparison changes · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7PV-0",
+          "name": "136 · R10 · Comparison setup · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7RR-0",
+          "name": "137 · R10 · Comparison preview · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7U3-0",
+          "name": "138 · R10 · Review comparison changes · 320",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "7WK-0",
+          "name": "139 · R10 · Review comparison · 320 · 200% Text",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-D-0",
+      "nodeCount": 773,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboards": [
+        {
+          "id": "P9-0",
+          "name": "90 · R10 SPEC · Product + Engine Ledger",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "Q2-0",
+          "name": "91 · R10 SPEC · Data + Historical + MO",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "R0-0",
+          "name": "92 · R10 SPEC · Interaction + Release",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2FN-0",
+          "name": "93 · R10 SPEC · State Specimens & Recovery",
+          "width": 1440,
+          "height": 1100,
+          "childCount": 4
+        },
+        {
+          "id": "2WI-0",
+          "name": "94 · R10 SPEC · Mobile Macro + Risk Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3PB-0",
+          "name": "95 · R10 SPEC · History, Scenarios & Library Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3Q6-0",
+          "name": "100 · R10 SPEC · Research Library Group Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3R1-0",
+          "name": "101 · R10 SPEC · Library Reflow + Search",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3TE-0",
+          "name": "96 · R10 SPEC · Small Screen + Enlarged Text",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3U4-0",
+          "name": "97 · R10 SPEC · Scenario States + Reflow",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "422-0",
+          "name": "106 · R10 SPEC · Search, Coverage + Saved States",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "6EG-0",
+          "name": "124 · R10 SPEC · Saved Research Workspace + Evidence Refresh",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        }
+      ],
+      "root": "root_node_p-B-0",
+      "nodeCount": 797,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-I-0",
+      "pageName": "R14 · Global Surveillance · Frozen design",
+      "artboards": [
+        {
+          "id": "G9J-0",
+          "name": "R14 · Scanner · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "HIX-0",
+          "name": "R14 · Scanner · Desktop · Dark · ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "I5E-0",
+          "name": "R14 · Scanner · Desktop · Light · ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "GWG-0",
+          "name": "R14 · Scanner · Desktop · Light · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "IRV-0",
+          "name": "R14 · Scanner · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "J74-0",
+          "name": "R14 · Scanner · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "JLR-0",
+          "name": "R14 · Scanner · Mobile · Dark · ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "K0E-0",
+          "name": "R14 · Scanner · Mobile · Light · ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "KF1-0",
+          "name": "R14 · Dislocation explorer · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "KUS-0",
+          "name": "R14 · Transmission workbench · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "LLI-0",
+          "name": "R14 · EM market dossier · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "MH8-0",
+          "name": "R14 · Scenario lab · Replay · Watch · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "M06-0",
+          "name": "R14 · Coverage and data states · Desktop · Light · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "N8D-0",
+          "name": "R14 · State matrix · Dark/Light · EN/ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-I-0",
+      "nodeCount": 8583,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-G-0",
+      "pageName": "REF · R12 · Country Intelligence",
+      "artboards": [
+        {
+          "id": "DMX-0",
+          "name": "R12 · Country Intelligence · Desktop Dark",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "DW7-0",
+          "name": "R12 · Country Intelligence · Desktop Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "E4D-0",
+          "name": "R12 · Country Intelligence · Mobile Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "EC2-0",
+          "name": "R12 · Country Intelligence · Mobile Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "ER4-0",
+          "name": "R12 · UK · Policy and fiscal detail",
+          "width": 768,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "ER5-0",
+          "name": "R12 · Taiwan · Policy and forecast detail",
+          "width": 768,
+          "height": null,
+          "childCount": 6
+        }
+      ],
+      "root": "root_node_p-G-0",
+      "nodeCount": 1621,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-H-0",
+      "pageName": "REF · R13 · Global Surveillance · Expansion",
+      "artboards": [
+        {
+          "id": "EZ1-0",
+          "name": "R13 · 01 Global scanner · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FZY-0",
+          "name": "R13 · 01 Global scanner · Light ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FUM-0",
+          "name": "R13 · 01 Global scanner · Dark ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FNH-0",
+          "name": "R13 · 01B Global scanner · Light EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "F4Y-0",
+          "name": "R13 · 02 Dislocation explorer · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "F93-0",
+          "name": "R13 · 03 Transmission to US · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "FCL-0",
+          "name": "R13 · 04 EM market dossier · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 10
+        },
+        {
+          "id": "FG7-0",
+          "name": "R13 · 05 Global scanner · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "G73-0",
+          "name": "R13 · 05 Mobile · Light ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "G5A-0",
+          "name": "R13 · 05 Mobile · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "FST-0",
+          "name": "R13 · 05B Global scanner · Mobile Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "FIB-0",
+          "name": "R13 · 06 Coverage and partial data · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        }
+      ],
+      "root": "root_node_p-H-0",
+      "nodeCount": 1518,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-6-0",
+      "pageName": "05 · China Intelligence · vNext",
+      "artboards": [
+        {
+          "id": "DMD-0",
+          "name": "MOVED · China Intelligence · See canonical",
+          "width": 1440,
+          "height": 480,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 10,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-7-0",
+      "pageName": "06 · Returns Calendar · Terminal + Dossier",
+      "artboards": [
+        {
+          "id": "DMN-0",
+          "name": "MOVED · Returns Calendar · See canonical",
+          "width": 1440,
+          "height": 480,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-7-0",
+      "nodeCount": 10,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-A-0",
+      "pageName": "ARCHIVE · Relocated Families · Not for Build",
+      "artboards": [
+        {
+          "id": "AOD-0",
+          "name": "Returns Calendar · Stock Dossier · Desktop",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 4
+        },
+        {
+          "id": "QYU-0",
+          "name": "WORKING HOLD · Comparison references · Not for build",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "AT2-0",
+          "name": "Returns Calendar · Native Dossier · 390",
+          "width": 390,
+          "height": 844,
+          "childCount": 1
+        },
+        {
+          "id": "AWJ-0",
+          "name": "Returns Calendar · Early Close State",
+          "width": 760,
+          "height": 440,
+          "childCount": 1
+        },
+        {
+          "id": "AXL-0",
+          "name": "Returns v2 · Desktop Study · 1440",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "B4J-0",
+          "name": "Returns v2 · Mobile Study · 390",
+          "width": 390,
+          "height": 1290,
+          "childCount": 4
+        },
+        {
+          "id": "B9F-0",
+          "name": "Returns v2 · Rail Entry · 360",
+          "width": 360,
+          "height": 320,
+          "childCount": 2
+        },
+        {
+          "id": "BAB-0",
+          "name": "Returns v2 · Expanded Sessions and Recovery",
+          "width": 900,
+          "height": 620,
+          "childCount": 2
+        },
+        {
+          "id": "8OX-0",
+          "name": "00 · SPEC · China Journey + State Contract",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "8Q7-0",
+          "name": "10 · DESKTOP · China Intelligence",
+          "width": 1440,
+          "height": 1180,
+          "childCount": 1
+        },
+        {
+          "id": "90H-0",
+          "name": "20 · TABLET · China Intelligence",
+          "width": 820,
+          "height": 1533,
+          "childCount": 2
+        },
+        {
+          "id": "99H-0",
+          "name": "30 · MOBILE · China Intelligence",
+          "width": 390,
+          "height": 2583,
+          "childCount": 3
+        },
+        {
+          "id": "ANO-0",
+          "name": "00 · ARCHIVED · Intelligence Hub R1–R3 · Redirect",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-A-0",
+      "nodeCount": 2080,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-9-0",
+      "pageName": "90 · ARCHIVE · Returns v2 duplicate studies · NOT FOR BUILD",
+      "artboards": [
+        {
+          "id": "BBL-0",
+          "name": "ARCHIVE COPY · Returns v2 · Desktop Study",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "BI8-0",
+          "name": "ARCHIVE COPY · Returns v2 · Mobile Study",
+          "width": 390,
+          "height": 1290,
+          "childCount": 4
+        },
+        {
+          "id": "BN1-0",
+          "name": "ARCHIVE COPY · Returns v2 · Rail Entry",
+          "width": 360,
+          "height": 320,
+          "childCount": 2
+        },
+        {
+          "id": "BNW-0",
+          "name": "ARCHIVE COPY · Returns v2 · Recovery Study",
+          "width": 900,
+          "height": 620,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-9-0",
+      "nodeCount": 489,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-1-0",
+      "pageName": "00 · R10 · Chat workbench · Start here",
+      "artboards": [
+        {
+          "id": "1Z2-0",
+          "name": "00A · Workspace Directory · Noir + References",
+          "width": 1440,
+          "height": 788,
+          "childCount": 3
+        },
+        {
+          "id": "1MR-0",
+          "name": "40 · R10 · Noir · Start · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "1O7-0",
+          "name": "41 · R10 · Noir · Answer · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "1QN-0",
+          "name": "42 · R10 · Noir · Sources open · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "1U0-0",
+          "name": "43 · R10 · Noir · Start · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 3
+        },
+        {
+          "id": "1VE-0",
+          "name": "44 · R10 · Noir · Answer · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "1ZY-0",
+          "name": "45 · R10 · Noir · Context preview · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "1ZZ-0",
+          "name": "46 · R10 · Noir · Context preview · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "2GV-0",
+          "name": "51 · R10 · Noir · Sources sheet · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "5M1-0",
+          "name": "67 · R10 · Research depth review · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "5P8-0",
+          "name": "68 · R10 · Research depth review · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "2K8-0",
+          "name": "52 · R10 · Noir · Performance details · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "3CZ-0",
+          "name": "62 · R10 · Research in progress · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "3F5-0",
+          "name": "63 · R10 · Partial answer · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "5WL-0",
+          "name": "R10 · Incomplete response · Desktop · Proposed",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "5YW-0",
+          "name": "R10 · Incomplete response · Mobile · Proposed",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "3HQ-0",
+          "name": "64 · R10 · Private context denied · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "3JZ-0",
+          "name": "65 · R10 · Scenario follow-up · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "3M8-0",
+          "name": "66 · R10 · Scenario follow-up · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 1558,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-B-0",
+      "pageName": "Proposed · Draft mention context",
+      "artboards": [
+        {
+          "id": "72Y-0",
+          "name": "PROPOSED · Draft mentions and context · EN/ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        }
+      ],
+      "root": "root_node_p-B-0",
+      "nodeCount": 318,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-8-0",
+      "pageName": "R10 · Save + Resume · Recovery",
+      "artboards": [
+        {
+          "id": "24R-0",
+          "name": "47 · R10 · Noir · Save review · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "71F-0",
+          "name": "R10 · Chats recovery · Proposed states 69–73",
+          "width": 2770,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "26X-0",
+          "name": "48 · R10 · Noir · Save review · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "2AX-0",
+          "name": "49 · R10 · Noir · Save unconfirmed · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "2DV-0",
+          "name": "50 · R10 · Noir · Save unconfirmed · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "2NN-0",
+          "name": "53 · R10 · Noir · History · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "2PT-0",
+          "name": "54 · R10 · Noir · History · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "2TS-0",
+          "name": "55 · R10 · Noir · Reopened case · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "2VY-0",
+          "name": "56 · R10 · Noir · Reopened case · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "2YE-0",
+          "name": "57 · R10 · Noir · Context handover · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "30N-0",
+          "name": "58 · R10 · Noir · Context handover · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        },
+        {
+          "id": "34I-0",
+          "name": "59 · R10 · Static reading tail · Short viewport",
+          "width": 390,
+          "height": 544,
+          "childCount": 5
+        },
+        {
+          "id": "371-0",
+          "name": "60 · R10 · Session expired before save · Desktop",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "39Z-0",
+          "name": "61 · R10 · Session expired before save · Mobile",
+          "width": 390,
+          "height": 844,
+          "childCount": 5
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 1807,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-9-0",
+      "pageName": "R10 · Build + Implementation Boundaries",
+      "artboards": [
+        {
+          "id": "1MO-0",
+          "name": "00 · R10 · Noir · Builder map + interaction",
+          "width": 1440,
+          "height": 1200,
+          "childCount": 3
+        },
+        {
+          "id": "5M0-0",
+          "name": "R10 · Preserved Implementation Boundaries",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "5VN-0",
+          "name": "Source gaps · Answer evidence and non-monitoring save",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        }
+      ],
+      "root": "root_node_p-9-0",
+      "nodeCount": 97,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-2-0",
+      "pageName": "01 · Interaction + Recovery · R2 References",
+      "artboards": [
+        {
+          "id": "4B-0",
+          "name": "10 · STATE · Desktop · Collapsed Launcher",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "AR-0",
+          "name": "11 · STATE · Desktop · Context Popup",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "IJ-0",
+          "name": "12 · STATE · Desktop · Expanded Research",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "NJ-0",
+          "name": "13 · ANSWER STATE · Desktop · Financial Scenario",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "SI-0",
+          "name": "14 · STATE · Desktop · Save Case Review",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "X6-0",
+          "name": "15 · VARIANT STATE · Mobile · Conversation Sheet",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "YK-0",
+          "name": "16 · BUILDER SPEC · R2 · First Open + Continuity",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 2
+        },
+        {
+          "id": "11E-0",
+          "name": "17 · BUILDER SPEC · R2 · Trust + Recovery",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 3
+        },
+        {
+          "id": "130-0",
+          "name": "18 · BUILDER SPEC · R2 · Interaction Blueprint",
+          "width": 1440,
+          "height": 1660,
+          "childCount": 5
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 1320,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboards": [
+        {
+          "id": "14Y-0",
+          "name": "20 · BUILDER SPEC · R7 · Answer Craft",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "17B-0",
+          "name": "21 · BUILDER SPEC · R7 · System Contract",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "18K-0",
+          "name": "22 · BUILDER REF · R7 · Popup + Narrow Specimens",
+          "width": 1440,
+          "height": 1040,
+          "childCount": 2
+        },
+        {
+          "id": "1B7-0",
+          "name": "30 · ANSWER SPECIMEN · R8 · Desktop · Finance",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1DA-0",
+          "name": "31 · ANSWER SPECIMEN · R8 · Desktop · Compare",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1FW-0",
+          "name": "32 · ANSWER SPECIMEN · R8 · Desktop · Relationships",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1IL-0",
+          "name": "33 · ANSWER SPECIMEN · R8 · Desktop · Sources",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1L4-0",
+          "name": "34 · ANSWER SPECIMEN · R8 · Mobile · Narrow",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 639,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-4-0",
+      "pageName": "03 · Legacy Reference + Assets",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "90 · LEGACY REF · Desktop · Quiet Command Center",
+          "width": 1440,
+          "height": 980,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 157,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboards": [
+        {
+          "id": "5HW-0",
+          "name": "00 · START HERE · Retained Research Reading References",
+          "width": 1440,
+          "height": 780,
+          "childCount": 3
+        },
+        {
+          "id": "3PA-0",
+          "name": "10 · R11 · DESKTOP · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3VC-0",
+          "name": "31 · R11 STATE · Desktop · Evidence Inspector",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "476-0",
+          "name": "34 · R11 · DESKTOP · Light · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "428-0",
+          "name": "32 · R11 · MOBILE · Guided Long Read",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "461-0",
+          "name": "33 · R11 STATE of 32 · Mobile · Claim Evidence",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4D8-0",
+          "name": "35 · R11 · MOBILE · Research Outline",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4HS-0",
+          "name": "36 · R11 · TABLET · Guided Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 1174,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-7-0",
+      "pageName": "05 · SOURCE ONLY · Chat Live Baseline",
+      "artboards": [
+        {
+          "id": "6JU-0",
+          "name": "SOURCE ONLY · 08 · Mastermind AI · Chat live baseline",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-7-0",
+      "nodeCount": 130,
+      "error": false
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-6-0",
+      "pageName": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+      "artboards": [
+        {
+          "id": "4LL-0",
+          "name": "10 · R11 · DESKTOP · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4RN-0",
+          "name": "34 · R11 · DESKTOP · Light · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4XP-0",
+          "name": "31 · R11 STATE · Desktop · Evidence Inspector",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "54L-0",
+          "name": "32 · R11 · MOBILE · Guided Long Read",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "58E-0",
+          "name": "33 · R11 STATE of 32 · Mobile · Claim Evidence",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "59J-0",
+          "name": "35 · R11 · MOBILE · Research Outline",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5E3-0",
+          "name": "36 · R11 · TABLET · Guided Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 1157,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-9-0",
+      "pageName": "00 · Start here · Build contract",
+      "artboards": [
+        {
+          "id": "47Q-0",
+          "name": "F02 · Read me & Build contract · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 12
+        },
+        {
+          "id": "9ZX-0",
+          "name": "LAW REFERENCE · Human-first clarity",
+          "width": 1040,
+          "height": 694,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-9-0",
+      "nodeCount": 96,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-1-0",
+      "pageName": "00 · Cover",
+      "artboards": [
+        {
+          "id": "423-1",
+          "name": "00 · Start Here · NOIR + Library Directory",
+          "width": 1440,
+          "height": 900,
+          "childCount": 4
+        },
+        {
+          "id": "42T-0",
+          "name": "01 · Working Files · Workspace Navigator",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 102,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-2-0",
+      "pageName": "01 · Getting Started",
+      "artboards": [
+        {
+          "id": "23T-0",
+          "name": "Getting Started · Dark",
+          "width": 1441,
+          "height": 960,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 18,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-3-0",
+      "pageName": "02 · Foundations",
+      "artboards": [
+        {
+          "id": "24A-0",
+          "name": "Foundations · Legacy Dual-Theme Reference",
+          "width": 1440,
+          "height": 1880,
+          "childCount": 4
+        },
+        {
+          "id": "3XJ-1",
+          "name": "Foundations · NOIR Family System · Canonical",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "48W-0",
+          "name": "F02 · Semantic roles, type & density · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 14
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 426,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-4-0",
+      "pageName": "03 · Components",
+      "artboards": [
+        {
+          "id": "25V-0",
+          "name": "MX/Section Header",
+          "width": 560,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "25Z-0",
+          "name": "MX/Metric Tile",
+          "width": 708,
+          "height": 228,
+          "childCount": 5
+        },
+        {
+          "id": "26C-0",
+          "name": "MX/Tab",
+          "width": 116,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "26J-0",
+          "name": "MX/Data Row",
+          "width": 1120,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "272-0",
+          "name": "MX/Freshness",
+          "width": 220,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "27I-0",
+          "name": "MX/Data Row · Mobile",
+          "width": 342,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "28D-0",
+          "name": "MX/Button",
+          "width": 448,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "28Y-0",
+          "name": "MX/Decision Row",
+          "width": 640,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "29H-0",
+          "name": "MX/Callout",
+          "width": 440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "2A7-0",
+          "name": "MX/State Panel",
+          "width": 440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "2BK-0",
+          "name": "MX/LENS Evidence",
+          "width": 340,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2BR-0",
+          "name": "MX/Verdict Hero",
+          "width": 720,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "2CM-0",
+          "name": "MX/Count Ladder",
+          "width": 560,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2E3-0",
+          "name": "MX/Lifecycle Rail",
+          "width": 640,
+          "height": 416,
+          "childCount": 4
+        },
+        {
+          "id": "2GG-0",
+          "name": "MX/Detail Disclosure",
+          "width": 520,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2GM-0",
+          "name": "MX/Verdict Hero · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "2HH-0",
+          "name": "MX/Count Ladder · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2IY-0",
+          "name": "MX/Lifecycle Rail · Mobile",
+          "width": 350,
+          "height": 376,
+          "childCount": 4
+        },
+        {
+          "id": "2LB-0",
+          "name": "MX/Decision Row · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "2LX-0",
+          "name": "MX/Detail Disclosure · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2M3-0",
+          "name": "MX/State Panel · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "2NG-0",
+          "name": "MX/Callout · Mobile",
+          "width": 350,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "2O6-0",
+          "name": "MX/Table Frame",
+          "width": 720,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2PH-0",
+          "name": "MX/Chart Frame",
+          "width": 720,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "2RE-0",
+          "name": "MX/Tier Gate",
+          "width": 720,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4E3-0",
+          "name": "F02 · Metric, change & source receipt · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 13
+        },
+        {
+          "id": "4H1-0",
+          "name": "F02 · Metric, change & source receipt · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 10
+        },
+        {
+          "id": "4JP-0",
+          "name": "F02 · Tabs, actions & evidence inspector · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "6Q3-0",
+          "name": "F02 · States & semantics · Dark / Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "771-0",
+          "name": "F02 · Actions, disclosure & access variants · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 14
+        },
+        {
+          "id": "8W7-0",
+          "name": "F02 · Dense40 / Comfortable52 · Same three rows · Repair v1",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "905-0",
+          "name": "F02 · Fault compositions & saved read continuity · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 13
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 2106,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-5-0",
+      "pageName": "04 · Patterns",
+      "artboards": [
+        {
+          "id": "2S4-0",
+          "name": "Pattern · Material UI State Contract · Dark",
+          "width": 1440,
+          "height": 1120,
+          "childCount": 8
+        },
+        {
+          "id": "2UE-0",
+          "name": "Pattern · Material UI State Contract · Light",
+          "width": 1440,
+          "height": 1120,
+          "childCount": 8
+        },
+        {
+          "id": "2WO-0",
+          "name": "Pattern · Archetype Signature Devices · Dark",
+          "width": 1440,
+          "height": 1029,
+          "childCount": 6
+        },
+        {
+          "id": "2YK-0",
+          "name": "Pattern · Archetype Signature Devices · Light",
+          "width": 1440,
+          "height": 1029,
+          "childCount": 6
+        },
+        {
+          "id": "30G-0",
+          "name": "Pattern · Mobile Decision Thread · Dark",
+          "width": 390,
+          "height": 1598,
+          "childCount": 7
+        },
+        {
+          "id": "336-0",
+          "name": "Pattern · Mobile Decision Thread · Light",
+          "width": 390,
+          "height": 1598,
+          "childCount": 7
+        },
+        {
+          "id": "35W-0",
+          "name": "Pattern · Data, Chart & Access · Dark",
+          "width": 1440,
+          "height": 2078,
+          "childCount": 12
+        },
+        {
+          "id": "39G-0",
+          "name": "Pattern · Data, Chart & Access · Light",
+          "width": 1440,
+          "height": 2078,
+          "childCount": 12
+        },
+        {
+          "id": "4LC-0",
+          "name": "F02 · Table and chart grammar · Candidate 2",
+          "width": 1440,
+          "height": 1191,
+          "childCount": 7
+        },
+        {
+          "id": "70C-0",
+          "name": "F02 · Company evidence · Unknown EPS · 320",
+          "width": 320,
+          "height": 1258,
+          "childCount": 3
+        },
+        {
+          "id": "72T-0",
+          "name": "F02 · Company evidence · Actual zero dividend · 320",
+          "width": 320,
+          "height": 1330,
+          "childCount": 3
+        },
+        {
+          "id": "74P-0",
+          "name": "F02 · Options print-01 evidence · 320 · Candidate 2",
+          "width": 320,
+          "height": 1148,
+          "childCount": 3
+        },
+        {
+          "id": "7CM-0",
+          "name": "F02 · Macro comparison · EN · Dark · 390",
+          "width": 390,
+          "height": 1289,
+          "childCount": 3
+        },
+        {
+          "id": "7IS-0",
+          "name": "F02 · Macro comparison · 中文 · Light · 390",
+          "width": 390,
+          "height": 1331,
+          "childCount": 3
+        },
+        {
+          "id": "8G2-0",
+          "name": "F02 · Macro with evidence dock · 1280 stress · Provisional shell",
+          "width": 1280,
+          "height": 1124,
+          "childCount": 3
+        },
+        {
+          "id": "8N8-0",
+          "name": "F02 · 中文行业证据与返回 · 390 · Candidate 2",
+          "width": 390,
+          "height": 979,
+          "childCount": 5
+        },
+        {
+          "id": "8PF-0",
+          "name": "F02 · Company historical EPS evidence & return · 390 · Repair v1",
+          "width": 390,
+          "height": 1111,
+          "childCount": 5
+        },
+        {
+          "id": "8R5-0",
+          "name": "F02 · Editorial calculation evidence & return · 390 · Repair v1",
+          "width": 390,
+          "height": 1116,
+          "childCount": 4
+        },
+        {
+          "id": "8TF-0",
+          "name": "F02 · Public editorial reading · 390 · Repair v1",
+          "width": 390,
+          "height": 2142,
+          "childCount": 4
+        },
+        {
+          "id": "98N-0",
+          "name": "F02 · 768px width evaluation · Evidence overlay",
+          "width": 768,
+          "height": 930,
+          "childCount": 2
+        },
+        {
+          "id": "9EB-0",
+          "name": "F02 · 1024px width evaluation · Evidence overlay",
+          "width": 1024,
+          "height": 930,
+          "childCount": 2
+        },
+        {
+          "id": "9K6-0",
+          "name": "F02 · 1600px width evaluation · 984px comparison + 320px dock",
+          "width": 1600,
+          "height": 1105,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 2482,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-B-0",
+      "pageName": "Build · Clarity & product contracts",
+      "artboards": [
+        {
+          "id": "9ZS-0",
+          "name": "BUILD REFERENCES · Product contracts",
+          "width": 2800,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "9ZY-0",
+          "name": "UTILITY · Hidden empty template 3",
+          "width": 1,
+          "height": 1,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-B-0",
+      "nodeCount": 185,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-6-0",
+      "pageName": "05 · Reference Screens",
+      "artboards": [
+        {
+          "id": "3D0-0",
+          "name": "Reference · Sector Breadth · Desktop · Dark",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3GU-0",
+          "name": "Reference · Sector Breadth · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3KO-0",
+          "name": "Reference · Sector Breadth · Mobile · Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3NL-0",
+          "name": "Reference · Sector Breadth · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "40D-1",
+          "name": "Reference · NOIR Profile Application",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 4
+        },
+        {
+          "id": "4PO-0",
+          "name": "F02 · Macro · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "4YD-0",
+          "name": "F02 · Macro · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "56L-0",
+          "name": "F02 · Company · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5HV-0",
+          "name": "F02 · Company · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5VE-0",
+          "name": "F02 · Options · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "67V-0",
+          "name": "F02 · Options · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6JX-0",
+          "name": "F02 · Editorial · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6NG-0",
+          "name": "F02 · Editorial · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 3147,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-7-0",
+      "pageName": "06 · Utilities",
+      "artboards": [
+        {
+          "id": "3QI-0",
+          "name": "Utility · Material UI Migration Packet · Working Template",
+          "width": 1440,
+          "height": 1280,
+          "childCount": 10
+        },
+        {
+          "id": "3RX-0",
+          "name": "Utility · Archetype Starter Map · Dark",
+          "width": 1440,
+          "height": 1480,
+          "childCount": 7
+        },
+        {
+          "id": "3UP-0",
+          "name": "Utility · Archetype Starter Map · Light",
+          "width": 1440,
+          "height": 1480,
+          "childCount": 7
+        },
+        {
+          "id": "4NV-0",
+          "name": "F02 · Builder acceptance & source ownership · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 15
+        }
+      ],
+      "root": "root_node_p-7-0",
+      "nodeCount": 356,
+      "error": false
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-8-1",
+      "pageName": "07 · Source Imports + Assets · Pending Review",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "SOURCE / Macro · 1440 · Dark EN · Sep 11 snapshot · import under review",
+          "width": 1440,
+          "height": 2699,
+          "childCount": 4
+        },
+        {
+          "id": "23O-0",
+          "name": "PENDING / public-browser PNG transfer · local witness preserved",
+          "width": 1440,
+          "height": 2699,
+          "childCount": 2
+        }
+      ],
+      "root": "root_node_p-8-1",
+      "nodeCount": 2722,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-3-0",
+      "pageName": "00 / Foundations and components",
+      "artboards": [
+        {
+          "id": "18U-0",
+          "name": "AERLOR / Foundations and components",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 71,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-9-1",
+      "pageName": "08 / R9 / Solutions · Editorial + Professional",
+      "artboards": [
+        {
+          "id": "5HR-1",
+          "name": "R9 / Solutions flagship / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "5HS-1",
+          "name": "R9 / Salons professional / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "5HT-1",
+          "name": "R9 / Business planner / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "5HU-1",
+          "name": "R9 / Solutions flagship / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5HV-1",
+          "name": "R9 / Salons professional / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 7
+        }
+      ],
+      "root": "root_node_p-9-1",
+      "nodeCount": 494,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-8-0",
+      "pageName": "07 / R7 / Consumer flagship + business",
+      "artboards": [
+        {
+          "id": "4ZS-0",
+          "name": "R7 / Image masters / Generated design studies",
+          "width": 1440,
+          "height": null,
+          "childCount": 12
+        },
+        {
+          "id": "50D-0",
+          "name": "R7 / Consumer home desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "53B-0",
+          "name": "R7 / Consumer home mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "562-1",
+          "name": "R7 / Retail product desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "597-1",
+          "name": "R7 / Retail product mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5YG-1",
+          "name": "R8 / Retail flagship / Desktop / Editorial",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "61L-1",
+          "name": "R8 / Retail flagship / Mobile / Editorial",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5C5-1",
+          "name": "R7 / Product menu and bag states",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5DK-1",
+          "name": "R7 / Business channel desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 945,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-7-0",
+      "pageName": "06 / R6 / Solutions · Salons + specialty markets",
+      "artboards": [
+        {
+          "id": "4IX-0",
+          "name": "Solutions / Overview / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4IY-0",
+          "name": "Salons & Stylists / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4IZ-0",
+          "name": "Spas & Wellness / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "4J0-0",
+          "name": "Fitness & Clubs / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "4SN-0",
+          "name": "Navigation / Solutions dropdown / Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "4SO-0",
+          "name": "Solutions / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "4SP-0",
+          "name": "Salons & Stylists / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "4SQ-0",
+          "name": "Navigation / Solutions expanded / Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-7-0",
+      "nodeCount": 572,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-6-0",
+      "pageName": "05 / R5 Release / Premium technology",
+      "artboards": [
+        {
+          "id": "3UX-0",
+          "name": "R5 / Home desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "3Z2-0",
+          "name": "R5 / Home mobile / Release design",
+          "width": 390,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "47I-0",
+          "name": "R5 / Product desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4BD-0",
+          "name": "R5 / Product mobile / Release design",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4F3-0",
+          "name": "R5 / Hotels desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 551,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-5-0",
+      "pageName": "04 / R5 / Brand + product / Design-first rebuild",
+      "artboards": [
+        {
+          "id": "3NB-0",
+          "name": "R5 / A1 product / Desktop / Design review",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "3OZ-0",
+          "name": "R5 / Brand home / Desktop / Design review",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3SE-0",
+          "name": "R5 / Brand home / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3TV-0",
+          "name": "R5 / A1 product / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 262,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-4-0",
+      "pageName": "03 / R4 / Precision hospitality",
+      "artboards": [
+        {
+          "id": "1BE-0",
+          "name": "R4 / Home / Precision technology / 1440",
+          "width": 1440,
+          "height": 980,
+          "childCount": 3
+        },
+        {
+          "id": "1CJ-0",
+          "name": "R4 / home / mobile / 390",
+          "width": 390,
+          "height": 9500.28,
+          "childCount": 10
+        },
+        {
+          "id": "1ON-0",
+          "name": "R4 / home / desktop / 1440",
+          "width": 1440,
+          "height": 5635.12,
+          "childCount": 10
+        },
+        {
+          "id": "211-0",
+          "name": "R4 / collection / desktop / 1440",
+          "width": 1440,
+          "height": 2835.67,
+          "childCount": 5
+        },
+        {
+          "id": "29P-0",
+          "name": "R4 / product / desktop / 1440",
+          "width": 1440,
+          "height": 5196.98,
+          "childCount": 10
+        },
+        {
+          "id": "2M6-0",
+          "name": "R4 / product / mobile / 390",
+          "width": 390,
+          "height": 7293.38,
+          "childCount": 10
+        },
+        {
+          "id": "2Y9-0",
+          "name": "R4 / hotels / desktop / 1440",
+          "width": 1440,
+          "height": 5547.05,
+          "childCount": 11
+        },
+        {
+          "id": "3B1-0",
+          "name": "R4 / project / desktop / 1440",
+          "width": 1440,
+          "height": 3274.78,
+          "childCount": 6
+        },
+        {
+          "id": "3L5-0",
+          "name": "R4 / Foundations / Precision system",
+          "width": 1440,
+          "height": 1190,
+          "childCount": 5
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 2740,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-2-0",
+      "pageName": "02 / Product and interaction states",
+      "artboards": [
+        {
+          "id": "KT-0",
+          "name": "AERLOR / PRO / desktop",
+          "width": 1000,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "ME-0",
+          "name": "Pilot planner / default / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "PH-0",
+          "name": "AERLOR / LITE / desktop",
+          "width": 1000,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "R3-0",
+          "name": "Pilot planner / default / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "TR-0",
+          "name": "Pilot planner / validation / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "WI-0",
+          "name": "Pilot planner / local brief ready / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "Z9-0",
+          "name": "AERLOR / PRO / mobile",
+          "width": 367,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "10U-0",
+          "name": "AERLOR / LITE / mobile",
+          "width": 367,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "12F-0",
+          "name": "Pilot planner / validation / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "154-0",
+          "name": "Pilot planner / local brief ready / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "17T-0",
+          "name": "Privacy and preview notice / mobile",
+          "width": 354,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "18D-0",
+          "name": "Navigation / mobile expanded",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 644,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-1-0",
+      "pageName": "01 · Website · Desktop & Mobile",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "AERLOR / Home / Desktop 1440",
+          "width": 1440,
+          "height": 5866.53125,
+          "childCount": 10
+        },
+        {
+          "id": "A4-0",
+          "name": "AERLOR / Home / Mobile 390",
+          "width": 390,
+          "height": 6790.734375,
+          "childCount": 10
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 550,
+      "error": false
+    }
+  ]
+}

@@ -6653,7 +6653,15 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             return False
         raise GatewayPublicationError("gateway_studio_invalid")
 
-    def observe_studio(self, expected_sha: str) -> GatewayStudioEvidence:
+    def observe_studio(
+        self, expected_sha: str, *, predecessor_grant_sha256: str | None = None,
+    ) -> GatewayStudioEvidence:
+        """Observe the base seat or its exact qualified predecessor enrollment."""
+        if predecessor_grant_sha256 is not None and (
+            type(predecessor_grant_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", predecessor_grant_sha256) is None
+        ):
+            raise GatewayPublicationError("gateway_studio_invalid")
         from integrations.studio_direct_mcp import private_service
 
         home, studio_gid = self._studio_account_identity()
@@ -6726,8 +6734,9 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or sha256_bytes(agent_plist_raw) != manifest["plistHash"]
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
-        # The staged config is the one closed repository-workspace profile,
-        # WITHOUT the commission opt-in, on the fixed loopback port.
+        # Keep the closed repository-workspace profile on the fixed port.
+        # An enrolled successor retains only its already-qualified prior grant;
+        # observing that binding never changes or creates an enrollment.
         if (
             type(config) is not dict
             or config.get("accountLabel") != OS_GATEWAY_STUDIO_ACCOUNT
@@ -6738,12 +6747,23 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or config.get("cwd") != os.fspath(home)
             or config.get("repositoryWorkspaces")
             != {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
-            or "commissionPublication" in config
             or "fabricOnly" in config
             or type(config.get("gitPublish")) is not dict
             or config["gitPublish"].get("enabled") is not True
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
+
+        if "commissionPublication" in config:
+            commission = config["commissionPublication"]
+            if (
+                predecessor_grant_sha256 is None
+                or type(commission) is not dict
+                or set(commission) != {"enabled", "configurationDigest"}
+                or commission["enabled"] is not True
+                or type(commission["configurationDigest"]) is not str
+                or commission["configurationDigest"] != predecessor_grant_sha256
+            ):
+                raise GatewayPublicationError("gateway_studio_invalid")
 
         if observed.installed_file_hashes != files:
             raise GatewayPublicationError("gateway_studio_invalid")
@@ -7727,7 +7747,13 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         # The retained Studio definition is re-observed before every phase
         # write; drifted source, custody or running state never publishes.
         if (
-            self.observe_studio(transaction.expected_sha).definition_sha256
+            self.observe_studio(
+                transaction.expected_sha,
+                predecessor_grant_sha256=(
+                    manifest["gateway_prior_grant_sha256"]
+                    if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+                ),
+            ).definition_sha256
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
@@ -7771,7 +7797,13 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         ):
             raise TransactionEffectUnknown()
         if (
-            self.observe_studio(transaction.expected_sha).definition_sha256
+            self.observe_studio(
+                transaction.expected_sha,
+                predecessor_grant_sha256=(
+                    manifest["gateway_prior_grant_sha256"]
+                    if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+                ),
+            ).definition_sha256
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
@@ -8143,7 +8175,12 @@ def prepare_gateway_publication(
             host, request.expected_sha, prior_mcp_config)
     except Exception as exc:
         raise GatewayPublicationError("gateway_capability_profiles_invalid") from exc
-    studio = host.observe_studio(request.expected_sha)
+    studio = host.observe_studio(
+        request.expected_sha,
+        predecessor_grant_sha256=(
+            sha256_bytes(grant_bytes) if predecessor is not None else None
+        ),
+    )
     audit_directory = host.observe_gateway_audit_directory(
         studio_uid=studio.studio_uid, studio_gid=studio.studio_gid
     )
@@ -11447,7 +11484,13 @@ def reconcile_gateway_publication(
     if bundle_digest != manifest["gateway_release_bundle_digest"]:
         raise TransactionEffectUnknown()
     if (
-        host.observe_studio(request.expected_sha).definition_sha256
+        host.observe_studio(
+            request.expected_sha,
+            predecessor_grant_sha256=(
+                manifest["gateway_prior_grant_sha256"]
+                if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+            ),
+        ).definition_sha256
         != manifest["gateway_studio_definition_sha256"]
     ):
         raise TransactionEffectUnknown()

@@ -53,7 +53,16 @@ def snapshot(output, profile):
     raw = (output / profile / 'ci-fixed-diagnostics.json').read_bytes()
     assert b'PRIVATE' not in raw and b'password' not in raw
     value = json.loads(raw)
-    assert value['schema'] == 'ci.fixed-diagnostics.v1'
+    if value['schema'] == 'ci.fixed-diagnostics.native-timing.v1':
+        assert set(value) == {'schema', 'head', 'progress', 'failures', 'truncated',
+                              'timings', 'timing_observations', 'envelope'}
+        assert type(value['timing_observations']) is int
+        assert len(value['timings']) <= value['timing_observations'] <= preflight.MAX_OBSERVATIONS
+        assert len(value['timings']) <= preflight.MAX_TIMINGS
+        assert all(set(row) == {'module', 'case', 'phase', 'seconds'} for row in value['timings'])
+    else:
+        assert value['schema'] == 'ci.fixed-diagnostics.v1'
+        assert set(value) == {'schema', 'head', 'progress', 'failures', 'truncated'}
     return value
 
 
@@ -190,8 +199,13 @@ def test_actual_native_workflow_failure_retains_rollout_fact_before_repository_p
     subprocess.run(['git', '-C', str(root), '-c', 'user.name=Fixture', '-c',
                     'user.email=fixture@example.invalid', 'commit', '-qm', 'rollout'], check=True)
     home = tmp_path / 'home'; home.mkdir(mode=0o700); env['HOME'] = str(home)
+    # The isolated HOME intentionally has no user site. Retain only this
+    # runner's already-loaded pytest dependency, not arbitrary ambient paths.
+    env['PYTHONPATH'] = str(root) + os.pathsep + str(Path(pytest.__file__).resolve().parent.parent)
     # The real job already selected Python3.12; mirror that setup for its literal python command.
-    env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
+    python_bin = tmp_path / 'python-bin'; python_bin.mkdir()
+    (python_bin / 'python').symlink_to(sys.executable)
+    env['PATH'] = str(python_bin) + os.pathsep + env.get('PATH', '')
     from scripts.ci_pytest import _WorkflowYAMLLoader
     workflow = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=_WorkflowYAMLLoader)
     command = next(s['run'] for s in workflow['jobs']['pytest_shards']['steps']
@@ -202,6 +216,7 @@ def test_actual_native_workflow_failure_retains_rollout_fact_before_repository_p
     assert result.returncode == 1
     assert (output / 'native-admission-unit/ci-fixed-diagnostics.json').exists(), result.stderr.decode()[:1200]
     assert snapshot(output, 'native-admission-unit')['failures'] == []
+    assert (output / 'native-admission-rollout/ci-fixed-diagnostics.json').exists(), (result.stdout+result.stderr).decode()[:5000]
     rows = snapshot(output, 'native-admission-rollout')['failures']
     assert len(rows) == 1 and rows[0]['module'] == ROLLOUT and rows[0]['case'] == 'test_failure'
     assert not list(home.iterdir())  # Original temp-root trap still executes.
