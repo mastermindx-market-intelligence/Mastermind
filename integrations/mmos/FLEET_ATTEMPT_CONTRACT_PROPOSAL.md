@@ -223,3 +223,20 @@ receipts and run records" and "Recent Fabric runs" (Load runs → per-run select
 3. **Adapter-state absence** (no durable store composed yet) ⇒ zero attempts,
    note `ADAPTER_STATE_EMPTY` — the desktop's ad-hoc threads are not
    adapter-minted runs and are deliberately NOT projected as attempts.
+
+## 5. Integrator decision (Fable, 2026-11-09)
+
+§2's native-bridge operation is **not applied**. `src-tauri/src/hermes_native/bridge.py`
+runs inside the installed desktop app against the Hermes install under `~/.hermes`;
+it has no Mastermind checkout on `sys.path` (it *mirrors* `team_roster_projection.py`
+rather than importing it), and the durable adapter state lives beside the Executive
+runtime (`data/control_plane/t3_adapter_state.sqlite3`), not on the Hermes host.
+The per-attempt fleet read therefore belongs on the **Workspace read route** that the
+Capacity Fabric panel already uses (`/workspace/resources/fabric/current`, #2351):
+a sibling `GET /workspace/resources/t3/attempts/<attempt_id>` composed in
+`integrations/mastermind_workspace_app/app.py` + `control_plane/workspace_read_service.py`,
+admitted in the Executive transport fence (`_WORKSPACE_ADDITIONAL_GET_ROUTES`), read by
+the OS through the existing signed HTTP read, parsed by the §1 TS mirror. Those files
+carry reviewed identity pins; the lane that lands the route moves the pins exactly and
+takes a distinct CRITICAL review. §1 (contract), §3 (where the Fleet view reads it) and
+§4 (correlation limits) stand unchanged. Delegated to Director G2.
