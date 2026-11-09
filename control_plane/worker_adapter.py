@@ -220,9 +220,26 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     # selected runtime's transport composition is a deployment act.
     # Donor: T3 Code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
     # (seams adapted, never rebuilt); delegate_task lineage is never forged.
+    # Rev 5 D1/D3 union (integration repair): the lane's implemented=True
+    # row and the shared contract's NAMED row were both present under the
+    # SAME dict key after the lane merges — Python keeps the LAST literal,
+    # which silently re-flipped the seam to implemented=False and made
+    # adapter_descriptor("t3-native") refuse to bind.  One row now carries
+    # both halves.  Capability statuses record ONLY what the live receipt
+    # exercised through the adapter (launch, incremental status read,
+    # result collection) plus exact-run cancel, which the adapter
+    # implements on the port contract (requested-vs-settled ledger) and
+    # which the proof session settled natively via t3_thread_interrupt on
+    # its stalled proof threads; resume and descendant admission stay
+    # UNKNOWN (fail-closed).  Descendant policy stays
+    # native_fanout_disabled: T3 fanout is never forged into Executive
+    # lineage.
     "t3-native": AdapterDescriptor(
         adapter_id="t3-native", implemented=True,
         implementation="control_plane.t3_execution_adapter.T3ExecutionAdapter",
+        runtime_kind="t3-native", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="SUPPORTED", status_read="SUPPORTED",
+                              collect_result="SUPPORTED", cancel="SUPPORTED"),
     ),
     # WO-18 (MMOS V1, OQ-11/OQ-7): the scoped V1 DeepSeek route's adapter
     # identity — the incumbent DeepSeek lane is OpenCodeWorkerAdapter
@@ -239,40 +256,24 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
                               collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
-    # Rev 5 D1/D3 seam, owned by the T3 integration lane: the T3 native
-    # execution adapter's descriptor.  Registered NAMED-but-NOT-IMPLEMENTED
-    # so the shared contract can reference the runtime kind now; the T3
-    # lane flips implemented=True + implementation= when
-    # T3ExecutionAdapter lands with its admission seams (D3/D4).  All
-    # capabilities UNKNOWN — upstream source capability is not
-    # installed-fleet proof (change order evidence note).
-    "t3-native": AdapterDescriptor(
-        adapter_id="t3-native", implemented=False,
-        runtime_kind="t3-native", descendant_policy="native_fanout_disabled",
-        capabilities=_cap_map(),
-    ),
     # Rev 5 D1/D5 seam, owned by the DSH integration lane: DeepSeek Harness
     # under ACP (literal args `dsh --profile acp`).  Deliberately
     # native_fanout_disabled until a real native descendant-admission hook
     # is proven (change order §3C); the DSH lane may move to
     # bounded_native_fanout ONLY with descendant_enforcement_ref set.
+    # DSH lane (D5/D2-DSH) note, folded in at integration (the lane merge
+    # had left a SECOND bare "dsh-acp" literal under the same key, which
+    # Python silently preferred and which declared no runtime kind):
+    # runtime=dsh is DISTINCT from model=deepseek; the rich descriptor in
+    # control_plane/dsh_acp_runtime.py carries the T3 Local-ACP-command
+    # provider config, probe-backed capability discovery, the
+    # evidence-chosen bounded_native_fanout policy and the narrow
+    # Executive-tools bridge seam.  Naming selects nothing and launches
+    # nothing until the full T3→DSH composition is reviewed.
     "dsh-acp": AdapterDescriptor(
         adapter_id="dsh-acp", implemented=False,
         runtime_kind="dsh-acp", descendant_policy="native_fanout_disabled",
         capabilities=_cap_map(),
-    ),
-    # Rev 5 DSH lane (D5/D2-DSH): the native DSH-beneath-T3 runtime
-    # identity — runtime=dsh, DISTINCT from model=deepseek.  The
-    # descriptor (control_plane/dsh_acp_runtime.py) carries the T3
-    # Local-ACP-command provider config, probe-backed capability
-    # discovery, the evidence-chosen bounded_native_fanout descendant
-    # policy and the narrow Executive-tools bridge seam.  Registered so
-    # the route can be NAMED; deliberately implemented=False — naming
-    # selects nothing and launches nothing until the full T3→DSH
-    # composition and confinement profile are reviewed (the WO-18
-    # opencode-free-cli discipline).
-    "dsh-acp": AdapterDescriptor(
-        adapter_id="dsh-acp", implemented=False,
     ),
 }
 

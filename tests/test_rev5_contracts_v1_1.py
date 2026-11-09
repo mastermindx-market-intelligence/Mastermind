@@ -320,7 +320,13 @@ def test_descriptor_extension_fields_are_optional_and_defaulted():
 
 def test_capability_status_is_fail_closed():
     assert capability_status("codex-cli", "cancel") == "SUPPORTED"
-    assert capability_status("t3-native", "launch") == "UNKNOWN"
+    # t3-native launch/status_read/collect_result were flipped to SUPPORTED by
+    # the recorded live receipt (integrations/t3/live_proof/); everything the
+    # receipt did NOT exercise stays UNKNOWN.
+    assert capability_status("t3-native", "launch") == "SUPPORTED"
+    assert capability_status("t3-native", "cancel") == "SUPPORTED"
+    assert capability_status("t3-native", "resume") == "UNKNOWN"
+    assert capability_status("dsh-acp", "launch") == "UNKNOWN"
     assert capability_status("hermes-native", "resume") == "UNKNOWN"
     assert capability_status("hermes-native", "descendant_admission") == "UNKNOWN"
 
@@ -354,8 +360,14 @@ def test_rev5_lane_seams_are_registered_named_not_implemented():
     for lane_id in ("t3-native", "dsh-acp"):
         descriptor = ADAPTER_DESCRIPTORS[lane_id]
         assert descriptor.runtime_kind == lane_id
-        assert not descriptor.implemented
         assert descriptor.descendant_policy in DESCENDANT_POLICIES
         assert descriptor.capabilities
-        # naming the route selects nothing and launches nothing
-        assert capability_status(lane_id, "launch") in ("UNKNOWN", "UNSUPPORTED")
+    # dsh-acp is still NAMED-not-implemented (naming selects nothing and
+    # launches nothing).  t3-native was flipped implemented=True by its lane
+    # on the recorded live receipt; that flip is pinned (with the receipt
+    # path) in tests/test_worker_adapter.py::MASTER_IMPLEMENTED_ADAPTER_IDS
+    # and stays UNSELECTED as a worker route until the incumbent runtime
+    # composes the real MCP port.
+    assert not ADAPTER_DESCRIPTORS["dsh-acp"].implemented
+    assert ADAPTER_DESCRIPTORS["t3-native"].implemented
+    assert capability_status("dsh-acp", "launch") in ("UNKNOWN", "UNSUPPORTED")
