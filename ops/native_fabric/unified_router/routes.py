@@ -40,6 +40,8 @@ class Route:
     key_pointer: str = ""          # dotted pointer to the key inside that config
     base_url_pointer: str = ""     # optional dotted pointer to the base URL
     upstream_model: tuple[tuple[str, str], ...] = ()  # public slug -> wire id
+    auth_header: str = ""          # upstream header for the raw credential (default Bearer authorization)
+    session_header: str = ""       # upstream header carrying a stable per-affinity session id
     notes: str = ""
 
     def serves(self, model: str) -> bool:

@@ -112,6 +112,8 @@ def _routes_from_document(document: dict) -> tuple[Route, ...]:
             base_url_pointer=entry.get("base_url_pointer", ""),
             upstream_model=tuple((slug, wire) for slug, wire
                                  in entry.get("upstream_model", {}).items()),
+            auth_header=entry.get("auth_header", ""),
+            session_header=entry.get("session_header", ""),
             notes=entry.get("notes", "")))
     return tuple(routes)
 
@@ -171,16 +173,39 @@ def _route_authorization(route: Route, cfg: Settings) -> str:
         token = os.environ.get(route.gateway_token_env, "")
         if not token:
             raise ValueError(f"route {route.route_id} gateway token missing")
-        return f"Bearer {token}"
+        return token
     if route.kind == "credential_pool":
         if route.env_key:
-            return f"Bearer {env_file_value(cfg.auth_store, route.env_key)}"
-        return f"Bearer {credential_pool_key(cfg.auth_store, route.pool, route.api_key_label)}"
+            return env_file_value(cfg.auth_store, route.env_key)
+        return credential_pool_key(cfg.auth_store, route.pool, route.api_key_label)
     if route.kind == "config_file":
         key, _ = config_file_route_key(route.config_path, route.key_pointer,
                                        route.base_url_pointer)
-        return f"Bearer {key}"
+        return key
     raise ValueError(f"route kind {route.kind} cannot be authorized")
+
+
+def _affinity(payload: dict) -> str | None:
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("user_id"), str):
+        return metadata["user_id"]
+    return None
+
+
+def _upstream_auth_headers(route: Route, credential: str) -> dict[str, str]:
+    """Credential headers: a named raw-key header, else Bearer authorization."""
+    if route.auth_header:
+        return {route.auth_header: credential}
+    return {"authorization": f"Bearer {credential}"}
+
+
+def _session_headers(route: Route, payload: dict) -> dict[str, str]:
+    """A stable, header-safe session id for upstreams that route by session."""
+    if not route.session_header:
+        return {}
+    raw = _affinity(payload) or "anonymous"
+    cleaned = "".join(ch for ch in raw if 33 <= ord(ch) <= 126)[:64] or "anonymous"
+    return {route.session_header: f"fabric-{cleaned}"}
 
 
 def create_app(cfg: Settings | None = None, *,
@@ -360,17 +385,12 @@ def create_app(cfg: Settings | None = None, *,
                 "type": "fabric_route_error", "route": route.route_id}},
                 status_code=502)
 
-    def _affinity(payload: dict) -> str | None:
-        metadata = payload.get("metadata")
-        if isinstance(metadata, dict) and isinstance(metadata.get("user_id"), str):
-            return metadata["user_id"]
-        return None
-
     async def _forward_anthropic_count(app, route, authorization, payload) -> Response:
         upstream: httpx.AsyncClient = app.state.upstream
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages/count_tokens",
-            headers={"authorization": authorization,
+            headers={**_upstream_auth_headers(route, authorization),
+                     **_session_headers(route, payload),
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
             content=json.dumps(payload).encode())
@@ -386,7 +406,8 @@ def create_app(cfg: Settings | None = None, *,
         upstream: httpx.AsyncClient = app.state.upstream
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages",
-            headers={"authorization": authorization,
+            headers={**_upstream_auth_headers(route, authorization),
+                     **_session_headers(route, payload),
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
             content=json.dumps(payload).encode())
@@ -434,7 +455,8 @@ def create_app(cfg: Settings | None = None, *,
                 status_code=400)
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/chat/completions",
-            headers={"authorization": authorization,
+            headers={**_upstream_auth_headers(route, authorization),
+                     **_session_headers(route, payload),
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
             content=json.dumps(openai_request).encode())

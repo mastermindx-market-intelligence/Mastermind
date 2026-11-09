@@ -481,3 +481,43 @@ async def test_openai_response_translation_failure_is_bounded_502(tmp_path):
             error = response.json()["error"]
             assert error["message"] == "translation failed: FABRIC_TRANSLATE_RESPONSE"
             assert error["type"] == "fabric_route_error"
+
+
+@run_async_test
+async def test_custom_auth_and_session_headers_reach_upstream(tmp_path):
+    """An opencode-style route: raw-key header + stable per-affinity session id."""
+    (tmp_path / ".env").write_text("OPENCODE_TEST_KEY=oc_test_0123456789abcdef\n")
+    oc_route = Route(route_id="opencode_go", kind="credential_pool",
+                     base_url="https://opencode.example/zen/go", wire="anthropic",
+                     models=("glm-5.3-flash",), priority=25,
+                     env_key="OPENCODE_TEST_KEY",
+                     auth_header="x-api-key", session_header="x-opencode-session")
+    captured = []
+
+    def handler(req):
+        captured.append((str(req.url), dict(req.headers)))
+        return httpx.Response(200, headers={"content-type": "application/json"},
+                              stream=httpx.ByteStream(json.dumps(
+                                  {"id": "m", "type": "message", "role": "assistant",
+                                   "content": [{"type": "text", "text": "ok"}],
+                                   "model": "glm-5.3-flash", "stop_reason": "end_turn",
+                                   "usage": {}}).encode()))
+
+    app = create_app(settings(tmp_path, routes=(oc_route,)),
+                     transport=httpx.MockTransport(handler))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            for user in ("user_a", "user_a", "user_b"):
+                response = await session.post(
+                    "/v1/messages", headers={"Authorization": f"Bearer {TOKEN}"},
+                    json=anthropic_body("glm-5.3-flash",
+                                        metadata={"user_id": user}))
+                assert response.status_code == 200
+    url, headers = captured[0]
+    assert url == "https://opencode.example/zen/go/v1/messages"
+    assert headers["x-api-key"] == "oc_test_0123456789abcdef"
+    assert "authorization" not in headers
+    assert headers["x-opencode-session"] == "fabric-user_a"
+    assert captured[1][1]["x-opencode-session"] == "fabric-user_a"
+    assert captured[2][1]["x-opencode-session"] == "fabric-user_b"
+    assert all("Bearer" not in headers.get("authorization", "") for _, headers in captured)
