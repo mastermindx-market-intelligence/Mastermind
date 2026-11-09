@@ -2,7 +2,7 @@
   "schema": "paper.estate.effects.v2",
   "operation": "paper-estate-organization-20261108-c1",
   "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
-  "count": 391,
+  "count": 448,
   "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay. Five post-head follow-through records are preserved by exact PR comment references. AI-worker continuation receipts use separate bounded chunks in the same evidence store.",
   "operations": [
     {
@@ -4338,6 +4338,519 @@
       "before_snapshot": "62a3656f55068ae6c6c9492469739447c90a228f61c6f8f8508f1817df54b290",
       "after_snapshot": "62a3656f55068ae6c6c9492469739447c90a228f61c6f8f8508f1817df54b290",
       "receipt_path": "effects/agent-navigation-343-391.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-header",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "62247136febd96b4ff5981a55df7b0c137156236104a41b9151388c289329d48",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-route-1",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-route-2",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-route-3",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-qualification",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-footer",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-page-first",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "fc80f1c0511f93124ffbb60490f58c8e459a32ca5f8ba92d70818cf8977be53a",
+      "after_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume24-finish",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "after_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-page",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "c73c42f46574a71628229ab905b6e8c33a821456a0dcde57d8f0a267190e45fa",
+      "after_snapshot": "8b85b4e744fabbde05e4ae3dcffa4d3af337bde7376c5a1cabd40918870b236a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-header",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "8b85b4e744fabbde05e4ae3dcffa4d3af337bde7376c5a1cabd40918870b236a",
+      "after_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-route-1",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "after_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-route-2",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "after_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-qualification",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "after_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-footer",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "after_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-page-first",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "beeb4a3ad03bc1d51fd57458d2fc5dee8f13aebd2c90a6de1df7af2a0b156b7e",
+      "after_snapshot": "8439db235a863e1f581c42386f4a8b6b6bb04a879d6dcfa5daede7e6e9873d9f",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume25-finish",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "8439db235a863e1f581c42386f4a8b6b6bb04a879d6dcfa5daede7e6e9873d9f",
+      "after_snapshot": "8439db235a863e1f581c42386f4a8b6b6bb04a879d6dcfa5daede7e6e9873d9f",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-page",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3844176050ba84ba33e4ef7107fdc774d3b95547265572dd1926244a4d735269",
+      "after_snapshot": "08efacc26d48014998e8e8a5696fabefe154b99b27a3f99c2bc73d2738911ebd",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-header",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "08efacc26d48014998e8e8a5696fabefe154b99b27a3f99c2bc73d2738911ebd",
+      "after_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-route-1",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "after_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-route-2",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "after_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-qualification",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "after_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-footer",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "after_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-page-first",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "aaf932ef8c0fb89eca7d1ee43b2c2ddc15b636383f1265c3260cd04b9334d1aa",
+      "after_snapshot": "49d6b201ce5c2e0f8835edfeb137cf2de656ceef55d906f70e8e471ad6d3da3a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume26-finish",
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "49d6b201ce5c2e0f8835edfeb137cf2de656ceef55d906f70e8e471ad6d3da3a",
+      "after_snapshot": "49d6b201ce5c2e0f8835edfeb137cf2de656ceef55d906f70e8e471ad6d3da3a",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-page",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "4d0996e2ce75f352558314b83d9de324eff59134c66c0b7a959a09ff39096d23",
+      "after_snapshot": "072f717e02bd85c481c4f1337fe2d335fa96f166bf6a34c6362458bb23c12932",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-header",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "072f717e02bd85c481c4f1337fe2d335fa96f166bf6a34c6362458bb23c12932",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-route-1",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-route-2",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-route-3",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-route-4",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-qualification",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-footer",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-page-first",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "3596b39c1f3e555a60bb96ffa8e44459ad74dbed50a0357ef9b680d4f100cf51",
+      "after_snapshot": "a53848609d22b0841f16676b44329d0e1bb70abbba385006430fc76b14169f55",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume27-finish",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "a53848609d22b0841f16676b44329d0e1bb70abbba385006430fc76b14169f55",
+      "after_snapshot": "a53848609d22b0841f16676b44329d0e1bb70abbba385006430fc76b14169f55",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-page",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7924d31b63cf36bb58e8f9e57fb655b6b734646ac90bb8477b5b95ad27967541",
+      "after_snapshot": "b656549af96cc70819f7bba9a9ae66d9eb85e6a01f9a6c939b9618aa3d758daa",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-header",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b656549af96cc70819f7bba9a9ae66d9eb85e6a01f9a6c939b9618aa3d758daa",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-route-1",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-route-2",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-route-3",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-qualification",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-footer",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-page-first",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "020d126f6eb3539383ebc612ef5e72a7d7cf36087d0c4ca668ee20e489f537a3",
+      "after_snapshot": "c63f0da4da1d35d58d29cef31b64566159f42989e2a05150330d9804a99de0d5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume28-finish",
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "c63f0da4da1d35d58d29cef31b64566159f42989e2a05150330d9804a99de0d5",
+      "after_snapshot": "c63f0da4da1d35d58d29cef31b64566159f42989e2a05150330d9804a99de0d5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-page",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "48ea99510c8fbc9a20ee2115f79756c8b3c640ba9c20585cbe9d31ef55e1f76a",
+      "after_snapshot": "f44d71cb42ed2b58a64536f080d6f8ad358f0d6d662bbdf550067d2836352193",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-header",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "f44d71cb42ed2b58a64536f080d6f8ad358f0d6d662bbdf550067d2836352193",
+      "after_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-route-1",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "after_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-qualification",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "after_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-footer",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "after_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-page-first",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b49d63dacf63cdb0bee410c22d53d611240c3a8b85ec5404ddf8fce96805c1b5",
+      "after_snapshot": "afce6b9e4fd037f1d9697010691f4c95fa970a739a1960406b020a124d9a8e70",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-resume29-finish",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "afce6b9e4fd037f1d9697010691f4c95fa970a739a1960406b020a124d9a8e70",
+      "after_snapshot": "afce6b9e4fd037f1d9697010691f4c95fa970a739a1960406b020a124d9a8e70",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-1",
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5bf691f7884df075b0683af65dc95b3ff2b0692a02888678a32b46d2f79b560f",
+      "after_snapshot": "5bf691f7884df075b0683af65dc95b3ff2b0692a02888678a32b46d2f79b560f",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-1-finish",
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5bf691f7884df075b0683af65dc95b3ff2b0692a02888678a32b46d2f79b560f",
+      "after_snapshot": "5bf691f7884df075b0683af65dc95b3ff2b0692a02888678a32b46d2f79b560f",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-2",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "after_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-intraday-route-names",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "after_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-2-finish",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "after_snapshot": "5d7d7da937379fe537645758ffbf83791d3a3b6cdfb6d2f39a680bdfe063bf67",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-3",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "after_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-probe-repair-3-finish",
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "after_snapshot": "ba90e4747552279356e0fbb345f187b2310b9bb35dd2f45c2712e5d7ca8673ec",
+      "receipt_path": "effects/agent-navigation-resume-01.json"
     }
   ]
 }

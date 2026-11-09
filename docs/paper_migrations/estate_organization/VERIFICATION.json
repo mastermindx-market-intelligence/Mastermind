@@ -330,5 +330,27 @@
       "repair": "normalize PAGES.md to exactly one final newline; content and Paper effects unchanged",
       "repair_qualification": "no trailing whitespace and no blank line at EOF; hosted current-head result still required"
     }
+  },
+  "agent_navigation_continuation": {
+    "observed_at": "2026-11-09T12:39:16.066Z",
+    "source_parent": "da1fb24c66375924dd5dd7ad6a65a7abfb0739de",
+    "guide_count": 29,
+    "planned": 50,
+    "validation": {
+      "passed": true,
+      "failures": [],
+      "files": 83,
+      "routes": 196,
+      "guides": 29
+    },
+    "own_operation_count": 57,
+    "guide_evidence": "effects/agent-navigation-resume-verification.json",
+    "recovered_evidence": "effects/agent-navigation-resume-recovery.json",
+    "consumer_repairs": true,
+    "limits": [
+      "Guide proof is not product or implementation acceptance",
+      "Pre-existing complete guides are observed content, not invented original effect receipts",
+      "Metadata snapshot is non-atomic across active writers"
+    ]
   }
 }

@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T12:03:37.574Z. 575 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T12:39:16.058Z. 593 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
@@ -268,13 +268,13 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## Intelligence Hub · R4 Workspace · 01M2VWK62FA5S4VVF6G7SBPE5J
 
-Role: working_design. US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.
+Role: working_design. US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-1-0` | [00 · Start here · Hub design map](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | — |
+| `p-1-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | 00 · Start here · Hub design map |
 | `p-2-0` | [00B · R4 contracts + Navigation](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0) | — |
 | `p-3-0` | [01 · Hub · Desktop Commands + Evidence](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0) | — |
 | `p-4-0` | [02 · Hub · Mobile Commands + Evidence](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-4-0) | — |
@@ -289,33 +289,42 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## Intraday Flow · R1 Draft · 01M6Y2QK8TQZRN8T4BHG10CJXT
 
-Role: proposal. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
+Role: proposal. PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-2-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0) | — |
 | `p-1-0` | [Intraday Flow · R1 · Discovery workspace · DRAFT](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) | — |
 
 ## Market Breadth · Command Center R1 · 01M6Y3CRMC345RTB3ZDP3XSYRP
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-9-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-1-0` | [Market Breadth · Command Center · R1 · 2026-09-29](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0) | — |
-| `p-2-0` | [02 · Session evidence · Interaction & build](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-2-0) | — |
+| `p-9-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-9-0) | — |
+| `p-1-0` | [01 · Product · Breadth overview](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0) | Market Breadth · Command Center · R1 · 2026-09-29 |
+| `p-4-0` | [02A · Session choice & explanations](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-4-0) | — |
+| `p-5-0` | [02B · Evidence · Desktop](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-5-0) | — |
+| `p-6-0` | [02C · Evidence · Mobile](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-6-0) | — |
+| `p-8-0` | [02D · Full breadth analysis · Mobile](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-8-0) | — |
+| `p-2-0` | [03A · Build · Source & interaction](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-2-0) | 02 · Session evidence · Interaction & build |
+| `p-7-0` | [03B · Build · Session states](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-7-0) | — |
+| `p-3-0` | [90 · Retained R1 overview · Reference](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-3-0) | — |
 
 ## Market Ontology · Research & Evidence · 01M3P1X4FR6BRTB13KA736Y1HT
 
-Role: working_design. Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.
+Role: working_design. WTI overview: p-1-0 / 44L-0 desktop and 4F5-0 mobile. Answer/evidence recovery: p-1-0 / 4SA-0; qualified answer text is node 4T3-0, not an artboard. Preserve R22 scope at 3VC-0. Portfolio causal overlays remain owner-gated; company bridge p-5-0 / HL-0 remains NOT FOR BUILD. Design references do not establish live causal or portfolio acceptance.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-9-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-9-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-9-0) | — |
 | `p-1-0` | [00 · Start here · WTI journey + Scope](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) | — |
 | `p-2-0` | [01 · Answers, Context + Evidence](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-2-0) | — |
 | `p-3-0` | [02 · Thesis Changes + Receipts](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-3-0) | — |
@@ -329,10 +338,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: proposal. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-3-0) | — |
 | `p-1-0` | [DRAFT · T47 · Ranked snapshot search · 2026-11-04](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) | — |
 | `p-2-0` | [Build · No-match visibility](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-2-0) | — |
 
@@ -394,10 +404,11 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6FAXA774QT1VR
 
 Role: recorded_contract, retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-3-0) | — |
 | `p-1-0` | [BioCatalyst · Builder & Acceptance Contracts](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0) | — |
 | `p-2-0` | [BioCatalyst · North Star + Build Blueprint · 2026-09-26](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-2-0) | — |
 
@@ -405,11 +416,14 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0) | — |
 | `p-1-0` | [Catalyst Intelligence · Decision Desk · R1 · 2026-10-18](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0) | — |
+| `p-7-0` | [02A · Review · Case, evidence & conditions](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-7-0) | — |
+| `p-6-0` | [01 · Product · Catalyst review desk](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-6-0) | — |
 | `p-4-0` | [R2 · Manual review condition flow](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-4-0) | — |
 | `p-3-0` | [Proposed · Selected case and filters](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-3-0) | — |
 | `p-2-0` | [Catalyst-to-Opportunity · Source-bound integration · 2026-10-17](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-2-0) | — |
@@ -418,10 +432,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-4-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-4-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-4-0) | — |
 | `p-1-0` | [00 · Start · Estimate revisions](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) | — |
 | `p-3-0` | [01 · Study · Coverage + methods](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-3-0) | — |
 | `p-2-0` | [02 · Build · States + implementation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | — |
@@ -430,12 +445,15 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: recorded_contract, retained_reference. Read the existing in-file crosswalk and source qualifications. Stock setup/action is the front door; catalyst evidence provides context. Retain dated R5/Blueprint and R11-state distinctions; titles do not establish a current replacement.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-5-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-1-0` | [Gov Revenue · Builder Contracts & State Specimens](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0) | — |
-| `p-2-0` | [Gov Revenue · Signal Desk · R5 · 2026-09-26](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-2-0) | — |
+| `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-5-0) | — |
+| `p-2-0` | [01 · Product · Signals & funding](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-2-0) | Gov Revenue · Signal Desk · R5 · 2026-09-26 |
+| `p-3-0` | [02A · States · Prepared, saved & degraded](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-3-0) | — |
+| `p-4-0` | [02B · Components · Funding & watches](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-4-0) | — |
+| `p-1-0` | [03 · Build · Routes & source contracts](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0) | Gov Revenue · Builder Contracts & State Specimens |
 
 ## Market Memory · Evidence Workspace R1 · 01M6Y2V2M0J28M2PYAHWZ8SB98
 
@@ -1187,7 +1205,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Empty · Jolly vase · Removal candidate · 01M5HDPF3HSZFJJAFMARVQSHZR
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1197,7 +1215,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Copy-link identity · Empty clone · 2026-10-22 · 01M5K3WQXMD1QKXM2SBD7VABW1
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1207,7 +1225,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Delete regression · Empty clone · 2026-10-22 · 01M5JV8SY6WP21H72WKK7GJ5R6
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1248,7 +1266,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Native clone fidelity · Empty clone · 01M5HQ8VMMY87NVDENZAGJNYKM
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1269,7 +1287,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Page lifecycle · Empty clone · 01M5JS8TNZKQ01SJS4D0S9VQFC
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1279,7 +1297,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Page lifecycle · Empty source · 01M5JRN1HWF62YK527NKCY7WD5
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1300,7 +1318,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## 90 · Test · Row guard · Empty clone · 2026-10-22 · 01M5K0V5AGPSDXKA2K1PH1ABNE
 
-Role: . All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
+Role: empty_technical_candidate. All pages inspected for emptiness/specimen content; see TEST_CLEANUP.json.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1320,7 +1338,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 ## Others · 01M3NSWX6SGTY4Z5DKBN4YP60M
 
-Role: . Listed as file but exact-file read fails and parent listing exposes Design System, Dashboard and archived collection. Container metadata conflict remains unresolved.
+Role: container. Listed as file but exact-file read fails and parent listing exposes Design System, Dashboard and archived collection. Container metadata conflict remains unresolved.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1328,7 +1346,7 @@ No readable design page list is assigned to this container record.
 
 ## Projects · 01M2VVZT0YA4WK46WT5VD72YTQ
 
-Role: . Existing root container; no move or new folder hierarchy introduced.
+Role: container. Existing root container; no move or new folder hierarchy introduced.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 
@@ -1336,7 +1354,7 @@ No readable design page list is assigned to this container record.
 
 ## Untitled project · 01M3NSTSZ248TQSMQQR62DC06J
 
-Role: . Already archived folder. Fresh includeArchived child listing returned zero resources; physical disposal remains blocked.
+Role: container. Already archived folder. Fresh includeArchived child listing returned zero resources; physical disposal remains blocked.
 
 Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
 

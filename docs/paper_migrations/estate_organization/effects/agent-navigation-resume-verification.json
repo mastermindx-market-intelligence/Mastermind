@@ -1,0 +1,132 @@
+{
+  "schema": "paper.estate.guide_verification.v1",
+  "observed_at": "2026-11-09T12:39:16.071Z",
+  "validation": {
+    "passed": true,
+    "failures": [],
+    "files": 83,
+    "routes": 196,
+    "guides": 29
+  },
+  "guide_verifications": [
+    {
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "page_id": "p-9-0",
+      "node_id": "BDU-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:27:56.097Z",
+      "original_page_ids_preserved": true
+    },
+    {
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "page_id": "p-3-0",
+      "node_id": "13I-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:29:49.157Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "page_id": "p-3-0",
+      "node_id": "2BK-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:30:54.760Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "page_id": "p-5-0",
+      "node_id": "1JR-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:31:35.639Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "page_id": "p-4-0",
+      "node_id": "4HO-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:32:13.758Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "page_id": "p-5-0",
+      "node_id": "44J-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:32:37.327Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    }
+  ],
+  "navigation_corrections": {
+    "observed_at": "2026-11-09T12:36:11.597Z",
+    "hub_missing_reference": "AP-0 not found in addressed Hub file; preserved explicitly unresolved.",
+    "intraday_old_routes": [
+      {
+        "task": "LEARN",
+        "question": "Existing scope entry; inspect its named product/contract boards",
+        "target": {
+          "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+          "page_id": "p-1-0",
+          "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
+        },
+        "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+        "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+      },
+      {
+        "task": "SOURCE_SELECTION",
+        "question": "Read applicable family source; no current build selection is inferred here",
+        "target": {
+          "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "page_id": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+        },
+        "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+        "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+      }
+    ],
+    "ontology_node_type": "4T3-0 is Text inside artboard 4SA-0."
+  },
+  "navigation_corrections_verified": true
+}

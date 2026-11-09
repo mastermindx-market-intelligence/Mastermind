@@ -7,7 +7,7 @@
   "counts": {
     "resources": 83,
     "readable_design_files": 80,
-    "pages": 575,
+    "pages": 593,
     "dividers": 19
   },
   "entry_url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
@@ -71,7 +71,8 @@
         },
         {
           "type": "divider",
-          "id": "p-7-0"
+          "id": "p-7-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-7-0"
         },
         {
           "type": "page",
@@ -99,7 +100,8 @@
         },
         {
           "type": "divider",
-          "id": "p-A-0"
+          "id": "p-A-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-A-0"
         },
         {
           "type": "page",
@@ -1000,7 +1002,8 @@
         },
         {
           "type": "divider",
-          "id": "p-7-0"
+          "id": "p-7-0",
+          "url": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-7-0"
         },
         {
           "type": "page",
@@ -1186,7 +1189,8 @@
         },
         {
           "type": "divider",
-          "id": "p-A-0"
+          "id": "p-A-0",
+          "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-A-0"
         },
         {
           "type": "page",
@@ -2247,7 +2251,7 @@
         {
           "type": "page",
           "id": "p-1-0",
-          "name": "00 · Start here · Hub design map",
+          "name": "00 · AGENT README · Scope & routes",
           "icon": "arrow",
           "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0",
           "baseline_name": "00 · Start here · Hub design map"
@@ -2337,7 +2341,7 @@
           "baseline_name": "99 · Hub · Transfer QA + Held"
         }
       ],
-      "retention_note": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+      "retention_note": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -2345,14 +2349,17 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+        "page_id": "p-1-0",
+        "board_id": "5E9-0",
+        "node_id": "8MN-0",
+        "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0",
+        "kind": "reused_guidance_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -2363,7 +2370,7 @@
       "read_next": [
         {
           "task": "LEARN",
-          "question": "Scope and market destinations",
+          "question": "Read the original workspace directory below this guide, then p-2-0 for R4 contracts",
           "target": {
             "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
             "page_id": "p-1-0",
@@ -2372,7 +2379,7 @@
             ],
             "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0"
           },
-          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "qualification": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -2381,9 +2388,15 @@
           "target": {
             "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
             "page_id": "p-2-0",
-            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0"
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0",
+            "board_ids": [
+              "17-0",
+              "2P-0",
+              "54-0",
+              "6S-0"
+            ]
           },
-          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "qualification": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -2392,20 +2405,28 @@
           "target": {
             "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
             "page_id": "p-C-0",
-            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-C-0"
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-C-0",
+            "board_ids": [
+              "7FE-0"
+            ]
           },
-          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "qualification": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
           "task": "DESKTOP",
-          "question": "Select actual desktop product boards",
+          "question": "US product node 73Q-0 inside 7FJ-0; China KE-0; compare 10M-0",
           "target": {
             "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
             "page_id": "p-3-0",
-            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0"
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0",
+            "board_ids": [
+              "7FJ-0",
+              "KE-0",
+              "10M-0"
+            ]
           },
-          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "qualification": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -2416,18 +2437,19 @@
             "page_id": "p-4-0",
             "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-4-0"
           },
-          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "qualification": "US Buy-Board and China Stocks Board are distinct destinations. AXON p-7-0 / 157-0 is an empty held frame, NOT FOR BUILD. The former AP-0 action reference is unresolved in this file; preserve the evidence-unavailable behavior and do not construct a working destination from the empty frame. Source-only imports, canaries and held transfer pages are excluded from product extraction. The research-list supplement 7XY-0 on p-2-0 remains provisional.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "reuse_guidance_page",
         "operation_prefix": "peo-20261109-c1-local-21",
         "page_id": "p-1-0",
         "board_id": "5E9-0",
         "dark": false
-      }
+      },
+      "guide_recovery_evidence": "effects/agent-navigation-resume-recovery.json"
     },
     {
       "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
@@ -2442,9 +2464,18 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 1,
+      "page_count": 2,
       "divider_count": 0,
       "pages": [
+        {
+          "page_id": "p-2-0",
+          "name": "00 · AGENT README · Read first",
+          "role": "guide",
+          "type": "page",
+          "id": "p-2-0",
+          "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0",
+          "icon": "arrow"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -2454,7 +2485,7 @@
           "baseline_name": "Intraday Flow · R1 · Discovery workspace · DRAFT"
         }
       ],
-      "retention_note": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+      "retention_note": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -2464,14 +2495,17 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "page_id": "p-2-0",
+        "board_id": "I6-0",
+        "node_id": "I6-0",
+        "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
@@ -2481,34 +2515,41 @@
       },
       "read_next": [
         {
-          "task": "LEARN",
-          "question": "Existing scope entry; inspect its named product/contract boards",
+          "task": "DRAFT_SCAN",
+          "question": "R1 desktop EN scan; inspect the same page for mobile and ZH variants",
           "target": {
             "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
             "page_id": "p-1-0",
+            "board_ids": [
+              "1-0"
+            ],
             "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
+          "evidence_basis": "Fresh exact node/page read and consumer navigation probe; no adoption inferred."
         },
         {
-          "task": "SOURCE_SELECTION",
-          "question": "Read applicable family source; no current build selection is inferred here",
+          "task": "DRAFT_EVIDENCE",
+          "question": "R4 recorded-evidence treatment; accepted implementation source remains unresolved",
           "target": {
-            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-            "page_id": "p-6-0",
-            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+            "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "FE-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
+          "evidence_basis": "Fresh exact node/page read and consumer navigation probe; no adoption inferred."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-22",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "guide_recovery_evidence": "effects/agent-navigation-resume-recovery.json"
     },
     {
       "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
@@ -2523,24 +2564,87 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 9,
       "divider_count": 0,
       "pages": [
         {
+          "page_id": "p-9-0",
+          "name": "00 · AGENT README · Read first",
+          "role": "guide",
+          "type": "page",
+          "id": "p-9-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-9-0",
+          "icon": "arrow"
+        },
+        {
           "type": "page",
           "id": "p-1-0",
-          "name": "Market Breadth · Command Center · R1 · 2026-09-29",
+          "name": "01 · Product · Breadth overview",
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0",
           "baseline_name": "Market Breadth · Command Center · R1 · 2026-09-29"
         },
         {
+          "page_id": "p-4-0",
+          "name": "02A · Session choice & explanations",
+          "role": "guide",
+          "type": "page",
+          "id": "p-4-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-4-0",
+          "icon": "info"
+        },
+        {
+          "page_id": "p-5-0",
+          "name": "02B · Evidence · Desktop",
+          "role": "guide",
+          "type": "page",
+          "id": "p-5-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-5-0",
+          "icon": "design"
+        },
+        {
+          "page_id": "p-6-0",
+          "name": "02C · Evidence · Mobile",
+          "role": "guide",
+          "type": "page",
+          "id": "p-6-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-6-0",
+          "icon": "design"
+        },
+        {
+          "page_id": "p-8-0",
+          "name": "02D · Full breadth analysis · Mobile",
+          "role": "guide",
+          "type": "page",
+          "id": "p-8-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-8-0",
+          "icon": "line-chart"
+        },
+        {
           "type": "page",
           "id": "p-2-0",
-          "name": "02 · Session evidence · Interaction & build",
+          "name": "03A · Build · Source & interaction",
           "icon": "blueprint",
           "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-2-0",
           "baseline_name": "02 · Session evidence · Interaction & build"
+        },
+        {
+          "page_id": "p-7-0",
+          "name": "03B · Build · Session states",
+          "role": "guide",
+          "type": "page",
+          "id": "p-7-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-7-0",
+          "icon": "blueprint"
+        },
+        {
+          "page_id": "p-3-0",
+          "name": "90 · Retained R1 overview · Reference",
+          "role": "guide",
+          "type": "page",
+          "id": "p-3-0",
+          "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-3-0",
+          "icon": "paper"
         }
       ],
       "retention_note": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
@@ -2553,14 +2657,17 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+        "page_id": "p-9-0",
+        "board_id": "4RX-0",
+        "node_id": "4RX-0",
+        "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-9-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
@@ -2592,12 +2699,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-23",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "guide_recovery_evidence": "effects/agent-navigation-resume-recovery.json"
     },
     {
       "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -2612,32 +2720,36 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 7,
+      "page_count": 8,
       "divider_count": 1,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-9-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-9-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
           "name": "00 · Start here · WTI journey + Scope",
           "icon": "arrow",
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0",
-          "baseline_name": "00 · Start here · WTI journey + Scope"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0"
         },
         {
           "type": "page",
           "id": "p-2-0",
           "name": "01 · Answers, Context + Evidence",
           "icon": null,
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-2-0",
-          "baseline_name": "01 · Answers, Context + Evidence"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-2-0"
         },
         {
           "type": "page",
           "id": "p-3-0",
           "name": "02 · Thesis Changes + Receipts",
           "icon": null,
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-3-0",
-          "baseline_name": "02 · Thesis Changes + Receipts"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-3-0"
         },
         {
           "type": "divider",
@@ -2648,35 +2760,31 @@
           "id": "p-4-0",
           "name": "03 · Retained Shared Shell · Company Comparison + Evidence",
           "icon": null,
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-4-0",
-          "baseline_name": "03 · Retained Shared Shell · Company Comparison + Evidence"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-4-0"
         },
         {
           "type": "page",
           "id": "p-8-0",
           "name": "Build · Clarity & receipt contracts",
           "icon": "blueprint",
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-8-0",
-          "baseline_name": "Build · Clarity & receipt contracts"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-8-0"
         },
         {
           "type": "page",
           "id": "p-6-0",
           "name": "04 · Implementation + Visual Engine · References",
           "icon": null,
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-6-0",
-          "baseline_name": "04 · Implementation + Visual Engine · References"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-6-0"
         },
         {
           "type": "page",
           "id": "p-5-0",
           "name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
           "icon": null,
-          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-5-0",
-          "baseline_name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build"
+          "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-5-0"
         }
       ],
-      "retention_note": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+      "retention_note": "WTI overview: p-1-0 / 44L-0 desktop and 4F5-0 mobile. Answer/evidence recovery: p-1-0 / 4SA-0; qualified answer text is node 4T3-0, not an artboard. Preserve R22 scope at 3VC-0. Portfolio causal overlays remain owner-gated; company bridge p-5-0 / HL-0 remains NOT FOR BUILD. Design references do not establish live causal or portfolio acceptance.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -2686,14 +2794,17 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+        "page_id": "p-9-0",
+        "board_id": "BDU-0",
+        "node_id": "BDU-0",
+        "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-9-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -2704,13 +2815,19 @@
       "read_next": [
         {
           "task": "LEARN",
-          "question": "Existing scope entry; inspect its named product/contract boards",
+          "question": "WTI scope map U2-0; desktop 44L-0; mobile 4F5-0; evidence recovery 4SA-0",
           "target": {
             "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0"
+            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0",
+            "board_ids": [
+              "U2-0",
+              "44L-0",
+              "4F5-0",
+              "4SA-0"
+            ]
           },
-          "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+          "qualification": "WTI overview: p-1-0 / 44L-0 desktop and 4F5-0 mobile. Answer/evidence recovery: p-1-0 / 4SA-0; qualified answer text is node 4T3-0, not an artboard. Preserve R22 scope at 3VC-0. Portfolio causal overlays remain owner-gated; company bridge p-5-0 / HL-0 remains NOT FOR BUILD. Design references do not establish live causal or portfolio acceptance.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -2721,7 +2838,7 @@
             "page_id": "p-8-0",
             "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-8-0"
           },
-          "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+          "qualification": "WTI overview: p-1-0 / 44L-0 desktop and 4F5-0 mobile. Answer/evidence recovery: p-1-0 / 4SA-0; qualified answer text is node 4T3-0, not an artboard. Preserve R22 scope at 3VC-0. Portfolio causal overlays remain owner-gated; company bridge p-5-0 / HL-0 remains NOT FOR BUILD. Design references do not establish live causal or portfolio acceptance.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -2732,15 +2849,16 @@
             "page_id": "p-6-0",
             "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-6-0"
           },
-          "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+          "qualification": "WTI overview: p-1-0 / 44L-0 desktop and 4F5-0 mobile. Answer/evidence recovery: p-1-0 / 4SA-0; qualified answer text is node 4T3-0, not an artboard. Preserve R22 scope at 3VC-0. Portfolio causal overlays remain owner-gated; company bridge p-5-0 / HL-0 remains NOT FOR BUILD. Design references do not establish live causal or portfolio acceptance.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-24",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-9-0"
       }
     },
     {
@@ -2756,9 +2874,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -2786,14 +2911,17 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+        "page_id": "p-3-0",
+        "board_id": "13I-0",
+        "node_id": "13I-0",
+        "url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
@@ -2825,11 +2953,12 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-25",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-3-0"
       }
     },
     {
@@ -3202,7 +3331,8 @@
         },
         {
           "type": "divider",
-          "id": "p-A-0"
+          "id": "p-A-0",
+          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-A-0"
         },
         {
           "type": "page",
@@ -3354,9 +3484,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -3385,14 +3522,17 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+        "page_id": "p-3-0",
+        "board_id": "2BK-0",
+        "node_id": "2BK-0",
+        "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
@@ -3424,11 +3564,12 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-26",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-3-0"
       }
     },
     {
@@ -3444,9 +3585,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 4,
+      "page_count": 7,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -3454,6 +3602,20 @@
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
           "baseline_name": "Catalyst Intelligence · Decision Desk · R1 · 2026-10-18"
+        },
+        {
+          "type": "page",
+          "id": "p-7-0",
+          "name": "02A · Review · Case, evidence & conditions",
+          "icon": "info",
+          "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-7-0"
+        },
+        {
+          "type": "page",
+          "id": "p-6-0",
+          "name": "01 · Product · Catalyst review desk",
+          "icon": "design",
+          "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-6-0"
         },
         {
           "type": "page",
@@ -3490,14 +3652,17 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+        "page_id": "p-5-0",
+        "board_id": "1JR-0",
+        "node_id": "1JR-0",
+        "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
@@ -3551,11 +3716,12 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-27",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-5-0"
       }
     },
     {
@@ -3571,9 +3737,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 3,
+      "page_count": 4,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-4-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-4-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -3607,14 +3780,17 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+        "page_id": "p-4-0",
+        "board_id": "4HO-0",
+        "node_id": "4HO-0",
+        "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-4-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
@@ -3657,11 +3833,12 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-28",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-4-0"
       }
     },
     {
@@ -3677,24 +3854,51 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
         {
           "type": "page",
-          "id": "p-1-0",
-          "name": "Gov Revenue · Builder Contracts & State Specimens",
-          "icon": "design",
-          "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
-          "baseline_name": "Gov Revenue · Builder Contracts & State Specimens"
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-5-0"
         },
         {
           "type": "page",
           "id": "p-2-0",
-          "name": "Gov Revenue · Signal Desk · R5 · 2026-09-26",
+          "name": "01 · Product · Signals & funding",
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-2-0",
-          "baseline_name": "Gov Revenue · Signal Desk · R5 · 2026-09-26"
+          "baseline_name": "Gov Revenue · Signal Desk · R5 · 2026-09-26",
+          "aliases": [
+            "Gov Revenue · Signal Desk · R5 · 2026-09-26"
+          ]
+        },
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "02A · States · Prepared, saved & degraded",
+          "icon": "info",
+          "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-3-0"
+        },
+        {
+          "type": "page",
+          "id": "p-4-0",
+          "name": "02B · Components · Funding & watches",
+          "icon": "vector",
+          "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-4-0"
+        },
+        {
+          "type": "page",
+          "id": "p-1-0",
+          "name": "03 · Build · Routes & source contracts",
+          "icon": "blueprint",
+          "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
+          "baseline_name": "Gov Revenue · Builder Contracts & State Specimens",
+          "aliases": [
+            "Gov Revenue · Builder Contracts & State Specimens"
+          ]
         }
       ],
       "retention_note": "Read the existing in-file crosswalk and source qualifications. Stock setup/action is the front door; catalyst evidence provides context. Retain dated R5/Blueprint and R11-state distinctions; titles do not establish a current replacement.",
@@ -3708,14 +3912,17 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3397SE03G626MJ72N90PF",
+        "page_id": "p-5-0",
+        "board_id": "44J-0",
+        "node_id": "44J-0",
+        "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3397SE03G626MJ72N90PF",
@@ -3736,11 +3943,12 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-29",
-        "page_name": "00 · AGENT README · Read first"
+        "page_name": "00 · AGENT README · Read first",
+        "page_id": "p-5-0"
       }
     },
     {
@@ -5482,7 +5690,8 @@
         },
         {
           "type": "divider",
-          "id": "p-7-0"
+          "id": "p-7-0",
+          "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-7-0"
         },
         {
           "type": "page",
@@ -6800,7 +7009,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1G-0"
+          "id": "p-1G-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1G-0"
         },
         {
           "type": "page",
@@ -6836,7 +7046,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1H-0"
+          "id": "p-1H-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1H-0"
         },
         {
           "type": "page",
@@ -6880,7 +7091,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1I-0"
+          "id": "p-1I-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1I-0"
         },
         {
           "type": "page",
@@ -6980,7 +7192,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1J-0"
+          "id": "p-1J-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1J-0"
         },
         {
           "type": "page",
@@ -7048,7 +7261,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1K-0"
+          "id": "p-1K-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1K-0"
         },
         {
           "type": "page",
@@ -7124,7 +7338,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1L-0"
+          "id": "p-1L-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1L-0"
         },
         {
           "type": "page",
@@ -7168,7 +7383,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1M-0"
+          "id": "p-1M-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1M-0"
         },
         {
           "type": "page",
@@ -7220,7 +7436,8 @@
         },
         {
           "type": "divider",
-          "id": "p-1N-0"
+          "id": "p-1N-0",
+          "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1N-0"
         },
         {
           "type": "page",
@@ -7956,7 +8173,8 @@
         },
         {
           "type": "divider",
-          "id": "p-A-0"
+          "id": "p-A-0",
+          "url": "https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-A-0"
         },
         {
           "type": "page",
@@ -8219,7 +8437,8 @@
         },
         {
           "type": "divider",
-          "id": "p-L-0"
+          "id": "p-L-0",
+          "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-L-0"
         },
         {
           "type": "page",
@@ -8247,7 +8466,8 @@
         },
         {
           "type": "divider",
-          "id": "p-M-0"
+          "id": "p-M-0",
+          "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-M-0"
         },
         {
           "type": "page",
@@ -11026,7 +11246,7 @@
     }
   ],
   "observed_at": "2026-11-09 11:03:44 UTC",
-  "organization_verified_at": "2026-11-09T12:03:37.574Z",
+  "organization_verified_at": "2026-11-09T12:39:16.058Z",
   "agent_navigation": {
     "schema": "paper.estate.agent_navigation.v1",
     "protocol": {
@@ -11039,9 +11259,11 @@
     "roles_are_navigation_not_permissions": true,
     "source_acceptance_not_refreshed_by_metadata": true,
     "product_extraction": "Agent guides and navigation-only boards are internal documentation. Select exact product boards after scope/source inspection.",
-    "rollout": "20/50 local guides verified; central protocol applied.",
+    "rollout": "29/50 local guides verified; central protocol applied.",
     "source_record": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6738066883",
-    "local_guides_verified": 20,
-    "local_guides_planned": 50
+    "local_guides_verified": 29,
+    "local_guides_planned": 50,
+    "continuation_source_pin": "9e6659c4a49ee6f11a6f6ee690d222ce81d67b09",
+    "continuation_macro_pin": "cf07e7a73334c646a09c043647c43e43ee6e4060"
   }
 }
