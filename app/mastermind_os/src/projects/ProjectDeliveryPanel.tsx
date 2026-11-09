@@ -16,7 +16,8 @@ const STRINGS = {
   en: {
     heading: "Team delivery",
     outcomeEyebrow: "NEXT OUTCOME",
-    outcomeUnavailable: "The next outcome has not been read from the project source.",
+    outcomeUnavailable:
+      "The next outcome has not been read from the project source.",
     codingHeading: "Coding now",
     noTask: "No delegated coding task is projected for this project yet.",
     trailHeading: "Delivery trail",
@@ -39,7 +40,15 @@ const STRINGS = {
   },
 };
 
-export function ProjectDeliveryPanel({ locale = "en", objective, owner, delegatedTask, trail, onOpenCode, onOpenPlan }: {
+export function ProjectDeliveryPanel({
+  locale = "en",
+  objective,
+  owner,
+  delegatedTask,
+  trail,
+  onOpenCode,
+  onOpenPlan,
+}: {
   locale?: "en" | "zh-CN";
   /** Objective text from the existing project plan source; null = not read. */
   objective: string | null;
@@ -54,25 +63,48 @@ export function ProjectDeliveryPanel({ locale = "en", objective, owner, delegate
     <div className="mm-delivery">
       <div className="card mm-delivery-outcome">
         <p className="mm-eyebrow">{t.outcomeEyebrow}</p>
-        {objective !== null
-          ? <h3 className="mm-delivery-objective">{objective}</h3>
-          : <p className="muted">{t.outcomeUnavailable}</p>}
+        {objective !== null ? (
+          <h3 className="mm-delivery-objective">{objective}</h3>
+        ) : (
+          <p className="muted">{t.outcomeUnavailable}</p>
+        )}
         {owner ? <p className="muted">{t.ownerNote(owner)}</p> : null}
-        {onOpenPlan ? <button type="button" className="mm-delivery-open-plan" onClick={onOpenPlan}>{t.openProject}</button> : null}
+        {onOpenPlan ? (
+          <button
+            type="button"
+            className="mm-delivery-open-plan"
+            onClick={onOpenPlan}
+          >
+            {t.openProject}
+          </button>
+        ) : null}
       </div>
       <section className="mm-delivery-coding">
         <h3>{t.codingHeading}</h3>
-        {delegatedTask !== null
-          ? <DelegatedTaskCard task={delegatedTask} locale={locale} onOpenCode={onOpenCode} />
-          : <p className="muted">{t.noTask}</p>}
+        {delegatedTask !== null ? (
+          <DelegatedTaskCard
+            task={delegatedTask}
+            locale={locale}
+            onOpenCode={onOpenCode}
+          />
+        ) : (
+          <p className="muted">{t.noTask}</p>
+        )}
       </section>
       <section className="mm-delivery-trail-section">
         <h3>{t.trailHeading}</h3>
         <ul className="mm-delivery-trail">
-          {trail.map(step => (
+          {trail.map((step) => (
             <li key={step.key}>
               <span className="mm-trail-step">{step.step}</span>
-              <span className="mm-trail-label" data-state={step.state === "pending" || step.state === "unknown" ? "pending" : "done"}>
+              <span
+                className="mm-trail-label"
+                data-state={
+                  step.state === "pending" || step.state === "unknown"
+                    ? "pending"
+                    : "done"
+                }
+              >
                 {step.state === "unknown" ? t.trailUnknown : step.label}
               </span>
             </li>

@@ -45,15 +45,25 @@ function invalid(reason: string): never {
   throw new Error(reason);
 }
 
-function record(value: unknown, allowed: readonly string[], required: readonly string[]): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) invalid("TEAM_ROSTER_INVALID");
+function record(
+  value: unknown,
+  allowed: readonly string[],
+  required: readonly string[],
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    invalid("TEAM_ROSTER_INVALID");
   const object = value as Record<string, unknown>;
-  if (Object.keys(object).some(key => !allowed.includes(key)) || required.some(key => !(key in object))) invalid("TEAM_ROSTER_INVALID");
+  if (
+    Object.keys(object).some((key) => !allowed.includes(key)) ||
+    required.some((key) => !(key in object))
+  )
+    invalid("TEAM_ROSTER_INVALID");
   return object;
 }
 
 function text(value: unknown, maximum: number): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum) invalid("TEAM_ROSTER_INVALID");
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum)
+    invalid("TEAM_ROSTER_INVALID");
   return value;
 }
 
@@ -62,7 +72,18 @@ function optionalText(value: unknown, maximum: number): string | null {
 }
 
 function botEntry(value: unknown): TeamRosterEntry {
-  const required = ["botId", "displayName", "role", "profile", "gatewayInstance", "host", "readiness", "readinessReason", "lastActivity", "activitySummary"];
+  const required = [
+    "botId",
+    "displayName",
+    "role",
+    "profile",
+    "gatewayInstance",
+    "host",
+    "readiness",
+    "readinessReason",
+    "lastActivity",
+    "activitySummary",
+  ];
   const row = record(value, required, required);
   const botId = text(row.botId, 128);
   if (BOT_ID.exec(botId)?.[0] !== botId) invalid("TEAM_ROSTER_INVALID");
@@ -71,10 +92,13 @@ function botEntry(value: unknown): TeamRosterEntry {
   const readinessValue = readiness as TeamReadiness;
   const readinessReason = optionalText(row.readinessReason, 240);
   // A healthy row carries no reason; an unhealthy row must explain itself.
-  if (readiness === "ready" && readinessReason !== null) invalid("TEAM_ROSTER_INVALID");
-  if (readiness !== "ready" && readinessReason === null) invalid("TEAM_ROSTER_INVALID");
+  if (readiness === "ready" && readinessReason !== null)
+    invalid("TEAM_ROSTER_INVALID");
+  if (readiness !== "ready" && readinessReason === null)
+    invalid("TEAM_ROSTER_INVALID");
   const lastActivity = optionalText(row.lastActivity, 40);
-  if (lastActivity !== null && ISO.exec(lastActivity)?.[0] !== lastActivity) invalid("TEAM_ROSTER_INVALID");
+  if (lastActivity !== null && ISO.exec(lastActivity)?.[0] !== lastActivity)
+    invalid("TEAM_ROSTER_INVALID");
   return {
     botId,
     displayName: text(row.displayName, 160),
@@ -92,10 +116,13 @@ function botEntry(value: unknown): TeamRosterEntry {
 /** Fail-closed parser for `mastermind.team_roster/v1`. Throws on any defect. */
 export function parseTeamRoster(value: unknown): TeamRosterView {
   const root = record(value, ["schema", "bots"], ["schema", "bots"]);
-  if (root.schema !== "mastermind.team_roster.v1") invalid("TEAM_ROSTER_INVALID");
-  if (!Array.isArray(root.bots) || root.bots.length > 64) invalid("TEAM_ROSTER_INVALID");
+  if (root.schema !== "mastermind.team_roster.v1")
+    invalid("TEAM_ROSTER_INVALID");
+  if (!Array.isArray(root.bots) || root.bots.length > 64)
+    invalid("TEAM_ROSTER_INVALID");
   const bots = root.bots.map(botEntry);
-  if (new Set(bots.map(bot => bot.botId)).size !== bots.length) invalid("TEAM_ROSTER_INVALID");
+  if (new Set(bots.map((bot) => bot.botId)).size !== bots.length)
+    invalid("TEAM_ROSTER_INVALID");
   return { schema: "mastermind.team_roster.v1", bots };
 }
 
@@ -103,8 +130,13 @@ export function parseTeamRoster(value: unknown): TeamRosterView {
  *  Until Director B's projection is installed, every host reports no source
  *  and the caller renders the honest unverified-roster state. */
 export function readTeamRoster(host: unknown): TeamRosterRead {
-  const source = (host as { teamRoster?: { read?: unknown } } | undefined)?.teamRoster;
-  if (!source || typeof source !== "object" || typeof source.read !== "function") {
+  const source = (host as { teamRoster?: { read?: unknown } } | undefined)
+    ?.teamRoster;
+  if (
+    !source ||
+    typeof source !== "object" ||
+    typeof source.read !== "function"
+  ) {
     return { kind: "UNAVAILABLE", reason: "TEAM_ROSTER_SOURCE_NOT_CONNECTED" };
   }
   let raw: unknown;
@@ -113,7 +145,8 @@ export function readTeamRoster(host: unknown): TeamRosterRead {
   } catch {
     return { kind: "UNAVAILABLE", reason: "TEAM_ROSTER_SOURCE_READ_FAILED" };
   }
-  if (raw === null || raw === undefined) return { kind: "UNAVAILABLE", reason: "TEAM_ROSTER_SOURCE_EMPTY" };
+  if (raw === null || raw === undefined)
+    return { kind: "UNAVAILABLE", reason: "TEAM_ROSTER_SOURCE_EMPTY" };
   try {
     return { kind: "AVAILABLE", roster: parseTeamRoster(raw) };
   } catch {

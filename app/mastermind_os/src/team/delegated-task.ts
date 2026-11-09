@@ -5,7 +5,8 @@
  * admitted coding handoff on the Executive path can carry authority; the UI
  * never mints it.
  */
-export type DelegatedTaskState = "queued" | "running" | "unknown" | "declined" | "terminal";
+export type DelegatedTaskState =
+  "queued" | "running" | "unknown" | "declined" | "terminal";
 
 export interface DelegatedTaskResult {
   title: string;
@@ -35,7 +36,15 @@ export function delegatedTaskValid(task: DelegatedTask): boolean {
   if (task.state === "unknown" && task.stateReason === null) return false;
   if (task.state === "declined" && task.stateReason === null) return false;
   if (task.result !== null && task.state !== "terminal") return false;
-  if (task.result !== null && (task.result.title.length === 0 || task.result.deliveredTo.length === 0)) return false;
-  if (task.route.length > 6 || task.route.some(chip => chip.length === 0 || chip.length > 64)) return false;
+  if (
+    task.result !== null &&
+    (task.result.title.length === 0 || task.result.deliveredTo.length === 0)
+  )
+    return false;
+  if (
+    task.route.length > 6 ||
+    task.route.some((chip) => chip.length === 0 || chip.length > 64)
+  )
+    return false;
   return true;
 }

@@ -22,7 +22,8 @@ const STRINGS = {
     deliveredWhen: (value: string) => `Delivery observed ${value}`,
     acceptedLabel: "Accepted",
     acceptedNo: "Not yet accepted",
-    notAcceptedNote: "Delivery is not acceptance. The receiving owner still reviews this result.",
+    notAcceptedNote:
+      "Delivery is not acceptance. The receiving owner still reviews this result.",
     evidenceHeading: "Evidence",
     evidenceEmpty: "No evidence attached yet.",
     openOrigin: "Open origin →",
@@ -41,14 +42,21 @@ const STRINGS = {
   },
 };
 
-export function ResultReturnCard({ result, locale = "en", onOpenOrigin }: {
+export function ResultReturnCard({
+  result,
+  locale = "en",
+  onOpenOrigin,
+}: {
   result: TaskResultReturn;
   locale?: "en" | "zh-CN";
   onOpenOrigin?: () => void;
 }) {
   const t = STRINGS[locale];
   return (
-    <article className="mm-result-return" aria-labelledby="mm-result-return-heading">
+    <article
+      className="mm-result-return"
+      aria-labelledby="mm-result-return-heading"
+    >
       <h3 id="mm-result-return-heading">{t.heading}</h3>
       <p className="mm-result-title">{result.title}</p>
       <dl className="mm-result-status">
@@ -56,24 +64,45 @@ export function ResultReturnCard({ result, locale = "en", onOpenOrigin }: {
           <dt>{t.deliveredLabel}</dt>
           <dd>
             {t.deliveredTo(result.deliveredTo)}
-            {result.deliveredAt ? <small>{t.deliveredWhen(result.deliveredAt)}</small> : null}
+            {result.deliveredAt ? (
+              <small>{t.deliveredWhen(result.deliveredAt)}</small>
+            ) : null}
           </dd>
         </div>
         <div>
           <dt>{t.acceptedLabel}</dt>
           <dd>
-            <span data-accepted={result.accepted}>{result.accepted ? t.acceptedLabel : t.acceptedNo}</span>
+            <span data-accepted={result.accepted}>
+              {result.accepted ? t.acceptedLabel : t.acceptedNo}
+            </span>
             {!result.accepted ? <small>{t.notAcceptedNote}</small> : null}
           </dd>
         </div>
       </dl>
       <div className="mm-result-evidence">
         <h4>{t.evidenceHeading}</h4>
-        {result.evidence.length === 0 ? <p>{t.evidenceEmpty}</p> : (
-          <dl>{result.evidence.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+        {result.evidence.length === 0 ? (
+          <p>{t.evidenceEmpty}</p>
+        ) : (
+          <dl>
+            {result.evidence.map((item) => (
+              <div key={item.label}>
+                <dt>{item.label}</dt>
+                <dd>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
       </div>
-      {onOpenOrigin ? <button type="button" className="mm-result-open-origin" onClick={onOpenOrigin}>{t.openOrigin}</button> : null}
+      {onOpenOrigin ? (
+        <button
+          type="button"
+          className="mm-result-open-origin"
+          onClick={onOpenOrigin}
+        >
+          {t.openOrigin}
+        </button>
+      ) : null}
     </article>
   );
 }

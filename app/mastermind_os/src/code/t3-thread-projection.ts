@@ -44,15 +44,24 @@ function invalid(): never {
   throw new Error("T3_PROJECTION_INVALID");
 }
 
-function record(value: unknown, allowed: readonly string[], required: readonly string[]): Record<string, unknown> {
+function record(
+  value: unknown,
+  allowed: readonly string[],
+  required: readonly string[],
+): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
   const object = value as Record<string, unknown>;
-  if (Object.keys(object).some(key => !allowed.includes(key)) || required.some(key => !(key in object))) invalid();
+  if (
+    Object.keys(object).some((key) => !allowed.includes(key)) ||
+    required.some((key) => !(key in object))
+  )
+    invalid();
   return object;
 }
 
 function text(value: unknown, maximum: number): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum) invalid();
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum)
+    invalid();
   return value;
 }
 
@@ -61,7 +70,16 @@ function optionalText(value: unknown, maximum: number): string | null {
 }
 
 function thread(value: unknown): T3ThreadProjection {
-  const required = ["threadId", "environment", "title", "runState", "lastActivity", "prLink", "repository", "companyManaged"];
+  const required = [
+    "threadId",
+    "environment",
+    "title",
+    "runState",
+    "lastActivity",
+    "prLink",
+    "repository",
+    "companyManaged",
+  ];
   const row = record(value, required, required);
   const threadId = text(row.threadId, 128);
   if (THREAD_ID.exec(threadId)?.[0] !== threadId) invalid();
@@ -71,7 +89,8 @@ function thread(value: unknown): T3ThreadProjection {
   if (!RUN_STATES.has(runState)) invalid();
   const runStateValue = runState as T3RunState;
   const lastActivity = optionalText(row.lastActivity, 40);
-  if (lastActivity !== null && ISO.exec(lastActivity)?.[0] !== lastActivity) invalid();
+  if (lastActivity !== null && ISO.exec(lastActivity)?.[0] !== lastActivity)
+    invalid();
   const prLink = optionalText(row.prLink, 512);
   if (prLink !== null && HTTPS.exec(prLink)?.[0] !== prLink) invalid();
   if (typeof row.companyManaged !== "boolean") invalid();
@@ -94,7 +113,9 @@ export function parseT3ThreadList(value: unknown): T3ThreadProjectionList {
   if (root.schema !== "mastermind.t3_thread_projection_list.v1") invalid();
   if (!Array.isArray(root.threads) || root.threads.length > 64) invalid();
   const threads = root.threads.map(thread);
-  const identity = new Set(threads.map(item => `${item.environment}/${item.threadId}`));
+  const identity = new Set(
+    threads.map((item) => `${item.environment}/${item.threadId}`),
+  );
   if (identity.size !== threads.length) invalid();
   return { schema: "mastermind.t3_thread_projection_list.v1", threads };
 }
@@ -108,9 +129,18 @@ export function t3ThreadUrl(environment: string, threadId: string): string {
  *  Until the T3 lane's projection is installed, every host reports no source
  *  and the Code surface renders the honest not-projected state. */
 export function readT3ThreadProjection(host: unknown): T3ProjectionRead {
-  const source = (host as { t3ThreadProjection?: { read?: unknown } } | undefined)?.t3ThreadProjection;
-  if (!source || typeof source !== "object" || typeof source.read !== "function") {
-    return { kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_NOT_CONNECTED" };
+  const source = (
+    host as { t3ThreadProjection?: { read?: unknown } } | undefined
+  )?.t3ThreadProjection;
+  if (
+    !source ||
+    typeof source !== "object" ||
+    typeof source.read !== "function"
+  ) {
+    return {
+      kind: "UNAVAILABLE",
+      reason: "T3_PROJECTION_SOURCE_NOT_CONNECTED",
+    };
   }
   let raw: unknown;
   try {
@@ -118,7 +148,8 @@ export function readT3ThreadProjection(host: unknown): T3ProjectionRead {
   } catch {
     return { kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_READ_FAILED" };
   }
-  if (raw === null || raw === undefined) return { kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_EMPTY" };
+  if (raw === null || raw === undefined)
+    return { kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_EMPTY" };
   try {
     return { kind: "AVAILABLE", list: parseT3ThreadList(raw) };
   } catch {
