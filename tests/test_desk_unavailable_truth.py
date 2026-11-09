@@ -460,3 +460,148 @@ async function test(name,run) {
     evidence = json.loads(result.stdout)
     assert evidence["failed"] == 0
     assert evidence["cases"] == evidence["passed"] == 69
+
+
+# These use real files and the registered HTTP routes. Read spies record
+# attempted outside reads; they do not suppress an unsafe read or forge success.
+def _observe_forbidden_reads(monkeypatch, forbidden):
+    original = Path.read_text
+    reads = []
+    destination = forbidden.resolve()
+
+    def read(path, *args, **kwargs):
+        if path.resolve().is_relative_to(destination):
+            reads.append(str(path.resolve()))
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    return reads
+
+
+@pytest.mark.parametrize("endpoint,root,leaf,value,code", [
+    ("strategist", "committee", "_FLAGSHIP/strategist.json",
+     {"verdict": {"rationale": "secret outside owner"}}, "desk_strategist_unavailable"),
+    ("decisions", "gate_officer", "decisions.json",
+     {"result": {"decisions": [{"ticker": "NVDA", "reason": "secret outside owner"}]}},
+     "desk_decisions_unavailable"),
+    ("decisions", "risk_officer", "decisions.json",
+     {"result": {"decisions": [{"ticker": "NVDA", "reason": "secret outside owner"}]}},
+     "desk_decisions_unavailable"),
+    ("macro-risk", "macro_risk", "state.json",
+     {"state": {"state": "risk_off", "rationale": "secret outside owner"}},
+     "desk_macro_risk_unavailable"),
+])
+@pytest.mark.parametrize("link", ["date", "file"])
+@pytest.mark.parametrize("explicit_date", [False, True])
+def test_desk_artifact_symlink_cannot_read_outside_its_owner(
+    desk, monkeypatch, endpoint, root, leaf, value, code, link, explicit_date,
+):
+    outside = desk[1].parent / "outside-owner"
+    target = outside / DATE / leaf
+    write(target, value)
+    inside = desk[1] / root / DATE / leaf
+    if link == "date":
+        (desk[1] / root).mkdir(parents=True)
+        (desk[1] / root / DATE).symlink_to(outside / DATE, target_is_directory=True)
+    else:
+        inside.parent.mkdir(parents=True)
+        inside.symlink_to(target)
+    reads = _observe_forbidden_reads(monkeypatch, outside)
+    payload = get(desk, endpoint, "?asof=" + DATE if explicit_date else "")
+    assert reads == [], reads
+    assert_unavailable(payload, code)
+    if endpoint == "decisions":
+        assert payload["decisions"] is None
+    assert desk[3] == []
+
+
+@pytest.mark.parametrize("root", ["gate_officer", "risk_officer"])
+@pytest.mark.parametrize("ticker", ["../ESCAPE", "/outside", ".", "..", r"..\outside", "NVDA\x00"])
+def test_desk_unsafe_ticker_cannot_originate_a_committee_read(desk, monkeypatch, root, ticker):
+    write(desk[1] / root / DATE / "decisions.json",
+          {"result": {"decisions": [{"ticker": ticker, "action": "add"}]}})
+    write(desk[1] / "committee" / "ESCAPE" / "forge.json",
+          {"confirmed": True, "combined": "secret outside selected date"})
+    original = Path.read_text
+    seat_reads = []
+
+    def read(path, *args, **kwargs):
+        if path.name in {"forge.json", "sentinel.json", "nexus.json"}:
+            seat_reads.append(str(path))
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    payload = get(desk, "decisions", "?asof=" + DATE)
+    assert seat_reads == [], seat_reads
+    assert_unavailable(payload, "desk_decisions_unavailable")
+    assert payload["decisions"] is None
+
+
+@pytest.mark.parametrize("explicit_date", [False, True])
+def test_desk_ticker_directory_symlink_cannot_read_another_owner(desk, monkeypatch, explicit_date):
+    outside = desk[1].parent / "outside-owner"
+    write(outside / "forge.json", {"confirmed": True, "combined": "secret outside owner"})
+    date = desk[1] / "committee" / DATE
+    date.mkdir(parents=True)
+    (date / "NVDA").symlink_to(outside, target_is_directory=True)
+    reads = _observe_forbidden_reads(monkeypatch, outside)
+    payload = get(desk, "decisions", "?asof=" + DATE if explicit_date else "")
+    assert reads == [], reads
+    assert_unavailable(payload, "desk_decisions_unavailable")
+
+
+def test_desk_regime_symlink_cannot_compute_from_another_owner(desk, monkeypatch):
+    outside = desk[1].parent / "outside-owner" / "regime.json"
+    write(outside, {"date": DATE, "quad": "secret outside owner"})
+    owner = desk[1].parent / "vendor" / "macro" / "data" / "regime"
+    owner.mkdir(parents=True)
+    (owner / "latest.json").symlink_to(outside)
+    reads = _observe_forbidden_reads(monkeypatch, outside)
+    payload = get(desk, "macro-risk")
+    assert reads == [], reads
+    assert_unavailable(payload, "desk_macro_risk_unavailable")
+    assert desk[3] == []
+
+
+@pytest.mark.parametrize("ticker", ["BRK.B", "0700.HK", "^GSPC", "EURUSD=X", "ES=F", "BRK-B"])
+def test_desk_single_component_market_symbols_keep_their_existing_read(desk, ticker):
+    write(desk[1] / "gate_officer" / DATE / "decisions.json",
+          {"result": {"decisions": [{"ticker": ticker, "action": "withhold"}]}})
+    write(desk[1] / "committee" / DATE / ticker / "forge.json",
+          {"confirmed": True, "combined": 0.75})
+    payload = get(desk, "decisions", "?asof=" + DATE)
+    assert payload["status"] == "scoring"
+    assert len(payload["decisions"]) == 1
+    row = payload["decisions"][0]
+    assert row["ticker"] == ticker
+    assert row["forge"]["confirmed"] is True
+    assert row["forge"]["combined"] == 0.75
+    assert row["gate"]["action"] == "withhold"
+
+
+def test_desk_configured_data_root_may_be_a_trusted_mount(desk):
+    storage = desk[1].parent / "configured-storage"
+    storage.mkdir()
+    desk[1].symlink_to(storage, target_is_directory=True)
+    write(desk[1] / "committee" / DATE / "_FLAGSHIP" / "strategist.json",
+          {"verdict": {"confirmed_themes": [], "rationale": "known evidence"}})
+    payload = get(desk, "strategist")
+    assert payload["status"] == "scoring"
+    assert payload["rationale"] == "known evidence"
+
+
+@pytest.mark.parametrize("link", ["ticker", "seat"])
+def test_desk_committee_cannot_read_a_different_desk_owner(desk, monkeypatch, link):
+    outside = desk[1] / "risk_officer" / "OTHER_OWNER"
+    write(outside / "forge.json", {"confirmed": True, "combined": "secret other owner"})
+    date = desk[1] / "committee" / DATE
+    date.mkdir(parents=True)
+    if link == "ticker":
+        (date / "NVDA").symlink_to(outside, target_is_directory=True)
+    else:
+        (date / "NVDA").mkdir()
+        (date / "NVDA" / "forge.json").symlink_to(outside / "forge.json")
+    reads = _observe_forbidden_reads(monkeypatch, outside)
+    payload = get(desk, "decisions", "?asof=" + DATE)
+    assert reads == [], reads
+    assert_unavailable(payload, "desk_decisions_unavailable")

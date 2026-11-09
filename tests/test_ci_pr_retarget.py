@@ -177,7 +177,8 @@ def test_retarget_keeps_event_checkout_and_actual_base_selection():
     assert scope[0]["uses"] == "actions/checkout@v4"
     assert "ref" not in scope[0]["with"]
     assert scope[0]["with"]["persist-credentials"] is False
-    assert scope[1]["env"] == {"PR_BASE_SHA": "$" + "{{ github.event.pull_request.base.sha }}"}
+    classifier = next(step for step in scope if step.get("id") == "scope")
+    assert classifier["env"] == {"PR_BASE_SHA": "$" + "{{ github.event.pull_request.base.sha }}"}
     steps = workflow["jobs"]["pytest_shards"]["steps"]
     checkout = next(s for s in steps if s.get("name") == "Checkout event source")
     assert checkout["uses"] == "actions/checkout@v4"

@@ -43,6 +43,7 @@ _EXPECTED_SHARD_SOURCE_STEPS = [
 
 
 _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
+ {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12'}},
  {'name': 'Classify integrated source diff using protected base code',
   'id': 'scope',
   'env': {'PR_BASE_SHA': '${{ github.event.pull_request.base.sha }}'},
@@ -75,15 +76,13 @@ _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth':
          "  echo 'CI_SCOPE source not in protected base: required full suite'\n"
          'fi\n'}]
 _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
+ {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12', 'cache': 'pip'}},
  {'name': 'Verify exact changed source without executing untrusted PR text',
   'env': {'PR_BASE_SHA': '${{ needs.pr_scope.outputs.source_base }}',
           'PR_HEAD_SHA': '${{ needs.pr_scope.outputs.source_head }}'},
   'run': 'set -euo pipefail\n'
          'git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"\n'
          'python -m compileall -q scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py\n'},
- {'uses': 'actions/setup-python@v5',
-  'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
-  'with': {'python-version': '3.12', 'cache': 'pip'}},
  {'name': 'Checkout pinned Macro engine for source-proximate tests',
   'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
   'uses': 'actions/checkout@v4',
@@ -140,14 +139,17 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
     ):
         raise ci_pytest.PolicyError("PR scope must be trusted and PR fast lane must be bounded")
     scope_steps, fast_steps = scope.get("steps"), fast.get("steps")
-    if not isinstance(scope_steps, list) or len(scope_steps) != 2 or not isinstance(fast_steps, list) or len(fast_steps) != 8:
+    if not isinstance(scope_steps, list) or len(scope_steps) != 3 or not isinstance(fast_steps, list) or len(fast_steps) != 8:
         raise ci_pytest.PolicyError("PR scope/fast steps missing or duplicated")
     if scope_steps != _EXPECTED_SCOPE_STEPS or fast_steps != _EXPECTED_FAST_STEPS:
         raise ci_pytest.PolicyError("PR fast lane source or commands drifted")
-    checkout, qualifier = scope_steps
+    checkout, python_setup, qualifier = scope_steps
     if (
         checkout.get("uses") != "actions/checkout@v4"
         or checkout.get("with") != {"fetch-depth": 0, "persist-credentials": False}
+        or python_setup.get("uses") != "actions/setup-python@v5"
+        or python_setup.get("with") != {"python-version": "3.12"}
+        or python_setup.get("if") is not None
         or qualifier.get("name") != "Classify integrated source diff using protected base code"
         or qualifier.get("id") != "scope"
         or qualifier.get("env") != {"PR_BASE_SHA": "${{ github.event.pull_request.base.sha }}"}
@@ -172,31 +174,31 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
             raise ci_pytest.PolicyError("PR scope and fast checks may not bypass failures")
     names = [step.get("name") for step in fast_steps]
     if names != [
-        None, "Verify exact changed source without executing untrusted PR text",
-        None, "Checkout pinned Macro engine for source-proximate tests",
+        None, None, "Verify exact changed source without executing untrusted PR text",
+        "Checkout pinned Macro engine for source-proximate tests",
         "Install focused Python test dependencies",
         "Bounded source-proximate PR tests", None,
         "Typecheck affected web application",
     ]:
         raise ci_pytest.PolicyError("PR fast steps must preserve exact bounded checks")
-    for i in (0, 2, 3, 6):
+    for i in (0, 1, 3, 6):
         if fast_steps[i].get("uses") != [
             "actions/checkout@v4", "actions/setup-python@v5",
             "actions/checkout@v4", "actions/setup-node@v4",
-        ][(0, 2, 3, 6).index(i)]:
+        ][(0, 1, 3, 6).index(i)]:
             raise ci_pytest.PolicyError("PR fast check toolchain is invalid")
     if fast_steps[0].get("with") != {"fetch-depth": 0, "persist-credentials": False}:
         raise ci_pytest.PolicyError("PR fast checkout must not persist credentials")
     if fast_steps[3]["with"].get("persist-credentials") is not False:
         raise ci_pytest.PolicyError("PR smoke fixture checkout must not persist credentials")
     if (
-        fast_steps[2].get("if") != "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
-        or fast_steps[3].get("if") != fast_steps[2].get("if")
-        or fast_steps[4].get("if") != fast_steps[2].get("if")
-        or fast_steps[5].get("if") != fast_steps[2].get("if")
+        fast_steps[1].get("if") is not None
+        or fast_steps[3].get("if") != "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+        or fast_steps[4].get("if") != fast_steps[3].get("if")
+        or fast_steps[5].get("if") != fast_steps[3].get("if")
         or fast_steps[6].get("if") != "${{ needs.pr_scope.outputs.needs_node == 'true' }}"
         or fast_steps[7].get("if") != fast_steps[6].get("if")
-        or "git diff --check" not in str(fast_steps[1].get("run"))
+        or "git diff --check" not in str(fast_steps[2].get("run"))
         or fast_steps[4].get("run") != 'python -m pip install --disable-pip-version-check -e ".[dev]"'
         or "python -m scripts.ci_pr_smoke" not in str(fast_steps[5].get("run"))
         or "npm --prefix app/mastermind_os run typecheck" not in str(fast_steps[7].get("run"))
@@ -391,7 +393,8 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
+        or runner.get("run") != ("umask 077\n"
+                                 "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n")
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")

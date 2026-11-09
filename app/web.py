@@ -3663,21 +3663,43 @@ def _is_date_dir(name: str) -> bool:
     return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", name or ""))
 
 
+def _desk_artifact_path(root: Path, *parts: str) -> Path:
+    """Confine Desk reads below their fixed owner root, including resolved links.
+
+    The configured owner root may itself be a mount or symlink. Descendants
+    must remain inside that root. This is a read boundary, not a writer lock.
+    """
+    owner = root.resolve()
+    path = owner.joinpath(*parts).resolve()
+    if not path.is_relative_to(owner):
+        raise ValueError("Desk artifact path escapes its owner root")
+    return path
+
+
+def _desk_ticker(value: Any) -> str:
+    """A ticker from an artifact is one path component, never a path."""
+    ticker = str(value or "").upper().strip()
+    if ticker in {".", ".."} or any(char in ticker for char in ("/", "\\", "\x00")):
+        raise ValueError("Desk ticker must be a single path component")
+    return ticker
+
+
 def _latest_asof(*roots: Path) -> str | None:
     """The most-recent ISO-date subdir name across one or more artifact roots ({} → None)."""
     dates: set[str] = set()
     for root in roots:
         try:
-            for p in root.iterdir():
-                if p.is_dir() and _is_date_dir(p.name):
+            for p in _desk_artifact_path(root).iterdir():
+                if _is_date_dir(p.name) and _desk_artifact_path(root, p.name).is_dir():
                     dates.add(p.name)
         except FileNotFoundError:
             continue
     return max(dates) if dates else None
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    """Read a Desk artifact; only an absent file is ordinary missing data."""
+def _read_json(root: Path, *parts: str) -> dict[str, Any]:
+    """Read a confined Desk artifact; only actual absence is ordinary missing data."""
+    path = _desk_artifact_path(root, *parts)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -3698,7 +3720,7 @@ def api_desk_strategist(asof: str = "") -> JSONResponse:
             asof = _latest_asof(_committee_dir())
         if not asof:
             return JSONResponse({"status": "building", "asof": None})
-        j = _read_json(_committee_dir() / asof / "_FLAGSHIP" / "strategist.json")
+        j = _read_json(_committee_dir(), asof, "_FLAGSHIP", "strategist.json")
         verdict = j.get("verdict") or {}
         if not verdict:
             return JSONResponse({"status": "building", "asof": asof})
@@ -3747,10 +3769,10 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
 
         # Gate + Risk per-name decisions (keyed by ticker) for the date
         def _by_ticker(root: Path) -> dict[str, dict]:
-            j = _read_json(root / asof / "decisions.json")
+            j = _read_json(root, asof, "decisions.json")
             out: dict[str, dict] = {}
             for dec in ((j.get("result") or {}).get("decisions") or []):
-                tk = str(dec.get("ticker") or "").upper().strip()
+                tk = _desk_ticker(dec.get("ticker"))
                 if tk:
                     out[tk] = {"action": str(dec.get("action") or "").lower(),
                                "scale": dec.get("scale"),
@@ -3760,12 +3782,14 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
         gate = _by_ticker(_gate_officer_dir())
         risk = _by_ticker(_risk_officer_dir())
 
-        cdir = _committee_dir() / asof
+        committee = _committee_dir()
+        cdir = _desk_artifact_path(committee, asof)
         rows: list[dict[str, Any]] = []
         tickers: list[str] = []
         try:
             tickers = sorted(p.name for p in cdir.iterdir()
-                             if p.is_dir() and p.name != "_FLAGSHIP")
+                             if p.name != "_FLAGSHIP"
+                             and _desk_artifact_path(committee, asof, p.name).is_dir())
         except FileNotFoundError:
             tickers = []
         # also surface gate/risk-only names (e.g. a withheld name with no committee folder)
@@ -3774,9 +3798,9 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
                 tickers.append(tk)
 
         for tk in tickers[:120]:
-            forge = _read_json(cdir / tk / "forge.json")
-            sentinel = _read_json(cdir / tk / "sentinel.json")
-            nexus = _read_json(cdir / tk / "nexus.json")
+            forge = _read_json(committee, asof, tk, "forge.json")
+            sentinel = _read_json(committee, asof, tk, "sentinel.json")
+            nexus = _read_json(committee, asof, tk, "nexus.json")
             g = gate.get(tk) or {}
             r = risk.get(tk) or {}
             rows.append({
@@ -3966,13 +3990,14 @@ def api_desk_macro_risk(asof: str = "") -> JSONResponse:
         if not (asof and _is_date_dir(asof)):
             asof = _latest_asof(_macro_risk_dir())
         if asof:
-            j = _read_json(_macro_risk_dir() / asof / "state.json")
+            j = _read_json(_macro_risk_dir(), asof, "state.json")
             st = j.get("state") or {}
             if st:
                 return JSONResponse({"status": "scoring", **_shape(st)})
         # nothing persisted yet — compute the deterministic state LIVE (no LLM) so the card renders
         from brain import macro_risk
-        reg = _read_json(_data().parent / "vendor" / "macro" / "data" / "regime" / "latest.json")
+        regime_root = _data().parent / "vendor" / "macro" / "data" / "regime"
+        reg = _read_json(regime_root, "latest.json")
         st = macro_risk.risk_state(reg.get("date") or "", reg or None)
         return JSONResponse({"status": "scoring" if st.get("state") else "building", **_shape(st)})
     except Exception as exc:  # noqa: BLE001
