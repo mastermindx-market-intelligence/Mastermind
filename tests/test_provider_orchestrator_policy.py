@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -1177,9 +1178,23 @@ def shared_placement(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
     monkeypatch.setenv("MASTERMIND_SHARED_PLACEMENT", "1")
+    # r2 N-4: the owner positively asserts the receipt-channel owner uids.
+    monkeypatch.setenv(
+        "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", str(os.geteuid())
+    )
+    # The placement owner runs as its own service account: simulate a fenced
+    # principal whose uid/groups do NOT own the test's receipt files (the
+    # real-principal case is exercised by the M-2 forge/replay tests).
+    monkeypatch.setattr(
+        guard,
+        "_principal_ids",
+        lambda: (os.geteuid() + 4242, frozenset()),
+        raising=False,
+    )
     for name in (
         "POOL_EXECUTION_BINDING",
         "MASTERMIND_PLACEMENT_RECEIPT",
+        "MASTERMIND_PLACEMENT_RECEIPT_DIGEST",
         "POOL_ORCHESTRATOR_ID",
         "POOL_PARENT_RUN_ID",
         "POOL_TASK_CLASS",
@@ -1525,4 +1540,1202 @@ def test_shared_placement_launch_matching_current_binding_is_allowed(
     monkeypatch.setenv("POOL_TASK_CLASS", "code")
     command = 'pool run glm "bounded task" /tmp glm-5.3'
     guard.guard_bash(_payload(shared_placement, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
+# --- rework r2: regression tests for the distinct reviewer's MAJOR findings ---
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-1 (a): duplicate prefix assignment — the shell applies the LAST
+        # one, so the child runs as root-other while the first is benign.
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_ORCHESTRATOR_ID=root-other "
+        "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+        'pool run glm "bounded task" /tmp glm-5.3',
+        # M-1 (b): duplicate parent assignment re-parents the launch.
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_PARENT_RUN_ID=parent-forged POOL_TASK_CLASS=code "
+        'pool run glm "bounded task" /tmp glm-5.3',
+        # M-1 (c): nested export inside a quoted sub-command overrides the
+        # benign prefix assignment at runtime.
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code bash -c 'export POOL_ORCHESTRATOR_ID=root-other; "
+        'pool run glm "bounded task" /tmp glm-5.3\'',
+        # M-1 (d): a benign explicit value followed by a dynamic one.
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_ORCHESTRATOR_ID=$OTHER "
+        "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+        'pool run glm "bounded task" /tmp glm-5.3',
+    ],
+    ids=["dup-root", "dup-parent", "nested-export", "dup-dynamic"],
+)
+def test_m1_every_identity_assignment_is_held_to_the_projection(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "server-derived projection" in reason
+    assert "assignments of POOL_" in reason
+
+    # The helper itself reports every occurrence in positional order.
+    assert guard._command_assignments(
+        "A=1 A=2 bash -c 'export A=3; x'", "A"
+    ) == ["1", "2", "3"]
+
+    # Duplicate assignments that all equal the projection remain allowed:
+    # the check is on identity, not on spelling.
+    same = (
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_ORCHESTRATOR_ID=root-orch-1 "
+        "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+        'pool run glm "bounded task" /tmp glm-5.3'
+    )
+    _guard_launch(shared_placement, same)
+    assert capsys.readouterr().out == ""
+
+
+def test_m1_legacy_rebind_check_judges_every_root_assignment(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unarmed session: the pre-existing rebind guard used the FIRST
+    # assignment; a benign first value followed by a forged one re-rooted
+    # the child under approval.
+    for name in ("MASTERMIND_SHARED_PLACEMENT", "POOL_EXECUTION_BINDING"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-1")
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-1 POOL_ORCHESTRATOR_ID=root-2 "
+        "POOL_PARENT_RUN_ID=parent-1 POOL_TASK_CLASS=review "
+        "pool run grok bounded /tmp grok-4.6"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert "may not be rebound" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_m2_pinned_receipt_refuses_rewritten_or_replayed_receipt(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    # Owner projects the binding AND the digest of the receipt it wrote.
+    current = _binding(fence_counter=3)
+    stale = _binding(fence_counter=2)
+    _install(monkeypatch, tmp_path, stale, receipt=_receipt(current, fence_counter=3))
+    path = Path(os.environ["MASTERMIND_PLACEMENT_RECEIPT"])
+    monkeypatch.setenv(
+        "MASTERMIND_PLACEMENT_RECEIPT_DIGEST",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    # Honest receipt: refused as a stale fence (lease moved to 3).
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+    # The fenced principal rewrites the receipt to agree with its stale
+    # binding (fence 2, HELD, far-future expiry) — identical content to a
+    # forged/replayed self-consistent pair. The pin refuses it before any
+    # receipt field is trusted.
+    path.write_text(json.dumps(_receipt(stale)), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "receipt integrity" in reason
+    assert "rewritten, replayed or re-projected" in reason
+
+    # Native delegations go through the same pinned receipt.
+    with pytest.raises(SystemExit):
+        guard.guard_native_child({"model": "opus", "prompt": "help"})
+    assert "receipt integrity" in _emitted(capsys)["permissionDecisionReason"]
+
+    # A malformed pin is a refusal, never a fall-through to the unpinned mode.
+    monkeypatch.setenv("MASTERMIND_PLACEMENT_RECEIPT_DIGEST", "not-a-digest")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "64-char hex" in _emitted(capsys)["permissionDecisionReason"]
+
+    # The pinned, owner-written current receipt still allows the launch.
+    path.write_text(json.dumps(_receipt(current)), encoding="utf-8")
+    monkeypatch.setenv("POOL_EXECUTION_BINDING", json.dumps(current))
+    monkeypatch.setenv(
+        "MASTERMIND_PLACEMENT_RECEIPT_DIGEST",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    _guard_launch(shared_placement)
+    assert capsys.readouterr().out == ""
+
+    # The pin is defence in depth; the trust basis is the owner-only
+    # receipt channel, and what remains trusting is stated, not implied.
+    doc = guard.validate_execution_binding.__doc__ or ""
+    assert "owner-only channel" in doc and "OS uid boundary" in doc
+
+
+def test_m2_receipt_internal_consistency_and_expiry_type_are_enforced(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binding = _binding()
+    # Top-level fence/attempt disagreeing with the embedded binding (m-4).
+    _install(monkeypatch, tmp_path, binding, receipt=_receipt(binding, attempt_ref="attempt-9"))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "internally inconsistent" in _emitted(capsys)["permissionDecisionReason"]
+
+    # A float expiry in the past no longer skips the expiry check (m-2).
+    _install(monkeypatch, tmp_path, binding, receipt=_receipt(binding, lease_expires_at_ms=1.0))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "lease_expires_at_ms must be an integer" in _emitted(capsys)[
+        "permissionDecisionReason"
+    ]
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # P3b: matching first launch, substituted second launch.
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3; "
+            "pool run grok b /tmp grok-4.6",
+            "provider substitution",
+        ),
+        # P3c: substituted first launch, matching later launch (regex
+        # priority used to grab the later `pool run glm`).
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code /opt/mastermind/ext/sub.sh grok /tmp/p.txt "
+            "/tmp grok-4.6; pool run glm a /tmp glm-5.3",
+            "provider substitution",
+        ),
+        # P3d: decoy launch text inside an echo, real launch substituted.
+        (
+            'echo "pool run glm"; POOL_ORCHESTRATOR_ID=root-orch-1 '
+            "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+            "/opt/mastermind/ext/sub.sh grok /tmp/p.txt /tmp grok-4.6",
+            "provider substitution",
+        ),
+        # Two launches that BOTH match the reservation: one binding covers
+        # exactly one attempt, so the second is an unaccounted descendant.
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3 && "
+            "pool run glm b /tmp glm-5.3",
+            "unaccounted descendant",
+        ),
+    ],
+    ids=["second-substituted", "first-substituted", "echo-decoy", "two-matching"],
+)
+def test_m3_every_launch_in_a_compound_command_is_checked(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    expected: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert expected in output["permissionDecisionReason"]
+
+    # Token extraction is positional and per-launch.
+    assert [token for _, token in guard.launch_provider_tokens(
+        "sub.sh grok x; pool run glm y; python3 /x/slot.py minimax -- z"
+    )] == ["grok", "glm", "minimax"]
+
+
+def test_m4_launch_tokens_must_equal_the_reserved_pool_exactly(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())  # pool glm / provider codex
+    prefix = (
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code "
+    )
+    # P3a: attacker-chosen composites with a reserved segment, and real
+    # composites/provider names that are not the reserved pool: no
+    # segment-wise acceptance — every one is a substitution.
+    for token in (
+        "glm-grok", "glm-deepseek", "codex-zebra", "glm_grok",
+        "glm-codex", "codex-native", "codex", "go-claude",
+    ):
+        with pytest.raises(SystemExit):
+            _guard_launch(shared_placement, f"{prefix}pool run {token} a /tmp m")
+        reason = _emitted(capsys)["permissionDecisionReason"]
+        assert "provider substitution" in reason and repr(token) in reason
+
+    # The exact reserved pool passes, quoting does not matter.
+    for token in ("glm", '"glm"', "GLM"):
+        _guard_launch(shared_placement, f"{prefix}pool run {token} a /tmp m")
+        assert capsys.readouterr().out == ""
+
+    # A reservation of a composite pool admits exactly that composite.
+    _install(monkeypatch, tmp_path, _binding(pool_ref="glm-codex"))
+    _guard_launch(shared_placement, f"{prefix}sub.sh glm-codex task /tmp m")
+    assert capsys.readouterr().out == ""
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, f"{prefix}sub.sh glm task /tmp m")
+    assert "provider substitution" in _emitted(capsys)["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [
+        "/opt/mastermind/ext/sub.sh zebra-glm task /tmp glm-5.3",  # P3e
+        "/opt/mastermind/ext/sub.sh glm_x task /tmp glm-5.3",
+        '/opt/mastermind/ext/sub.sh "grok" task /tmp grok-4.6',
+        "/opt/mastermind/ext/remote_sub.sh ubuntu2 application p /tmp m",
+        "python3 /opt/mastermind/ext/slot.py deepseek -- run",
+        "/opt/mastermind/ext/remote_sub.sh ubuntu2",
+    ],
+    ids=["off-list", "near-miss", "quoted-mode", "remote-off-list", "slot-off-list",
+         "missing-mode"],
+)
+def test_m4_unknown_wrapper_modes_are_refused_never_ignored(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    launch: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        f"POOL_TASK_CLASS=code {launch}"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unknown wrapper mode" in reason or "provider substitution" in reason
+
+
+def test_m4_off_list_wrapper_mode_is_observed_in_unarmed_sessions(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # P3e (unarmed): an off-list mode used to skip EVERY check; it is now an
+    # observed launch held to the legacy identity law.
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT", "POOL_EXECUTION_BINDING",
+        "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    command = "/opt/mastermind/ext/sub.sh zebra-glm task /tmp glm-5.3"
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert "Fabric root-budget guard" in _emitted(capsys)["permissionDecisionReason"]
+
+
+# --- rework r3: the orchestrator-ruled strengthening of M-1..M-3 ------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # env -i clears the inherited root/parent: the child re-roots.
+        "env -i POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
+        # env -u / unset / export -n remove the projected identity.
+        "env -u POOL_ORCHESTRATOR_ID pool run glm a /tmp glm-5.3",
+        "env --unset=POOL_PARENT_RUN_ID pool run glm a /tmp glm-5.3",
+        "unset POOL_ORCHESTRATOR_ID; pool run glm a /tmp glm-5.3",
+        "export -n POOL_PARENT_RUN_ID; pool run glm a /tmp glm-5.3",
+        # Assignment forms hidden from a plain NAME= scan.
+        "env 'POOL_ORCHESTRATOR_ID=root-other' pool run glm a /tmp glm-5.3",
+        'sh -c "POOL_ORCH""ESTRATOR_ID=root-other pool run glm a /tmp glm-5.3"',
+        "POOL_ORCHESTRATOR_ID+=-x pool run glm a /tmp glm-5.3",
+        "declare -x POOL_PARENT_RUN_ID=parent-forged; pool run glm a /tmp glm-5.3",
+        "printf -v POOL_ORCHESTRATOR_ID root-other; pool run glm a /tmp glm-5.3",
+        ": ${POOL_ORCHESTRATOR_ID:=root-other}; pool run glm a /tmp glm-5.3",
+        # Environment changed outside lexical observation.
+        'eval "$X"; pool run glm a /tmp glm-5.3',
+        ". ./forged.env; pool run glm a /tmp glm-5.3",
+        "BASH_ENV=./forged.env bash -c 'pool run glm a /tmp glm-5.3'",
+        "export ${V}=root-other; pool run glm a /tmp glm-5.3",
+    ],
+)
+def test_m1_identity_is_canonicalised_across_every_assignment_form(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "server-derived projection" in reason or "unobservable" in reason
+
+
+def test_m1_canonical_identity_still_admits_faithful_launches(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    for command in (
+        # env -i followed by the projected identity is faithful.
+        "env -i POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
+        # Reads and bare re-exports of the inherited value change nothing.
+        'echo "$POOL_ORCHESTRATOR_ID ${POOL_PARENT_RUN_ID}"; '
+        "export POOL_ORCHESTRATOR_ID; pool run glm a /tmp glm-5.3",
+        # Quoted literal equal to the projection.
+        "env \"POOL_ORCHESTRATOR_ID=root-orch-1\" pool run glm a /tmp glm-5.3",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+def test_m2_receipt_the_fenced_principal_can_write_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Reviewer P2a: the honest receipt says fence 3; the session holds fence
+    # 2. Rewriting the receipt to fence 2 / HELD / far-future expiry used to
+    # be ALLOWED. The receipt now must come from a path this principal
+    # cannot write, so the forged file is refused before any field is read.
+    real_ids = (os.geteuid(), frozenset({os.getegid(), *os.getgroups()}))
+    current = _binding(fence_counter=3)
+    stale = _binding(fence_counter=2)
+    _install(monkeypatch, tmp_path, stale, receipt=_receipt(current, fence_counter=3))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+    monkeypatch.setattr(guard, "_principal_ids", lambda: real_ids)
+    Path(os.environ["MASTERMIND_PLACEMENT_RECEIPT"]).write_text(
+        json.dumps(_receipt(stale)), encoding="utf-8"
+    )
+    for launch in (
+        lambda: _guard_launch(shared_placement),
+        lambda: guard.guard_native_child({"model": "opus", "prompt": "help"}),
+    ):
+        with pytest.raises(SystemExit):
+            launch()
+        reason = _emitted(capsys)["permissionDecisionReason"]
+        assert "not owner-authenticated" in reason
+        assert "owned or writable by this session's principal" in reason
+
+    # Reviewer P2b: replay of a prior session's self-consistent pair into a
+    # principal-writable location is refused the same way.
+    prior = _binding(fence_counter=1, attempt_ref="attempt-0")
+    replay_dir = tmp_path / "replay"
+    replay_dir.mkdir()
+    _install(monkeypatch, replay_dir, prior)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "not owner-authenticated" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_m2_receipt_channel_checks_every_path_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = (os.geteuid(), frozenset({os.getegid(), *os.getgroups()}))
+    owner_file = Path("/etc/hosts")  # root-owned, root-owned ancestry
+    if os.geteuid() == 0 or not owner_file.exists():
+        pytest.skip("needs a non-root principal and a root-owned file")
+    original = guard._principal_ids
+    try:
+        guard._principal_ids = lambda: real
+        monkeypatch.setenv(
+            "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", str(os.geteuid())
+        )
+        assert guard._receipt_channel_problem(str(owner_file)) == ""
+        # r2 N-4: without the owner-asserted allowlist the channel is no
+        # longer defined positively and no path qualifies as owner-written.
+        monkeypatch.delenv("MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS")
+        assert "allowlist" in guard._receipt_channel_problem(str(owner_file))
+        monkeypatch.setenv(
+            "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", str(os.geteuid())
+        )
+        # A symlink the principal controls could be re-pointed at any
+        # owner-written file (e.g. an older receipt): refused.
+        link = tmp_path / "receipt.json"
+        link.symlink_to(owner_file)
+        assert "principal" in guard._receipt_channel_problem(str(link))
+        assert guard._receipt_channel_problem(str(tmp_path / "absent"))
+    finally:
+        guard._principal_ids = original
+
+
+def test_m3_every_wrapper_shape_is_enumerated_and_checked(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    shapes = [
+        "pool run glm a /tmp m",
+        "pool remote ubuntu0 glm a /tmp m",
+        "/opt/x/sub.sh glm a /tmp m",
+        "/opt/x/remote_sub.sh ubuntu0 glm a /tmp m",
+        "python3 /opt/x/slot.py glm -- run",
+    ]
+    command = " ; ".join(shapes + shapes)
+    assert [token for _, token in guard.launch_provider_tokens(command)] == ["glm"] * 10
+    prefix = (
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code "
+    )
+    for shape in shapes:  # each shape alone, matching: allowed
+        _guard_launch(shared_placement, prefix + shape)
+        assert capsys.readouterr().out == "", shape
+    for shape in shapes:  # repeated in one command: second is unaccounted
+        with pytest.raises(SystemExit):
+            _guard_launch(shared_placement, f"{prefix}{shape} && {shape}")
+        assert "unaccounted descendant" in _emitted(capsys)["permissionDecisionReason"]
+    # A substituted launch anywhere in the command is found.
+    with pytest.raises(SystemExit):
+        _guard_launch(
+            shared_placement,
+            f"{prefix}pool run glm a /tmp m; true; true; /opt/x/remote_sub.sh h grok p",
+        )
+    assert "'grok'" in _emitted(capsys)["permissionDecisionReason"]
+    # Wrapper source fed to a shell is not a visible invocation: refused.
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, f"{prefix}cat /opt/x/sub.sh | bash -s grok a")
+    assert "unobservable launch" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_minor_heredoc_staged_wrapper_launch_is_judged_under_shared_placement(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Reviewer P4a (m-1): the staged script really contains `pool run grok`.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        "cat > x.sh <<'EOF'\n"
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code pool run grok b /tmp grok-4.6\nEOF\nbash x.sh"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    assert "'grok'" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_minor_binding_counters_are_required_and_generation_compared(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # m-3 (P6e): a binding without fence_counter no longer passes as fence 0.
+    binding = _binding()
+    no_fence = {k: v for k, v in binding.items() if k != "fence_counter"}
+    _install(
+        monkeypatch, tmp_path, binding,
+        env_binding=no_fence,
+        receipt=_receipt(dict(binding, fence_counter=0), fence_counter=0),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "fence_counter must be present" in _emitted(capsys)["permissionDecisionReason"]
+    # n-2: assignment_generation is part of the owner's current assignment.
+    _install(monkeypatch, tmp_path, binding, env_binding=dict(binding, assignment_generation=9))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "assignment_generation" in _emitted(capsys)["permissionDecisionReason"]
+    # n-4: only the exact HELD state admits a launch.
+    _install(monkeypatch, tmp_path, binding, receipt=_receipt(binding, lease_state="held "))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_minor_native_delegation_allow_path(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # m-5: with the owner projecting binding + identity, a native Opus
+    # orchestration delegation passes the binding gate and the routing fence.
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    guard.guard_native_child({
+        "model": "opus",
+        "prompt": "ROUTE: ORCHESTRATION\nWHY OPUS: cross-module plan needs judgment",
+    })
+    assert capsys.readouterr().out == ""
+
+
+# --- rework r4: round-2 review findings (N-1..N-4) ------------------------------
+
+_NL = "\\\n"  # a literal backslash + newline: a POSIX line continuation
+
+_IDENTITY_PREFIX = (
+    "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+    "POOL_TASK_CLASS=code "
+)
+
+
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        # N-1/A1: the identity NAME is split by a line continuation; the
+        # shell joins it with NOTHING, so the child receives
+        # POOL_ORCHESTRATOR_ID=root-other while the projection check used
+        # to see no assignment at all.
+        (
+            "POOL_ORCH" + _NL + "ESTRATOR_ID=root-other "
+            "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+            "pool run glm a /tmp glm-5.3",
+            "server-derived projection",
+        ),
+        # N-1/A1b: the same split re-parenting the launch.
+        (
+            _IDENTITY_PREFIX + "POOL_PARENT_R" + _NL
+            + "UN_ID=parent-forged pool run glm a /tmp glm-5.3",
+            "server-derived projection",
+        ),
+        # N-1/A2: the LAUNCH WORD is split — `pool ru\<NL>n grok` is a paid
+        # launch the wrapper scan used to not observe at all.
+        (
+            _IDENTITY_PREFIX + "pool ru" + _NL + "n grok a /tmp grok-4.6",
+            "provider substitution",
+        ),
+    ],
+    ids=["split-root-name", "split-parent-name", "split-launch"],
+)
+def test_n1_posix_continuation_splits_are_canonicalised(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    expected: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert expected in output["permissionDecisionReason"]
+
+
+def test_n1_continuation_split_launch_reaches_the_binding_gate(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # r2 A2 core: with a stale fence, `pool ru\<NL>n glm` used to return
+    # before validate_execution_binding — an armed session executed a paid
+    # launch with ZERO binding validation. The gate must run and refuse.
+    current = _binding(fence_counter=3)
+    _install(
+        monkeypatch, tmp_path, _binding(fence_counter=2),
+        receipt=_receipt(current, fence_counter=3),
+    )
+    command = _IDENTITY_PREFIX + "pool ru" + _NL + "n glm a /tmp glm-5.3"
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+    # Observed means validated, not blanket-denied: under the CURRENT
+    # binding the same continuation-split launch is allowed.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(shared_placement, command)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # N-2/C1: a for-loop body executes one lexical launch N times.
+        "for i in 1 2; do " + _IDENTITY_PREFIX
+        + "pool run glm a /tmp glm-5.3; done",
+        # while/until bodies are the same runtime-multiplexing construct.
+        "while read x; do " + _IDENTITY_PREFIX
+        + 'pool run glm "$x" /tmp glm-5.3; done',
+        # N-2/C2: xargs runs the wrapped command once per input item.
+        "printf 'a\\nb\\n' | xargs -I{} env " + _IDENTITY_PREFIX
+        + "pool run glm {} /tmp glm-5.3",
+        # N-2/C3: parallel multiplies the launch across its argument source.
+        "parallel -j2 env " + _IDENTITY_PREFIX
+        + "pool run glm {} /tmp glm-5.3 ::: a b",
+        # find -exec runs the wrapper once per matched file.
+        "find /tmp -name '*.txt' -exec env " + _IDENTITY_PREFIX
+        + "pool run glm {} /tmp glm-5.3 \\;",
+    ],
+    ids=["for-loop", "while-loop", "xargs", "parallel", "find-exec"],
+)
+def test_n2_runtime_multiplexed_launches_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # One lexical launch inside a construct that executes it N times is N
+    # paid children under one binding's single attempt_ref.
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+def test_n2_launch_feeding_a_batch_tool_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A launch that runs ONCE and pipes into xargs is not multiplexed;
+    # only a launch inside the executor's own argument tail is refused.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement,
+        _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3 | xargs grep -l glm",
+    )
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # N-3/C4: an interpreter one-liner assembles the launch at runtime;
+        # the gate never ran at all (no five-shapes match).
+        "python3 -c 'subprocess.run([\"pool\",\"run\",\"grok\",\"a\",\"/tmp\","
+        "\"grok-4.6\"])'",
+        # N-3/C4b: same carrier rewriting the identity inside the code.
+        "python3 -c 'import os,subprocess; "
+        "os.environ[\"POOL_ORCHESTRATOR_ID\"]=\"root-evil\"; "
+        "subprocess.run([\"pool\",\"run\",\"glm\",\"a\",\"/tmp\",\"glm-5.3\"])'",
+        # N-3/C5: perl exec of the wrapper.
+        "perl -e 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        # N-3/C6: a variable-assembled command word.
+        "P=pool; $P run grok a /tmp grok-4.6",
+        "P=pool; ${P} run grok a /tmp grok-4.6",
+        "P=pool; exec $P run grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "python-subprocess", "python-env-rewrite", "perl-exec",
+        "variable-command", "braced-variable", "exec-runner",
+    ],
+)
+def test_n3_computed_and_interpreter_launches_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_n3_computed_launch_refusal_stays_scoped_to_wrapper_tokens(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Without a wrapper NAME in the text, interpreter one-liners and
+    # computed command words stay allowed (documented arbitrary-process
+    # limit); a wrapper run as a plain script argument stays observed.
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    for command in (
+        "python3 -m pytest tests/test_provider_orchestrator_policy.py",
+        "TOOL=ls; $TOOL -la /tmp",
+        "python3 /opt/mastermind/ext/slot.py glm -- run",
+    ):
+        guard.guard_bash(
+            _payload(shared_placement, command), {"command": command}
+        )
+        assert capsys.readouterr().out == "", command
+
+
+def test_n4_receipt_channel_requires_a_positive_owner_allowlist(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("positive-ownership legs need a non-root test principal")
+    _install(monkeypatch, tmp_path, _binding())
+
+    # No allowlist projected: the channel is no longer defined only
+    # negatively ("anything the principal cannot write") — refuse.
+    monkeypatch.delenv("MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "not owner-authenticated" in reason
+    assert "owner-uid allowlist" in reason
+    assert "is not projected" in reason
+
+    # A malformed pin refuses, never falls through.
+    monkeypatch.setenv("MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", "not-a-uid")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "malformed" in _emitted(capsys)["permissionDecisionReason"]
+
+    # r2 N-4 core: a receipt owned by a uid OUTSIDE root+allowlist is
+    # refused even though the fenced principal cannot write it — before,
+    # any third local account's file qualified as an "owner channel".
+    monkeypatch.setenv(
+        "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", str(os.geteuid() + 4242)
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "not owner-authenticated" in reason
+    assert "owner-uid allowlist" in reason
+
+    # The owner asserting its own uid admits the owner-written receipt.
+    monkeypatch.setenv(
+        "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS", str(os.geteuid())
+    )
+    _guard_launch(shared_placement)
+    assert capsys.readouterr().out == ""
+
+
+def test_guard_module_stays_stdlib_only() -> None:
+    import ast
+    import sys
+
+    source = Path(guard.__file__).read_text(encoding="utf-8")
+    roots = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0, "relative imports break verbatim-copy deployment"
+            roots.add(str(node.module).split(".")[0])
+    assert roots and roots <= set(sys.stdlib_module_names) | {"__future__"}
+
+
+# --- rework r5: REVIEW_2329 r3 structural findings (B-1 / M-A / M-B) -----------
+#
+# Review-item -> test mapping (REVIEW_2329_r3.md §4; every shape the review
+# named plus the obvious variants, all under a REAL armed session with the
+# faithful binding installed):
+#
+#   B-1 (BLOCKER; r2 N-3 reopened) interpreter one-liners and computed
+#   command words carrying the literal wrapper name escape the whole gate:
+#     python3 -Sc/-Bc/-Ic/-uc, perl -we/-E, node -p/--eval, ruby -ne,
+#     php -nr, python3 -X dev -c, osascript -l JavaScript -e .... test_r5_b1_interpreter_option_forms
+#     python3 - <<'EOF' (option + heredoc feed) .............. test_r5_b1_interpreter_stdin_fed
+#     python3 <<'EOF' (bare heredoc feed, no option) ......... test_r5_b1_interpreter_stdin_fed
+#     echo 'code' | python3 (pipe feed) ...................... test_r5_b1_interpreter_stdin_fed
+#     awk 'system("pool …")', sed e-command, jq filter ........ test_r5_b1_always_inline_interpreters
+#     time/sudo -n/caffeinate/script/strace/flock/systemd-run/
+#     unbuffer/ionice/doas/chrt/ssh host/su -c … $P run grok . test_r5_b1_computed_words_through_unlisted_runners
+#     { $P run grok …; } (computed word inside a brace group) . test_r5_b1_computed_words_through_unlisted_runners
+#     P=sub.sh; sudo -n $P glm … (non-pool wrapper shadow) ... test_r5_b1_computed_words_through_unlisted_runners
+#     pool run glm a /tmp $(date +%s) and `date` arguments .... test_r5_b1_command_substitution_arguments
+#     controls: script-file slot.py launch, nested faithful -c
+#     launch, no-wrapper-token computed/interpreter commands,
+#     inspector reads, heredoc JSON write ................... test_r5_b1_structural_refusals_stay_scoped
+#
+#   M-A (MAJOR; r2 N-2 residual) runtime multiplication outside do…done:
+#     f() { launch; }; f; f and single-call and recursion ..... test_r5_ma_function_definition_bodies
+#     function f { launch; } ................................ test_r5_ma_function_definition_bodies
+#     f() ( subshell-body launch ) ........................... test_r5_ma_function_definition_bodies
+#     for i in 1 2; { launch; } .............................. test_r5_ma_brace_body_loops
+#     for ((i=0;i<2;i++)) { launch; } ........................ test_r5_ma_brace_body_loops
+#     while read x; { launch; } .............................. test_r5_ma_brace_body_loops
+#     trap 'launch' USR1; kill -USR1 $$ twice ................ test_r5_ma_trap_payloads_and_watch_repeaters
+#     watch -n 60 launch and watch -g 'launch' ............... test_r5_ma_trap_payloads_and_watch_repeaters
+#
+#   M-B (new; M-1 class) eval/source/'.' inside the nested -c launcher:
+#     X/Y-split eval "$X$Y" identity assembly (live L11) ...... test_r5_mb_nested_eval_source_dot
+#     bash -c 'eval "$X"; launch' ............................ test_r5_mb_nested_eval_source_dot
+#     sh -c '. ./env.sh; launch' ............................. test_r5_mb_nested_eval_source_dot
+#     bash -c 'source ./env.sh; launch' ...................... test_r5_mb_nested_eval_source_dot
+#     bash -c 'eval "pool run grok …"' (literal launch) ...... test_r5_mb_nested_eval_source_dot
+#     control: bash -c '. ./env.sh'; launch (separate
+#     process — N5-ctl2 stays allowed) ....................... test_r5_mb_separate_process_dot_stays_allowed
+
+_R5_LAUNCH = _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3"
+
+
+def _r5_armed(
+    shared_placement: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E1/E2/F1/F2: bundled option clusters hide the -c.
+        "python3 -Sc 'subprocess.run([\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\"])'",
+        "python3 -Bc 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -Ic 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -uc 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        # r3 E3/E4: perl option clusters.
+        "perl -we 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        "perl -E 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        # r3 E5/E6: node short and long program options.
+        "node -p 'require(\"child_process\").execSync(\"pool run grok a /tmp grok-4.6\")'",
+        "node --eval 'require(\"child_process\").exec(\"pool run grok a /tmp grok-4.6\")'",
+        # r3 E10/F4: ruby / php option clusters.
+        "ruby -ne 'system(\"pool run grok a /tmp grok-4.6\")'",
+        "php -nr 'shell_exec(\"pool run grok a /tmp grok-4.6\");'",
+        # r2 F5/F6 relatives with the same delivery shape.
+        "python3 -X dev -c 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "osascript -l JavaScript -e 'app.doShellScript(\"pool run grok a /tmp grok-4.6\")'",
+    ],
+    ids=[
+        "python-Sc", "python-Bc", "python-Ic", "python-uc",
+        "perl-we", "perl-E", "node-p", "node-eval",
+        "ruby-ne", "php-nr", "python-X-dev-c", "osascript-e",
+    ],
+)
+def test_r5_b1_interpreter_option_forms(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # Structural rule: an interpreter is judged by HOW its program is
+    # delivered (here: inline option text), never by which letters the
+    # options spell — so every cluster/long-form variant is one class.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "plain command" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E7: option + heredoc feed.
+        "python3 - <<'EOF'\nimport subprocess\nsubprocess.run([\"pool\",\"run\",\"grok\"])\nEOF",
+        # r3 E8: bare heredoc feed (no option word at all).
+        "python3 <<'EOF'\nimport subprocess\nsubprocess.run([\"pool\",\"run\",\"grok\"])\nEOF",
+        # r3 E9: pipe-fed program text.
+        "echo 'import subprocess; subprocess.run([\"pool\",\"run\",\"grok\"])' | python3",
+    ],
+    ids=["heredoc-dash", "heredoc-bare", "pipe-fed"],
+)
+def test_r5_b1_interpreter_stdin_fed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Interpreters whose program text is ALWAYS an inline argument.
+        "awk 'BEGIN{system(\"pool run grok a /tmp grok-4.6\")}'",
+        "sed 's/x/e pool run grok a \\/tmp grok-4.6/e' notes.txt # pool run grok",
+        "jq --raw-output '\"pool run grok a /tmp grok-4.6\"' cfg.json",
+    ],
+    ids=["awk-system", "sed-e-command", "jq-filter"],
+)
+def test_r5_b1_always_inline_interpreters(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # No script-file form exists for these: any invocation with a wrapper
+    # token in the text is an inline-program launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    assert "unobservable launch" in _emitted(capsys)["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 N3-R: runners outside the old nine-word allowlist.
+        "P=pool; time $P run grok a /tmp grok-4.6",
+        "P=pool; sudo -n $P run grok a /tmp grok-4.6",
+        "P=pool; caffeinate $P run grok a /tmp grok-4.6",
+        "P=pool; script -q /dev/null $P run grok a /tmp grok-4.6",
+        "P=pool; strace -f $P run grok a /tmp grok-4.6",
+        "P=pool; flock /tmp/lock $P run grok a /tmp grok-4.6",
+        "P=pool; systemd-run $P run grok a /tmp grok-4.6",
+        "P=pool; unbuffer $P run grok a /tmp grok-4.6",
+        "P=pool; ionice -c2 $P run grok a /tmp grok-4.6",
+        "P=pool; doas $P run grok a /tmp grok-4.6",
+        "P=pool; chrt -r 10 $P run grok a /tmp grok-4.6",
+        "P=pool; ssh ubuntu0 $P run grok a /tmp grok-4.6",
+        "P=pool; su -c '$P run grok a /tmp grok-4.6' root",
+        # r3 E12/E13/E14: computed word inside a brace group.
+        "P=pool; { $P run grok a /tmp grok-4.6; }",
+        # Non-pool wrapper shadowed through a runner.
+        "P=sub.sh; sudo -n $P grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "time", "sudo", "caffeinate", "script", "strace", "flock",
+        "systemd-run", "unbuffer", "ionice", "doas", "chrt", "ssh",
+        "su-c", "brace-group", "subsh-shadow",
+    ],
+)
+def test_r5_b1_computed_words_through_unlisted_runners(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # Structural rule (shadow substitution): when replacing a computed word
+    # with a wrapper name would complete a paid launch, the launch cannot be
+    # attributed — with no runner allowlist left to evade.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "literal name" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _IDENTITY_PREFIX + "pool run glm a /tmp $(date +%s)",
+        _IDENTITY_PREFIX + "pool run glm a /tmp `date +%s`",
+    ],
+    ids=["command-substitution", "backtick"],
+)
+def test_r5_b1_command_substitution_arguments(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # $(…)/backticks execute inside this very shell: even as launch
+    # arguments they can construct or hide a second paid launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable" in reason
+    assert "command substitution" in reason
+
+
+def test_r5_b1_structural_refusals_stay_scoped(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The structural layer must not swallow the forms it does not own:
+    # the script-file interpreter launch stays OBSERVED (judged by the
+    # normal launch pipeline), the nested faithful -c launch stays
+    # allowed, and no-wrapper-token commands keep the documented
+    # arbitrary-process limit.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    for command in (
+        # Documented launch shape: slot.py through python3, no options —
+        # an OBSERVED launch judged by the normal pipeline, so it carries
+        # the faithful identity projection like every launch.
+        _IDENTITY_PREFIX + "python3 /opt/mastermind/ext/slot.py glm -- run",
+        # Faithful nested -c launch: identity prefix assignments on the
+        # bash invocation itself (inherited by everything the body runs).
+        _IDENTITY_PREFIX + "bash -c 'pool run glm a /tmp glm-5.3'",
+        # Wrapper name present but only as data for inspectors/printers.
+        "cat results.txt | grep pool",
+        "cat > /tmp/pool.json <<'EOF'\n{\"pool\": \"glm\"}\nEOF",
+        "{ echo grouped; }",
+        # Computed/interpreter commands with NO wrapper token anywhere.
+        "TOOL=ls; $TOOL -la /tmp",
+        "python3 -m pytest tests/test_provider_orchestrator_policy.py",
+        "jq -r '.models[]' config.json",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E2: defined once, called twice.
+        "f() { " + _R5_LAUNCH + "; }; f; f",
+        # r3 E2 single call: the body itself is still a deferred repeat.
+        "f() { " + _R5_LAUNCH + "; }; f",
+        # r3 E3: recursion.
+        "f() { " + _R5_LAUNCH + "; f; }; f",
+        # ksh/bash function keyword form.
+        "function f { " + _R5_LAUNCH + "; }; f; f",
+        # POSIX subshell body.
+        "f() ( " + _R5_LAUNCH + " ); f; f",
+    ],
+    ids=["called-twice", "called-once", "recursive", "function-keyword", "subshell-body"],
+)
+def test_r5_ma_function_definition_bodies(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E1/E9: bash brace bodies instead of do…done.
+        "for i in 1 2; { " + _R5_LAUNCH + "; }",
+        "for ((i=0;i<2;i++)) { " + _R5_LAUNCH + "; }",
+        "while read x; { " + _R5_LAUNCH + "; }",
+    ],
+    ids=["for-brace", "arith-for-brace", "while-brace"],
+)
+def test_r5_ma_brace_body_loops(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E12: trap fires per signal — one lexical launch, N children.
+        "trap '" + _R5_LAUNCH + "' USR1; kill -USR1 $$; kill -USR1 $$",
+        # r3 E4: watch repeats the launch forever.
+        "watch -n 60 " + _R5_LAUNCH,
+        "watch -g '" + _R5_LAUNCH + "'",
+    ],
+    ids=["trap-payload", "watch-interval", "watch-glob"],
+)
+def test_r5_ma_trap_payloads_and_watch_repeaters(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 M-B / live L11: identity re-assembled inside the launcher.
+        "X='export POOL_ORCH' Y='ESTRATOR_ID=root-other' bash -c "
+        "'eval \"$X$Y\"; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-a.
+        "bash -c 'eval \"$X\"; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-b.
+        "sh -c '. ./env.sh; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-c.
+        "bash -c 'source ./env.sh; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # eval staging even a LITERAL launch inside the nested body.
+        "bash -c 'eval \"pool run grok a /tmp grok-4.6\"'",
+    ],
+    ids=["eval-split-identity", "eval-word", "dot-source", "source-word", "eval-literal-launch"],
+)
+def test_r5_mb_nested_eval_source_dot(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch environment" in reason
+
+
+def test_r5_mb_separate_process_dot_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # N5-ctl2 pinned behaviour: a nested shell that sources and EXITS
+    # before the launch cannot change the launch environment, so it stays
+    # allowed — the refusal is scoped to the SAME nested script that
+    # performs the launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    _guard_launch(
+        shared_placement,
+        "bash -c '. ./env.sh'; " + _R5_LAUNCH,
+    )
     assert capsys.readouterr().out == ""

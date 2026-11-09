@@ -18901,6 +18901,71 @@ def _require_placement_settlement_fence(
     return raw
 
 
+def _join_native_runtime_binding(
+    binding: object, *, spec: Mapping[str, Any], adapter_id: str
+) -> object:
+    """Rev 5 §3A/§7 ExecutionBinding v1.1 native-runtime join at the claim seam.
+
+    When the claimed route's EFFECTIVE adapter id (worker capacity metadata,
+    falling back to the admitted route descriptor) resolves to a registered
+    native adapter, the claim-time ExecutionBinding itself carries the
+    native idempotency join the adapter must reproduce at launch:
+
+    * ``runtime_kind`` — from the REGISTERED adapter descriptor, never
+      guessed from a label, file name or provider string;
+    * ``operation_key`` — the binding-derived T3 ``clientRequestId``
+      (sha256 over adapter id + child identity triple + admitted request
+      digest), so a coordinator restart, disconnect or lost reply replays
+      the SAME upstream command instead of minting a second native thread
+      (idempotency identity is the persisted (namespace, key) pair —
+      T3_HANDOFF_V2 §2);
+    * ``caller_namespace`` — the adapter's pinned request namespace, i.e.
+      the namespace the launch envelope will carry.
+
+    Every joined value is derived from the SAME issued binding, so the
+    adapter's later ``derive_t3_client_request_id`` reproduces
+    ``operation_key`` byte for byte; a drifted or hand-edited binding fails
+    that join instead of launching under a different identity. Any other
+    adapter id returns the binding unchanged (a plain v1 record); an
+    adapter id that does not resolve, or a t3 seam that is not implemented,
+    fails CLOSED with a typed ``StateConflict`` inside the claim
+    transaction, so the placement commitment rolls back with it and the Job
+    stays QUEUED (never a half-claimed attempt).
+    """
+    from control_plane.worker_adapter import adapter_descriptor
+
+    effective = str(
+        adapter_id or spec["route"].get("adapter_id") or ""
+    ).strip().lower()
+    if not effective:
+        return binding
+    try:
+        descriptor = adapter_descriptor(effective)
+    except ValueError as exc:
+        raise StateConflict(
+            f"claimed route adapter {effective!r} is not a reviewed adapter"
+            " descriptor"
+        ) from exc
+    if descriptor.runtime_kind != "t3-native":
+        return binding
+    if not descriptor.implemented:
+        raise StateConflict(
+            f"claimed route adapter {effective!r} is registered but not"
+            " implemented; the t3-native seam cannot bind a live worker"
+        )
+    from control_plane.t3_execution_adapter import (
+        T3_REQUEST_NAMESPACE,
+        derive_t3_client_request_id,
+    )
+    operation_key = derive_t3_client_request_id(binding)
+    return dataclasses.replace(
+        binding,
+        runtime_kind=descriptor.runtime_kind,
+        operation_key=operation_key,
+        caller_namespace=T3_REQUEST_NAMESPACE,
+    )
+
+
 class AttemptRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -19262,6 +19327,15 @@ class AttemptRegistry:
                 adapter_id=str(capacity_metadata.get("adapter_id") or ""),
                 fence_counter=fence,
                 lease_expires_at_ms=timestamp + duration * 1000,
+            )
+            # Rev 5 v1.1 (Director C): the claim seam joins native runtime
+            # identity onto the issued binding BEFORE it rides the payload,
+            # inside this same transaction — a t3-native route carries its
+            # clientRequestId/namespace join, an unknown adapter fails
+            # closed with the commitment, and every other route stays v1.
+            binding = _join_native_runtime_binding(
+                binding, spec=spec,
+                adapter_id=str(capacity_metadata.get("adapter_id") or ""),
             )
             claim_payload["execution_binding"] = binding.to_dict()
             claim_payload["placement_commitment"] = dict(

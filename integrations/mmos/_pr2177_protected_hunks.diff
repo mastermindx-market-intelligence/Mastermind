@@ -1,0 +1,2039 @@
+diff --git a/config/executive_worker_routes.json b/config/executive_worker_routes.json
+index 77c1d8915..785e73d92 100644
+--- a/config/executive_worker_routes.json
++++ b/config/executive_worker_routes.json
+@@ -4,6 +4,11 @@
+   "lifecycle_authority": "executive_os",
+   "production_armed": false,
+   "providers": {
++    "acp": {
++      "adapter_id": "dsh-native-acp",
++      "enabled": true,
++      "autonomous_allowed": true
++    },
+     "minimax": {
+       "adapter_id": "attended-fabric",
+       "enabled": false,
+@@ -56,6 +61,15 @@
+     }
+   },
+   "model_aliases": {
++    "dsh.native.conversation": {
++      "provider_alias": "acp",
++      "execution_profile_id": "operator.dsh.native-conversation.v1",
++      "model": "deepseek-chat",
++      "effort": "default",
++      "cost_class": "small",
++      "capabilities": ["read"],
++      "worker_eligible": true
++    },
+     "experiential.flash.candidate": {
+       "provider_alias": "experiential",
+       "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+diff --git a/control_plane/executive_runtime.py b/control_plane/executive_runtime.py
+index 3ad518a38..9456878a8 100644
+--- a/control_plane/executive_runtime.py
++++ b/control_plane/executive_runtime.py
+@@ -65,6 +65,7 @@ from control_plane.executive_authority import (
+ from control_plane.executive_agent_capabilities import (
+     CapabilityPolicyError,
+     ExecutionCapabilityRegistry,
++    DSH_NATIVE_CONVERSATION_PROFILE_ID,
+ )
+ from control_plane.executive_coo_policy import (
+     CooCyclePolicy,
+@@ -116,6 +117,9 @@ from control_plane.operator_harness_contract import (
+     operation_receipt_command_id,
+     compare_launch,
+ )
++from control_plane.native_conversation_result import (
++    DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT,
++)
+ from scripts.ohf.redaction import redact_evidence, redact_evidence_text
+ 
+ SCHEMA_VERSION = 7
+@@ -226,10 +230,124 @@ def _validated_planner_producer_binding(
+     return expected
+ 
+ 
++_NATIVE_RESULT_BINDING_SCHEMA = "mastermind.operator_result_contract_binding/v1"
++_NATIVE_RESULT_CONSTRAINT = "operator_result_contract"
++
++
++def _make_native_result_binding(
++    *, root_job_id: str, job_id: str, command_id: str,
++    constraints: Mapping[str, Any],
++) -> dict[str, Any]:
++    if (constraints.get(_NATIVE_RESULT_CONSTRAINT) != DSH_NATIVE_RESULT_CONTRACT
++            or constraints.get("execution_profile_id") != DSH_NATIVE_CONVERSATION_PROFILE_ID
++            or constraints.get("provider") != "acp"
++            or command_id != f"coo-cycle:{root_job_id}:create-interactive:0"):
++        raise StateConflict("native result contract requires its exact interactive creator")
++    return {
++        "schema_version": _NATIVE_RESULT_BINDING_SCHEMA,
++        "result_contract": DSH_NATIVE_RESULT_CONTRACT,
++        "root_job_id": root_job_id,
++        "job_id": job_id,
++        "command_id": command_id,
++        "execution_binding_digest": _planner_execution_binding_digest(constraints),
++    }
++
++
++def _validated_native_result_binding(
++    connection: sqlite3.Connection, job_row: sqlite3.Row,
++) -> dict[str, Any] | None:
++    """Read native selection from the original creation Event, never a row marker."""
++    constraints = _strict_canonical_json_loads(
++        str(job_row["constraints_json"]), name="operator result constraints")
++    if type(constraints) is not dict:
++        raise StateConflict("operator result constraints are malformed")
++    rows = connection.execute(
++        "SELECT * FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
++        (job_row["job_id"],),
++    ).fetchall()
++    if len(rows) != 1:
++        raise StateConflict("operator result requires one original creation Event")
++    event = rows[0]
++    payload = _strict_canonical_json_loads(
++        str(event["payload_json"]), name="operator result JOB_CREATED payload")
++    if type(payload) is not dict:
++        raise StateConflict("operator result creation payload is malformed")
++    keys = {"operator_result_binding", "operator_result_binding_digest"}
++    present = keys.intersection(payload)
++    selected = (_NATIVE_RESULT_CONSTRAINT in constraints
++                or constraints.get("execution_profile_id") == DSH_NATIVE_CONVERSATION_PROFILE_ID)
++    if not present and not selected:
++        return None
++    if (present != keys or not selected
++            or any(key in payload for key in (
++                "planner_producer_binding", "planner_producer_binding_digest"))):
++        raise StateConflict("native result binding must be exact, exclusive and all-or-absent")
++    role, provenance, provenance_digest = _decode_orchestration_job_fields(job_row)
++    root_id = str(job_row["root_job_id"])
++    command_id = f"coo-cycle:{root_id}:create-interactive:0"
++    root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_id,)).fetchone()
++    if root is None:
++        raise StateConflict("native result original root is unavailable")
++    root_role, root_provenance, root_digest = _decode_orchestration_job_fields(root)
++    if (role != "plan" or job_row["parent_job_id"] != root_id or int(job_row["depth"]) != 1
++            or root_role != "aggregation" or root["parent_job_id"] is not None
++            or root["root_job_id"] != root_id or int(root["depth"]) != 0
++            or not _accepted_orchestration_root_provenance(root_provenance)
++            or provenance is None or provenance.get("creator") != "coo_cycle"
++            or provenance.get("command_id") != command_id
++            or provenance.get("job_id") != job_row["job_id"]
++            or provenance.get("parent_job_id") != root_id or provenance.get("root_job_id") != root_id
++            or provenance.get("role") != "plan" or provenance.get("source_id") != root_id
++            or provenance.get("source_digest") != root_digest
++            or event["aggregate_type"] != "job" or event["aggregate_id"] != job_row["job_id"]
++            or event["command_id"] != command_id
++            or payload.get("parent_job_id") != root_id or payload.get("root_job_id") != root_id
++            or type(payload.get("depth")) is not int or payload["depth"] != 1
++            or payload.get("orchestration_role") != "plan"
++            or payload.get("orchestration_provenance_digest") != provenance_digest):
++        raise StateConflict("native result original creation identity differs")
++    expected = _make_native_result_binding(
++        root_job_id=root_id, job_id=str(job_row["job_id"]),
++        command_id=command_id, constraints=constraints)
++    if (payload["operator_result_binding"] != expected
++            or payload["operator_result_binding_digest"] != orchestration_digest(expected)):
++        raise StateConflict("native result original binding or execution identity differs")
++    return expected
++
++
++def _assert_root_native_result_join(
++    connection: sqlite3.Connection, *, root_row: sqlite3.Row, constraints: Mapping[str, Any],
++) -> dict[str, Any] | None:
++    """Fresh native effects retain the original root's executable and logical choice."""
++    selected = _frontier_selection_from_root_creation(
++        connection, root_job_id=str(root_row["job_id"]))
++    root_constraints = _strict_canonical_json_loads(
++        str(root_row["constraints_json"]), name="native original root constraints")
++    if type(root_constraints) is not dict or root_constraints.get("operator_harness_armed") is not True:
++        raise StateConflict("native operator lane is not armed for this root")
++    _planner_execution_binding_digest(constraints)
++    for field in _PLANNER_EXECUTION_FIELDS:
++        root_field = field if field == "base_sha" else f"operator_{field}"
++        if constraints.get(field) != root_constraints.get(root_field):
++            raise StateConflict("native executable lane differs from its admitted root")
++    if selected is not None:
++        for logical, executable in (
++            ("provider_alias", "provider"), ("model", "model"), ("effort", "effort"),
++            ("routing_policy_version", "routing_policy_version"),
++            ("capability_policy_version", "capability_policy_version"),
++            ("capability_policy_digest", "capability_policy_digest"),
++        ):
++            if selected[logical] != constraints[executable]:
++                raise StateConflict("selected CEO differs from the admitted native identity")
++    return selected
++
++
+ def _assert_planner_producer_result(
+     connection: sqlite3.Connection, planner: sqlite3.Row,
+     attempt: sqlite3.Row, plan: Mapping[str, Any],
+ ) -> None:
++    if _validated_native_result_binding(connection, planner) is not None:
++        raise StateConflict("native conversation evidence cannot become a planner result")
+     binding = _validated_planner_producer_binding(connection, planner)
+     if binding is not None:
+         version = binding["plan_schema_version"]
+@@ -878,6 +996,11 @@ def _normalise_constraints(
+     if value is not None and not isinstance(value, dict):
+         raise StateConflict("job constraints must be a mapping")
+     raw = value or {}
++    native_result_fields = {}
++    if _NATIVE_RESULT_CONSTRAINT in raw:
++        if raw[_NATIVE_RESULT_CONSTRAINT] != DSH_NATIVE_RESULT_CONTRACT:
++            raise StateConflict("unknown operator result contract")
++        native_result_fields[_NATIVE_RESULT_CONSTRAINT] = DSH_NATIVE_RESULT_CONTRACT
+     direct_fields = {}
+     if direct_native.POLICY_KEY in raw:
+         if raw[direct_native.POLICY_KEY] != direct_native.POLICY:
+@@ -917,7 +1040,7 @@ def _normalise_constraints(
+     eligible = sorted(
+         {str(item).strip().lower() for item in quota_values if str(item).strip()}
+     ) or ["default"]
+-    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
++    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields, **native_result_fields}
+ 
+     aliases_raw = raw.get("preferred_model_aliases") or []
+     if isinstance(aliases_raw, str):
+@@ -2052,6 +2175,13 @@ def _assert_frontier_planner_execution(
+     if (planner["orchestration_role"] != "plan"
+             or planner["parent_job_id"] != planner["root_job_id"]):
+         return None
++    if _validated_native_result_binding(connection, planner) is not None:
++        # The incumbent fresh-claim join must not charge native work through
++        # its legacy no-CEO-selection fallback.
++        if not _interactive_tx5_admitted(planner, connection=connection):
++            raise StateConflict("native claim requires its original admitted contract")
++        return _frontier_selection_from_root_creation(
++            connection, root_job_id=str(planner["root_job_id"]))
+     selected = _frontier_selection_from_root_creation(
+         connection, root_job_id=str(planner["root_job_id"]),
+     )
+@@ -2396,7 +2526,7 @@ def _interactive_live_plan_owner(
+     ).fetchall()
+     if not rows:
+         return None
+-    if len(rows) != 1 or not _interactive_tx5_admitted(rows[0]):
++    if len(rows) != 1 or not _interactive_tx5_admitted(rows[0], connection=connection):
+         raise StateConflict("interactive root parent identity is ambiguous")
+     return rows[0]
+ 
+@@ -2501,7 +2631,7 @@ def _admitted_current_generation_for_interactive_seal(
+     return rows[0]
+ 
+ 
+-def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
++def _interactive_tx5_admitted(row: sqlite3.Row, *, connection: sqlite3.Connection | None = None) -> bool:
+     if row["orchestration_role"] != "plan":
+         return False
+     constraints = _strict_canonical_json_loads(
+@@ -2510,6 +2640,32 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
+     if not isinstance(constraints, dict):
+         raise StateConflict("interactive parent constraints are malformed")
+     profile_id = constraints.get("execution_profile_id")
++    if profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID:
++        if connection is None or _validated_native_result_binding(connection, row) is None:
++            raise StateConflict("native interactive admission requires its original creation binding")
++        root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["root_job_id"],)).fetchone()
++        _assert_root_native_result_join(connection, root_row=root, constraints=constraints)
++        try:
++            registry = ExecutionCapabilityRegistry.load()
++            profile = registry.resolve(profile_id)
++        except CapabilityPolicyError as exc:
++            raise StateConflict(f"native interactive capability policy is invalid: {exc}") from exc
++        if (not profile.enabled or profile.execution_surface != "dsh-native-web-acp"
++                or profile.auth_realm != "dedicated-worker-account"
++                or profile.sandbox_policy != "read-only" or profile.approval_policy != "never"
++                or profile.network_policy != "disabled" or profile.write_capable
++                or profile.native_helper_policy is not NativeHelperPolicy.DISABLED
++                or profile.native_helper is not None or profile.skills or profile.skill_grants
++                or profile.mcp_servers or profile.mcp_server_grants or profile.resource_grants
++                or profile.plugins != ("mastermind-company",) or profile.forbidden
++                or any(constraints.get(key) != value for key, value in {
++                    "execution_profile_id": profile.profile_id,
++                    "execution_profile_digest": profile.profile_digest,
++                    "capability_policy_version": registry.policy_version,
++                    "capability_policy_digest": registry.policy_digest, "provider": "acp",
++                }.items())):
++            raise StateConflict("native interactive profile is not the exact admitted lane")
++        return True
+     if profile_id not in {INTERACTIVE_TX5_EXECUTION_PROFILE, NATIVE_RETURN_TX5_EXECUTION_PROFILE}:
+         return False
+     _role, provenance, _digest = _decode_orchestration_job_fields(row)
+@@ -2617,6 +2773,13 @@ def _interactive_in_flight_turn_id(
+             continue
+         turn_id = str(payload.get("turn_id"))
+         receipts.setdefault(turn_id, set()).add(event["event_type"])
++    for turn_id, states in receipts.items():
++        if OperationReceiptKind.RECONCILED.value in states:
++            attempt = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
++            if attempt is None:
++                raise StateConflict("native recovered turn has no original Attempt")
++            OperatorHarnessRegistry._validated_tx5_receipts(connection, row=attempt,
++                turn=TurnRef(turn_id, session_epoch_id, generation_id, attempt_id))
+     for turn_id, states in receipts.items():
+         if states == {OperationReceiptKind.INTENT.value}:
+             return turn_id
+@@ -2624,7 +2787,7 @@ def _interactive_in_flight_turn_id(
+         if OperationReceiptKind.EFFECT_UNKNOWN.value in states:
+             return turn_id
+     for turn_id, states in receipts.items():
+-        if OperationReceiptKind.APPLIED.value in states:
++        if states.intersection({OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value}):
+             turn_operation_applied = connection.execute(
+                 """
+                 SELECT 1
+@@ -5152,13 +5315,59 @@ class RuntimeStore:
+                      ORDER BY event_id LIMIT 2""",
+                 (job_id,),
+             ).fetchall()
+-            if len(rows) != 1 or rows[0]["bytes"] > max_payload_bytes:
++            # Native v2 stores its one admitted input in the original
++            # provenance/admission copies. Its exact UTF-8 input has its own
++            # 128-KiB bound; all other root metadata keeps the caller's budget.
++            # Metadata first: even a forged native marker cannot request an
++            # unbounded payload read. ensure_ascii=False stores at most two
++            # bytes per allowed input byte, in exactly two validated copies.
++            from common.fresh_conversation_contract import NATIVE_MESSAGE_BYTES
++            if len(rows) != 1 or rows[0]["bytes"] > max_payload_bytes + 4 * NATIVE_MESSAGE_BYTES:
+                 raise ValueError("original root unavailable or budget exceeded")
++            if rows[0]["bytes"] > max_payload_bytes:
++                from control_plane.fresh_conversation_admission import NATIVE_SCHEMA
++                marked = conn.execute("""SELECT 1 FROM events WHERE event_id=? AND
++                    CASE WHEN json_valid(payload_json)
++                         THEN json_extract(payload_json,'$.fresh_conversation_admission.source.schema')
++                         ELSE NULL END=?""", (rows[0]["event_id"], NATIVE_SCHEMA)).fetchone()
++                if marked is None:
++                    raise ValueError("original root unavailable or budget exceeded")
+             row = conn.execute("SELECT * FROM events WHERE event_id=?",
+                                (rows[0]["event_id"],)).fetchone()
+             if row is None:
+                 raise ValueError("original root changed")
+-            return _event_from_row(row)
++            event = _event_from_row(row)
++            if rows[0]["bytes"] > max_payload_bytes:
++                from control_plane.fresh_conversation_admission import _validated_creation_record, NATIVE_SCHEMA
++                try:
++                    from control_plane.project_execution_admission import COMMISSION_PATH
++                    if row["payload_json"] != _json_dumps(event.payload):
++                        raise ValueError()
++                    provenance = event.payload.get("provenance") or {}
++                    commission = (provenance.get("dialogue_source") or {}).get("commission_ref") or {}
++                    if (event.aggregate_type != "job" or event.aggregate_id != job_id
++                            or "project_execution_admission" in event.payload
++                            or any(key in provenance for key in ("project_execution", "project_execution_digest"))
++                            or commission.get("path") == COMMISSION_PATH):
++                        raise ValueError()
++                    job_row = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
++                    if job_row is None:
++                        raise ValueError()
++                    material = _validated_creation_record(_job_from_row(job_row), event.command_id, event.payload)
++                    if material is None or material["schema"] != NATIVE_SCHEMA:
++                        raise ValueError()
++                    # Copy only the two qualified ancestors; no mutable Event
++                    # or stored bytes are changed and no text owner is added.
++                    bounded_material = {**material, "initial_message": ""}
++                    metadata = {**event.payload,
++                        "provenance": {**event.payload["provenance"], "fresh_conversation": bounded_material},
++                        "fresh_conversation_admission": {**event.payload["fresh_conversation_admission"],
++                            "source": bounded_material}}
++                    if len(_json_dumps(metadata).encode("utf-8")) > max_payload_bytes:
++                        raise ValueError()
++                except (ValueError, TypeError, KeyError, AttributeError):
++                    raise ValueError("original root unavailable or budget exceeded") from None
++            return event
+ 
+     def bounded_event_by_id(
+         self, event_id: int, *, max_payload_bytes: int = 65536,
+@@ -9582,7 +9791,21 @@ def _validated_orchestration_terminal_generation(
+             attempt_row=attempt_row,
+             seal=seal,
+         )
+-    generation_id = str(seal["process_generation_id"])
++    return _validated_ohf_terminal_generation(connection, attempt_row=attempt_row, binding=seal)
++
++
++def _validated_ohf_terminal_generation(
++    connection: sqlite3.Connection, *, attempt_row: sqlite3.Row,
++    binding: dict[str, Any], require_latest: bool = True,
++) -> dict[str, Any]:
++    """Validate original admitted/closed OHF facts, without a role-result envelope.
++
++    Legacy completion requires its latest producer. Native completion validates
++    every bounded closed generation, then names the actual final generation.
++    """
++    if attempt_row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value:
++        raise StateConflict("OHF terminal generation requires the original execution mode")
++    generation_id = str(binding["process_generation_id"])
+     generation = connection.execute(
+         """
+         SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.epoch_number,
+@@ -9700,14 +9923,14 @@ def _validated_orchestration_terminal_generation(
+     if int(generation["generation_number"]) == 1:
+         expected_launch_applied = {
+             "operation_kind": OperationKind.START_SESSION.value,
+-            "provider_session_id": seal["provider_session_id"],
++            "provider_session_id": binding["provider_session_id"],
+             "process_generation_id": generation_id,
+         }
+         expected_launch_intent = {
+             "schema_version": "mastermind.operator_harness_intent/v1",
+             "operation_kind": OperationKind.START_SESSION.value,
+             "attempt_id": attempt_row["attempt_id"],
+-            "session_epoch_id": seal["session_epoch_id"],
++            "session_epoch_id": binding["session_epoch_id"],
+             "process_generation_id": generation_id,
+             "worker_id": attempt_row["worker_id"],
+             "provider_session_id": None,
+@@ -9716,15 +9939,15 @@ def _validated_orchestration_terminal_generation(
+         expected_launch_applied = {
+             "operation_kind": OperationKind.RESUME_SESSION.value,
+             "process_generation_id": generation_id,
+-            "provider_session_id": seal["provider_session_id"],
++            "provider_session_id": binding["provider_session_id"],
+         }
+         expected_launch_intent = {
+             "operation_kind": OperationKind.RESUME_SESSION.value,
+             "attempt_id": attempt_row["attempt_id"],
+-            "session_epoch_id": seal["session_epoch_id"],
++            "session_epoch_id": binding["session_epoch_id"],
+             "process_generation_id": generation_id,
+             "worker_id": attempt_row["worker_id"],
+-            "provider_session_id": seal["provider_session_id"],
++            "provider_session_id": binding["provider_session_id"],
+         }
+     else:
+         raise StateConflict("orchestration terminal generation exceeds G1/G2")
+@@ -9732,17 +9955,17 @@ def _validated_orchestration_terminal_generation(
+         generation["attempt_id"] != attempt_row["attempt_id"]
+         or generation["worker_id"] != attempt_row["worker_id"]
+         or generation["epoch_worker"] != attempt_row["worker_id"]
+-        or generation["provider_session_id"] != seal["provider_session_id"]
+-        or generation["epoch_provider_session"] != seal["provider_session_id"]
+-        or generation["session_epoch_id"] != seal["session_epoch_id"]
++        or generation["provider_session_id"] != binding["provider_session_id"]
++        or generation["epoch_provider_session"] != binding["provider_session_id"]
++        or generation["session_epoch_id"] != binding["session_epoch_id"]
+         or generation["observed_attestation_digest"]
+-        != seal["observed_attestation_digest"]
++        != binding["observed_attestation_digest"]
+         or generation["ended_at_ms"] is None
+         or int(generation["executive_writer_held"]) != 0
+         or generation["provider_writer_state"] != "RELEASED"
+         or generation["epoch_state"] == "CURRENT"
+         or latest is None
+-        or latest["process_generation_id"] != generation_id
++        or (require_latest and latest["process_generation_id"] != generation_id)
+         or active is None
+         or int(active["current_epochs"]) != 0
+         or int(active["writers"]) != 0
+@@ -9773,15 +9996,15 @@ def _validated_orchestration_terminal_generation(
+         or admission.get("attempt_id") != attempt_row["attempt_id"]
+         or admission.get("worker_id") != attempt_row["worker_id"]
+         or admission.get("quota_class") != attempt_row["quota_class"]
+-        or admission.get("orchestration_role") != seal["orchestration_role"]
++        or admission.get("orchestration_role") != binding["orchestration_role"]
+         or admission.get("process_generation_id") != generation_id
+-        or admission.get("provider_session_id") != seal["provider_session_id"]
++        or admission.get("provider_session_id") != binding["provider_session_id"]
+         or admission.get("observed_attestation_digest")
+-        != seal["observed_attestation_digest"]
++        != binding["observed_attestation_digest"]
+         or observation["attempt_id"] != attempt_row["attempt_id"]
+         or observation["worker_id"] != attempt_row["worker_id"]
+         or observation["process_generation_id"] != generation_id
+-        or observation["provider_session_id"] != seal["provider_session_id"]
++        or observation["provider_session_id"] != binding["provider_session_id"]
+         or observation["process_identity"]["pid"] != generation["pid"]
+         or observation["process_identity"]["pgid"] != generation["pgid"]
+         or observation["process_identity"]["process_start_identity"]
+@@ -9790,21 +10013,21 @@ def _validated_orchestration_terminal_generation(
+         or admission.get("execution_principal_snapshot_digest")
+         != attempt_row["execution_principal_snapshot_digest"]
+         or admission.get("execution_principal_snapshot_digest")
+-        != seal["execution_principal_snapshot_digest"]
++        != binding["execution_principal_snapshot_digest"]
+         or admission.get("placement_snapshot_digest")
+         != attempt_row["placement_snapshot_digest"]
+         or admission.get("placement_snapshot_digest")
+-        != seal["placement_snapshot_digest"]
++        != binding["placement_snapshot_digest"]
+         or admission.get("effective_grant_digest")
+         != attempt_row["effective_grant_digest"]
+-        or admission.get("effective_grant_digest") != seal["effective_grant_digest"]
++        or admission.get("effective_grant_digest") != binding["effective_grant_digest"]
+         or admission.get("policy_sha") != _job_coo_policy(connection, str(attempt_row["job_id"])).policy_sha256
+-        or admission.get("policy_sha") != seal["policy_sha"]
++        or admission.get("policy_sha") != binding["policy_sha"]
+         or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+         or not isinstance(decision, dict)
+         or decision.get("decision") != LaunchDecision.ALLOW.value
+-        or decision.get("attestation_digest") != seal["observed_attestation_digest"]
+-        or seal["work_admission_command_id"] != event["command_id"]
++        or decision.get("attestation_digest") != binding["observed_attestation_digest"]
++        or binding["work_admission_command_id"] != event["command_id"]
+     ):
+         raise StateConflict("orchestration terminal generation evidence is invalid")
+     return admission
+@@ -10390,7 +10613,7 @@ def _validated_plan_admission(
+     active_interactive = plan_attempt is not None and (
+         plan_attempt["status"]
+         in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+-        and _interactive_tx5_admitted(plan_attempt)
++        and _interactive_tx5_admitted(plan_attempt, connection=connection)
+     )
+     completed_history = plan_attempt is not None and (
+         plan_attempt["status"] == AttemptStatus.COMPLETED.value
+@@ -11795,7 +12018,7 @@ def _assert_orchestration_lineage_for_create(
+         job_row = connection.execute(
+             "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
+         ).fetchone()
+-        if job_row is None or not _interactive_tx5_admitted(job_row):
++        if job_row is None or not _interactive_tx5_admitted(job_row, connection=connection):
+             raise StateConflict(
+                 "active interactive plan lineage is not recognized"
+             )
+@@ -14277,6 +14500,18 @@ class JobRegistry:
+                     "supersedes_job_id": spec.supersedes_job_id,
+                 }
+             )
++        if _NATIVE_RESULT_CONSTRAINT in spec.constraints:
++            if (spec.orchestration_role != "plan" or spec.parent_job_id != root_job_id
++                    or spec.depth != 1 or spec.planner_plan_schema_version is not None
++                    or (spec.orchestration_provenance_source or {}).get("creator") != "coo_cycle"
++                    or set(spec.requested_authorities) != {"READ"}
++                    or spec.allowed_write_paths or spec.validation_commands):
++                raise StateConflict("native result creation exceeds its original owner")
++            binding = _make_native_result_binding(
++                root_job_id=str(root_job_id), job_id=job_id,
++                command_id=str(spec.command_id), constraints=spec.constraints)
++            event_payload["operator_result_binding"] = binding
++            event_payload["operator_result_binding_digest"] = orchestration_digest(binding)
+         if spec.planner_plan_schema_version is not None:
+             if spec.orchestration_role != "plan" or spec.parent_job_id is None:
+                 raise StateConflict("planner producer cannot bind another role")
+@@ -14731,6 +14966,33 @@ class JobRegistry:
+                 return None
+             return _validated_planner_producer_binding(connection, row)
+ 
++    def get_native_conversation_binding(self, job_id: str) -> dict[str, Any] | None:
++        """Historical creator evidence; does not authorize a current effect."""
++        with self.store.read() as connection:
++            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
++            if row is None:
++                raise StateConflict("operator result Job does not exist")
++            return _validated_native_result_binding(connection, row)
++
++    def operator_result_contract(self, job_id: str) -> str:
++        return (DSH_NATIVE_RESULT_CONTRACT
++                if self.get_native_conversation_binding(job_id) is not None else ROLE_RESULT_CONTRACT)
++
++    def assert_native_conversation_execution(self, job_id: str) -> dict[str, Any]:
++        """Fresh native effect joins its immutable creator and admitted root."""
++        with self.store.read() as connection:
++            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
++            if row is None:
++                raise StateConflict("native conversation Job disappeared")
++            binding = _validated_native_result_binding(connection, row)
++            if binding is None:
++                raise StateConflict("native conversation has no original creator binding")
++            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["root_job_id"],)).fetchone()
++            _assert_root_native_result_join(connection, root_row=root,
++                constraints=_strict_canonical_json_loads(str(row["constraints_json"]),
++                                                        name="native execution constraints"))
++            return binding
++
+     def assert_frontier_planner_execution(self, job_id: str) -> dict[str, Any] | None:
+         """Validate an explicit CEO choice only for a fresh root-planner effect."""
+         with self.store.read() as connection:
+@@ -14774,6 +15036,10 @@ class JobRegistry:
+             "harness_version": root_constraints.get("operator_harness_version"),
+             "base_sha": root_constraints.get("base_sha"),
+         }
++        if (operator_binding["execution_profile_id"] == DSH_NATIVE_CONVERSATION_PROFILE_ID
++                and (root_constraints.get("operator_harness_armed") is not True
++                     or not all(operator_binding.values()))):
++            raise StateConflict("native conversation requires the complete armed root execution tuple")
+         if root_constraints.get("operator_harness_armed") is True and all(
+             operator_binding.values()
+         ):
+@@ -14834,17 +15100,22 @@ class JobRegistry:
+         native = (root.constraints.get("operator_harness_armed") is True
+                   and root.constraints.get("operator_execution_profile_id")
+                   == NATIVE_RETURN_TX5_EXECUTION_PROFILE)
+-        profile_id = NATIVE_RETURN_TX5_EXECUTION_PROFILE if native else INTERACTIVE_TX5_EXECUTION_PROFILE
++        dsh_native = (root.constraints.get("operator_execution_profile_id")
++                      == DSH_NATIVE_CONVERSATION_PROFILE_ID)
++        profile_id = (DSH_NATIVE_CONVERSATION_PROFILE_ID if dsh_native else
++                      NATIVE_RETURN_TX5_EXECUTION_PROFILE if native else INTERACTIVE_TX5_EXECUTION_PROFILE)
+         registry = ExecutionCapabilityRegistry.load()
+         profile = registry.resolve(profile_id)
+-        if native and any(constraints.get(key) != value for key, value in {
++        if (native or dsh_native) and any(constraints.get(key) != value for key, value in {
+             "execution_profile_id": profile_id,
+             "execution_profile_digest": profile.profile_digest,
+             "capability_policy_version": registry.policy_version,
+             "capability_policy_digest": registry.policy_digest,
+-            "provider": "codex",
++            "provider": "acp" if dsh_native else "codex",
+         }.items()):
+             raise StateConflict("native interactive root capability identity is stale or incomplete")
++        if dsh_native:
++            constraints[_NATIVE_RESULT_CONSTRAINT] = DSH_NATIVE_RESULT_CONTRACT
+         constraints["execution_profile_id"] = profile_id
+         constraints["execution_profile_digest"] = profile.profile_digest
+         constraints["capability_policy_version"] = (
+@@ -14856,7 +15127,8 @@ class JobRegistry:
+         if not constraints.get("routing_policy_version"):
+             constraints["routing_policy_version"] = "interactive-routing"
+         return self.create_job(
+-            f"Operate the bounded interactive App Server session for {root.job_id}: {root.objective}",
++            (f"Continue the native DeepSeek conversation for {root.job_id}: {root.objective}"
++             if dsh_native else f"Operate the bounded interactive App Server session for {root.job_id}: {root.objective}"),
+             department=root.department,
+             priority=root.priority,
+             authority_level=root.authority_level,
+@@ -14978,10 +15250,11 @@ class JobRegistry:
+                 )
+             planner = children[0]
+             if _strict_canonical_json_loads(str(planner["constraints_json"]),
+-                    name="native planner constraints").get("execution_profile_id") == NATIVE_RETURN_TX5_EXECUTION_PROFILE:
++                    name="native planner constraints").get("execution_profile_id") in {
++                        NATIVE_RETURN_TX5_EXECUTION_PROFILE, DSH_NATIVE_CONVERSATION_PROFILE_ID}:
+                 raise StateConflict("bounded native return cannot admit a child plan")
+             interactive = False
+-            if _interactive_tx5_admitted(planner):
++            if _interactive_tx5_admitted(planner, connection=connection):
+                 expected_command = (
+                     f"coo-cycle:{root_token}:admit-plan:"
+                     f"{planner['current_attempt_id']}"
+@@ -16778,6 +17051,26 @@ class JobRegistry:
+         orchestration_role = (
+             str(orchestration_role).strip().lower() if orchestration_role else None
+         )
++        normalized_constraints = _normalise_constraints(
++            constraints,
++            host_admitted_placement_union=(
++                orchestration_role == "aggregation"
++                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
++            ),
++        )
++        native_selected = (
++            _NATIVE_RESULT_CONSTRAINT in normalized_constraints
++            or normalized_constraints.get("execution_profile_id") == DSH_NATIVE_CONVERSATION_PROFILE_ID)
++        if native_selected and (
++            normalized_constraints.get(_NATIVE_RESULT_CONSTRAINT) != DSH_NATIVE_RESULT_CONTRACT
++            or normalized_constraints.get("execution_profile_id") != DSH_NATIVE_CONVERSATION_PROFILE_ID
++            or orchestration_role != "plan"
++            or _coo_cycle_planner_capability is not _COO_CYCLE_PLANNER_CREATION_CAPABILITY
++            or parent_job_id is None
++            or command_id != f"coo-cycle:{parent_job_id}:create-interactive:0"
++            or _planner_plan_schema_version is not None
++        ):
++            raise StateConflict("native result selection is reserved to the original interactive creator")
+         if _planner_plan_schema_version is not None and (
+             orchestration_role != "plan"
+             or _coo_cycle_planner_capability is not _COO_CYCLE_PLANNER_CREATION_CAPABILITY
+@@ -16920,13 +17213,6 @@ class JobRegistry:
+             raise StateConflict(
+                 f"escalation_target={escalation_target!r} requires its typed executive provenance"
+             )
+-        normalized_constraints = _normalise_constraints(
+-            constraints,
+-            host_admitted_placement_union=(
+-                orchestration_role == "aggregation"
+-                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
+-            ),
+-        )
+         try:
+             authority = ExecutiveAuthorityPolicy.load().authorize(
+                 ["READ"] if requested_authorities is None else requested_authorities,
+@@ -17042,6 +17328,9 @@ class JobRegistry:
+                         raise StateConflict(
+                             "planner command replay semantic target drifted"
+                         )
++                    retained_native = _validated_native_result_binding(connection, existing)
++                    if (retained_native is not None) != native_selected:
++                        raise StateConflict("interactive replay cannot replace its result contract")
+                     retained_producer = _validated_planner_producer_binding(connection, existing)
+                     if (_planner_plan_schema_version is not None
+                             and (retained_producer is None
+@@ -17211,10 +17500,14 @@ class JobRegistry:
+                     raise StateConflict("child attempt_limit may not exceed its parent")
+             if (orchestration_role == "plan" and parent_row is not None
+                     and parent_row["job_id"] == parent_row["root_job_id"]):
+-                _assert_root_frontier_planner_join(
+-                    connection, root_row=parent_row, constraints=normalized_constraints,
+-                    plan_schema_version=_planner_plan_schema_version,
+-                )
++                if native_selected:
++                    _assert_root_native_result_join(
++                        connection, root_row=parent_row, constraints=normalized_constraints)
++                else:
++                    _assert_root_frontier_planner_join(
++                        connection, root_row=parent_row, constraints=normalized_constraints,
++                        plan_schema_version=_planner_plan_schema_version,
++                    )
+             job = self._create_job_in_transaction(
+                 connection,
+                 spec=_JobCreationSpec(
+@@ -20334,7 +20627,23 @@ class AttemptRegistry:
+                 raise StateConflict("terminal Attempt lost its Job")
+             orchestration_role = job_row["orchestration_role"]
+             if status is AttemptStatus.COMPLETED:
+-                if orchestration_role == "aggregation":
++                from control_plane.native_conversation_result import (
++                    NATIVE_CONVERSATION_TERMINAL_SCHEMA, NativeConversationResultRef,
++                )
++                native_binding = _validated_native_result_binding(connection, job_row)
++                if (native_binding is None and isinstance(payload, dict)
++                        and payload.get("schema_version") == NATIVE_CONVERSATION_TERMINAL_SCHEMA):
++                    raise StateConflict("native terminal payload requires its original native creator")
++                if native_binding is not None:
++                    try:
++                        reference = NativeConversationResultRef.from_wire(payload["native_result"])
++                    except (ValueError, TypeError, KeyError) as exc:
++                        raise StateConflict("native terminal payload requires its exact result reference") from exc
++                    structured = OperatorHarnessRegistry(self.store)._native_conversation_terminal_payload(
++                        connection, row=row, job=job_row, reference=reference)
++                    if type(payload) is not dict or payload != structured:
++                        raise StateConflict("native terminal payload differs from original evidence")
++                elif orchestration_role == "aggregation":
+                     structured = _validated_aggregation_terminal_payload(
+                         connection,
+                         attempt_row=row,
+@@ -20398,6 +20707,9 @@ class AttemptRegistry:
+                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
+             )
+             event_payload: dict[str, Any] = {"status": job_status.value}
++            if status is AttemptStatus.COMPLETED and native_binding is not None:
++                event_payload.update(native_terminal_digest=orchestration_digest(structured),
++                                     native_result_event_id=structured["native_result"]["event_id"])
+             if status is AttemptStatus.COMPLETED and _direct_native_provenance(connection,job_row) is not None:
+                 event_payload.update(direct_native_terminal_digest=orchestration_digest(structured),
+                     admission_digest=structured["admission_digest"])
+@@ -20954,7 +21266,7 @@ class OperatorHarnessRegistry:
+         """Read existing deterministic retained-turn admission; grant nothing."""
+         with self.store.read() as connection:
+             row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+-            return row is not None and _interactive_tx5_admitted(row)
++            return row is not None and _interactive_tx5_admitted(row, connection=connection)
+ 
+     def __init__(self, store: RuntimeStore) -> None:
+         self.store = store
+@@ -20993,8 +21305,9 @@ class OperatorHarnessRegistry:
+             raise StateConflict("attempt has no valid sealed OPERATOR_HARNESS profile")
+         return row
+ 
++    @staticmethod
+     def _event(
+-        self, connection: sqlite3.Connection, command_id: str
++        connection: sqlite3.Connection, command_id: str
+     ) -> sqlite3.Row | None:
+         return connection.execute(
+             "SELECT * FROM events WHERE command_id=?", (command_id,)
+@@ -21183,7 +21496,7 @@ class OperatorHarnessRegistry:
+                 "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+             ).fetchone()
+             if job_row is not None:
+-                _interactive_tx5_admitted(job_row)
++                _interactive_tx5_admitted(job_row, connection=connection)
+             seal = connection.execute(
+                 """
+                 SELECT payload_json FROM events
+@@ -21845,7 +22158,7 @@ class OperatorHarnessRegistry:
+             WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+             (row["attempt_id"],),
+         ).fetchall()
+-        interactive = _interactive_tx5_admitted(job)
++        interactive = _interactive_tx5_admitted(job, connection=connection)
+         if (
+             current is None
+             or len(admissions) != 1
+@@ -22000,7 +22313,9 @@ class OperatorHarnessRegistry:
+             job_row = connection.execute(
+                 "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+             ).fetchone()
+-            _interactive_tx5_admitted(job_row)
++            _interactive_tx5_admitted(job_row, connection=connection)
++            if _validated_native_result_binding(connection, job_row) is not None:
++                self._require_no_native_close_intent(connection, generation=generation)
+             job_role = job_row
+             if (
+                 job_role is not None
+@@ -22056,7 +22371,7 @@ class OperatorHarnessRegistry:
+                     generation.process_generation_id,
+                     epoch.attempt_id,
+                 )
+-            if _interactive_tx5_admitted(job_row):
++            if _interactive_tx5_admitted(job_row, connection=connection):
+                 tx5_rows: list[dict[str, Any]] = []
+                 for prior in connection.execute(
+                     """SELECT payload_json FROM events
+@@ -22076,7 +22391,7 @@ class OperatorHarnessRegistry:
+                         == generation.process_generation_id
+                         for item in tx5_rows
+                     )
+-                    if g2_turns >= 1:
++                    if g2_turns >= 1 and _validated_native_result_binding(connection, job_row) is None:
+                         raise StateConflict(
+                             "interactive TX-5 cardinality is exhausted"
+                         )
+@@ -22111,6 +22426,8 @@ class OperatorHarnessRegistry:
+                     raise StateConflict(
+                         "interactive TX-5 already has an in-flight turn"
+                     )
++                if _validated_native_result_binding(connection, job_row) is not None:
++                    self._require_native_predecessor_results(connection, row=row, epoch=epoch)
+             elif job_role is not None and job_role["orchestration_role"] is not None:
+                 tx5_rows: list[dict[str, Any]] = []
+                 for prior in connection.execute(
+@@ -22484,6 +22801,301 @@ class OperatorHarnessRegistry:
+             )
+             return True
+ 
++
++    @staticmethod
++    def _native_operation_event(connection, *, row, operation, kind, command_id=None):
++        command = command_id or operation_receipt_command_id(operation, kind)
++        event = OperatorHarnessRegistry._event(connection, command)
++        if (event is None or event["command_id"] != command
++                or event["aggregate_type"] != "operator_operation"
++                or event["aggregate_id"] != operation.command_id
++                or event["event_type"] != (kind.value if isinstance(kind, OperationReceiptKind) else kind)
++                or event["actor"] != "supervisor"
++                or any(event[key] != row[key] for key in ("attempt_id", "job_id", "worker_id", "quota_class"))):
++            raise StateConflict("native begin original operation provenance differs")
++        payload = _strict_canonical_json_loads(str(event["payload_json"]), name="native original operation")
++        return event, payload
++
++    @classmethod
++    def _native_begin_sources(cls, connection, *, row, turn, operation, observation):
++        """Historical source joins only; current write authority is checked separately."""
++        from control_plane.native_conversation_result import (
++            NativeConversationBeginObservation, result_contract_for_profile,
++        )
++        from control_plane.operator_harness_wire import requested_execution_profile
++        if type(observation) is not NativeConversationBeginObservation:
++            raise StateConflict("native begin requires its closed original observation")
++        job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
++        binding = None if job is None else _validated_native_result_binding(connection, job)
++        if binding is None or row["attempt_id"] != turn.attempt_id:
++            raise StateConflict("native begin requires its original native creator")
++        profile_json = str(row["requested_execution_profile_json"])
++        if (row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
++                or hashlib.sha256(profile_json.encode()).hexdigest() != row["requested_execution_profile_digest"]
++                or observation.requested_profile_digest != row["requested_execution_profile_digest"]):
++            raise StateConflict("native begin differs from its original requested profile")
++        try:
++            requested = requested_execution_profile(_strict_canonical_json_loads(
++                profile_json, name="native begin sealed profile"))
++            constraints = _strict_canonical_json_loads(str(job["constraints_json"]), name="native begin constraints")
++            if (result_contract_for_profile(requested) != DSH_NATIVE_RESULT_CONTRACT
++                    or requested.worker_id != row["worker_id"]
++                    or requested.requested_model != constraints["model"]
++                    or requested.harness_binary_digest != constraints["harness_binary_digest"]
++                    or requested.harness_version != constraints["harness_version"]):
++                raise ValueError("native sealed profile differs")
++        except (ValueError, TypeError, KeyError) as exc:
++            raise StateConflict("native begin immutable creator profile differs") from exc
++        profiles = connection.execute(
++            "SELECT * FROM events WHERE event_type='OHF_PROFILE_SEALED' AND attempt_id=?",
++            (turn.attempt_id,)).fetchall()
++        if len(profiles) != 1:
++            raise StateConflict("native begin requires one original TX-1 profile seal")
++        profile = profiles[0]
++        profile_payload = _strict_canonical_json_loads(str(profile["payload_json"]), name="native begin TX-1")
++        if (profile["aggregate_type"] != "attempt" or profile["aggregate_id"] != turn.attempt_id
++                or any(profile[key] != row[key] for key in ("job_id", "worker_id", "quota_class"))
++                or profile_payload != {"profile_digest": observation.requested_profile_digest}):
++            raise StateConflict("native begin original profile seal differs")
++        generation = connection.execute(
++            """SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.provider_session_id AS epoch_session
++               FROM process_generations g JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
++               WHERE g.process_generation_id=? AND g.session_epoch_id=?""",
++            (turn.process_generation_id, turn.session_epoch_id)).fetchone()
++        if (generation is None or generation["attempt_id"] != turn.attempt_id
++                or generation["worker_id"] != row["worker_id"] or generation["epoch_worker"] != row["worker_id"]
++                or generation["provider_session_id"] != generation["epoch_session"]
++                or generation["observed_attestation_digest"] != observation.observed_attestation_digest
++                or not generation["observed_attestation_json"]
++                or hashlib.sha256(str(generation["observed_attestation_json"]).encode()).hexdigest()
++                   != observation.observed_attestation_digest):
++            raise StateConflict("native begin original generation or attestation differs")
++        ref = ProcessGenerationRef(turn.process_generation_id, turn.session_epoch_id,
++                                   int(generation["generation_number"]), str(row["worker_id"]))
++        try:
++            observation.require_origin(operation, turn, ref, generation["provider_session_id"])
++        except ValueError as exc:
++            raise StateConflict("native begin original claim or generation differs") from exc
++        intent, intent_payload = cls._native_operation_event(connection, row=row, operation=operation,
++            kind=OperationReceiptKind.INTENT, command_id=operation.command_id)
++        if intent_payload != {
++                "schema_version": "mastermind.operator_harness_turn_intent/v1",
++                "operation_kind": OperationKind.BEGIN_TURN.value, "attempt_id": turn.attempt_id,
++                "session_epoch_id": turn.session_epoch_id, "process_generation_id": turn.process_generation_id,
++                "worker_id": str(row["worker_id"]), "provider_session_id": generation["provider_session_id"],
++                "turn_id": turn.turn_id}:
++            raise StateConflict("native begin original TX-5 INTENT differs")
++        duplicate = connection.execute(
++            """SELECT COUNT(*) FROM events WHERE event_type=? AND attempt_id=?
++               AND json_extract(payload_json,'$.operation_kind')=?
++               AND json_extract(payload_json,'$.turn_id')=?""",
++            (OperationReceiptKind.INTENT.value, turn.attempt_id, OperationKind.BEGIN_TURN.value, turn.turn_id)
++        ).fetchone()[0]
++        if duplicate != 1:
++            raise StateConflict("native begin original TX-5 INTENT is ambiguous")
++        admission = cls._event(connection, f"ohf-work-admit:{turn.process_generation_id}")
++        if (admission is None or admission["event_type"] != "ORCHESTRATION_WORK_ADMITTED"
++                or admission["aggregate_type"] != "process_generation"
++                or admission["aggregate_id"] != turn.process_generation_id
++                or any(admission[key] != row[key] for key in ("attempt_id", "job_id", "worker_id", "quota_class"))):
++            raise StateConflict("native begin original work admission differs")
++        admission_payload = _strict_canonical_json_loads(str(admission["payload_json"]), name="native begin admission")
++        principal = _validated_admission_principal(row, admission_payload)
++        if (any(admission_payload.get(key) != row[key] for key in (
++                "attempt_id", "job_id", "worker_id", "quota_class", "execution_principal_snapshot_digest",
++                "placement_snapshot_digest", "effective_grant_digest"))
++                or admission_payload.get("process_generation_id") != turn.process_generation_id
++                or admission_payload.get("provider_session_id") != generation["provider_session_id"]
++                or admission_payload.get("observed_attestation_digest") != observation.observed_attestation_digest
++                or admission_payload.get("launch_decision") != LaunchDecision.ALLOW.value
++                or base_process_identity(principal["process_identity"]) != {
++                    "pid": generation["pid"], "pgid": generation["pgid"],
++                    "process_start_identity": generation["process_start_identity"], "boot_id": generation["boot_id"]}):
++            raise StateConflict("native begin original principal or admission differs")
++        if not int(profile["event_id"]) < int(admission["event_id"]) < int(intent["event_id"]):
++            raise StateConflict("native begin original source order differs")
++        return intent, intent_payload, generation, admission, admission_payload, profile, profile_payload
++
++    @classmethod
++    def _native_begin_reconciled_payload(cls, connection, *, row, turn, operation, observation):
++        intent, intent_payload, _generation, admission, admission_payload, profile, profile_payload = (
++            cls._native_begin_sources(connection, row=row, turn=turn, operation=operation, observation=observation))
++        for kind in (OperationReceiptKind.APPLIED, OperationReceiptKind.REFUSED):
++            if cls._event(connection, operation_receipt_command_id(operation, kind)) is not None:
++                raise StateConflict("native begin cannot reconcile another terminal operation")
++        dispatch, dispatch_payload = cls._native_operation_event(connection, row=row, operation=operation,
++            kind="OHF_PROVIDER_DISPATCH_COMMITTED", command_id=operation.command_id+":dispatch")
++        unknown, unknown_payload = cls._native_operation_event(connection, row=row, operation=operation,
++            kind=OperationReceiptKind.EFFECT_UNKNOWN)
++        if (dispatch_payload != {"schema_version": "mastermind.operator_harness_provider_dispatch/v1",
++                                 "operation_kind": OperationKind.BEGIN_TURN.value}
++                or set(unknown_payload) != {"schema_version", "phase", "detail"}
++                or unknown_payload["schema_version"] != "mastermind.operator_harness_effect_unknown/v1"
++                or type(unknown_payload["phase"]) is not str
++                or unknown_payload["phase"] not in {"begin_turn", "begin_turn_ack", "bind_turn_result", "begin_turn_dispatch"}
++                or type(unknown_payload["detail"]) is not str or len(unknown_payload["detail"]) > 512
++                or not int(intent["event_id"]) < int(dispatch["event_id"]) < int(unknown["event_id"])):
++            raise StateConflict("native begin original unknown dispatch evidence differs")
++        def reference(event, payload):
++            return {"command_id": str(event["command_id"]), "event_id": int(event["event_id"]),
++                    "payload_digest": orchestration_digest(payload)}
++        return {
++            "schema_version": "mastermind.dsh_native_begin_reconciled/v1",
++            "operation_kind": OperationKind.BEGIN_TURN.value,
++            "attempt_id": turn.attempt_id, "session_epoch_id": turn.session_epoch_id,
++            "process_generation_id": turn.process_generation_id, "turn_id": turn.turn_id,
++            "provider_native_turn_id": observation.start.provider_native_turn_id,
++            "acknowledged": True, "resolution": "ACKNOWLEDGED",
++            "observation": observation.to_wire(),
++            "original_intent": reference(intent, intent_payload),
++            "original_dispatch": reference(dispatch, dispatch_payload),
++            "original_unknown": reference(unknown, unknown_payload),
++            "original_profile_seal": reference(profile, profile_payload),
++            "original_work_admission": reference(admission, admission_payload),
++        }
++
++    @classmethod
++    def _validated_native_begin_reconciled(cls, connection, *, row, turn, operation):
++        from control_plane.native_conversation_result import NativeConversationBeginObservation
++        event, payload = cls._native_operation_event(connection, row=row, operation=operation,
++                                                     kind=OperationReceiptKind.RECONCILED)
++        try:
++            observation = NativeConversationBeginObservation.from_wire(payload.get("observation"))
++            expected = cls._native_begin_reconciled_payload(connection, row=row, turn=turn,
++                                                           operation=operation, observation=observation)
++        except (ValueError, TypeError, KeyError) as exc:
++            raise StateConflict("native begin reconciliation evidence is invalid") from exc
++        if payload != expected or int(event["event_id"]) <= expected["original_unknown"]["event_id"]:
++            raise StateConflict("native begin reconciliation differs from original sources")
++        return event, payload
++
++    def reconcile_native_begin(self, *, turn, operation_id, observation, fence_generation, lease_token):
++        """Record one observed original ACK; never dispatch, replay or erase UNKNOWN."""
++        timestamp = self.store.now_ms()
++        with self.store.transaction() as connection:
++            row = self._leased(connection, attempt_id=turn.attempt_id,
++                fence_generation=fence_generation, lease_token=lease_token, timestamp=timestamp,
++                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED})
++            self._native_begin_sources(connection, row=row, turn=turn, operation=operation_id, observation=observation)
++            self._require_active_orchestration_generation(connection, row=row,
++                                                         generation_id=turn.process_generation_id)
++            self._require_no_native_close_intent(connection, generation=observation.generation)
++            applied = self._event(connection, operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED))
++            if applied is not None:
++                operation, _intent, _intent_payload, event, payload = self._validated_tx5_receipts(
++                    connection, row=row, turn=turn)
++                if (operation != operation_id or payload["provider_native_turn_id"] != observation.start.provider_native_turn_id
++                        or self._event(connection, operation_receipt_command_id(operation_id, OperationReceiptKind.EFFECT_UNKNOWN))
++                        is not None):
++                    raise StateConflict("native begin original APPLIED receipt differs")
++                return str(event["command_id"])
++            payload = self._native_begin_reconciled_payload(connection, row=row, turn=turn,
++                                                            operation=operation_id, observation=observation)
++            command = operation_receipt_command_id(operation_id, OperationReceiptKind.RECONCILED)
++            existing = self._event(connection, command)
++            if existing is not None:
++                _event, previous = self._validated_native_begin_reconciled(
++                    connection, row=row, turn=turn, operation=operation_id)
++                if previous != payload:
++                    raise StateConflict("native begin already reconciled differently")
++                return command
++            _finite_existing_effect(self.store, connection, str(row["job_id"]))
++            self._receipt(connection, op=operation_id, kind=OperationReceiptKind.RECONCILED, row=row, payload=payload)
++            return command
++
++    @classmethod
++    def _validated_tx5_receipts(
++        cls, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
++    ) -> tuple[OperationId, sqlite3.Row, dict[str, Any], sqlite3.Row, dict[str, Any]]:
++        """Read the original ACK chain; ordinary APPLIED and native recovery stay distinct."""
++        matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
++        for intent in connection.execute(
++            """SELECT * FROM events
++               WHERE aggregate_type='operator_operation'
++                 AND event_type=? AND attempt_id=?""",
++            (OperationReceiptKind.INTENT.value, turn.attempt_id),
++        ):
++            intent_payload = _json_loads(intent["payload_json"], fallback={})
++            if (intent_payload.get("turn_id") == turn.turn_id
++                    and intent_payload.get("operation_kind") == OperationKind.BEGIN_TURN.value):
++                # Exact-turn interrupt/steering receipts share the TurnRef but
++                # are not a second TX5 begin. Their own operation owner validates
++                # them; candidate evidence joins the original acknowledged begin.
++                matching_intents.append((intent, intent_payload))
++        if len(matching_intents) != 1:
++            raise StateConflict(
++                "candidate requires exactly one matching TX-5 INTENT"
++            )
++        intent, intent_payload = matching_intents[0]
++        expected_intent = {
++            "schema_version": "mastermind.operator_harness_turn_intent/v1",
++            "operation_kind": OperationKind.BEGIN_TURN.value,
++            "attempt_id": turn.attempt_id,
++            "session_epoch_id": turn.session_epoch_id,
++            "process_generation_id": turn.process_generation_id,
++            "worker_id": str(row["worker_id"]),
++            "provider_session_id": intent_payload.get("provider_session_id"),
++            "turn_id": turn.turn_id,
++        }
++        if (
++            intent["aggregate_id"] != intent["command_id"]
++            or intent["worker_id"] != row["worker_id"]
++            or intent["job_id"] != row["job_id"]
++            or intent["quota_class"] != row["quota_class"]
++            or not intent_payload.get("provider_session_id")
++            or intent_payload != expected_intent
++        ):
++            raise StateConflict("candidate TX-5 INTENT provenance mismatch")
++        operation = OperationId(str(intent["command_id"]))
++        applied = cls._event(
++            connection,
++            operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
++        )
++        reconciled = cls._event(connection, operation_receipt_command_id(operation, OperationReceiptKind.RECONCILED))
++        if reconciled is not None:
++            if applied is not None:
++                raise StateConflict("TX-5 has competing acknowledgement receipts")
++            event, payload = cls._validated_native_begin_reconciled(
++                connection, row=row, turn=turn, operation=operation)
++            return operation, intent, intent_payload, event, payload
++        applied_payload = (
++            _json_loads(applied["payload_json"], fallback={}) if applied else {}
++        )
++        if (
++            applied is None
++            or applied["aggregate_type"] != "operator_operation"
++            or applied["aggregate_id"] != operation.command_id
++            or applied["event_type"] != OperationReceiptKind.APPLIED.value
++            or int(applied["event_id"]) <= int(intent["event_id"])
++            or applied["attempt_id"] != turn.attempt_id
++            or applied["worker_id"] != row["worker_id"]
++            or applied["job_id"] != row["job_id"]
++            or applied["quota_class"] != row["quota_class"]
++            or applied_payload.get("schema_version")
++            != "mastermind.operator_harness_turn_applied/v1"
++            or applied_payload.get("operation_kind")
++            != OperationKind.BEGIN_TURN.value
++            or applied_payload.get("attempt_id") != turn.attempt_id
++            or applied_payload.get("session_epoch_id") != turn.session_epoch_id
++            or applied_payload.get("process_generation_id")
++            != turn.process_generation_id
++            or applied_payload.get("turn_id") != turn.turn_id
++            or applied_payload.get("acknowledged") is not True
++            or set(applied_payload)
++            != {
++                "schema_version",
++                "operation_kind",
++                "attempt_id",
++                "session_epoch_id",
++                "process_generation_id",
++                "turn_id",
++                "provider_native_turn_id",
++                "acknowledged",
++            }
++        ):
++            raise StateConflict("candidate requires exact matching TX-5 APPLIED")
++        return operation, intent, intent_payload, applied, applied_payload
++
+     def record_candidate_evidence(
+         self,
+         *,
+@@ -22568,76 +23180,7 @@ class OperatorHarnessRegistry:
+             ).fetchone()
+             if generation is None:
+                 raise StateConflict("candidate generation does not exist")
+-            matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+-            for intent in connection.execute(
+-                """SELECT * FROM events
+-                   WHERE aggregate_type='operator_operation'
+-                     AND event_type=? AND attempt_id=?""",
+-                (OperationReceiptKind.INTENT.value, turn.attempt_id),
+-            ):
+-                intent_payload = _json_loads(intent["payload_json"], fallback={})
+-                if intent_payload.get("turn_id") == turn.turn_id:
+-                    matching_intents.append((intent, intent_payload))
+-            if len(matching_intents) != 1:
+-                raise StateConflict(
+-                    "candidate requires exactly one matching TX-5 INTENT"
+-                )
+-            intent, intent_payload = matching_intents[0]
+-            expected_intent = {
+-                "schema_version": "mastermind.operator_harness_turn_intent/v1",
+-                "operation_kind": OperationKind.BEGIN_TURN.value,
+-                "attempt_id": turn.attempt_id,
+-                "session_epoch_id": turn.session_epoch_id,
+-                "process_generation_id": turn.process_generation_id,
+-                "worker_id": str(row["worker_id"]),
+-                "provider_session_id": intent_payload.get("provider_session_id"),
+-                "turn_id": turn.turn_id,
+-            }
+-            if (
+-                intent["aggregate_id"] != intent["command_id"]
+-                or intent["worker_id"] != row["worker_id"]
+-                or not intent_payload.get("provider_session_id")
+-                or intent_payload != expected_intent
+-            ):
+-                raise StateConflict("candidate TX-5 INTENT provenance mismatch")
+-            operation = OperationId(str(intent["command_id"]))
+-            applied = self._event(
+-                connection,
+-                operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
+-            )
+-            applied_payload = (
+-                _json_loads(applied["payload_json"], fallback={}) if applied else {}
+-            )
+-            if (
+-                applied is None
+-                or applied["aggregate_type"] != "operator_operation"
+-                or applied["aggregate_id"] != operation.command_id
+-                or applied["event_type"] != OperationReceiptKind.APPLIED.value
+-                or applied["attempt_id"] != turn.attempt_id
+-                or applied["worker_id"] != row["worker_id"]
+-                or applied_payload.get("schema_version")
+-                != "mastermind.operator_harness_turn_applied/v1"
+-                or applied_payload.get("operation_kind")
+-                != OperationKind.BEGIN_TURN.value
+-                or applied_payload.get("attempt_id") != turn.attempt_id
+-                or applied_payload.get("session_epoch_id") != turn.session_epoch_id
+-                or applied_payload.get("process_generation_id")
+-                != turn.process_generation_id
+-                or applied_payload.get("turn_id") != turn.turn_id
+-                or applied_payload.get("acknowledged") is not True
+-                or set(applied_payload)
+-                != {
+-                    "schema_version",
+-                    "operation_kind",
+-                    "attempt_id",
+-                    "session_epoch_id",
+-                    "process_generation_id",
+-                    "turn_id",
+-                    "provider_native_turn_id",
+-                    "acknowledged",
+-                }
+-            ):
+-                raise StateConflict("candidate requires exact matching TX-5 APPLIED")
++            self._validated_tx5_receipts(connection, row=row, turn=turn)
+             existing = self._event(connection, command_id)
+             if existing is not None:
+                 if _json_loads(existing["payload_json"], fallback={}) == payload:
+@@ -22659,6 +23202,282 @@ class OperatorHarnessRegistry:
+                 timestamp_ms=timestamp,
+             )
+ 
++    def _validated_candidate_event(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
++    ) -> tuple[sqlite3.Row, dict[str, Any]]:
++        """Read one exact candidate in the incumbent Events owner."""
++        event = self._event(connection, f"ohf-candidate:{turn.turn_id}")
++        if (event is None or event["event_type"] != "OHF_CANDIDATE_RESULT_RECORDED"
++                or event["aggregate_type"] != "operator_turn" or event["aggregate_id"] != turn.turn_id
++                or event["attempt_id"] != turn.attempt_id or event["attempt_id"] != row["attempt_id"]
++                or event["job_id"] != row["job_id"] or event["worker_id"] != row["worker_id"]):
++            raise StateConflict("result requires its exact original candidate Event")
++        value = _strict_canonical_json_loads(str(event["payload_json"]), name="OHF candidate Event")
++        if (type(value) is not dict or set(value) != {"schema_version", "turn", "candidate", "events", "cursor"}
++                or value["schema_version"] != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
++                or value["turn"] != _ohf_jsonable(turn)):
++            raise StateConflict("result candidate Event scope differs")
++        candidate = value["candidate"]
++        if (type(candidate) is not dict
++                or set(candidate) != {"attempt_id", "session_epoch_id", "process_generation_id",
++                                      "artifact_digest", "summary", "complete_job_permitted"}
++                or candidate["complete_job_permitted"] is not False
++                or (candidate["attempt_id"], candidate["session_epoch_id"], candidate["process_generation_id"])
++                != (turn.attempt_id, turn.session_epoch_id, turn.process_generation_id)):
++            raise StateConflict("result candidate is outside the original turn")
++        return event, value
++
++
++    def _native_result_seal_payload(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
++        turn: TurnRef, observation: Any,
++    ) -> dict[str, Any]:
++        """Join historical native evidence; this helper grants no current effect."""
++        from control_plane.native_conversation_result import (
++            NativeConversationResultObservation, NATIVE_CONVERSATION_SEAL_SCHEMA,
++            NATIVE_CONVERSATION_RECOVERED_SEAL_SCHEMA, result_contract_for_profile,
++        )
++        from control_plane.operator_harness_wire import requested_execution_profile
++        if type(observation) is not NativeConversationResultObservation:
++            raise StateConflict("native seal requires the closed native observation")
++        try:
++            observation.require_turn(turn)
++        except ValueError as exc:
++            raise StateConflict("native observation is outside the original turn") from exc
++        job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
++        binding = None if job is None else _validated_native_result_binding(connection, job)
++        if binding is None:
++            raise StateConflict("native seal requires its original native creator")
++        profile_json = str(row["requested_execution_profile_json"])
++        if (row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
++                or hashlib.sha256(profile_json.encode()).hexdigest() != row["requested_execution_profile_digest"]):
++            raise StateConflict("native seal has no original sealed execution profile")
++        profile_events = connection.execute(
++            "SELECT * FROM events WHERE event_type='OHF_PROFILE_SEALED' AND attempt_id=?",
++            (turn.attempt_id,),
++        ).fetchall()
++        if len(profile_events) != 1:
++            raise StateConflict("native result requires one original TX-1 profile seal")
++        profile_event = profile_events[0]
++        profile_payload = _strict_canonical_json_loads(str(profile_event["payload_json"]),
++                                                      name="native original TX-1 profile seal")
++        if (profile_event["aggregate_type"] != "attempt" or profile_event["aggregate_id"] != turn.attempt_id
++                or profile_event["job_id"] != row["job_id"] or profile_event["worker_id"] != row["worker_id"]
++                or profile_event["quota_class"] != row["quota_class"]
++                or profile_payload != {"profile_digest": row["requested_execution_profile_digest"]}):
++            raise StateConflict("native result differs from the original TX-1 profile seal")
++        try:
++            requested = requested_execution_profile(_strict_canonical_json_loads(
++                profile_json, name="native original sealed profile"))
++            constraints = _strict_canonical_json_loads(str(job["constraints_json"]),
++                                                       name="native original constraints")
++            if (result_contract_for_profile(requested) != DSH_NATIVE_RESULT_CONTRACT
++                    or requested.worker_id != row["worker_id"]
++                    or requested.requested_model != constraints["model"]
++                    or requested.harness_binary_digest != constraints["harness_binary_digest"]
++                    or requested.harness_version != constraints["harness_version"]):
++                raise ValueError("native sealed profile differs")
++        except (ValueError, TypeError, KeyError) as exc:
++            raise StateConflict("native result profile differs from its immutable creator") from exc
++        operation, intent, intent_payload, applied, applied_payload = self._validated_tx5_receipts(
++            connection, row=row, turn=turn)
++        candidate, candidate_payload = self._validated_candidate_event(connection, row=row, turn=turn)
++        admission_event = self._event(connection, f"ohf-work-admit:{turn.process_generation_id}")
++        if (admission_event is None or admission_event["event_type"] != "ORCHESTRATION_WORK_ADMITTED"
++                or admission_event["aggregate_type"] != "process_generation"
++                or admission_event["aggregate_id"] != turn.process_generation_id
++                or admission_event["job_id"] != row["job_id"]
++                or admission_event["attempt_id"] != turn.attempt_id
++                or admission_event["worker_id"] != row["worker_id"]
++                or admission_event["quota_class"] != row["quota_class"]):
++            raise StateConflict("native result original work admission is unavailable")
++        admission = _strict_canonical_json_loads(str(admission_event["payload_json"]),
++                                               name="native original work admission")
++        principal = _validated_admission_principal(row, admission)
++        historical = connection.execute(
++            """SELECT g.*, e.attempt_id, e.worker_id AS epoch_worker,
++                      e.provider_session_id AS epoch_session
++               FROM process_generations g JOIN harness_session_epochs e
++                 ON e.session_epoch_id=g.session_epoch_id
++               WHERE g.process_generation_id=? AND g.session_epoch_id=?""",
++            (turn.process_generation_id, turn.session_epoch_id),
++        ).fetchone()
++        if (historical is None or historical["attempt_id"] != turn.attempt_id
++                or historical["worker_id"] != row["worker_id"] or historical["epoch_worker"] != row["worker_id"]
++                or historical["provider_session_id"] != observation.provider_session_id
++                or historical["epoch_session"] != observation.provider_session_id
++                or historical["observed_attestation_digest"] != admission.get("observed_attestation_digest")
++                or base_process_identity(principal["process_identity"]) != {
++                    "pid": historical["pid"], "pgid": historical["pgid"],
++                    "process_start_identity": historical["process_start_identity"], "boot_id": historical["boot_id"],
++                }):
++            raise StateConflict("native result original producer generation differs")
++        if (observation.native_claim.operation_id != operation.command_id
++                or observation.provider_session_id != intent_payload["provider_session_id"]
++                or observation.provider_session_id != admission.get("provider_session_id")
++                or observation.provider_native_turn_id != applied_payload["provider_native_turn_id"]
++                or observation.provider_turn_artifact_digest != candidate_payload["candidate"]["artifact_digest"]
++                or admission.get("job_id") != row["job_id"]
++                or admission.get("attempt_id") != turn.attempt_id
++                or admission.get("worker_id") != row["worker_id"]
++                or admission.get("process_generation_id") != turn.process_generation_id
++                or admission.get("execution_principal_snapshot_digest") != row["execution_principal_snapshot_digest"]
++                or admission.get("placement_snapshot_digest") != row["placement_snapshot_digest"]
++                or admission.get("effective_grant_digest") != row["effective_grant_digest"]):
++            raise StateConflict("native observation differs from its original turn and work admission")
++        recovered = applied["event_type"] == OperationReceiptKind.RECONCILED.value
++        if recovered and observation.native_claim.to_wire() != applied_payload["observation"]["native_claim"]:
++            raise StateConflict("native result claim differs from original recovered ACK")
++        prior_ref = None
++        prior_applied = connection.execute(
++            """SELECT payload_json FROM events
++               WHERE event_type IN (?,?) AND aggregate_type='operator_operation' AND attempt_id=?
++                 AND event_id<? AND json_extract(payload_json,'$.operation_kind')=?
++               ORDER BY event_id DESC LIMIT 1""",
++            (OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value,
++             turn.attempt_id, intent["event_id"], OperationKind.BEGIN_TURN.value),
++        ).fetchone()
++        if prior_applied is not None:
++            prior = _strict_canonical_json_loads(str(prior_applied["payload_json"]),
++                                                 name="native prior acknowledged turn")
++            prior_turn = TurnRef(prior["turn_id"], prior["session_epoch_id"],
++                                 prior["process_generation_id"], prior["attempt_id"])
++            prior_event, prior_payload = self._validated_native_turn_result(
++                connection, row=row, turn=prior_turn)
++            previous = NativeConversationResultObservation.from_wire(prior_payload["observation"])
++            if (previous.provider_session_id != observation.provider_session_id
++                    or prior_turn.session_epoch_id != turn.session_epoch_id
++                    or observation.native_claim.through_seq <= previous.native_terminal.through_seq
++                    or observation.native_claim.native_turn <= previous.native_claim.native_turn):
++                raise StateConflict("native successor does not extend its original persisted prefix")
++            prior_ref = self._native_result_ref(prior_event, prior_payload).to_wire()
++        return {
++            "schema_version": NATIVE_CONVERSATION_RECOVERED_SEAL_SCHEMA if recovered else NATIVE_CONVERSATION_SEAL_SCHEMA,
++            "predecessor_result": prior_ref,
++            "job_id": str(row["job_id"]), "attempt_id": turn.attempt_id,
++            "worker_id": str(row["worker_id"]), "quota_class": str(row["quota_class"]),
++            "turn": _ohf_jsonable(turn),
++            "operator_result_binding_digest": orchestration_digest(binding),
++            "profile_seal_command_id": str(profile_event["command_id"]),
++            "profile_seal_digest": orchestration_digest(profile_payload),
++            "observation": observation.to_wire(),
++            "observation_digest": orchestration_digest(observation.to_wire()),
++            "tx5_intent_command_id": str(intent["command_id"]),
++            "tx5_intent_digest": orchestration_digest(intent_payload),
++            **({"tx5_ack_kind": OperationReceiptKind.RECONCILED.value,
++                "tx5_ack_command_id": str(applied["command_id"]),
++                "tx5_ack_digest": orchestration_digest(applied_payload)} if recovered else {
++                "tx5_applied_command_id": str(applied["command_id"]),
++                "tx5_applied_digest": orchestration_digest(applied_payload)}),
++            "candidate_command_id": str(candidate["command_id"]),
++            "candidate_digest": orchestration_digest(candidate_payload),
++            "work_admission_command_id": str(admission_event["command_id"]),
++            "work_admission_digest": orchestration_digest(admission),
++        }
++
++    def _validated_native_turn_result(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
++    ) -> tuple[sqlite3.Row, dict[str, Any]]:
++        """Resolve one prior turn without promoting its producer to current authority."""
++        from control_plane.native_conversation_result import NativeConversationResultObservation
++        event = self._event(connection, f"ohf-native-result:{turn.turn_id}")
++        if event is None:
++            raise StateConflict("native successor requires the original flushed result seal")
++        payload = _strict_canonical_json_loads(str(event["payload_json"]), name="native predecessor result")
++        try:
++            observation = NativeConversationResultObservation.from_wire(payload["observation"])
++            expected = self._native_result_seal_payload(connection, row=row, turn=turn, observation=observation)
++            if payload != expected:
++                raise ValueError("native predecessor seal drifted")
++            self._native_result_ref(event, expected)
++        except (ValueError, TypeError, KeyError) as exc:
++            raise StateConflict("native predecessor result evidence differs") from exc
++        return event, expected
++
++    def _require_native_predecessor_results(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row, epoch: SessionEpochRef,
++    ) -> None:
++        for event in connection.execute(
++            "SELECT * FROM events WHERE event_type IN (?,?) AND aggregate_type='operator_operation' AND attempt_id=?",
++            (OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value, row["attempt_id"]),
++        ):
++            value = _strict_canonical_json_loads(str(event["payload_json"]), name="native prior operation")
++            if value.get("operation_kind") != OperationKind.BEGIN_TURN.value:
++                continue
++            if value.get("session_epoch_id") != epoch.session_epoch_id:
++                raise StateConflict("native successor cannot replace its original Session epoch")
++            try:
++                turn = TurnRef(value["turn_id"], value["session_epoch_id"],
++                               value["process_generation_id"], value["attempt_id"])
++                self._validated_native_turn_result(connection, row=row, turn=turn)
++            except (ValueError, TypeError, KeyError) as exc:
++                raise StateConflict("native prior turn evidence is malformed") from exc
++
++    def _native_result_ref(self, event: sqlite3.Row, payload: Mapping[str, Any]):
++        from control_plane.native_conversation_result import NativeConversationResultRef
++        turn = payload["turn"]
++        if (event["event_type"] != "OHF_NATIVE_CONVERSATION_RESULT_SEALED"
++                or event["aggregate_type"] != "operator_turn" or event["aggregate_id"] != turn["turn_id"]
++                or event["command_id"] != f"ohf-native-result:{turn['turn_id']}"
++                or event["job_id"] != payload["job_id"] or event["attempt_id"] != payload["attempt_id"]
++                or event["worker_id"] != payload["worker_id"] or event["quota_class"] != payload["quota_class"]):
++            raise StateConflict("native result Event identity differs")
++        return NativeConversationResultRef(str(event["command_id"]), int(event["event_id"]),
++                                           orchestration_digest(dict(payload)), payload["observation_digest"])
++
++    def seal_native_conversation_result(
++        self, *, turn: TurnRef, observation: Any, fence_generation: int, lease_token: str,
++    ):
++        """Seal an original flushed native turn, never complete its Job or grant work."""
++        timestamp = self.store.now_ms()
++        with self.store.transaction() as connection:
++            row = self._leased(connection, attempt_id=turn.attempt_id,
++                fence_generation=fence_generation, lease_token=lease_token, timestamp=timestamp,
++                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED})
++            admission = self._require_active_orchestration_generation(
++                connection, row=row, generation_id=turn.process_generation_id)
++            if admission is None:
++                raise StateConflict("native seal requires current original work admission")
++            payload = self._native_result_seal_payload(connection, row=row, turn=turn, observation=observation)
++            command_id = f"ohf-native-result:{turn.turn_id}"
++            existing = self._event(connection, command_id)
++            if existing is not None:
++                if _strict_canonical_json_loads(str(existing["payload_json"]), name="native seal replay") != payload:
++                    raise StateConflict("native result seal replay drifted")
++                return self._native_result_ref(existing, payload)
++            _finite_existing_effect(self.store, connection, str(row["job_id"]))
++            self.store.append_event(connection, aggregate_type="operator_turn", aggregate_id=turn.turn_id,
++                event_type="OHF_NATIVE_CONVERSATION_RESULT_SEALED", command_id=command_id, actor="supervisor",
++                job_id=str(row["job_id"]), attempt_id=turn.attempt_id, worker_id=str(row["worker_id"]),
++                quota_class=str(row["quota_class"]), payload=payload, timestamp_ms=timestamp)
++            return self._native_result_ref(self._event(connection, command_id), payload)
++
++    def native_conversation_result(self, *, attempt_id: str, reference: Any) -> dict[str, Any]:
++        """Resolve historical evidence without treating its generation as the current writer."""
++        from control_plane.native_conversation_result import (
++            NativeConversationResultObservation, NativeConversationResultRef,
++        )
++        if type(reference) is not NativeConversationResultRef:
++            raise StateConflict("exact native result reference required")
++        with self.store.read() as connection:
++            event = self._event(connection, reference.command_id)
++            row = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
++            if event is None or row is None or event["attempt_id"] != attempt_id:
++                raise StateConflict("native result reference is outside this Attempt")
++            value = _strict_canonical_json_loads(str(event["payload_json"]), name="historical native result")
++            try:
++                observation = NativeConversationResultObservation.from_wire(value["observation"])
++                turn_value = value["turn"]
++                turn = TurnRef(turn_value["turn_id"], turn_value["session_epoch_id"],
++                               turn_value["process_generation_id"], turn_value["attempt_id"])
++                expected = self._native_result_seal_payload(connection, row=row, turn=turn, observation=observation)
++                if value != expected or self._native_result_ref(event, expected) != reference:
++                    raise ValueError("native result reference drifted")
++            except (ValueError, TypeError, KeyError) as exc:
++                raise StateConflict("native result reference does not resolve exact original evidence") from exc
++            return expected
++
++
+     def seal_orchestration_role_result(
+         self,
+         *,
+@@ -22700,6 +23519,8 @@ class OperatorHarnessRegistry:
+             ).fetchone()
+             if job is None or job["orchestration_role"] is None:
+                 raise StateConflict("role result seal requires an orchestration Job")
++            if _validated_native_result_binding(connection, job) is not None:
++                raise StateConflict("native conversation cannot seal a role result")
+             role = str(job["orchestration_role"])
+             admission = self._require_active_orchestration_generation(
+                 connection,
+@@ -22713,7 +23534,7 @@ class OperatorHarnessRegistry:
+                    ORDER BY event_id""",
+                 (turn.attempt_id,),
+             ).fetchall()
+-            interactive = _interactive_tx5_admitted(job)
++            interactive = _interactive_tx5_admitted(job, connection=connection)
+             if interactive:
+                 candidate_rows = [
+                     row
+@@ -22726,9 +23547,10 @@ class OperatorHarnessRegistry:
+             if len(candidate_rows) != 1:
+                 raise StateConflict("role result requires exactly one candidate Event")
+             candidate_event = candidate_rows[0]
+-            candidate_payload = _strict_canonical_json_loads(
+-                str(candidate_event["payload_json"]), name="OHF candidate Event"
+-            )
++            exact_candidate, candidate_payload = self._validated_candidate_event(
++                connection, row=row, turn=turn)
++            if exact_candidate["event_id"] != candidate_event["event_id"]:
++                raise StateConflict("role result candidate selection drifted")
+             candidate = (
+                 candidate_payload.get("candidate")
+                 if isinstance(candidate_payload, dict)
+@@ -22857,6 +23679,303 @@ class OperatorHarnessRegistry:
+             )
+             return seal_payload
+ 
++    def _require_no_native_close_intent(
++        self, connection: sqlite3.Connection, *, generation: ProcessGenerationRef,
++    ) -> None:
++        # The original closure INTENT remains a fence through a lost/unknown
++        # return. It is never cleared or converted into permission to replay.
++        job = connection.execute(
++            """SELECT j.* FROM jobs j JOIN attempts a ON a.job_id=j.job_id
++               JOIN harness_session_epochs e ON e.attempt_id=a.attempt_id
++               JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
++               WHERE g.process_generation_id=?""", (generation.process_generation_id,)).fetchone()
++        if job is None or _validated_native_result_binding(connection, job) is None:
++            return
++        pending = connection.execute(
++            """SELECT 1 FROM events
++               WHERE aggregate_type='operator_operation' AND event_type=?
++                 AND json_extract(payload_json,'$.process_generation_id')=?
++                 AND json_extract(payload_json,'$.operation_kind') IN ('graceful_stop','cancel')
++               LIMIT 1""",
++            (OperationReceiptKind.INTENT.value, generation.process_generation_id),
++        ).fetchone()
++        if pending is not None:
++            raise StateConflict("native generation has an original close INTENT")
++
++    def _latest_native_result_material(self, connection: sqlite3.Connection, *, row: sqlite3.Row):
++        latest = connection.execute(
++            """SELECT * FROM events WHERE event_type='OHF_NATIVE_CONVERSATION_RESULT_SEALED'
++               AND attempt_id=? ORDER BY event_id DESC LIMIT 1""", (row["attempt_id"],),
++        ).fetchone()
++        if latest is None:
++            raise StateConflict("native conversation requires a flushed result")
++        payload = _strict_canonical_json_loads(str(latest["payload_json"]), name="latest native result")
++        try:
++            value = payload["turn"]
++            turn = TurnRef(value["turn_id"], value["session_epoch_id"],
++                           value["process_generation_id"], value["attempt_id"])
++            event, expected = self._validated_native_turn_result(connection, row=row, turn=turn)
++            if int(event["event_id"]) != int(latest["event_id"]):
++                raise StateConflict("native latest result Event changed")
++            return event, expected, self._native_result_ref(event, expected)
++        except (KeyError, TypeError, ValueError) as exc:
++            raise StateConflict("latest native result is malformed") from exc
++
++    def native_conversation_results(self, *, attempt_id: str):
++        """Bounded original native seal references, never a copied transcript or grant."""
++        with self.store.read() as connection:
++            row = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
++            job = None if row is None else connection.execute(
++                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
++            if job is None or _validated_native_result_binding(connection, job) is None:
++                raise StateConflict("native history requires its original creator")
++            events = connection.execute(
++                """SELECT * FROM events WHERE event_type='OHF_NATIVE_CONVERSATION_RESULT_SEALED'
++                   AND attempt_id=? ORDER BY event_id LIMIT 17""", (attempt_id,)).fetchall()
++            if len(events) > 16:
++                raise StateConflict("native history exceeds its two bounded generations")
++            references = []
++            for stored in events:
++                payload = _strict_canonical_json_loads(str(stored["payload_json"]), name="native history")
++                try:
++                    value = payload["turn"]
++                    turn = TurnRef(value["turn_id"], value["session_epoch_id"],
++                                   value["process_generation_id"], value["attempt_id"])
++                    event, expected = self._validated_native_turn_result(connection, row=row, turn=turn)
++                    if event["event_id"] != stored["event_id"]:
++                        raise StateConflict("native history Event identity changed")
++                    references.append(self._native_result_ref(event, expected))
++                except (KeyError, ValueError, TypeError) as exc:
++                    raise StateConflict("native history is malformed") from exc
++            return tuple(references)
++
++    def latest_native_conversation_result(self, *, attempt_id: str):
++        """Read original historical evidence; this grants no current writer."""
++        with self.store.read() as connection:
++            row = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
++            if row is None:
++                raise StateConflict("native result Attempt is absent")
++            return self._latest_native_result_material(connection, row=row)[2]
++
++    def _require_native_closure_result(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
++        epoch: SessionEpochRef, generation: ProcessGenerationRef, reference: Any, idle: bool,
++    ) -> dict[str, Any]:
++        """Bind idle/final closure to original flushed history before dispatch."""
++        from control_plane.native_conversation_result import NativeConversationResultRef
++        job = connection.execute(
++            "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],),
++        ).fetchone()
++        generations = connection.execute(
++            "SELECT * FROM process_generations WHERE session_epoch_id=? ORDER BY generation_number",
++            (epoch.session_epoch_id,),
++        ).fetchall()
++        if (type(reference) is not NativeConversationResultRef
++                or job is None or _validated_native_result_binding(connection, job) is None
++                or generation.generation_number not in ({1} if idle else {1, 2})
++                or [int(g["generation_number"]) for g in generations] != list(range(1, generation.generation_number + 1))):
++            raise StateConflict("native closure requires its exact original bounded result")
++        for stored in generations:
++            if _interactive_in_flight_turn_id(connection, str(stored["process_generation_id"])) is not None:
++                raise StateConflict("native closure has an unresolved turn")
++        self._require_native_predecessor_results(connection, row=row, epoch=epoch)
++        _event, result, latest = self._latest_native_result_material(connection, row=row)
++        if (latest != reference or result["turn"]["session_epoch_id"] != epoch.session_epoch_id
++                or not generations[-1]["observed_attestation_digest"]
++                or generations[-1]["provider_session_id"] != result["observation"]["provider_session_id"]
++                or (idle and result["turn"]["process_generation_id"] != generation.process_generation_id)):
++            raise StateConflict("native closure result is not the exact latest seal")
++        return reference.to_wire()
++
++    def _validated_generation_closure_event(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
++        generation: sqlite3.Row, provider_session_id: str | None,
++    ) -> int:
++        """Validate the latest actual physical evidence, without a result-success claim."""
++        from control_plane.operator_harness_wire import reconcile_observation
++        generation_id = str(generation["process_generation_id"])
++        if (generation["ended_at_ms"] is None
++                or generation["provider_writer_state"] != ProviderWriterState.RELEASED.value
++                or generation["worker_id"] != row["worker_id"]
++                or generation["provider_session_id"] != provider_session_id):
++            raise StateConflict("generation lost exact dead/released closure")
++        closure = connection.execute(
++            """SELECT * FROM events WHERE event_type='OHF_RECONCILE_OBSERVED'
++               AND aggregate_type='process_generation' AND aggregate_id=?
++               ORDER BY event_id DESC LIMIT 1""", (generation_id,),
++        ).fetchone()
++        if (closure is None or closure["job_id"] != row["job_id"]
++                or closure["attempt_id"] != row["attempt_id"] or closure["worker_id"] != row["worker_id"]
++                or closure["quota_class"] != row["quota_class"] or closure["actor"] != "supervisor"):
++            raise StateConflict("native terminal lacks exact physical closure evidence")
++        value = _strict_canonical_json_loads(str(closure["payload_json"]), name="native closure")
++        if (set(value) != {"schema_version", "process_generation_id", "observation"}
++                or value["schema_version"] != OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION
++                or value["process_generation_id"] != generation_id):
++            raise StateConflict("native terminal closure receipt differs")
++        try:
++            observed = reconcile_observation(value["observation"])
++            physical = _ohf_process(observed.observed_process)
++        except (ValueError, TypeError) as exc:
++            raise StateConflict("native terminal closure observation is malformed") from exc
++        if (observed.process_liveness is not ProcessLiveness.PROVEN_DEAD
++                or observed.provider_writer_state is not ProviderWriterState.RELEASED
++                or observed.observed_provider_session_id != provider_session_id
++                or physical != (generation["pid"], generation["pgid"],
++                                generation["process_start_identity"], generation["boot_id"])):
++            raise StateConflict("native terminal physical closure differs")
++        last_result = connection.execute(
++            """SELECT MAX(event_id) FROM events WHERE event_type='OHF_NATIVE_CONVERSATION_RESULT_SEALED'
++               AND attempt_id=? AND json_extract(payload_json,'$.turn.process_generation_id')=?""",
++            (row["attempt_id"], generation_id),
++        ).fetchone()[0]
++        if last_result is not None and int(closure["event_id"]) <= int(last_result):
++            raise StateConflict("native terminal closure predates its result")
++        return int(closure["event_id"])
++
++    def _validated_epoch_abandonment_event(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
++        epoch: SessionEpochRef, closure_events: list[int],
++    ) -> int:
++        if not closure_events:
++            raise StateConflict("abandonment lacks physical closure events")
++        abandoned = connection.execute(
++            """SELECT * FROM events WHERE event_type='OHF_EPOCH_ABANDONED'
++               AND aggregate_type='harness_session_epoch' AND aggregate_id=?""",
++            (epoch.session_epoch_id,),
++        ).fetchall()
++        if (len(abandoned) != 1 or abandoned[0]["job_id"] != row["job_id"]
++                or abandoned[0]["attempt_id"] != row["attempt_id"] or abandoned[0]["worker_id"] != row["worker_id"]
++                or abandoned[0]["quota_class"] != row["quota_class"]
++                or abandoned[0]["actor"] != "supervisor"
++                or _strict_canonical_json_loads(str(abandoned[0]["payload_json"]), name="native abandonment") != {"transaction_group": "TX-8"}
++                or int(abandoned[0]["event_id"]) <= max(closure_events)):
++            raise StateConflict("native terminal lost original abandonment evidence")
++        return int(abandoned[0]["event_id"])
++
++    def _native_conversation_terminal_payload(
++        self, connection: sqlite3.Connection, *, row: sqlite3.Row, job: sqlite3.Row, reference: Any,
++    ) -> dict[str, Any]:
++        from control_plane.native_conversation_result import (
++            NATIVE_CONVERSATION_TERMINAL_SCHEMA, NativeConversationResultRef,
++        )
++        if (type(reference) is not NativeConversationResultRef
++                or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
++                or _validated_native_result_binding(connection, job) is None):
++            raise StateConflict("native terminal requires its immutable original creator")
++        _result_event, result, latest = self._latest_native_result_material(connection, row=row)
++        if latest != reference:
++            raise StateConflict("native terminal requires the latest flushed result")
++        epochs = connection.execute(
++            "SELECT * FROM harness_session_epochs WHERE attempt_id=? ORDER BY epoch_number",
++            (row["attempt_id"],),
++        ).fetchall()
++        if (len(epochs) != 1 or epochs[0]["state"] != SessionEpochState.ABANDONED.value
++                or epochs[0]["session_epoch_id"] != result["turn"]["session_epoch_id"]
++                or epochs[0]["provider_session_id"] != result["observation"]["provider_session_id"]
++                or epochs[0]["worker_id"] != row["worker_id"]):
++            raise StateConflict("native terminal requires its abandoned original Session")
++        stored_epoch = epochs[0]
++        epoch = SessionEpochRef(str(stored_epoch["session_epoch_id"]), str(row["attempt_id"]),
++                                str(row["worker_id"]), int(stored_epoch["epoch_number"]))
++        generations = connection.execute(
++            "SELECT * FROM process_generations WHERE session_epoch_id=? ORDER BY generation_number",
++            (epoch.session_epoch_id,),
++        ).fetchall()
++        if len(generations) not in {1, 2} or [int(g["generation_number"]) for g in generations] != list(range(1, len(generations)+1)):
++            raise StateConflict("native terminal generation history differs")
++        self._require_native_predecessor_results(connection, row=row, epoch=epoch)
++        closure_events = []
++        for generation in generations:
++            generation_id = str(generation["process_generation_id"])
++            if (generation["ended_at_ms"] is None or generation["executive_writer_held"]
++                    or generation["provider_writer_state"] != ProviderWriterState.RELEASED.value
++                    or generation["worker_id"] != row["worker_id"]
++                    or generation["provider_session_id"] != stored_epoch["provider_session_id"]
++                    or _interactive_in_flight_turn_id(connection, generation_id) is not None):
++                raise StateConflict("native terminal has a live, held or unresolved generation")
++            # Reuse the original principal/placement/grant/TX3 or TX11 validator.
++            # This binding is derived from actual generation rows, independently
++            # of the last result's producing generation.
++            binding = {
++                "process_generation_id": generation_id,
++                "session_epoch_id": epoch.session_epoch_id,
++                "provider_session_id": stored_epoch["provider_session_id"],
++                "observed_attestation_digest": generation["observed_attestation_digest"],
++                "orchestration_role": job["orchestration_role"],
++                "execution_principal_snapshot_digest": row["execution_principal_snapshot_digest"],
++                "placement_snapshot_digest": row["placement_snapshot_digest"],
++                "effective_grant_digest": row["effective_grant_digest"],
++                "policy_sha": _job_coo_policy(connection, str(row["job_id"])).policy_sha256,
++                "work_admission_command_id": f"ohf-work-admit:{generation_id}",
++            }
++            _validated_ohf_terminal_generation(connection, attempt_row=row, binding=binding,
++                                                require_latest=generation_id == str(generations[-1]["process_generation_id"]))
++            closure_events.append(self._validated_generation_closure_event(
++                connection, row=row, generation=generation,
++                provider_session_id=stored_epoch["provider_session_id"]))
++        abandoned_event_id = self._validated_epoch_abandonment_event(
++            connection, row=row, epoch=epoch, closure_events=closure_events)
++        conflict = connection.execute(
++            """SELECT 1 FROM events WHERE attempt_id=? AND event_type IN
++               ('ORCHESTRATION_ROLE_RESULT_SEALED','SEALED_WORKER_RESULT_COLLECTED','JOB_CHECKPOINTED') LIMIT 1""",
++            (row["attempt_id"],),
++        ).fetchone()
++        if conflict is not None or int(row["checkpoint_sequence"]) != 0:
++            raise StateConflict("native terminal cannot consume another result lifecycle")
++        value = {
++            "schema_version": NATIVE_CONVERSATION_TERMINAL_SCHEMA, "status": "COMPLETED",
++            "job_id": str(job["job_id"]), "attempt_id": str(row["attempt_id"]),
++            "execution_mode": AttemptExecutionMode.OPERATOR_HARNESS.value,
++            "native_result": reference.to_wire(), "session_epoch_id": epoch.session_epoch_id,
++            "closed_generation_id": str(generations[-1]["process_generation_id"]),
++            "effective_grant_digest": str(row["effective_grant_digest"]),
++        }
++        value["terminal_evidence_digest"] = orchestration_digest(value)
++        if row["status"] == AttemptStatus.COMPLETED.value:
++            # A lost terminal return is historical readback, never a new lease
++            # or a replay of the original completion transaction.
++            terminal = connection.execute(
++                """SELECT * FROM events WHERE attempt_id=? AND event_type='JOB_COMPLETED'
++                   ORDER BY event_id""", (row["attempt_id"],),
++            ).fetchall()
++            expected_event = {
++                "status": JobStatus.COMPLETED.value,
++                "native_terminal_digest": orchestration_digest(value),
++                "native_result_event_id": reference.event_id,
++            }
++            review = _review_void_evidence(connection, job_id=str(row["job_id"]), worker_id=str(row["worker_id"]))
++            if review is not None:
++                expected_event["review"] = review
++            held = connection.execute(
++                "SELECT 1 FROM worker_quota_classes WHERE held_attempt_id=? LIMIT 1",
++                (row["attempt_id"],),
++            ).fetchone()
++            if (job["current_attempt_id"] != row["attempt_id"]
++                    or job["status"] != JobStatus.COMPLETED.value
++                    or row["lease_token"] is not None or row["finished_at_ms"] is None or held is not None
++                    or _strict_canonical_json_loads(str(row["result_json"]), name="native Attempt result") != value
++                    or _strict_canonical_json_loads(str(job["result_json"]), name="native Job result") != value
++                    or len(terminal) != 1 or terminal[0]["aggregate_type"] != "job"
++                    or terminal[0]["aggregate_id"] != row["job_id"]
++                    or terminal[0]["job_id"] != row["job_id"] or terminal[0]["attempt_id"] != row["attempt_id"]
++                    or terminal[0]["worker_id"] != row["worker_id"] or terminal[0]["quota_class"] != row["quota_class"]
++                    or terminal[0]["actor"] != "operator"
++                    or int(terminal[0]["event_id"]) <= abandoned_event_id
++                    or _strict_canonical_json_loads(str(terminal[0]["payload_json"]), name="native terminal Event") != expected_event):
++                raise StateConflict("native completed outcome lost its original atomic terminal proof")
++        return value
++
++    def native_conversation_terminal_payload(self, *, attempt_id: str, reference: Any) -> dict[str, Any]:
++        """Read the original closed result facts; completion remains Attempt-owned."""
++        with self.store.read() as connection:
++            row = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
++            job = (None if row is None else connection.execute(
++                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone())
++            if row is None or job is None:
++                raise StateConflict("native terminal Attempt or Job is absent")
++            return self._native_conversation_terminal_payload(connection, row=row, job=job, reference=reference)
++
+     def reserve_generation_operation(
+         self,
+         *,
+@@ -22865,12 +23984,17 @@ class OperatorHarnessRegistry:
+         operation_kind: str,
+         fence_generation: int,
+         lease_token: str,
++        native_idle_result: Any = None,
++        native_terminal_result: Any = None,
+     ) -> None:
+         """Commit an internal stop/cancel INTENT before the adapter call."""
+ 
+         kind = str(operation_kind or "").strip()
+         if kind not in {"graceful_stop", "cancel"}:
+             raise StateConflict("unsupported internal generation operation")
++        if ((native_idle_result is not None and native_terminal_result is not None)
++                or ((native_idle_result is not None or native_terminal_result is not None) and kind != "graceful_stop")):
++            raise StateConflict("native closure requires one exact graceful-stop disposition")
+         timestamp = self.store.now_ms()
+         with self.store.transaction() as connection:
+             timestamp = self.store.now_ms()
+@@ -22921,6 +24045,7 @@ class OperatorHarnessRegistry:
+                 or found["ended_at_ms"] is not None
+             ):
+                 raise StateConflict("generation operation INTENT preconditions failed")
++            self._require_no_native_close_intent(connection, generation=generation)
+             payload = {
+                 "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+                 "operation_kind": kind,
+@@ -22930,6 +24055,16 @@ class OperatorHarnessRegistry:
+                 "worker_id": generation.worker_id,
+                 "provider_session_id": found["epoch_session"],
+             }
++            closure_result = native_idle_result if native_idle_result is not None else native_terminal_result
++            if closure_result is not None:
++                # New useful-close authority ends at cancellation. An already
++                # reserved close may still record its exact physical receipt.
++                if row["status"] not in {AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value}:
++                    raise StateConflict("new native closure requires a running Attempt")
++                field = "native_idle_result" if native_idle_result is not None else "native_terminal_result"
++                payload[field] = self._require_native_closure_result(
++                    connection, row=row, epoch=epoch, generation=generation, reference=closure_result,
++                    idle=native_idle_result is not None)
+             _finite_existing_effect(self.store, connection, str(row["job_id"]))
+             timestamp = self.store.now_ms()
+             if timestamp >= int(row["lease_expires_at_ms"]):
+@@ -22951,12 +24086,17 @@ class OperatorHarnessRegistry:
+         observation: ReconcileObservation,
+         fence_generation: int,
+         lease_token: str,
++        native_idle_result: Any = None,
++        native_terminal_result: Any = None,
+     ) -> None:
+         """Apply stop/cancel only from an exact committed internal INTENT."""
+ 
+         kind = str(operation_kind or "").strip()
+         if kind not in {"graceful_stop", "cancel"}:
+             raise StateConflict("unsupported internal generation operation")
++        if ((native_idle_result is not None and native_terminal_result is not None)
++                or ((native_idle_result is not None or native_terminal_result is not None) and kind != "graceful_stop")):
++            raise StateConflict("native closure requires one exact graceful-stop disposition")
+         if observation.process_liveness is not ProcessLiveness.PROVEN_DEAD:
+             raise StateConflict("generation operation requires PROVEN_DEAD")
+         if (
+@@ -23016,6 +24156,14 @@ class OperatorHarnessRegistry:
+                 "worker_id": generation.worker_id,
+                 "provider_session_id": found["epoch_session"],
+             }
++            closure_result = native_idle_result if native_idle_result is not None else native_terminal_result
++            if closure_result is not None:
++                field = "native_idle_result" if native_idle_result is not None else "native_terminal_result"
++                expected[field] = self._require_native_closure_result(
++                    connection, row=row, epoch=epoch, generation=generation, reference=closure_result,
++                    idle=native_idle_result is not None)
++                if observation.observed_provider_session_id != found["epoch_session"]:
++                    raise StateConflict("native closure requires the exact observed Session")
+             intent = self._event(connection, operation_id.command_id)
+             intent_payload = (
+                 _json_loads(intent["payload_json"], fallback={}) if intent else {}
+@@ -23023,6 +24171,13 @@ class OperatorHarnessRegistry:
+             if (
+                 intent is None
+                 or intent["event_type"] != OperationReceiptKind.INTENT.value
++                or intent["aggregate_type"] != "operator_operation"
++                or intent["aggregate_id"] != operation_id.command_id
++                or intent["command_id"] != operation_id.command_id
++                or intent["job_id"] != row["job_id"]
++                or intent["attempt_id"] != row["attempt_id"]
++                or intent["worker_id"] != row["worker_id"]
++                or intent["quota_class"] != row["quota_class"]
+                 or intent_payload != expected
+                 or (
+                     found["pid"],
+@@ -23041,7 +24196,11 @@ class OperatorHarnessRegistry:
+             if self._event(connection, applied_id) is not None:
+                 return
+             _finite_existing_effect(self.store, connection, str(row["job_id"]))
+-            release = kind == "graceful_stop"
++            # Native success and containment both retain original custody
++            # until TX8, including failures before a useful result is sealed.
++            closure_job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
++            native_closure = closure_job is not None and _validated_native_result_binding(connection, closure_job) is not None
++            release = kind == "graceful_stop" and closure_result is None and not native_closure
+             connection.execute(
+                 """
+                 UPDATE process_generations
+@@ -23069,6 +24228,7 @@ class OperatorHarnessRegistry:
+                     "process_liveness": observation.process_liveness.value,
+                     "provider_writer_state": observation.provider_writer_state.value,
+                     "executive_writer_released": release,
++                    **({field: expected[field]} if closure_result is not None else {}),
+                 },
+             )
+ 
+@@ -23520,11 +24680,15 @@ class OperatorHarnessRegistry:
+         )
+ 
+     def abandon_epoch(
+-        self, *, epoch: SessionEpochRef, fence_generation: int, lease_token: str
++        self, *, epoch: SessionEpochRef, fence_generation: int, lease_token: str,
++        generation: ProcessGenerationRef | None = None, native_terminal_result: Any = None,
+     ) -> None:
+         """TX-8: only an observed-dead epoch may lose its Executive writer."""
++        if native_terminal_result is not None and generation is None:
++            raise StateConflict("native abandonment requires its paired generation and result")
+         timestamp = self.store.now_ms()
+         with self.store.transaction() as connection:
++            timestamp = self.store.now_ms()
+             row = self._leased(
+                 connection,
+                 attempt_id=epoch.attempt_id,
+@@ -23532,6 +24696,22 @@ class OperatorHarnessRegistry:
+                 lease_token=lease_token,
+                 timestamp=timestamp,
+             )
++            if generation is not None:
++                owned = self._owned_generation(connection, leased=row, epoch=epoch,
++                    generation=generation, require_current=True)
++                closed_generations = connection.execute(
++                    "SELECT * FROM process_generations WHERE session_epoch_id=? ORDER BY generation_number",
++                    (epoch.session_epoch_id,)).fetchall()
++                if not closed_generations or closed_generations[-1]["process_generation_id"] != generation.process_generation_id:
++                    raise StateConflict("abandonment requires the latest exact physical generation")
++                if native_terminal_result is not None:
++                    self._require_native_closure_result(connection, row=row, epoch=epoch,
++                        generation=generation, reference=native_terminal_result, idle=False)
++                # Recheck physical evidence under the same TX8 lock. A later
++                # UNKNOWN/HELD observation must leave CURRENT custody repairable.
++                for closed in closed_generations:
++                    self._validated_generation_closure_event(connection, row=row,
++                        generation=closed, provider_session_id=owned["epoch_session"])
+             item = connection.execute(
+                 """
+                 SELECT state,worker_id,epoch_number
+@@ -23710,6 +24890,26 @@ class OperatorHarnessRegistry:
+         ):
+             raise StateConflict("orchestration G1 recovery admission predicate failed")
+ 
++        if _validated_native_result_binding(connection, job) is not None:
++            # The same TX-10 owner may resume a flushed native conversation.
++            # Historical G1 results remain G1 evidence; G2 admits its own work.
++            if not _interactive_tx5_admitted(job, connection=connection):
++                raise StateConflict("native recovery lost its admitted interactive contract")
++            if _interactive_in_flight_turn_id(connection, g1_generation_id) is not None:
++                raise StateConflict("native recovery has an unresolved predecessor turn")
++            self._require_native_predecessor_results(connection, row=row, epoch=epoch)
++            terminal = connection.execute(
++                """SELECT 1 FROM events WHERE attempt_id=? AND event_type IN (
++                     'JOB_CHECKPOINTED','ORCHESTRATION_ROLE_RESULT_SEALED',
++                     'JOB_COMPLETED','SEALED_WORKER_RESULT_COLLECTED'
++                   ) LIMIT 1""", (row["attempt_id"],),
++            ).fetchone()
++            if (int(row["checkpoint_sequence"]) != 0 or row["checkpoint_json"] is not None
++                    or row["result_json"] is not None or job["checkpoint_json"] is not None
++                    or job["result_json"] is not None or terminal is not None):
++                raise StateConflict("native recovery cannot replace another lifecycle result")
++            return
++
+         turn_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+         for event in connection.execute(
+             """SELECT * FROM events
+@@ -23857,6 +25057,17 @@ class OperatorHarnessRegistry:
+                 lease_token=lease_token,
+                 timestamp=timestamp,
+             )
++            closure_job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
++            native_closure = closure_job is not None and _validated_native_result_binding(connection, closure_job) is not None
++            final_close = (connection.execute(
++                """SELECT 1 FROM events WHERE aggregate_type='operator_operation' AND event_type=?
++                   AND attempt_id=? AND json_extract(payload_json,'$.session_epoch_id')=?
++                   AND json_extract(payload_json,'$.operation_kind') IN ('graceful_stop','cancel')
++                   AND json_type(payload_json,'$.native_idle_result') IS NULL LIMIT 1""",
++                (OperationReceiptKind.INTENT.value, epoch.attempt_id, epoch.session_epoch_id),
++            ).fetchone() if native_closure else None)
++            if final_close is not None:
++                raise StateConflict("native final closure cannot resume its Session")
+             existing_intent = self._event(connection, operation_id.command_id)
+             if existing_intent is not None:
+                 applied = self._event(
+@@ -24342,29 +25553,9 @@ class OperatorHarnessRegistry:
+                 """,
+                 (turn.session_epoch_id, turn.process_generation_id),
+             ).fetchone()
+-            source = None
+-            for event in connection.execute(
+-                "SELECT * FROM events WHERE event_type=? AND attempt_id=?",
+-                (OperationReceiptKind.INTENT.value, turn.attempt_id),
+-            ):
+-                payload = _json_loads(event["payload_json"], fallback={})
+-                if (
+-                    payload.get("operation_kind") == OperationKind.BEGIN_TURN.value
+-                    and payload.get("turn_id") == turn.turn_id
+-                ):
+-                    source = (event, payload)
+-                    break
+-            source_applied = (
+-                None
+-                if source is None
+-                else self._event(
+-                    connection,
+-                    operation_receipt_command_id(
+-                        OperationId(str(source[0]["command_id"])),
+-                        OperationReceiptKind.APPLIED,
+-                    ),
+-                )
+-            )
++            _operation, source_event, source_payload, source_applied, _ack = self._validated_tx5_receipts(
++                connection, row=row, turn=turn)
++            source = (source_event, source_payload)
+             if (
+                 durable is None
+                 or durable["attempt_id"] != row["attempt_id"]
+@@ -28766,7 +29957,7 @@ def _current_harness_binding_source_from_snapshot(
+             "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+         ).fetchone()
+         if (len(seals) != 1 or retained_job is None or retained_attempt is None
+-                or not _interactive_tx5_admitted(retained_job)
++                or not _interactive_tx5_admitted(retained_job, connection=connection)
+                 or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                 != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+             raise StateConflict("runtime binding source is not a retained native writer")
+@@ -29299,7 +30490,7 @@ def _current_harness_binding_source_from_snapshot(
+             "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+         ).fetchone()
+         if (len(seals) != 1 or retained_job is None or retained_attempt is None
+-                or not _interactive_tx5_admitted(retained_job)
++                or not _interactive_tx5_admitted(retained_job, connection=connection)
+                 or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                 != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+             raise StateConflict("runtime binding source is not a retained native writer")

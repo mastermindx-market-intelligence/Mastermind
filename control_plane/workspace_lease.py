@@ -155,6 +155,45 @@ class WorkspaceLeaseRecord:
     released_ms: int | None = None
 
 
+def attach_workspace_lease(binding: Any, record: WorkspaceLeaseRecord) -> Any:
+    """Stamp an ``ExecutionBinding``'s v1.1 workspace-containment block from
+    one REAL lease record (Rev 5 §4 / change order §3E join; Director C).
+
+    The join is by contract, not by copy: the binding's ``workspace_ref``,
+    ``base_ref``, ``writer_epoch`` and ``lease_ref`` BECOME the lease's
+    values, so a launch carried by this binding is contained by exactly the
+    workspace lease the workspace authority issued — a drifted binding or
+    lease fails the equality checks downstream instead of silently widening
+    containment. ``t3_workspace_id`` stays a lease-side native join field
+    (this module never fabricates it): the T3 lane fills it when the real
+    native workspace exists, and the binding reaches it through
+    ``lease_ref``. A lease that is not ``active`` refuses; the binding is
+    returned as a NEW record (input unchanged).
+    """
+    from control_plane.child_execution_contracts import ExecutionBinding
+
+    if not isinstance(binding, ExecutionBinding):
+        raise WorkspaceLeaseConflict(
+            "BINDING_TYPE_INVALID", field=type(binding).__name__
+        )
+    if not isinstance(record, WorkspaceLeaseRecord):
+        raise WorkspaceLeaseConflict(
+            "LEASE_TYPE_INVALID", field=type(record).__name__
+        )
+    if record.lease_status != STATUS_ACTIVE:
+        raise WorkspaceLeaseConflict(
+            "LEASE_NOT_ACTIVE", lease_id=record.lease_id,
+            lease_status=record.lease_status,
+        )
+    return dataclasses.replace(
+        binding,
+        workspace_ref=record.workspace_ref,
+        base_ref=record.base_revision,
+        writer_epoch=record.writer_epoch,
+        lease_ref=record.lease_id,
+    )
+
+
 def host_cache_key(*, lockfiles: list[str], platform: str, toolchain: str) -> str:
     """Key for the per-host managed repo/object cache.
 
