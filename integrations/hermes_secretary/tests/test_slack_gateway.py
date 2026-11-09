@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-PATH = Path(__file__).resolve().parents[1] / "slack_gateway.py"
+PATH = Path(__file__).resolve().parents[2] / "hermes_runtime" / "slack_gateway.py"
 SPEC = importlib.util.spec_from_file_location("mmx_slack_gateway_candidate", PATH)
 assert SPEC and SPEC.loader
 gateway = importlib.util.module_from_spec(SPEC)
