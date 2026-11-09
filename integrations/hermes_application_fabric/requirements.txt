@@ -1,0 +1,6 @@
+# Publish this dependency and its resolved closure through the existing native
+# import_roots/dependency_inventory owner. Never install into a held live tree.
+# Role hosts receive PyYAML from the existing held_yaml runtime owner.
+# Ordinary native plugin entrypoints declare both pins in plugin.yaml for the
+# incumbent Hermes package manager; plugin import never installs dependencies.
+jsonschema==4.26.0

@@ -17,7 +17,8 @@ Design invariants (charter P3/P8):
   - ``matured()`` is the ONLY function the agenda calls — it returns items that are
     ready for a human or Opus session to judge, in priority order (earliest
     comeback_date first, then by id).
-  - P2: any failure in load/save degrades to an empty list, never raises.
+  - P2: default reads and mutation entrypoints retain their fail-soft behavior.
+    Strict read consumers can opt into error propagation without running a mutation.
   - MW2 addition: ``evaluate(item, asof)`` returns a tri-state verdict
     (not_old_enough / blocked_missing_evidence / ready_for_review) driven by a
     registry of PER-EXPERIMENT mechanical evaluator functions keyed by id.  LLMs may
@@ -52,10 +53,18 @@ Tri-state evaluate() return schema:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import tempfile
+import threading
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+
+import fcntl
 
 _ROOT = Path(__file__).resolve().parent.parent
 _REGISTRY_PATH = _ROOT / "data" / "experiments" / "registry.json"
@@ -71,29 +80,211 @@ _TRANSITIONS: dict[str, set[str]] = {
 
 # ── load / save ───────────────────────────────────────────────────────────────
 
-def _load() -> list[dict]:
-    """Load registry.json → list[dict].  Returns [] on any failure (P2)."""
-    try:
-        if not _REGISTRY_PATH.exists():
+_MUTATION_STATE = threading.local()
+
+
+def _mutation_active() -> bool:
+    return bool(getattr(_MUTATION_STATE, "depth", 0))
+
+
+def _registry_lock_path() -> Path:
+    return _REGISTRY_PATH.with_name(_REGISTRY_PATH.name + ".lock")
+
+
+def _validate_mutation_rows(experiments: object) -> list[dict]:
+    """Strict mutation-time shape check.
+
+    Read-only callers retain the historical fail-soft loader. Mutation callers
+    must never reinterpret corrupt, non-list, duplicate-id state as an empty
+    registry and overwrite it.
+    """
+    if not isinstance(experiments, list):
+        raise ValueError("experiment registry must be a list")
+    seen: set[str] = set()
+    for row in experiments:
+        if not isinstance(row, dict):
+            raise ValueError("experiment registry rows must be objects")
+        eid = row.get("id")
+        if not isinstance(eid, str) or not eid.strip():
+            raise ValueError("experiment registry rows require a non-empty id")
+        if eid in seen:
+            raise ValueError(f"duplicate experiment id: {eid}")
+        seen.add(eid)
+    return experiments
+
+
+def _decode_registry_bytes(raw: bytes, *, strict: bool) -> list[dict]:
+    data = json.loads(raw.decode("utf-8"))
+    if isinstance(data, list):
+        experiments = data
+    elif isinstance(data, dict):
+        if strict and "experiments" not in data:
+            raise ValueError("experiment registry envelope requires experiments")
+        experiments = data.get("experiments")
+        if experiments is None and not strict:
+            experiments = []
+    else:
+        if strict:
+            raise ValueError("experiment registry must be a list or experiments envelope")
+        experiments = []
+    if strict:
+        return _validate_mutation_rows(experiments)
+    return experiments if isinstance(experiments, list) else []
+
+
+def _remember_preimage(raw: bytes | None) -> None:
+    if not _mutation_active():
+        return
+    _MUTATION_STATE.preimage_known = True
+    _MUTATION_STATE.preimage_bytes = raw
+    _MUTATION_STATE.preimage_sha256 = (
+        hashlib.sha256(raw).hexdigest() if raw is not None else None
+    )
+
+
+def _current_registry_bytes() -> bytes | None:
+    if not _REGISTRY_PATH.exists():
+        return None
+    return _REGISTRY_PATH.read_bytes()
+
+
+@contextmanager
+def _mutation_lock():
+    """One re-entrant process/file lock for every registry mutation."""
+    depth = int(getattr(_MUTATION_STATE, "depth", 0) or 0)
+    if depth:
+        _MUTATION_STATE.depth = depth + 1
+        try:
+            yield
+        finally:
+            _MUTATION_STATE.depth = depth
+        return
+
+    _REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _registry_lock_path()
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        _MUTATION_STATE.depth = 1
+        _MUTATION_STATE.preimage_known = False
+        _MUTATION_STATE.preimage_bytes = None
+        _MUTATION_STATE.preimage_sha256 = None
+        try:
+            yield
+        finally:
+            for name in ("preimage_known", "preimage_bytes", "preimage_sha256"):
+                if hasattr(_MUTATION_STATE, name):
+                    delattr(_MUTATION_STATE, name)
+            _MUTATION_STATE.depth = 0
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _serialized_bool_mutation(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            with _mutation_lock():
+                return fn(*args, **kwargs)
+        except Exception:  # noqa: BLE001
+            return False
+    return wrapped
+
+
+def _serialized_list_mutation(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            with _mutation_lock():
+                return fn(*args, **kwargs)
+        except Exception:  # noqa: BLE001
             return []
-        raw = _REGISTRY_PATH.read_text()
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return data
-        # support {experiments: [...]} envelope
-        if isinstance(data, dict):
-            return data.get("experiments") or []
-        return []
+    return wrapped
+
+
+def _load() -> list[dict]:
+    """Load registry.json with strict semantics while a mutator owns the lock."""
+    if _mutation_active():
+        raw = _current_registry_bytes()
+        if raw is None:
+            _remember_preimage(None)
+            return []
+        experiments = _decode_registry_bytes(raw, strict=True)
+        _remember_preimage(raw)
+        return experiments
+
+    try:
+        raw = _current_registry_bytes()
+        if raw is None:
+            return []
+        return _decode_registry_bytes(raw, strict=False)
     except Exception:  # noqa: BLE001
         return []
 
 
-def _save(experiments: list[dict]) -> bool:
-    """Persist the registry.  Returns True on success."""
+def _serialize_registry(experiments: list[dict]) -> bytes:
+    _validate_mutation_rows(experiments)
+    return json.dumps(experiments, indent=2, default=str).encode("utf-8")
+
+
+def _fsync_directory(path: Path) -> None:
+    """Require confirmed directory sync; unsupported or failed sync propagates."""
+    fd = os.open(str(path), os.O_RDONLY)
     try:
-        _REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _REGISTRY_PATH.write_text(json.dumps(experiments, indent=2, default=str))
-        return True
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _save(experiments: list[dict]) -> bool:
+    """Confirm durable replacement under the cooperating-writer lock.
+
+    False means the write could not be confirmed, not that it had no effect.
+    After replacement, preserve the visible state even if sync or readback
+    fails: a writer outside this advisory lock may already have replaced it.
+    Never restore or unlink the registry on that uncertain path.
+    """
+    try:
+        with _mutation_lock():
+            payload = _serialize_registry(experiments)
+            if bool(getattr(_MUTATION_STATE, "preimage_known", False)):
+                expected = getattr(_MUTATION_STATE, "preimage_bytes", None)
+            else:
+                expected = _current_registry_bytes()
+                _remember_preimage(expected)
+
+            if _current_registry_bytes() != expected:
+                return False
+
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{_REGISTRY_PATH.name}.",
+                suffix=".tmp",
+                dir=str(_REGISTRY_PATH.parent),
+            )
+            tmp = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+                if _current_registry_bytes() != expected:
+                    return False
+
+                os.replace(tmp, _REGISTRY_PATH)
+                _fsync_directory(_REGISTRY_PATH.parent)
+
+                readback = _REGISTRY_PATH.read_bytes()
+                if readback != payload:
+                    raise OSError("experiment registry readback byte mismatch")
+                # Exact payload bytes plus strict decoding verify the stored
+                # representation. Existing default=str and tuple-to-list JSON
+                # conversion need not preserve in-memory Python value types.
+                _decode_registry_bytes(readback, strict=True)
+                _remember_preimage(readback)
+                return True
+            except Exception:  # noqa: BLE001
+                return False
+            finally:
+                tmp.unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
         return False
 
@@ -648,6 +839,7 @@ def evaluate(item: dict, asof: date | None = None) -> dict:
     return result
 
 
+@_serialized_bool_mutation
 def update_evaluator_tracking(experiment_id: str, state: str, asof: date | None = None) -> bool:
     """Persist the _evaluator_first_blocked sidecar field based on the current evaluate() result.
 
@@ -675,9 +867,36 @@ def update_evaluator_tracking(experiment_id: str, state: str, asof: date | None 
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def load() -> list[dict]:
-    """Return all experiments (with safe defaults filled in)."""
-    return [_defaults(dict(e)) for e in _load()]
+def load(*, strict: bool = False) -> list[dict]:
+    """Return experiments with defaults; strict reads expose unavailable evidence.
+
+    Strict mode reads the existing registry once without acquiring a mutation
+    lock, recording a mutation preimage, or promoting experiment status.
+    """
+    if strict:
+        import stat
+
+        try:
+            raw = _REGISTRY_PATH.read_bytes()
+        except FileNotFoundError:
+            probe = _REGISTRY_PATH
+            while True:
+                try:
+                    mode = probe.lstat().st_mode
+                except FileNotFoundError:
+                    parent = probe.parent
+                    if parent == probe:
+                        raise
+                    probe = parent
+                    continue
+                if probe == _REGISTRY_PATH or not stat.S_ISDIR(mode):
+                    raise
+                raw = None
+                break
+        experiments = [] if raw is None else _decode_registry_bytes(raw, strict=True)
+    else:
+        experiments = _load()
+    return [_defaults(dict(e)) for e in experiments]
 
 
 def get(experiment_id: str) -> dict | None:
@@ -688,6 +907,7 @@ def get(experiment_id: str) -> dict | None:
     return None
 
 
+@_serialized_bool_mutation
 def add(experiment: dict) -> bool:
     """Append a new experiment.  Returns False if id already exists or save fails."""
     try:
@@ -703,6 +923,7 @@ def add(experiment: dict) -> bool:
         return False
 
 
+@_serialized_bool_mutation
 def update(experiment_id: str, **fields: Any) -> bool:
     """Update allowed fields on an existing experiment.  Status field is validated.
 
@@ -731,6 +952,7 @@ def update(experiment_id: str, **fields: Any) -> bool:
         return False
 
 
+@_serialized_bool_mutation
 def resolve(experiment_id: str, verdict: str, notes: str = "") -> bool:
     """Mark an experiment JUDGED with a verdict note.
 
@@ -756,6 +978,7 @@ def resolve(experiment_id: str, verdict: str, notes: str = "") -> bool:
         return False
 
 
+@_serialized_list_mutation
 def matured(as_of: date | None = None) -> list[dict]:
     """Return all experiments that are ready for review, in priority order.
 
@@ -765,8 +988,8 @@ def matured(as_of: date | None = None) -> list[dict]:
           has been reached (as_of >= comeback_date).
 
     Items where (b) applies are promoted to status="matured" and saved before
-    being returned, so the agenda never re-surface a newly-matured item twice
-    without human acknowledgement.
+    being returned. If that save cannot be confirmed, return no promoted
+    results; failure does not establish that a replacement had no effect.
 
     Priority order: matured items first, sorted by comeback_date ASC (earliest
     deadline first); then by id as a tiebreaker.  Items with no comeback_date
@@ -789,8 +1012,8 @@ def matured(as_of: date | None = None) -> list[dict]:
         if as_of >= cd_date:
             all_exps[i]["status"] = "matured"
             changed = True
-    if changed:
-        _save(all_exps)
+    if changed and not _save(all_exps):
+        return []
     # collect all matured (not yet judged/cancelled)
     results = [_defaults(dict(e)) for e in all_exps if e.get("status") == "matured"]
     # sort: by comeback_date ASC (None sorts last), then by id
@@ -805,7 +1028,9 @@ def matured(as_of: date | None = None) -> list[dict]:
     return sorted(results, key=_sort_key)
 
 
-def open_with_tristate(as_of: date | None = None) -> list[dict]:
+def open_with_tristate(
+    as_of: date | None = None, *, experiments: list[dict] | None = None,
+) -> list[dict]:
     """Return all OPEN (non-terminal) experiments with their tri-state evaluation attached.
 
     Each item in the returned list is the experiment dict enriched with an ``evaluation``
@@ -816,11 +1041,12 @@ def open_with_tristate(as_of: date | None = None) -> list[dict]:
       4. not_old_enough last (sorted by expected_ready_date ASC within this tier)
 
     This is the source of truth for the agenda's experiment section and the web pane.
-    Never raises (P2).
+    Default callers retain fail-soft reads (P2). A supplied snapshot avoids a
+    second registry read and propagates projection failures to its owner.
     """
     as_of = as_of or date.today()
     try:
-        all_exps = load()
+        all_exps = load() if experiments is None else experiments
         results = []
         for exp in all_exps:
             if exp.get("status") in ("judged", "cancelled"):
@@ -849,25 +1075,51 @@ def open_with_tristate(as_of: date | None = None) -> list[dict]:
         results.sort(key=_sort_key)
         return results
     except Exception:  # noqa: BLE001
+        if experiments is not None:
+            raise
         return []
 
 
-def summary() -> dict:
+def summary(*, experiments: list[dict] | None = None) -> dict:
     """A compact summary suitable for the agenda and the /api/experiments endpoint.
 
     Returns {total, open, matured, judged, cancelled, matured_items: [...],
-             open_tristate: [...], as_of: str}.  Never raises.
+             open_tristate: [...], as_of: str}.
+    Default callers retain the existing fail-soft maturity-update behavior.
+    A supplied snapshot is projected without a registry reread or mutation;
+    due open items remain open, and projection failures propagate.
     """
     try:
-        all_exps = load()
+        all_exps = load() if experiments is None else experiments
         by_status: dict[str, int] = {}
         for e in all_exps:
             s = e.get("status", "open")
             by_status[s] = by_status.get(s, 0) + 1
-        mat = matured()
-        tristate = open_with_tristate()
+        if experiments is None:
+            mat = matured()
+            tristate = open_with_tristate()
+            as_of = date.today()
+        else:
+            as_of = date.today()
+            mat = []
+            for exp in all_exps:
+                ready = exp.get("status") == "matured"
+                comeback = exp.get("comeback_date")
+                if exp.get("status") == "open" and comeback:
+                    try:
+                        ready = as_of >= date.fromisoformat(str(comeback)[:10])
+                    except (TypeError, ValueError):
+                        ready = False
+                if ready:
+                    mat.append(dict(exp))
+            mat.sort(key=lambda exp: (
+                0 if exp.get("comeback_date") else 1,
+                str(exp.get("comeback_date"))[:10] if exp.get("comeback_date") else "",
+                exp.get("id") or "",
+            ))
+            tristate = open_with_tristate(as_of, experiments=all_exps)
         return {
-            "as_of": date.today().isoformat(),
+            "as_of": as_of.isoformat(),
             "total": len(all_exps),
             "open": by_status.get("open", 0),
             "matured": by_status.get("matured", 0),
@@ -877,6 +1129,8 @@ def summary() -> dict:
             "open_tristate": tristate,
         }
     except Exception:  # noqa: BLE001
+        if experiments is not None:
+            raise
         return {"as_of": date.today().isoformat(), "total": 0, "open": 0,
                 "matured": 0, "judged": 0, "cancelled": 0, "matured_items": [],
                 "open_tristate": []}

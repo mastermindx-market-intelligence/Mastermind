@@ -1,0 +1,34 @@
+{
+  "composition_base_tree": "a77ed52db8a5563ae39ddbdee713d87e2d4a9da4",
+  "composition_test_sha256": "005732cf5bfeb3c2fbf5809b44a7f89bffd987482ec208b2a6fb400164c738ab",
+  "generated_at": "2026-10-18T23:49:44.331453+00:00",
+  "reader_head": "dd2261b3c1fed284cd86d15d9f359112da46281f",
+  "receipt_retention_head": "b8e685ec75f112f8a63518b31c09574815b5f51f",
+  "responses": {
+    "china": {
+      "bytes": 18784,
+      "sha256": "167fd1d96d41430df2a19c24184ee3f4d4bc453cfbcff811c413c8356d238b21",
+      "unmodified_full_api_response": true
+    },
+    "hk": {
+      "bytes": 18738,
+      "sha256": "759b2fbda8e8e6532f5b86f27e708afa079461b7373b6df1cc3549c4675fe377",
+      "unmodified_full_api_response": true
+    }
+  },
+  "schema": "mastermind.synthetic_fx_api_fixture_provenance.v1",
+  "scope": "Complete, unmodified mounted API responses from controlled real-source FX/receipt/API composition; synthetic inputs and temporary accounts, never portfolio history.",
+  "source_sha256": {
+    "app/decision_availability.py": "4addabaddb035ccb797f7d051aec0f44534aa368e18750dd0ccf567ef617a8e4",
+    "app/settlement_price_read.py": "417447c0ac25c99bec75ed7f5fc7dc5371cc14710c4cb53d63c108c0030477d1",
+    "app/static/index.html": "ed451f5db2f97e3a2120b501c0ab4a9d151f7fa99c352d121e89f3c0bae58f96",
+    "app/web.py": "5d22cafab95b1203d33ca54c43e3e1e9a2f3a9746450a00a220bf91cb7c93be1",
+    "bot/settle.py": "f0e58b41e42950a7be18ec1863e7b7bb77222c07c97e99a9f5a4167dcd239cb5",
+    "portfolio/fx.py": "80ddab7d0c7b17d202eb860121071307cdf236b8b0e7ee6848042e756aba0b10",
+    "portfolio/fx_evidence.py": "7f649d8f8d53f692f0ca0d148fc09f9ec184eb61d978ffbca394162698b2697e",
+    "portfolio/paper_account.py": "e2896cabeea57be902932f54adefcb3d547997e6ac6e5816073f76d9382d0826",
+    "portfolio/price_evidence.py": "3425a9e02f9689423337702d09c9cafc5d62c07a52723ddbb16ad5b13c3b8280",
+    "tests/test_fx_price_evidence.py": "02e94b674baf4826ccb49a7a24ed56d68357175197c97df64072f3ffe7016f84",
+    "tests/test_receipt_price_display_composition.py": "b2eaf068f9d827d0d92af0ec9922a73d02588872b2821702cca5bde622a5d2bc"
+  }
+}

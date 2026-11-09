@@ -1,0 +1,122 @@
+{
+  "schema": "mastermind.design.completion.v1",
+  "operation_id": "hermes-design-director-20261108-c1-01",
+  "assignment_id": "sector-clock-refinement",
+  "assignment_sha256": "69564ee45da96869aee2b91d5c8c683c2e47b446c642cf38bc2bea826f10a653",
+  "session_ref": "attended-chat:hermes-design-director-20261108-c1-01",
+  "account_alias": "C1 (attended session alias)",
+  "summary": "Created an isolated review copy, clarified main-map and historical-tape fixture clocks, and inspected the resulting Paper screenshot.",
+  "continuation": "Keep the original session and G4P-0 review target. No further copy revision is justified by the observed 1440px screenshot; broader responsive/consumer proof remains separate.",
+  "status": "complete",
+  "reported_at": "2026-11-08T06:04:53.576540+00:00",
+  "decisions": [
+    "Separate observation clocks instead of changing financial values",
+    "Preserve the original DSJ-0 and mark the clone REVIEW ONLY"
+  ],
+  "interactions": [
+    "Navigation, chart/table controls and dossier affordances preserved as design content; execution untested"
+  ],
+  "gaps": [],
+  "limitations": [
+    "Bounded copy refinement, not full product acceptance",
+    "No Hermes model dispatch or Slack callback demonstrated",
+    "No mobile, light-theme or runtime interaction test performed"
+  ],
+  "checks": [
+    "Actual Paper screenshot G4P-0 inspected",
+    "Original DSJ-0 JSX readback unchanged",
+    "Clone structure compared after exact ID remapping and two expected text substitutions"
+  ],
+  "screens": [
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-4-0",
+      "node_id": "G4P-0",
+      "name": "Design Director canary: fixture-clock clarity",
+      "change": "changed",
+      "screenshot": {
+        "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "page_id": "p-4-0",
+        "node_id": "G4P-0",
+        "path": "evidence/sector-clock-refined.jpg",
+        "sha256": "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f",
+        "source_ref": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0",
+        "observed_at": "2026-11-08T06:04:53.576540+00:00"
+      }
+    }
+  ],
+  "coverage": {
+    "preserve": [
+      {
+        "requirement": "All financial values and chart geometry",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      },
+      {
+        "requirement": "Navigation, controls and evidence destinations",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      },
+      {
+        "requirement": "The original DSJ-0 artboard unchanged",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      }
+    ],
+    "states": [
+      {
+        "requirement": "Main map fixture and historical tape disclosed together",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      }
+    ],
+    "viewports": [
+      {
+        "requirement": "Existing 1440px desktop artboard",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      }
+    ],
+    "acceptance": [
+      {
+        "requirement": "Disclosure names the main map 30 Oct 2026 date and historical tape 27 Jul 2026 date",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      },
+      {
+        "requirement": "Clearly state that values are examples, not live readings",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      },
+      {
+        "requirement": "Inspect the actual changed artboard screenshot and preserve the original source",
+        "status": "observed",
+        "evidence": "Observed exact-target copy and preserved structure; see paper-canary.json and the captured screenshot. Scope is the bounded desktop copy assignment.",
+        "screenshot_sha256": [
+          "eb524d426d5d5e42b142337fa251a568226301af7e06e9f5eef03499ed3ecd6f"
+        ]
+      }
+    ]
+  }
+}

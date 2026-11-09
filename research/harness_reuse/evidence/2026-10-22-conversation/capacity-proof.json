@@ -1,0 +1,18 @@
+{
+  "schema": "mastermind.observed_transcript.capacity_fixture.v1",
+  "proof_scope": "SOURCE_FIXTURE_ONLY",
+  "source_rows": 256,
+  "source_text_bytes": 1025757,
+  "initial_rich_responses": 2,
+  "initial_rich_nodes": 2004,
+  "deferred_responses": 253,
+  "format_and_first_visible_render_seconds": 0.931,
+  "offscreen_response_formats_on_scroll": true,
+  "exact_source_bytes_restored": 1025757,
+  "page_errors": [],
+  "external_requests": [],
+  "latency_is_single_local_observation_not_sla": true,
+  "production_authentication": false,
+  "provider_calls": 0,
+  "real_send": false
+}

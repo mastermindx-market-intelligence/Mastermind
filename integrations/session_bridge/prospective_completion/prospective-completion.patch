@@ -1,0 +1,658 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -412,6 +412,7 @@
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
+     native_return: bool = False,
++    recoverable_return: bool = False,
+     qualification_host: str | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+@@ -423,6 +424,12 @@
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
++    if recoverable_return:
++        if (artifact_names or qualification_host or task_class == 'domain_orchestration'
++                or env.get('POOL_OPERATOR_CHILD_BUDGET','0') != '0'):
++            raise FabricTaskError('RECOVERABLE_RETURN_OPTIONS_REFUSED')
++        import original_delivery_collector
++        original_delivery_collector.completion_caller(observed_root,parent_run_id)
+     if artifact_names:
+         import artifact_production
+     if qualification_host:
+@@ -441,7 +448,8 @@
+             task_complexity=complexity, escalation_reason=reason,
+             requested_model=requested_model, route_key=rid,
+             **({"required_modes": sorted(artifact_production.MODES),
+-                "required_platforms": ["linux"]} if artifact_names else {}),
++                "required_platforms": ["linux"]} if artifact_names else
++               {"required_modes": ["glm","minimax","qwen"],"required_platforms": ["linux"]} if recoverable_return else {}),
+         ))
+     guard = pick.launch_policy(
+         route["MODE"], task_class, route["MODEL"],
+@@ -491,9 +499,20 @@
+         # lease, result, retry permission or native RuntimeBinding.
+         fabric_stop_return.register_subscription(observed_root, rid, HERE / "state" / "native_return")
+ 
++    completion = None
+     temp_path: Path | None = None
+     try:
+-        if packet is None:
++        if recoverable_return:
++            import artifact_production
++            state_dir = HERE / 'state' / 'remote_sub'
++            state_dir.mkdir(parents=True,exist_ok=True)
++            completion = original_delivery_collector.begin_completion(rid,observed_root,parent_run_id,
++                route,packet.read_bytes() if packet is not None else stdin_bytes,cwd,artifact_production.source_digest(HERE))
++            packet_path = completion.path / 'packet.txt'
++            env['FABRIC_COMPLETION_CONTEXT'] = str(completion.path)
++            env['FABRIC_COMPLETION_CONTROLLER_PID'] = str(os.getpid())
++            env['FABRIC_COMPLETION_CUSTODY_FD'] = str(completion.lock)
++        elif packet is None:
+             state_dir = HERE / "state" / "remote_sub"
+             state_dir.mkdir(parents=True, exist_ok=True)
+             fd, raw = tempfile.mkstemp(prefix=f"{rid}.packet.", dir=state_dir)
+@@ -517,9 +536,10 @@
+             "--run-id",
+             rid,
+         ]
+-        proc = subprocess.run(argv, env=env)
++        proc = subprocess.run(argv, env=env, **({"pass_fds":(completion.lock,)} if completion is not None else {}))
+         return int(proc.returncode)
+     finally:
++        if completion is not None:completion.close()
+         if temp_path is not None:
+             try:
+                 temp_path.unlink()
+@@ -559,6 +579,7 @@
+     p_request = sub.add_parser("request")
+     p_request.add_argument("--id", required=True)
+     p_request.add_argument("--class", dest="task_class", required=True)
++    p_request.add_argument("--recoverable-return",action="store_true",help="Prospective ordinary Linux run capture; no adoption or retry of existing operations")
+     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
+     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
+     p_request.add_argument("--cwd", default=os.getcwd())
+@@ -580,12 +601,12 @@
+     p_mac_return.add_argument("--root", required=True)
+     p_mac_return.add_argument("--destination", required=True)
+ 
+-    for command in ("collect", "collection-result"):
++    for command in ("collect", "collection-result", "collect-prospective"):
+         collect_parser = sub.add_parser(command)
+         collect_parser.add_argument("run_id")
+         for name in ("root", "parent"):
+             collect_parser.add_argument("--"+name, required=True)
+-        for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
++        for name in (("binding", "destination") if command == "collect" else ("destination",) if command == "collect-prospective" else ("collection", "receipt-sha256")):
+             collect_parser.add_argument("--"+name, required=True)
+ 
+     p_status = sub.add_parser("status")
+@@ -666,10 +687,11 @@
+     p_completed.add_argument("--apply", action="store_true")
+ 
+     args = parser.parse_args(argv)
+-    if args.cmd in {"collect", "collection-result"}:
++    if args.cmd in {"collect", "collection-result", "collect-prospective"}:
+         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
+                    "--root", args.root, "--parent", args.parent]
+-        names = ("binding", "destination") if args.cmd == "collect" else ("collection", "receipt-sha256")
++        names = ("binding", "destination") if args.cmd == "collect" else ("destination",) if args.cmd == "collect-prospective" else ("collection", "receipt-sha256")
++        if args.cmd == "collect-prospective":command.append("--prospective")
+         for name in names:
+             command.extend(["--"+name, getattr(args, name.replace("-", "_"))])
+         return subprocess.run(command).returncode
+@@ -758,6 +780,7 @@
+                 args.task_class,
+                 **({"artifact_names": args.artifact_output} if args.artifact_output else {}),
+                 **({"native_return": True} if args.native_return else {}),
++                **({"recoverable_return": True} if args.recoverable_return else {}),
+                 cwd=args.cwd,
+                 packet=Path(args.packet) if args.packet else None,
+                 stdin_bytes=stdin_bytes,
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -554,6 +554,7 @@
+ case "$MODE" in
+   glm|glm-codex|minimax|minimax-codex|qwen) RETRYABLE_ADMISSION_MODE=1 ;;
+ esac
++if [ -n "${FABRIC_COMPLETION_CONTEXT:-}" ]; then RETRYABLE_ADMISSION_MODE=0; fi
+ if [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
+   CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+ else
+@@ -951,6 +952,25 @@
+ if [ -n "$GLM_CAP_REMOTE" ]; then
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
++# New opt-in runs alone: persist exact controller/lease/source identity before
++# the first provider launch. Collection bypasses this whole controller above.
++if [ -n "${FABRIC_COMPLETION_CONTEXT:-}" ]; then
++  [ "$DRY_RUN" -eq 0 ] && [ "$REMOTE_CWD" = '~' ] && [ "$HOST_ARG" != m2 ] || { RC=78; exit "$RC"; }
++  case "$MODE" in glm|qwen|minimax) ;; *) RC=78; exit "$RC";; esac
++  COMPLETION_FILE=$("$REMOTE_SUB_PYTHON" "$HERE/original_delivery_collector.py" "$ID" \
++    --root "$ROUTING_ROOT" --parent "${POOL_PARENT_RUN_ID:-}" --seal-completion \
++    "$FABRIC_COMPLETION_CONTEXT" "$ID" "$ROUTING_ROOT" "${POOL_PARENT_RUN_ID:-}" \
++    "$HOST_ARG" "$MODE" "$MODEL" "$ACCOUNT_ARG" "$LEASE_ID" "$SUPPORT_DIGEST" \
++    "$MAX_SECS" "$CHILD_TIMEOUT" "$PROVIDER_LEASE_TTL" \
++    "${FABRIC_COMPLETION_CONTROLLER_PID:-}" "${FABRIC_COMPLETION_CUSTODY_FD:-}") || {
++      RC=78; log 'COMPLETION_BINDING_REFUSED'; exit "$RC";
++    }
++  # Existing upload transport, inside this run's newly created support directory.
++  "$SCP_CMD" -q "$COMPLETION_FILE" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/completion.json" || {
++    RC=78; log 'COMPLETION_TRANSFER_UNCONFIRMED'; exit "$RC";
++  }
++  REMOTE_INNER='export FABRIC_COMPLETION_BINDING="$HOME/lanes/tmp/$KEY.support-src/completion.json"; '"$REMOTE_INNER"
++fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+ LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -121,7 +121,8 @@
+     if not packet_path.is_file():
+         return _fail("REMOTE_SUB_PACKET_MISSING", 2)
+     try:
+-        prompt = packet_path.read_text(encoding="utf-8")
++        packet_bytes = packet_path.read_bytes()
++        prompt = packet_bytes.decode("utf-8")
+     except OSError:
+         return _fail("REMOTE_SUB_PACKET_UNREADABLE", 2)
+ 
+@@ -134,6 +135,18 @@
+         except (ImportError, ValueError, TypeError, KeyError, RecursionError):
+             return _fail("ARTIFACT_DELIVERY_CONTRACT_REFUSED", 65)
+     artifact_failure = False
++    completion_binding = None
++    if os.environ.get('FABRIC_COMPLETION_BINDING'):
++        if artifact_contract is not None:
++            return _fail('COMPLETION_ARTIFACT_CONFLICT', 78)
++        try:
++            completion_binding = completion_producer_binding(
++                os.environ['FABRIC_COMPLETION_BINDING'], packet_bytes, key, mode, model, os.environ)
++            import artifact_production
++            if artifact_production.source_digest(here) != completion_binding['support_digest']:
++                raise ValueError('completion_executing_source_changed')
++        except (OSError, ValueError, TypeError, KeyError):
++            return _fail('COMPLETION_BINDING_REFUSED', 78)
+ 
+     # Tilde belongs to this host, not to the controller that selected it.
+     if cwd.startswith("~") and cwd != "~" and not cwd.startswith("~/"):
+@@ -162,6 +175,10 @@
+     except LaneRuntimeConfigError as exc:
+         return _fail("REMOTE_SUB_PREFLIGHT_REFUSED " + str(exc), 78)
+ 
++    if completion_binding is not None:
++        timeout = min(timeout, completion_binding['worker_deadline'] - time.time())
++        if timeout <= 0:
++            return _fail('COMPLETION_DEADLINE_REFUSED', 78)
+     config = load_runtime_config(os.environ, cpu_count=os.cpu_count() or 1)
+     install_signal_cleanup()
+     active_dir = here / "active"
+@@ -219,6 +236,11 @@
+         with lease, ExitStack() as artifact_stack:
+             artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
+                               if artifact_contract is not None else None)
++            completion_owner = None
++            if completion_binding is not None:
++                import artifact_production
++                completion_owner = artifact_stack.enter_context(artifact_production.NewDirectory(completion_binding))
++                prepare_completion(completion_owner, completion_binding)
+             if mode in native_remote.MODES:
+                 child_env = native_remote.environment(mode, model, key, here, child_env)
+             # Worker-spawned shell tools inherit PATH. The immutable, reviewed
+@@ -231,6 +253,9 @@
+                     return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
+                 child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
+             install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
++            if completion_binding is not None:
++                timeout = min(timeout, completion_binding['worker_deadline'] - time.time())
++                if timeout <= 0:return _fail('COMPLETION_DEADLINE_REFUSED', 78)
+             try:
+                 state["started"] = True
+                 result = run_owned_process(
+@@ -280,6 +305,9 @@
+                         # Metering failure is unknown usage, never invented spend
+                         # and never a reason to replay a completed provider call.
+                         pass
++            if completion_owner is not None:
++                publish_completion(completion_owner, completion_binding, receipt.read_bytes(),
++                                   display_stdout.encode('utf-8'), result.returncode)
+             if (artifact_contract is not None and result.returncode == 0
+                     and result.cleanup_proven and not result.stdout_truncated and not result.stderr_truncated):
+                 try:
+@@ -322,6 +350,111 @@
+     if artifact_failure:
+         return _fail("ARTIFACT_DELIVERY_CONTRACT_FAILED", 65)
+     return int(result.returncode)
++
++
++# Prospective collection evidence only. Never grants retry, admission or acceptance.
++def validate_completion_binding(value):
++    import re
++    fields = {'schema', 'run_id', 'root', 'parent', 'host', 'mode', 'model', 'cwd',
++              'packet_sha256', 'support_digest', 'hosts_sha256', 'local_sources', 'controller', 'lease_id', 'account',
++              'controller_deadline', 'worker_deadline', 'lease_ttl_requested'}
++    if type(value) is not dict or set(value) != fields or value['schema'] != 'mastermind.prospective_completion.v1':
++        raise ValueError('completion_binding_schema')
++    ident = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
++    for k in ('run_id', 'root', 'parent', 'host', 'model', 'lease_id', 'account'):
++        if type(value[k]) is not str or not ident.fullmatch(value[k]):
++            raise ValueError('completion_binding_identity')
++    if value['mode'] not in ('glm', 'qwen', 'minimax') or value['cwd'] != '~':
++        raise ValueError('completion_binding_profile')
++    for k in ('packet_sha256', 'support_digest', 'hosts_sha256'):
++        if type(value[k]) is not str or not re.fullmatch('[a-f0-9]{64}', value[k]):
++            raise ValueError('completion_binding_digest')
++    sources = value['local_sources']
++    if (type(sources) is not dict or set(sources) != {'fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py','remote_sub_exec.py'}
++            or any(type(v) is not str or not re.fullmatch('[a-f0-9]{64}',v) for v in sources.values())):
++        raise ValueError('completion_source_binding')
++    c = value['controller']
++    if type(c) is not dict or set(c) != {'pid', 'generation', 'started_at', 'lock_device', 'lock_inode'}:
++        raise ValueError('completion_controller_identity')
++    if any(type(c[k]) is not int or c[k] < 0 for k in ('pid', 'started_at', 'lock_device', 'lock_inode')) or c['pid'] <= 0:
++        raise ValueError('completion_controller_identity')
++    if type(c['generation']) is not str or not re.fullmatch('[a-f0-9]{32}', c['generation']):
++        raise ValueError('completion_controller_generation')
++    if any(type(value[k]) is not int for k in ('controller_deadline', 'worker_deadline', 'lease_ttl_requested')):
++        raise ValueError('completion_deadline')
++    if not (c['started_at'] < value['worker_deadline'] <= value['controller_deadline'] <= c['started_at'] + 7200
++            and 900 <= value['lease_ttl_requested'] <= 7500):
++        raise ValueError('completion_deadline')
++    return value
++
++
++def completion_producer_binding(path, packet, key, mode, model, env):
++    import stat
++    import artifact_reader
++    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++    try:
++        s = os.fstat(fd)
++        if not stat.S_ISREG(s.st_mode) or s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o600 or s.st_nlink != 1 or not 0 < s.st_size <= 16384:
++            raise ValueError('completion_binding_file')
++        raw = os.read(fd, 16385)
++        if len(raw) != s.st_size or artifact_reader.identity(os.fstat(fd)) != artifact_reader.identity(s) or artifact_reader.identity(Path(path).lstat()) != artifact_reader.identity(s):
++            raise ValueError('completion_binding_changed')
++    finally:
++        os.close(fd)
++    b = validate_completion_binding(artifact_reader.strict_json(raw))
++    expected = {'run_id':key, 'mode':mode, 'model':model,
++        'root':env.get('POOL_ORCHESTRATOR_ID'), 'parent':env.get('POOL_PARENT_RUN_ID'),
++        'host':env.get('LANE_REMOTE_HOST'), 'lease_id':env.get('POOL_LEASE_ID'),
++        'account':env.get('POOL_ACCOUNT'), 'support_digest':env.get('SUPPORT_DIGEST')}
++    if any(b[k] != v for k, v in expected.items()) or hashlib.sha256(packet).hexdigest() != b['packet_sha256']:
++        raise ValueError('completion_producer_scope')
++    if time.time() >= b['worker_deadline']:
++        raise ValueError('completion_producer_deadline')
++    return b
++
++
++def prepare_completion(owner, binding):
++    import artifact_reader
++    owner.verify()
++    fd = os.open('binding.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=owner.fd)
++    with os.fdopen(fd, 'wb') as f:
++        f.write(artifact_reader.canonical(binding)); f.flush(); os.fsync(f.fileno())
++    os.fsync(owner.fd); os.fsync(owner.tmp); owner.verify()
++
++
++def publish_completion(owner, binding, process_raw, stdout, returncode):
++    import artifact_reader
++    import artifact_production
++    process = artifact_reader.strict_json(process_raw)
++    if (process.get('label') != binding['run_id'] or process.get('returncode') != returncode
++            or type(returncode) is not int or not cleanup_receipt_is_proven(process.get('cleanup', {}))
++            or process.get('stdout_truncated') is not False or process.get('stderr_truncated') is not False):
++        raise ValueError('completion_process_unproven')
++    if not isinstance(stdout, bytes) or not 0 < len(stdout) <= artifact_reader.MAX_FILE:
++        raise ValueError('completion_output_bound')
++    # The existing process owner supplies actual START/end/PID and cleanup.
++    # Bind its bytes and actual retained display output; no pre-exec START claim.
++    process['prospective_completion'] = {'binding': binding,
++        'stdout_sha256': hashlib.sha256(stdout).hexdigest(), 'stdout_bytes': len(stdout)}
++    blobs = {'stdout.txt':stdout, 'process.json':artifact_reader.canonical(process),
++             'returncode.txt':str(returncode).encode() + b'\n'}
++    for name, data in blobs.items():
++        if len(data) > artifact_reader.MAX_FILE:
++            raise ValueError('completion_file_bound')
++        owner.verify()
++        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=owner.fd)
++        with os.fdopen(fd, 'wb') as f:
++            f.write(data); f.flush(); os.fsync(f.fileno())
++        os.fsync(owner.fd)
++    # Terminal marker is last. Any interrupted prefix remains nonterminal.
++    terminal = artifact_reader.canonical({'schema':'mastermind.prospective_terminal.v1',
++        'binding_sha256':hashlib.sha256(artifact_reader.canonical(binding)).hexdigest(),
++        'files':{k:{'bytes':len(v),'sha256':hashlib.sha256(v).hexdigest()} for k,v in blobs.items()}})
++    owner.verify()
++    fd = os.open('terminal.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=owner.fd)
++    with os.fdopen(fd, 'wb') as f:
++        f.write(terminal);f.flush();os.fsync(f.fileno())
++    os.fsync(owner.fd);owner.verify()
+ 
+ 
+ def main(argv: list[str]) -> int:
+--- a/original_delivery_collector.py
++++ b/original_delivery_collector.py
+@@ -20,6 +20,7 @@
+ import artifact_delivery as delivery
+ import artifact_reader as reader
+ import artifact_production as production
++from remote_sub_exec import validate_completion_binding
+ 
+ DirectoryChain = delivery.DirectoryChain
+ HERE = Path(__file__).resolve().parent
+@@ -173,6 +174,8 @@
+                    for k in ('run_id','root','parent','host'))):
+         raise ValueError('read_request_invalid')
+     contract=request['contract']
++    if type(contract) is dict and contract.get('schema') == 'mastermind.prospective_completion.v1':
++        return prospective_remote_read(request)
+     plain = contract.get('schema') == PLAIN_SCHEMA if type(contract) is dict else False
+     if request['run_id'] in PLAIN_SCOPES and not plain:
+         raise ValueError('read_contract_invalid')
+@@ -273,6 +276,8 @@
+     code+="_reader_ns={'__name__':'fixed_original_artifact_reader'}\nexec("+repr(source)+",_reader_ns)\nreader=SimpleNamespace(**_reader_ns)\n"
+     code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCOPES='+repr(PLAIN_SCOPES)+'\n'
+     code+='SCHEMA='+repr(SCHEMA)+'\nMAX_STDOUT='+str(MAX_STDOUT)+'\nIDENT=re.compile('+repr(IDENT.pattern)+')\nHEX=re.compile('+repr(HEX.pattern)+')\n'
++    from remote_sub_exec import validate_completion_binding
++    code+=inspect.getsource(validate_completion_binding)+'\n'+inspect.getsource(prospective_remote_read)+'\n'
+     code+=inspect.getsource(delivery.DirectoryChain)+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
+     code+="\ntry:\n raw=sys.stdin.buffer.read(65537)\n if len(raw)>65536:raise ValueError('request_limit')\n request=reader.strict_json(raw)\n result=remote_envelope(request)\n sys.stdout.buffer.write(canonical(result))\nexcept (OSError,ValueError,TypeError,KeyError):\n raise SystemExit(76)\n"
+     return code
+@@ -300,6 +305,9 @@
+             raise ValueError('collection_file_integrity')
+         blobs[name]=data
+     if blobs['rc'] not in (b'0',b'0\n'):raise ValueError('collection_rc_mismatch')
++    if request['contract'].get('schema') == 'mastermind.prospective_completion.v1':
++        if row['artifacts']:raise ValueError('completion_artifact_conflict')
++        return validate_prospective_process(blobs,request)
+     if request['contract'].get('schema') == PLAIN_SCHEMA:
+         if row['artifacts'] or mode != 'minimax':raise ValueError('plain_artifact_conflict')
+         delivery.validate_capsule_process(blobs['process'],blobs['stdout'],request['run_id'])
+@@ -385,7 +393,6 @@
+ 
+ 
+ def read_collection(path,*,expected_sha256,run_id,root,parent):
+-    require_caller(root)
+     plain = PLAIN_SCOPES.get(run_id)
+     if plain is not None and (str(path) != str(Path(plain['destination'])/'receipt.json')
+             or root != plain['root'] or parent != plain['parent']):
+@@ -398,6 +405,14 @@
+             or any(receipt.get(k)!=v for k,v in {'root':root,'parent':parent,'run_id':run_id}.items())
+             or receipt.get('original_operation_mutated') is not False):
+         raise ValueError('collection_not_verified')
++    if receipt.get('completion_contract') == 'mastermind.prospective_completion.v1':
++        completion_caller(root,parent)
++        with CompletionDirectory(completion_path(run_id)) as context:
++            context.claim()
++            complete=reader.strict_json(context.read('collection-complete.json'))
++            if complete != {'destination':str(Path(path).parent),'receipt_sha256':expected_sha256}:
++                raise ValueError('completion_consumption_unconfirmed')
++    else:require_caller(root)
+     chunks=receipt['stdout_chunks']
+     if (not isinstance(chunks,list) or not 1<=len(chunks)<=32
+             or chunks!=[f'stdout.{i:03d}' for i in range(len(chunks))]):raise ValueError('collection_chunks_invalid')
+@@ -431,14 +446,262 @@
+         chain.verify();return stdout
+ 
+ 
++class CompletionDirectory:
++    """Private original-run evidence and its existing controller custody fence."""
++    def __init__(self, path):
++        self.path = Path(path)
++        self.chain = delivery.DirectoryChain(self.path)
++        self.fd = os.dup(self.chain.fd)
++        self.lock = None
++        self.identity = (os.fstat(self.fd).st_dev, os.fstat(self.fd).st_ino)
++        try: self.verify()
++        except BaseException: self.close(); raise
++
++    def verify(self):
++        self.chain.verify()
++        a, b = os.fstat(self.fd), self.path.lstat()
++        if (not stat.S_ISDIR(b.st_mode) or a.st_uid != os.getuid() or stat.S_IMODE(a.st_mode) != 0o700
++                or self.identity != (a.st_dev, a.st_ino) or self.identity != (b.st_dev, b.st_ino)):
++            raise ValueError('completion_directory_changed')
++        if self.lock is not None:
++            a, b = os.fstat(self.lock), os.stat('custody.lock', dir_fd=self.fd, follow_symlinks=False)
++            if ((a.st_dev,a.st_ino) != (b.st_dev,b.st_ino) or not stat.S_ISREG(a.st_mode)
++                    or a.st_uid != os.getuid() or a.st_nlink != 1 or stat.S_IMODE(a.st_mode) != 0o600):
++                raise ValueError('completion_custody_changed')
++
++    def claim(self, create=False):
++        import fcntl
++        self.lock = os.open('custody.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
++            | (os.O_CREAT | os.O_EXCL if create else 0), 0o600, dir_fd=self.fd)
++        self.verify()
++        fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        self.verify()
++
++    def read(self, name, limit=2*1024*1024):
++        self.verify()
++        info = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
++        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
++            raise ValueError('completion_evidence_file')
++        return delivery.read_local_at(self, name, limit)
++
++    def write(self, name, data):
++        self.verify();delivery.write_exclusive(self.fd,name,data);self.verify()
++        if self.read(name) != data:raise ValueError('completion_publication_unconfirmed')
++
++    def close(self):
++        for name in ('lock','fd'):
++            fd=getattr(self,name,None)
++            if fd is not None:os.close(fd);setattr(self,name,None)
++        if getattr(self,'chain',None) is not None:self.chain.close();self.chain=None
++    def __enter__(self):return self
++    def __exit__(self,*_):self.close()
++
++
++def completion_path(run):
++    if not IDENT.fullmatch(run):raise ValueError('completion_run_invalid')
++    return HERE/'state/remote_sub'/(run+'.completion')
++
++
++def completion_caller(root,parent):
++    # Explicit native-parent correlation is necessary, never a replacement for
++    # the original resource grant. No environment substitution for old runs.
++    if (type(root) is not str or type(parent) is not str or not IDENT.fullmatch(root) or not IDENT.fullmatch(parent)
++            or os.environ.get('CODEX_THREAD_ID') != parent
++            or os.environ.get('POOL_ORCHESTRATOR_ID',root) != root):
++        raise ValueError('completion_original_parent_required')
++
++
++def completion_sources():
++    return {name:sha(delivery.local_file(HERE/name,2*1024*1024)) for name in
++        ('fabric_task.py','remote_sub.sh','original_delivery_collector.py','artifact_delivery.py','artifact_reader.py','remote_sub_exec.py')}
++
++
++def begin_completion(run,root,parent,route,packet,cwd,support_digest):
++    import time,uuid
++    completion_caller(root,parent)
++    if not isinstance(packet,bytes) or not 0<len(packet)<=2*1024*1024:raise ValueError('completion_packet_bound')
++    if cwd != '~' or route['MODE'] not in ('glm','qwen','minimax') or route['HOST']=='m2':
++        raise ValueError('completion_route_unsupported')
++    for old in (HERE/'state/remote_sub'/(run+'.log'), HERE/'lanes'/(run+'.remote.stdout')):
++        if os.path.lexists(old):raise ValueError('completion_existing_run_not_adopted')
++    path=completion_path(run);os.mkdir(path,0o700)
++    parent_fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
++    try:os.fsync(parent_fd)
++    finally:os.close(parent_fd)
++    store=CompletionDirectory(path)
++    try:
++        store.claim(create=True)
++        lock=os.fstat(store.lock)
++        origin={'schema':'mastermind.completion_origin.v1','run_id':run,'root':root,'parent':parent,
++            'host':route['HOST'],'mode':route['MODE'],'model':route['MODEL'],'cwd':cwd,
++            'packet_sha256':sha(packet),'support_digest':support_digest,
++            'hosts_sha256':sha(delivery.local_file(HERE/'hosts.json')), 'local_sources':completion_sources(),
++            'controller':{'pid':os.getpid(),'generation':uuid.uuid4().hex,'started_at':int(time.time()),
++                'lock_device':lock.st_dev,'lock_inode':lock.st_ino}}
++        store.write('packet.txt',packet)
++        store.write('origin.json',canonical(origin))
++        return store
++    except BaseException:store.close();raise
++
++
++def seal_completion(path,run,root,parent,host,mode,model,account,lease,support,max_secs,child_secs,ttl,controller_pid,custody_fd):
++    import time
++    from remote_sub_exec import validate_completion_binding
++    if Path(path) != completion_path(run):raise ValueError('completion_context_path')
++    with CompletionDirectory(path) as store:
++        store.lock=os.dup(int(custody_fd))
++        store.verify()
++        import fcntl
++        fcntl.flock(store.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++        origin=reader.strict_json(store.read('origin.json'))
++        completion_caller(root,parent)
++        if origin['local_sources'] != completion_sources() or origin['hosts_sha256'] != sha(delivery.local_file(HERE/'hosts.json')):
++            raise ValueError('completion_launch_source_changed')
++        expected={'schema':'mastermind.completion_origin.v1','run_id':run,'root':root,'parent':parent,
++            'host':host,'mode':mode,'model':model,'cwd':'~','support_digest':support}
++        if any(origin.get(k)!=v for k,v in expected.items()) or str(origin['controller']['pid'])!=controller_pid:
++            raise ValueError('completion_origin_changed')
++        if sha(store.read('packet.txt'))!=origin['packet_sha256']:raise ValueError('completion_packet_changed')
++        lock=os.stat('custody.lock',dir_fd=store.fd,follow_symlinks=False)
++        if (lock.st_dev,lock.st_ino)!=(origin['controller']['lock_device'],origin['controller']['lock_inode']):
++            raise ValueError('completion_controller_changed')
++        # The original adapter holds this inode across the whole controller.
++        deadline=origin['controller']['started_at']+int(max_secs)
++        binding=dict(origin,schema='mastermind.prospective_completion.v1',lease_id=lease,account=account,
++            controller_deadline=deadline,worker_deadline=min(deadline,int(time.time())+int(child_secs)),
++            lease_ttl_requested=int(ttl))
++        validate_completion_binding(binding)
++        if binding['worker_deadline']<=time.time():raise ValueError('completion_deadline_expired')
++        support_raw=delivery.local_file(HERE/'state/remote_sub'/(run+'.support.json'))
++        if sha(canonical({'schema':'remote-support-code.v1','files':reader.strict_json(support_raw)}))!=support:
++            raise ValueError('completion_support_changed')
++        store.write('support.json',support_raw)
++        store.write('launch.json',canonical(binding))
++        return path+'/launch.json'
++
++
++def prospective_remote_read(request):
++    # Uses the SAME fixed artifact reader and its private /tmp/fabric-* rules.
++    # No home-directory probe, chmod, transport alternative or legacy adoption.
++    binding=validate_completion_binding(request.get('contract'))
++    if (set(request)!={'schema','run_id','root','parent','host','contract'} or request['schema']!=SCHEMA
++            or any(request[k]!=binding[k] for k in ('run_id','root','parent','host'))):
++        raise ValueError('read_request_invalid')
++    scope={k:binding[k] for k in ('root','parent','run_id')}
++    directory='/tmp/fabric-'+sha(canonical(scope))[:40]
++    def read(name):
++        item=reader.read_one(directory+'/'+name,reader.MAX_FILE)
++        if item.get('status')!='RETRIEVED':raise ValueError('original_artifact_unavailable')
++        return {k:item[k] for k in ('bytes','sha256','data_base64')}
++    original=read('binding.json')
++    if base64.b64decode(original['data_base64'],validate=True)!=canonical(binding):
++        raise ValueError('read_contract_invalid')
++    first=read('terminal.json')
++    result={'schema':SCHEMA,'request_sha256':sha(canonical(request)),'state':'READ',
++        'files':{'rc':read('returncode.txt'),'process':read('process.json'),'stdout':read('stdout.txt')},'artifacts':[]}
++    marker=reader.strict_json(base64.b64decode(first['data_base64'],validate=True))
++    names={'rc':'returncode.txt','process':'process.json','stdout':'stdout.txt'}
++    if (type(marker) is not dict or set(marker)!={'schema','binding_sha256','files'}
++            or marker['schema']!='mastermind.prospective_terminal.v1'
++            or marker['binding_sha256']!=sha(canonical(binding)) or set(marker['files'])!=set(names.values())):
++        raise ValueError('read_contract_invalid')
++    for short,name in names.items():
++        if marker['files'][name]!={k:result['files'][short][k] for k in ('bytes','sha256')}:
++            raise ValueError('original_file_changed')
++    if read('terminal.json')!=first or read('binding.json')!=original:raise ValueError('original_file_changed')
++    return result
++
++
++def validate_prospective_process(blobs,request):
++    from remote_sub_exec import validate_completion_binding
++    from datetime import datetime
++    b=validate_completion_binding(request['contract'])
++    process=reader.strict_json(blobs['process'])
++    delivery.validate_capsule_process(blobs['process'],blobs['stdout'],b['run_id'])
++    evidence=process.get('prospective_completion')
++    if evidence!={'binding':b,'stdout_sha256':sha(blobs['stdout']),'stdout_bytes':len(blobs['stdout'])}:
++        raise ValueError('completion_producer_binding_mismatch')
++    started=datetime.fromisoformat(process['started_at'].replace('Z','+00:00')).timestamp()
++    ended=datetime.fromisoformat(process['ended_at'].replace('Z','+00:00')).timestamp()
++    if not b['controller']['started_at']<=started<=ended<=b['controller_deadline']:
++        raise ValueError('completion_process_deadline')
++    return blobs,[],None
++
++
++def collect_prospective(run,root,parent,destination):
++    from remote_sub_exec import validate_completion_binding
++    completion_caller(root,parent)
++    with CompletionDirectory(completion_path(run)) as store:
++        store.claim()  # Fails while original controller OR another collector owns it.
++        origin_raw=store.read('origin.json');origin=reader.strict_json(origin_raw)
++        raw=store.read('launch.json');binding=validate_completion_binding(reader.strict_json(raw))
++        if any(binding[k]!=v for k,v in {'run_id':run,'root':root,'parent':parent}.items()):
++            raise ValueError('completion_foreign_run')
++        expected=dict(binding,schema='mastermind.completion_origin.v1')
++        for k in ('lease_id','account','controller_deadline','worker_deadline','lease_ttl_requested'):expected.pop(k)
++        if origin!=expected or sha(store.read('packet.txt'))!=binding['packet_sha256']:
++            raise ValueError('completion_original_source_changed')
++        c=binding['controller'];lock=os.fstat(store.lock)
++        if (lock.st_dev,lock.st_ino)!=(c['lock_device'],c['lock_inode']):raise ValueError('completion_lock_replaced')
++        support_raw=store.read('support.json')
++        if sha(canonical({'schema':'remote-support-code.v1','files':reader.strict_json(support_raw)}))!=binding['support_digest']:
++            raise ValueError('completion_support_changed')
++        if completion_sources()!=binding['local_sources']:raise ValueError('completion_local_source_changed')
++        registry_raw=delivery.local_file(HERE/'hosts.json')
++        if sha(registry_raw)!=binding['hosts_sha256']:raise ValueError('completion_host_source_changed')
++        host=reader.strict_json(registry_raw).get(binding['host'])
++        if (not isinstance(host,dict) or binding['mode'] not in host.get('allowed_modes',[])
++                or type(host.get('ssh_alias')) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',host['ssh_alias'])):
++            raise ValueError('completion_host_changed')
++        request={'schema':SCHEMA,**{k:binding[k] for k in ('root','parent','run_id','host')},'contract':binding}
++        def unchanged():
++            completion_caller(root,parent);store.verify()
++            if store.read('launch.json')!=raw or store.read('origin.json')!=origin_raw or sha(store.read('packet.txt'))!=binding['packet_sha256']:
++                raise ValueError('completion_source_changed')
++            if delivery.local_file(HERE/'hosts.json')!=registry_raw or store.read('support.json')!=support_raw or completion_sources()!=binding['local_sources']:
++                raise ValueError('completion_dependency_changed')
++        # Irreversible evidence of this read attempt precedes any transport.
++        # On lost response/publication it is NEVER cleared for another attempt.
++        store.write('collection-intent.json',canonical({'request':request,'destination':str(destination)}))
++        with delivery.reserve_destination(Path(destination)) as chain:
++            unchanged();response=delivery.transport(host['ssh_alias'],request)
++            delivery.write_exclusive(chain.fd,'untrusted-response.json',response)
++            blobs,_,_=validate_response(response,request,binding['mode'])
++            unchanged()
++            receipt={'schema':RECEIPT_SCHEMA,'state':'COMPLETE','root':root,'parent':parent,'run_id':run,
++                'host':binding['host'],'mode':binding['mode'],'binding_sha256':sha(raw),
++                'delivery_verified':True,'worker_terminal_proof':True,'original_operation_mutated':False,
++                'lease_settlement':'UNCHANGED_REQUIRES_EXISTING_OWNER','acceptance':'NOT_RECORDED','files':[],
++                'completion_contract':'mastermind.prospective_completion.v1',
++                'stdout_chunks':['stdout.000'],'stdout_bytes':len(blobs['stdout']),'stdout_sha256':sha(blobs['stdout']),
++                'artifacts':[],'artifact_manifest':None}
++            for name,data in [('binding.json',raw),('stdout.000',blobs['stdout']),('process.json',blobs['process']),('returncode.txt',blobs['rc'])]:
++                delivery.write_exclusive(chain.fd,name,data)
++                receipt['files'].append({'local_name':name,'bytes':len(data),'sha256':sha(data)})
++            delivery.publish_receipt(chain,receipt,{'paths':[]},verify_source=unchanged)
++            if receipt['state']!='COMPLETE':raise ValueError('completion_publication_unconfirmed')
++            store.write('collection-complete.json',canonical({'destination':str(destination),'receipt_sha256':sha(delivery.read_local_at(chain,'receipt.json',65536))}))
++            return receipt
++
++
+ def main(argv=None):
+     parser=argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('run_id')
+     for name in ('root','parent'):parser.add_argument('--'+name,required=True)
++    parser.add_argument('--prospective',action='store_true')
++    parser.add_argument('--seal-completion',nargs=15)
+     parser.add_argument('--binding');parser.add_argument('--destination')
+     parser.add_argument('--collection');parser.add_argument('--receipt-sha256')
+     args=parser.parse_args(argv)
+     try:
++        if args.seal_completion:
++            if (args.seal_completion[1:4] != [args.run_id,args.root,args.parent]
++                    or args.prospective or args.binding or args.destination or args.collection or args.receipt_sha256):
++                raise ValueError('completion_seal_arguments')
++            print(seal_completion(*args.seal_completion));return 0
++        if args.prospective:
++            if args.binding or args.collection or not args.destination:raise ValueError('completion_arguments')
++            print(canonical(collect_prospective(args.run_id,args.root,args.parent,args.destination)).decode());return 0
+         if args.collection:
+             if args.binding or args.destination or not args.receipt_sha256:raise ValueError('collection_arguments')
+             sys.stdout.buffer.write(read_collection(args.collection,expected_sha256=args.receipt_sha256,

@@ -1,0 +1,368 @@
+{
+  "schema": "workspace-release-installed-consumer-proof.v1",
+  "source_head": "564b5200fad58aa755ee8614cfc574480d202258",
+  "protected_merge": "8ca19391143ef870249a684ab29ffaa57671e248",
+  "pr": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2206",
+  "delivery": "PROTECTED_SQUASH_MERGE",
+  "payload_exact_match": {
+    "scripts/install_mastermind_workspace_cli.sh": {
+      "own": "b74d306a5f1a5dc10fef41d605c55e4093b1b657",
+      "merged": "b74d306a5f1a5dc10fef41d605c55e4093b1b657"
+    },
+    "scripts/mastermind_workspace.py": {
+      "own": "ae9477bd8a2d1c4380a6d23274f098876f0a788f",
+      "merged": "ae9477bd8a2d1c4380a6d23274f098876f0a788f"
+    },
+    "control_plane/executive_workspace.py": {
+      "own": "0963ccd158ef18067dfaf8cc02d928f1985b4555",
+      "merged": "0963ccd158ef18067dfaf8cc02d928f1985b4555"
+    },
+    "control_plane/__init__.py": {
+      "own": "2bcf2a4135db7c52a584b6fb98a15b7c9fea9959",
+      "merged": "2bcf2a4135db7c52a584b6fb98a15b7c9fea9959"
+    },
+    "common/__init__.py": {
+      "own": "4eda2ac4ab080fa537738fd4a714de3ce3503c1f",
+      "merged": "4eda2ac4ab080fa537738fd4a714de3ce3503c1f"
+    },
+    "common/acp_continuing_authority_contract.py": {
+      "own": "b17473601aaa5ff475ee718560d1f48f0ee164c8",
+      "merged": "b17473601aaa5ff475ee718560d1f48f0ee164c8"
+    },
+    "common/agent_dialogue_consultation_contract.py": {
+      "own": "03f9706d1bdd9cc759bf8847afc2a8d851abde63",
+      "merged": "03f9706d1bdd9cc759bf8847afc2a8d851abde63"
+    },
+    "common/agent_dialogue_contract.py": {
+      "own": "d30fcee512e2c5e718a5e2b14390b6e6c8cb5f6d",
+      "merged": "d30fcee512e2c5e718a5e2b14390b6e6c8cb5f6d"
+    },
+    "common/agent_dialogue_contract_v2.py": {
+      "own": "117b694f1955a67139e6f02fa58b8d152f4b8931",
+      "merged": "117b694f1955a67139e6f02fa58b8d152f4b8931"
+    },
+    "common/agent_dialogue_turn_watcher.py": {
+      "own": "e48d1ad20b2c459721749493440111e3ca2a142b",
+      "merged": "e48d1ad20b2c459721749493440111e3ca2a142b"
+    },
+    "common/bounded_sync_executor.py": {
+      "own": "4f59acffa3946deacbdbfa2ba6be2c53b48d24a1",
+      "merged": "4f59acffa3946deacbdbfa2ba6be2c53b48d24a1"
+    },
+    "common/canonical_project_data_observation_contract.py": {
+      "own": "f92938a8bbe78482080bdf12f69956b6bf4e5981",
+      "merged": "f92938a8bbe78482080bdf12f69956b6bf4e5981"
+    },
+    "common/claude_principal_capability_contract.py": {
+      "own": "97d6b7720c41cbbf4208d5c3f702c0ac373ea559",
+      "merged": "97d6b7720c41cbbf4208d5c3f702c0ac373ea559"
+    },
+    "common/commission_ref.py": {
+      "own": "4cac151fe021f8e2ca42b946f27d29d9968ff075",
+      "merged": "4cac151fe021f8e2ca42b946f27d29d9968ff075"
+    },
+    "common/company_consultation_host_contract.py": {
+      "own": "b09459282d1dc25cb75d51c5719504ee7e764419",
+      "merged": "b09459282d1dc25cb75d51c5719504ee7e764419"
+    },
+    "common/company_dialogue_principal_app_protocol.py": {
+      "own": "6f31a32e0da2b09e2e5586743697b916c4e66b50",
+      "merged": "6f31a32e0da2b09e2e5586743697b916c4e66b50"
+    },
+    "common/company_dialogue_principal_limits.py": {
+      "own": "214d38e53614a5166fec4cc979ca22689a726dd3",
+      "merged": "214d38e53614a5166fec4cc979ca22689a726dd3"
+    },
+    "common/direct_native_correction_contract.py": {
+      "own": "d6950e0ca7a087884cb60d8d235afdb1d4bf0bc7",
+      "merged": "d6950e0ca7a087884cb60d8d235afdb1d4bf0bc7"
+    },
+    "common/direct_native_result_contract.py": {
+      "own": "5e10745f6833df1e7c95d42d6fecf6fe914d52c8",
+      "merged": "5e10745f6833df1e7c95d42d6fecf6fe914d52c8"
+    },
+    "common/executive_content_contract.py": {
+      "own": "d3ec9ae4274109f96f2b3d1671e298b03400a3ac",
+      "merged": "d3ec9ae4274109f96f2b3d1671e298b03400a3ac"
+    },
+    "common/executive_hot_state_contract.py": {
+      "own": "2480e3cab5952798e0eaa5f563221be847dcc69d",
+      "merged": "2480e3cab5952798e0eaa5f563221be847dcc69d"
+    },
+    "common/executive_principal_namespace.py": {
+      "own": "fe48bd4eee8db2794590d31503b3f0b00fcacb91",
+      "merged": "fe48bd4eee8db2794590d31503b3f0b00fcacb91"
+    },
+    "common/executive_workspace_activity_contract.py": {
+      "own": "449209c0d0a0f1ba7e40eca8147cd9c4e67dcb0d",
+      "merged": "449209c0d0a0f1ba7e40eca8147cd9c4e67dcb0d"
+    },
+    "common/executive_workspace_contract.py": {
+      "own": "4baaeccc8e49a95b7de5016c66266215647ea3eb",
+      "merged": "4baaeccc8e49a95b7de5016c66266215647ea3eb"
+    },
+    "common/executive_workspace_fabric_contract.py": {
+      "own": "e8aeada6364d290f0ec8d4713250bfc39158d96b",
+      "merged": "e8aeada6364d290f0ec8d4713250bfc39158d96b"
+    },
+    "common/executive_workspace_mission_result_contract.py": {
+      "own": "45edf658464a97d6d50378c2f33a55ca580285f7",
+      "merged": "45edf658464a97d6d50378c2f33a55ca580285f7"
+    },
+    "common/executive_workspace_result_references_contract.py": {
+      "own": "4ff90e797e0a9c160283bcfa929425673df3fe5e",
+      "merged": "4ff90e797e0a9c160283bcfa929425673df3fe5e"
+    },
+    "common/fresh_conversation_contract.py": {
+      "own": "78b24087252ecc4e0f0797672f306cbaf9791d5d",
+      "merged": "78b24087252ecc4e0f0797672f306cbaf9791d5d"
+    },
+    "common/hermes_role_status_contract.py": {
+      "own": "b45ae0fdc33af0163be002a08dcd5afd345871fd",
+      "merged": "b45ae0fdc33af0163be002a08dcd5afd345871fd"
+    },
+    "common/plan_adoption_publication_contract.py": {
+      "own": "2dde799046e10f2851b4bdeb49460210f38a7332",
+      "merged": "2dde799046e10f2851b4bdeb49460210f38a7332"
+    },
+    "common/product_acceptance_acquisition_contract.py": {
+      "own": "aab7e9c3b056feef273b4a27ce09fc4d28e15fcf",
+      "merged": "aab7e9c3b056feef273b4a27ce09fc4d28e15fcf"
+    },
+    "common/product_acceptance_contract.py": {
+      "own": "5ef0d79cf42a9c3dfbb89246a7df6881dd64c178",
+      "merged": "5ef0d79cf42a9c3dfbb89246a7df6881dd64c178"
+    },
+    "common/product_acceptance_read_contract.py": {
+      "own": "b3627cee4f8bb3f556191486d70975948ea9ebfa",
+      "merged": "b3627cee4f8bb3f556191486d70975948ea9ebfa"
+    },
+    "common/project_conversation_read_contract.py": {
+      "own": "6f59295c58c54ab968f3425efa5cb8eb3808541d",
+      "merged": "6f59295c58c54ab968f3425efa5cb8eb3808541d"
+    },
+    "common/project_discovery_contract.py": {
+      "own": "3ee37ee2851c1194282f338eb9ba95f07cce4546",
+      "merged": "3ee37ee2851c1194282f338eb9ba95f07cce4546"
+    },
+    "common/project_discovery_observation_contract.py": {
+      "own": "17c5b98ae56f85a9818175ff6dee03b0a775084e",
+      "merged": "17c5b98ae56f85a9818175ff6dee03b0a775084e"
+    },
+    "common/project_execution_private_contract.py": {
+      "own": "4edd0b7a10d0994eb24d14171ece593d7c2c1180",
+      "merged": "4edd0b7a10d0994eb24d14171ece593d7c2c1180"
+    },
+    "common/project_journey_contract.py": {
+      "own": "b5904cc394183a9933db0d13210dc0f3ed8a5a9b",
+      "merged": "b5904cc394183a9933db0d13210dc0f3ed8a5a9b"
+    },
+    "common/project_plan_continuity_contract.py": {
+      "own": "1e09ac88ec14d45c340bdc35c2072c00366d1b92",
+      "merged": "1e09ac88ec14d45c340bdc35c2072c00366d1b92"
+    },
+    "common/project_planning_private_contract.py": {
+      "own": "39052b546af2a932eb02b69b7f3f91c1b812f27c",
+      "merged": "39052b546af2a932eb02b69b7f3f91c1b812f27c"
+    },
+    "common/redaction.py": {
+      "own": "6116f8120f19476db5082a2590d7eda5a78161c6",
+      "merged": "6116f8120f19476db5082a2590d7eda5a78161c6"
+    },
+    "common/reply_subscription_private_contract.py": {
+      "own": "60d2e6b085da267939b38f23407f60b57045bd00",
+      "merged": "60d2e6b085da267939b38f23407f60b57045bd00"
+    },
+    "common/runtime_diagnostics.py": {
+      "own": "fbab4da4f214fc225fee508eea4a681c84bdacd7",
+      "merged": "fbab4da4f214fc225fee508eea4a681c84bdacd7"
+    },
+    "common/session_bridge_private_contract.py": {
+      "own": "497f63068fef793cedf2c8a9f03172c650a08bcf",
+      "merged": "497f63068fef793cedf2c8a9f03172c650a08bcf"
+    },
+    "common/workspace_autonomy_read_contract.py": {
+      "own": "d1cc9c18da795d315835f681a75ba787f5412516",
+      "merged": "d1cc9c18da795d315835f681a75ba787f5412516"
+    },
+    "common/workspace_byok_read_contract.py": {
+      "own": "1ae71087013cf23ab324985b681c6dfb076a7ea1",
+      "merged": "1ae71087013cf23ab324985b681c6dfb076a7ea1"
+    },
+    "common/workspace_control_room_action_contract.py": {
+      "own": "d47c9a9b2107329c72fef8ba9420a410fdbfae80",
+      "merged": "d47c9a9b2107329c72fef8ba9420a410fdbfae80"
+    },
+    "common/workspace_control_room_read_contract.py": {
+      "own": "f60bc4ca7c9b5906bebacd36b6f9671b43eca973",
+      "merged": "f60bc4ca7c9b5906bebacd36b6f9671b43eca973"
+    },
+    "common/workspace_host_observation_contract.py": {
+      "own": "a0c1a644b7c6f8b14e16986b47d1a1d1c41c38a9",
+      "merged": "a0c1a644b7c6f8b14e16986b47d1a1d1c41c38a9"
+    },
+    "common/workspace_instruction_admission_contract.py": {
+      "own": "5f5a0ff6f83913e368a5e98fd3b02dfe5f8fece6",
+      "merged": "5f5a0ff6f83913e368a5e98fd3b02dfe5f8fece6"
+    },
+    "common/workspace_project_access_contract.py": {
+      "own": "7b79bda95318513a1fddcf4dbb7a6c7afdd37fda",
+      "merged": "7b79bda95318513a1fddcf4dbb7a6c7afdd37fda"
+    },
+    "common/workspace_project_admission_contract.py": {
+      "own": "a9a8f077bc22678bda69ba6e16e6e0c2f7df58a7",
+      "merged": "a9a8f077bc22678bda69ba6e16e6e0c2f7df58a7"
+    },
+    "common/workspace_project_admission_control_contract.py": {
+      "own": "471f197d560e6926b593cf808812978e945e6dd7",
+      "merged": "471f197d560e6926b593cf808812978e945e6dd7"
+    },
+    "common/workspace_project_admission_selection.py": {
+      "own": "0794ec784873b14b5a2a86bb08f4938404d3ac7a",
+      "merged": "0794ec784873b14b5a2a86bb08f4938404d3ac7a"
+    },
+    "common/workspace_project_admission_state_contract.py": {
+      "own": "0a6e58e42b6bbb54b3e5ec25e65f5aba553562cc",
+      "merged": "0a6e58e42b6bbb54b3e5ec25e65f5aba553562cc"
+    },
+    "common/workspace_project_admission_wire.py": {
+      "own": "d558550f5f712292e8810039a72f4d5a937e9883",
+      "merged": "d558550f5f712292e8810039a72f4d5a937e9883"
+    },
+    "common/workspace_project_archive_contract.py": {
+      "own": "cac849b555c442d0860e8e9b7b9dd71b7e60a359",
+      "merged": "cac849b555c442d0860e8e9b7b9dd71b7e60a359"
+    },
+    "common/workspace_project_direction_contract.py": {
+      "own": "36f17cae25f6d3d66ad59a63fe77466d8e4f5eaa",
+      "merged": "36f17cae25f6d3d66ad59a63fe77466d8e4f5eaa"
+    },
+    "common/workspace_project_instructions_contract.py": {
+      "own": "000670141c09e1f0734680c73be6f54d5436a866",
+      "merged": "000670141c09e1f0734680c73be6f54d5436a866"
+    },
+    "common/workspace_project_journal_contract.py": {
+      "own": "0be49ceb8507bac82348ac6ad25aaf1fdfb31a9a",
+      "merged": "0be49ceb8507bac82348ac6ad25aaf1fdfb31a9a"
+    },
+    "common/workspace_project_knowledge_contract.py": {
+      "own": "dec38f3d5f8588984eab54a64d011eb4c1d9670b",
+      "merged": "dec38f3d5f8588984eab54a64d011eb4c1d9670b"
+    },
+    "common/workspace_project_knowledge_read_contract.py": {
+      "own": "417c82c4daa379454b1938545cfd2a329d13d661",
+      "merged": "417c82c4daa379454b1938545cfd2a329d13d661"
+    },
+    "common/workspace_project_plan_contract.py": {
+      "own": "6c39f0e1e5ac87426c416cb01111540cf447681b",
+      "merged": "6c39f0e1e5ac87426c416cb01111540cf447681b"
+    },
+    "common/workspace_project_resumption_contract.py": {
+      "own": "7eeabe50359163b6e2e8192931ca986cad8e9b9b",
+      "merged": "7eeabe50359163b6e2e8192931ca986cad8e9b9b"
+    },
+    "common/workspace_project_session_contract.py": {
+      "own": "9aba3f1b2265749f4c53a825330dd9ad0f01867e",
+      "merged": "9aba3f1b2265749f4c53a825330dd9ad0f01867e"
+    },
+    "common/workspace_resource_capacity_contract.py": {
+      "own": "7a2d8d5cf0bd28617f6f0804b3e44ae1ec73df53",
+      "merged": "7a2d8d5cf0bd28617f6f0804b3e44ae1ec73df53"
+    },
+    "common/workspace_source_operation_contract.py": {
+      "own": "859ccb360732987878734cb0f0def663ec5ac9bc",
+      "merged": "859ccb360732987878734cb0f0def663ec5ac9bc"
+    },
+    "common/workspace_source_operation_wire.py": {
+      "own": "7e4bd7af9615fdd8caead69a8a474d667ce7fdd2",
+      "merged": "7e4bd7af9615fdd8caead69a8a474d667ce7fdd2"
+    }
+  },
+  "before": {
+    "launcher_sha256": "57641e49f98ff73a1d15dbad2ec492f2a046321146d68264c3c344d1218c6252",
+    "router_sha256": "7849ae4ed29a5cda05f73ddcfd4dd6ed29d55c677d038d42ee7faaa445587d8f"
+  },
+  "state": "INSTALL_VERIFIED",
+  "installation_effect": "APPLIED",
+  "install_command": [
+    "/bin/sh",
+    "/Volumes/Mastermind/agent-workspaces/web/workspace-release-integrity-20261107-sol-001/scripts/install_mastermind_workspace_cli.sh"
+  ],
+  "started_at_epoch": 1794049281.5079691,
+  "installer_exit_code": 0,
+  "installer_log_sha256": "e0acd07c0a235ecea4a292e5343639ced962305a07bd5cf45c19744ba8c13af3",
+  "after": {
+    "launcher_sha256": "c5dea35f74337c1d5bb6cb7b4c8b2858337684ec693552837f12981eead61f34",
+    "router_sha256": "7849ae4ed29a5cda05f73ddcfd4dd6ed29d55c677d038d42ee7faaa445587d8f",
+    "only_three_payload_selectors_changed": true
+  },
+  "installed_inventory_matches": {
+    "scripts/mastermind_workspace.py": true,
+    "control_plane/executive_workspace.py": true,
+    "control_plane/__init__.py": true,
+    "common/__init__.py": true,
+    "common/acp_continuing_authority_contract.py": true,
+    "common/agent_dialogue_consultation_contract.py": true,
+    "common/agent_dialogue_contract.py": true,
+    "common/agent_dialogue_contract_v2.py": true,
+    "common/agent_dialogue_turn_watcher.py": true,
+    "common/bounded_sync_executor.py": true,
+    "common/canonical_project_data_observation_contract.py": true,
+    "common/claude_principal_capability_contract.py": true,
+    "common/commission_ref.py": true,
+    "common/company_consultation_host_contract.py": true,
+    "common/company_dialogue_principal_app_protocol.py": true,
+    "common/company_dialogue_principal_limits.py": true,
+    "common/direct_native_correction_contract.py": true,
+    "common/direct_native_result_contract.py": true,
+    "common/executive_content_contract.py": true,
+    "common/executive_hot_state_contract.py": true,
+    "common/executive_principal_namespace.py": true,
+    "common/executive_workspace_activity_contract.py": true,
+    "common/executive_workspace_contract.py": true,
+    "common/executive_workspace_fabric_contract.py": true,
+    "common/executive_workspace_mission_result_contract.py": true,
+    "common/executive_workspace_result_references_contract.py": true,
+    "common/fresh_conversation_contract.py": true,
+    "common/hermes_role_status_contract.py": true,
+    "common/plan_adoption_publication_contract.py": true,
+    "common/product_acceptance_acquisition_contract.py": true,
+    "common/product_acceptance_contract.py": true,
+    "common/product_acceptance_read_contract.py": true,
+    "common/project_conversation_read_contract.py": true,
+    "common/project_discovery_contract.py": true,
+    "common/project_discovery_observation_contract.py": true,
+    "common/project_execution_private_contract.py": true,
+    "common/project_journey_contract.py": true,
+    "common/project_plan_continuity_contract.py": true,
+    "common/project_planning_private_contract.py": true,
+    "common/redaction.py": true,
+    "common/reply_subscription_private_contract.py": true,
+    "common/runtime_diagnostics.py": true,
+    "common/session_bridge_private_contract.py": true,
+    "common/workspace_autonomy_read_contract.py": true,
+    "common/workspace_byok_read_contract.py": true,
+    "common/workspace_control_room_action_contract.py": true,
+    "common/workspace_control_room_read_contract.py": true,
+    "common/workspace_host_observation_contract.py": true,
+    "common/workspace_instruction_admission_contract.py": true,
+    "common/workspace_project_access_contract.py": true,
+    "common/workspace_project_admission_contract.py": true,
+    "common/workspace_project_admission_control_contract.py": true,
+    "common/workspace_project_admission_selection.py": true,
+    "common/workspace_project_admission_state_contract.py": true,
+    "common/workspace_project_admission_wire.py": true,
+    "common/workspace_project_archive_contract.py": true,
+    "common/workspace_project_direction_contract.py": true,
+    "common/workspace_project_instructions_contract.py": true,
+    "common/workspace_project_journal_contract.py": true,
+    "common/workspace_project_knowledge_contract.py": true,
+    "common/workspace_project_knowledge_read_contract.py": true,
+    "common/workspace_project_plan_contract.py": true,
+    "common/workspace_project_resumption_contract.py": true,
+    "common/workspace_project_session_contract.py": true,
+    "common/workspace_resource_capacity_contract.py": true,
+    "common/workspace_source_operation_contract.py": true,
+    "common/workspace_source_operation_wire.py": true
+  }
+}

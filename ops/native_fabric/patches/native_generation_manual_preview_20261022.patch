@@ -1,0 +1,248 @@
+diff --git a/ext/fabric_task.py b/ext/fabric_task.py
+index 121a423..6f83df9 100644
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -662,6 +662,78 @@ def validate_request_max_turns(value: object) -> int:
+     return value
+ 
+ 
++def _manual_token(value: str | None) -> str | None:
++    """A literal preference is not an admission or quota grant."""
++    if value is None:
++        return None
++    if type(value) is not str:
++        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
++    token = value.strip()
++    if not token or token.casefold() == "auto":
++        return None
++    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", token) is None:
++        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
++    return token
++
++
++def _enforce_manual_route(route: dict[str, str], pool: str | None, model: str | None) -> None:
++    """Match the reselected *actual* worker route before native launch effects."""
++    named_pool = _manual_token(pool)
++    if named_pool is None:
++        raise FabricTaskError("MANUAL_POOL_REQUIRED")
++    canonical = pick.canonical_pool(named_pool)
++    canonical = pick.ROUTING_TOKEN_POOLS.get(canonical, canonical)
++    if route.get("POOL") != canonical:
++        raise FabricTaskError("MANUAL_POOL_ROUTE_MISMATCH")
++    if route.get("MODE") not in pick._HOST_POOL_MODES.get(canonical, ()):
++        raise FabricTaskError("MANUAL_POOL_MODE_MISMATCH")
++    named_model = _manual_token(model)
++    if named_model is not None and route.get("MODEL", "").casefold() != named_model.casefold():
++        raise FabricTaskError("MANUAL_MODEL_ROUTE_MISMATCH")
++
++
++def preview_route(
++    run_id: str,
++    task_class: str,
++    *,
++    pool: str | None = None,
++    model: str | None = None,
++    prefer: str | None = None,
++    subject_pool: str | None = None,
++    task_complexity: str = "",
++    escalation_reason: str = "",
++) -> dict[str, object]:
++    """Read-only incumbent picker and economic preflight; no lease, packet or worker."""
++    rid = validate_run_id(run_id)
++    selected_pool = _manual_token(pool)
++    selected_model = _manual_token(model)
++    if selected_model is not None and selected_pool is None:
++        raise FabricTaskError("MANUAL_MODEL_REQUIRES_POOL")
++    route = _parse_route(pick.format_pick(
++        task_class, host="auto", pool=selected_pool,
++        prefer=_manual_token(prefer),
++        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
++        task_complexity=task_complexity, escalation_reason=escalation_reason,
++        requested_model=selected_model, route_key=rid,
++    ))
++    if selected_pool is not None:
++        _enforce_manual_route(route, selected_pool, selected_model)
++    policy = pick.launch_policy(
++        route["MODE"], task_class, route["MODEL"],
++        escalation_reason=escalation_reason, task_complexity=task_complexity,
++    )
++    if not policy.get("allowed"):
++        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(policy.get("reason")))
++    return {
++        "state": "PREVIEW_ONLY", "reserved": False, "run_id": rid,
++        "pool": route["POOL"], "model": route["MODEL"],
++        "host": route["HOST"], "mode": route["MODE"],
++        "reason": route.get("REASON") or "",
++        "selection_rechecked_at_request": True,
++        "strict_pin_enforced_at_request": selected_pool is not None,
++    }
++
++
+ def request(
+     run_id: str,
+     task_class: str,
+@@ -687,8 +759,14 @@ def request(
+     request_capacity_preflight: bool = False,
+     request_deadline_ns: int | None = None,
+     not_before: str | None = None,
++    strict_manual_pin: bool = False,
+ ) -> int:
+     rid = validate_run_id(run_id)
++    # Match preview: AUTO is never a literal provider/model pin. Validate
++    # before retaining a packet or consulting any provider/runtime owner.
++    pool = _manual_token(pool)
++    requested_model = _manual_token(requested_model)
++    prefer = _manual_token(prefer)
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     if max_turns is not None:
+@@ -813,6 +891,8 @@ def request(
+             route = _parse_route(
+                 _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
+                 if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
++        if strict_manual_pin:
++            _enforce_manual_route(route, pool, requested_model)
+         check_deadline()
+         if max_turns is not None and route["MODE"] not in {"glm", "minimax"}:
+             raise FabricTaskError("REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED")
+@@ -1218,6 +1298,17 @@ def main(argv: list[str] | None = None) -> int:
+     p_packet_reconcile.add_argument("--root", required=True)
+     p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
+ 
++
++    p_preview = sub.add_parser("preview", help="read-only incumbent model and provider selection")
++    p_preview.add_argument("--id", required=True)
++    p_preview.add_argument("--class", dest="task_class", required=True)
++    p_preview.add_argument("--pool", default="auto")
++    p_preview.add_argument("--model", dest="requested_model", default="auto")
++    p_preview.add_argument("--prefer")
++    p_preview.add_argument("--subject-pool")
++    p_preview.add_argument("--task-complexity", default="")
++    p_preview.add_argument("--escalation-reason", default="")
++
+     p_request = sub.add_parser("request")
+     p_request.add_argument("--id", required=True)
+     p_request.add_argument("--class", dest="task_class", required=True)
+@@ -1232,6 +1323,7 @@ def main(argv: list[str] | None = None) -> int:
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+     p_request.add_argument("--pool")
++    p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
+     p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")
+     p_request.add_argument("--prefer")
+     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
+@@ -1482,7 +1574,19 @@ def main(argv: list[str] | None = None) -> int:
+             except (prestart_reconcile.PrestartReconcileError, OSError, ValueError) as exc:
+                 print(str(exc), file=sys.stderr)
+                 return 78
++
++        if args.cmd == "preview":
++            _json(preview_route(
++                args.id, args.task_class, pool=args.pool,
++                model=args.requested_model, prefer=args.prefer,
++                subject_pool=args.subject_pool,
++                task_complexity=args.task_complexity,
++                escalation_reason=args.escalation_reason,
++            ))
++            return 0
+         if args.cmd == "request":
++            if args.strict_manual_pin and args.quota_fallback:
++                raise FabricTaskError("MANUAL_PIN_QUOTA_FALLBACK_REFUSED")
+             stdin_bytes = sys.stdin.buffer.read() if args.stdin else None
+             request_fn = request
+             if args.quota_fallback:
+@@ -1507,6 +1611,7 @@ def main(argv: list[str] | None = None) -> int:
+                 qualification_host=args.qualification_host,
+                 new_macro_worktree=args.new_macro_worktree,
+                 cpu_scope_percent=args.cpu_scope_percent,
++                strict_manual_pin=args.strict_manual_pin,
+                 **({"not_before": args.not_before} if args.not_before is not None else {}),
+                 **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
+             )
+diff --git a/ext/pick.py b/ext/pick.py
+index 9a6d7cb..a998b93 100644
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -2053,24 +2053,37 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
+         # catalog. Capability/host, economic, quality and independence gates
+         # below are still required; catalog presence is not worker admission.
+     if explicit_model and not native_alias and not grok_pin:
+-        models = {str(value).casefold() for value in _glm_models(doc).values()}
+-        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+-        if explicit_model not in models:
+-            return "NONE reason=unknown requested_model"
+-        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
+-        if forced and effective_pool != "glm":
+-            return f"NONE reason=requested_model contradicts pool={pool!r}"
+-        if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
+-            return "NONE reason=requested model/complexity escalation not admitted"
+-        guard = launch_policy(
+-            "glm", tc, explicit_model, escalation_reason=escalation_reason,
+-            doc=doc, task_complexity=complexity,
+-        )
+-        if not guard.get("allowed"):
+-            return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
+-        if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
+-            return "NONE reason=explicit model held by GLM peak labor policy"
+-        forced = "glm"
++        # Exact worker pinning is never an arbitrary model promotion. Permit
++        # the current task-qualified default for its explicitly chosen pool;
++        # keep the pre-existing full GLM C2 escalation narrow and witnessed.
++        selected_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
++        glm_models = {str(value).casefold() for value in _glm_models(doc).values()}
++        if explicit_model in glm_models:
++            if selected_pool and selected_pool != "glm":
++                return f"NONE reason=requested_model contradicts pool={pool!r}"
++            normal_model, _ = _selection_model("glm", tc, doc)
++            if not (selected_pool == "glm" and explicit_model == str(normal_model).casefold()):
++                full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
++                if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
++                    return "NONE reason=requested model/complexity escalation not admitted"
++                guard = launch_policy(
++                    "glm", tc, explicit_model, escalation_reason=escalation_reason,
++                    doc=doc, task_complexity=complexity,
++                )
++                if not guard.get("allowed"):
++                    return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
++                if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
++                    return "NONE reason=explicit model held by GLM peak labor policy"
++            forced = "glm"
++        elif selected_pool:
++            if selected_pool not in (doc.get("pools") or {}):
++                return "NONE reason=unknown forced pool"
++            admitted_default, _ = _selection_model(selected_pool, tc, doc)
++            if not admitted_default or admitted_default.casefold() != explicit_model:
++                return "NONE reason=requested model not admitted for selected pool/task"
++            forced = selected_pool
++        else:
++            return "NONE reason=exact model requires provider pool"
+     if forced:
+         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
+         if forced not in (doc.get("pools") or {}):
+diff --git a/pool b/pool
+index 85935f8..75d8de3 100644
+--- a/pool
++++ b/pool
+@@ -12,10 +12,12 @@ SUB="$KIT_DIR/ext/sub.sh"
+ LEDGER="$KIT_DIR/ext/pool_ledger.py"
+ 
+ usage() {
+-  echo "usage: pool <run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
++  echo "usage: pool <preview|request|run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
+   echo "  run    <grok|cursor|qwen|minimax|glm|glm-codex|minimax-codex|go-codex|go-claude|oc-free> \"<prompt>\" [cwd] [model]" >&2
+   echo "  remote <host|auto> <mode> <packet_file> <remote_cwd> [model] [--out F] [--dry-run]   # R34 remote placement" >&2
+   echo "  hosts  <mode> [--seat-ok]        # host eligibility table (R34 remote-first)" >&2
++  echo "  preview --id ID --class CLASS [--pool auto|POOL] [--model auto|MODEL]  # NO EFFECT" >&2
++  echo "  request --id ID --class CLASS --stdin [--pool POOL] [--model MODEL] [--strict-manual-pin]" >&2
+   echo "  pick   <task-class> [--prefer <pool>] [--pool <pool>] [--needs vision] [--subject-pool <pool>]" >&2
+   echo "  placement --mode <mode> [--json]  # read-only host/provider/route boundaries" >&2
+   echo "  refresh HOST [HOST...]            # bounded selected-host telemetry refresh" >&2
+@@ -34,6 +36,8 @@ fi
+ CMD="$1"; shift
+ 
+ case "$CMD" in
++  preview) exec python3 "$KIT_DIR/ext/fabric_task.py" preview "$@" ;;
++  request) exec python3 "$KIT_DIR/ext/fabric_task.py" request "$@" ;;
+   run)
+     POOL="${1:?pool}"; PROMPT="${2:?prompt}"; CWD="${3:-$PWD}"; MODEL="${4:-}"
+     exec bash "$SUB" "$POOL" "$PROMPT" "$CWD" "$MODEL" ;;
