@@ -289,6 +289,14 @@ Explicit finish released only `4Z4-0` and `97H-0`. All14 phase operations return
 - `paper-forex-main-mobile-reload-fit-20261108-c4-sd`
 - `paper-forex-main-finish-20261108-c4-sd`
 
+## Breadth continuation ownership and exact-target reconciliation
+
+The Chairman's current continuation assignment remains with this session. The two unfinished inspector copies `17W-0` and `1HC-0` were created by this session with observed duplicate receipts. A fresh root and read-only child inspection through Studio Direct found the same empty Constituents body `2GJ-0` (only its existing tab row `2GK-0`) and old Receipts body `1HI-0` (spacer `1L2-0` and old summary `1HJ-0`). The improved Summary chart `10M-0`, Summary body `1QZ-0`, and external header/tab changes remain intact. Reads exposed correct exact-file binding and no explicit pending-operation or same-node hold; they expose no writer identity/lease and do not prove exclusive custody.
+
+This is a bounded continuation of the root-created copies, not a takeover of the improved Summary or a file-wide lock. Proceed with new constituent children below the preserved tabs in `2GJ-0`, and a Receipts-only reflow of `1HI-0`, retaining headers `2FL-0`/`2GC-0`, dates and Close controls. A separate later step may copy the existing improved chart into the two stale left contexts `1BU-0`/`1LA-0` without changing source `10M-0`. Use current snapshots, read back each target, and preserve/re-plan any fresh content rather than overwriting it. The old requested extremes/drivers effects were already read back present and must never be replayed. No actual historical receipt API, per-member contribution amounts, reader implementation or production proof is inferred.
+
+Durable predecessor for this decision: [verified Forex and prior-phase record at8bab3126](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8bab3126fa8dd48998ce68163cc8dc48e3c7d9cd/research/paper_migrated_journeys_2026-11-08/AUDIT_AND_DELIVERY.md). Native target: [Breadth file/page](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0).
+
 ## Active continuation
 
 Portfolio mobile, Bonds source recovery, Government Revenue320px returns, Forex review/account gallery and current My watches desktop/mobile integration are verified. Continue exact-target Breadth reconciliation and the bounded completion of its root-created unfinished constituents/receipts views only where current effects/custody permit. Preserve the improved Summary, external header/tab changes, source limits and original fixtures. No Breadth completion is yet claimed.
