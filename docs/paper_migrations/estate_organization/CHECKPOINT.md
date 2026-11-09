@@ -2,6 +2,14 @@
 
 Operation: `paper-estate-organization-20261108-c1`.
 
+## Resumed estate organization · 9 November 2026
+
+Current outer Chairman instruction resumes this same operation. The assigned principal owns this continuation on the existing GitHub-native branch/CAS and Mastermind Paper carrier. Protected procedure is pinned to `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09` (compatible skillpack 1.0.1); Macro design source is separately pinned to `cf07e7a73334c646a09c043647c43e43ee6e4060`. Existing plan, original acceptance and all target-specific holds below remain.
+
+Live same-carrier recovery found complete guides in Hub (`p-1-0 / 8MN-0`), Intraday Flow (`p-2-0 / I6-0`) and Market Breadth (`p-9-0 / 4RX-0`) beyond the saved twenty-guide index. Their guide text and exact routes were read back; preserve them without replaying creation. Ontology has an existing empty `p-9-0` guide page; preserve that page ID and inspect again before supplying missing content. Evidence: [recovery readback](effects/agent-navigation-resume-recovery.json). These are observed pre-existing effects, not newly authored effects or invented original receipts.
+
+Next: reconcile these four records in the existing index; complete the remaining planned local guides, respecting fresh exact-file reads and known held product nodes; validate exact routes and consumer source selection; save and read back cumulative evidence. Internal agent guides stay separate from product UI. No new runtime, watcher, paid worker, external message, authority registry or duplicate directory. Principal direct work uses PRINCIPAL_JUDGMENT / UNIQUE_APPROVED_ACCESS / LOWER_TOTAL_OVERHEAD; one native reasoning adviser supplied navigation failure analysis only, now consumed and stopped.
+
 ## Mission and current phase
 
 Current Chairman instruction on 9 November 2026: continue cleaning and organizing the whole estate for AI workers, including weaker agents learning, changing designs and preparing implementation. Make exact source scope and next action clear; preserve useful history and live writers. Mission complete: **false**. File-local orientation and consumer verification remain ready work; a checkpoint is not a stop.
