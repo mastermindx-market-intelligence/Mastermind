@@ -525,8 +525,17 @@ class Fleet:
                 placeholder = self.say(agent, channel, ":hourglass_flowing_sand: _working on it…_", None, run_id)
                 thread_ts = placeholder or ""
         conv_key = f"{channel}:{thread_ts}"
+        # Every independent role has its own native Hermes session for this
+        # shared Slack thread. A role switch must never pass Secretary's
+        # session ID to Engineering or vice versa. A matching old single-role
+        # binding can still resume a legacy (pre-migration) stored session ID.
+        session_key = f"{conv_key}:{agent}"
         with self.lock:
-            sid = (self.state.get("sessions") or {}).get(conv_key)
+            sessions = self.state.get("sessions") or {}
+            old_binding = (self.state.get("bindings") or {}).get(conv_key)
+            sid = sessions.get(session_key)
+            if sid is None and old_binding == agent:
+                sid = sessions.get(conv_key)
             if thread_ts:
                 self.state.setdefault("bindings", {})[conv_key] = agent
                 save_state(self.state)
@@ -540,7 +549,7 @@ class Fleet:
                                       int(dconf.get("timeout_s", 420)), str(dconf.get("model") or ""))
         if new_sid:
             with self.lock:
-                self.state.setdefault("sessions", {})[conv_key] = new_sid
+                self.state.setdefault("sessions", {})[session_key] = new_sid
                 save_state(self.state)
         self._unreact(channel, ts, conf.get("ack_reaction"))
         out_ts = None
