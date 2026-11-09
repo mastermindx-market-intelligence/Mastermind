@@ -7,6 +7,7 @@ Evidence references are checked for coverage/freshness, NOT authenticated here.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -270,9 +271,12 @@ def contract_digest(plan: dict) -> str:
                     "allowed_paths": sorted(plan["allowed_paths"]), "non_goals": plan["non_goals"]})
 
 
-def project_plan(plan: dict, *, source_sha256: str, source_path: str, workstream: str) -> dict:
+def project_plan(plan: dict, *, source_sha256: str, source_path: str, workstream: str,
+                 context_detail: str = "full") -> dict:
     """Suggest one source-level focus; never authorize, dispatch or accept work."""
     validate_plan(plan)
+    if context_detail not in ("full", "frontier"):
+        _fail("PLAN_CONTEXT_DETAIL_INVALID")
     _path(source_path, plan=True)
     if type(source_sha256) is not str or not _SHA.fullmatch(source_sha256):
         _fail("PLAN_SOURCE_DIGEST_INVALID")
@@ -333,9 +337,27 @@ def project_plan(plan: dict, *, source_sha256: str, source_path: str, workstream
             "Do not restart active or uncertain effects, expand scope, or clear a user stop based on this projection.",
         ],
     }
+    if context_detail == "frontier":
+        result = compact_context(result)
     if len(_json(result).encode()) > MAX_CONTEXT_BYTES:
         _fail("PLAN_CONTEXT_TOO_LARGE")
     return result
+
+
+def compact_context(context: dict) -> dict:
+    """Retain the full mission and recovery identifiers; omit only off-focus detail."""
+    if (context.get("schema") != "mastermind.project_task_context.v1"
+            or context.get("execution_authority") is not False):
+        raise PlanContextError("GUIDANCE_CONTEXT_INVALID")
+    brief = {k: copy.deepcopy(v) for k, v in context.items() if k != "task_tree"}
+    fields = ("id", "title", "state", "depends_on", "requirement_ids", "definition_sha256",
+              "missing_or_stale_evidence", "source_complete", "evidence", "blocker",
+              "next_action", "execution_lane", "native_ref")
+    brief["task_tree"] = [{k: copy.deepcopy(row[k]) for k in fields if k in row}
+                          for row in context["task_tree"]]
+    brief["task_detail_scope"] = "FULL_FOCUS; OFF_FOCUS_ACCEPTANCE_AT_EXACT_SOURCE"
+    return brief
+
 
 
 def read_plan(workspace_root: Path, relative_path: str, expected_sha256: str | None = None,
@@ -387,10 +409,12 @@ def read_plan(workspace_root: Path, relative_path: str, expected_sha256: str | N
 
 
 def load_context(*, workspace_root: Path, relative_path: str, workstream: str,
-                 expected_sha256: str | None = None, expected_contract_sha256: str | None = None) -> dict:
+                 expected_sha256: str | None = None, expected_contract_sha256: str | None = None,
+                 context_detail: str = "full") -> dict:
     plan, digest = read_plan(workspace_root, relative_path, expected_sha256,
                              expected_contract_sha256=expected_contract_sha256)
-    result = project_plan(plan, source_sha256=digest, source_path=relative_path, workstream=workstream)
+    result = project_plan(plan, source_sha256=digest, source_path=relative_path, workstream=workstream,
+                          context_detail=context_detail)
     result["source_binding"] = "EXACT_BYTES" if expected_sha256 is not None else "MATCHED_CONTRACT_CURRENT_PROGRESS"
     if len(_json(result).encode()) > MAX_CONTEXT_BYTES:
         _fail("PLAN_CONTEXT_TOO_LARGE")
@@ -421,13 +445,25 @@ def main(argv=None, *, stdout=None, stderr=None) -> int:
     binding.add_argument("--plan-sha256")
     binding.add_argument("--plan-contract-sha256")
     parser.add_argument("--workstream", required=True)
+    parser.add_argument("--format", choices=("json", "prompt"), default="json")
     out, err = stdout or sys.stdout, stderr or sys.stderr
     args = parser.parse_args(argv)
     try:
         result = load_context(workspace_root=args.workspace_root, relative_path=args.plan_path,
                               expected_sha256=args.plan_sha256, workstream=args.workstream,
-                              expected_contract_sha256=args.plan_contract_sha256)
-        out.write(_json(result) + "\n")
+                              expected_contract_sha256=args.plan_contract_sha256,
+                              context_detail="frontier" if args.format == "prompt" else "full")
+        if args.format == "prompt":
+            from integrations.session_bridge.long_horizon_guidance import render_context, PlanContextError as PromptError
+            try:
+                text = render_context(result)
+            except PromptError as exc:
+                # -m executes this file as __main__; the formatter imports its
+                # canonical package identity. Normalize the typed CLI boundary.
+                raise PlanContextError(str(exc)) from None
+            out.write(text + "\n")
+        else:
+            out.write(_json(result) + "\n")
         return 0
     except PlanContextError as exc:
         err.write(str(exc) + "\n")

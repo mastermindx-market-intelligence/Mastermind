@@ -28,6 +28,8 @@ python3 -m integrations.session_bridge.project_task_context \
   --workstream "$ASSIGNED_WORKSTREAM"
 ```
 
+Add `--format prompt` for a bounded frontier projection: all requirements, task identities/dependencies and recovery details are retained, with full acceptance detail for the focused task. Off-focus acceptance stays at the exact source.
+
 The command is read-only and does not call T3, a provider, Executive or Agent OS. Paths are confined, bounded and no-symlink; malformed source fails with a typed reason. Large task trees need bounded source reads, not silent truncation or removal of requirements.
 
 ## Existing startup hook, explicit binding only
@@ -50,3 +52,13 @@ Primary references, checked 2026-11-09:
 - https://code.claude.com/docs/en/skills
 - https://developers.openai.com/codex/skills
 - https://github.com/pingdotgg/t3code/tree/2b65ffb641f152fadf443096bad7f4a0677caae4
+
+## Shared hardening
+
+`long_horizon_guidance.check_direction` checks an explicit scope-change classification; side questions and pause/stop cannot erase progress. `advise` ranks dependency-ready work without displacing an active writer and recognizes no-progress, original-effect, native-input, stop and budget boundaries. These functions are pure advice over observations, not authenticated runtime state or execution grants. The same formatter and semantics are consumed by the Hermes plugin; see `native-hermes.md`.
+
+## Existing handoff/client composition
+
+`integrations.session_bridge.t3_project_context` composes the shared projection into the incumbent `HandoffBrief` and same-thread follow-up messages. It creates no runner, tool server, identity, connection or state store. The caller must verify the exact GitHub blob matches the inspected plan bytes and supply the real project and any separately permitted write scope. Write paths cannot exceed the plan's constraints; the incumbent native worktree-base requirement still applies. The existing brief has an 8-KiB objective limit, so an oversized project context fails explicitly rather than silently dropping requirements.
+
+`followup` retains source scope beside an explicit side question/refinement/addition/replacement classification; it does not amend the plan itself. It is for the existing client's queue-next operation. Pause and stop are refused with `T3_NATIVE_CONTROL_REQUIRED`; use the actually available native control, never queue text behind an active run and describe it as an interruption. Original ThreadReceipt/run identity and unknown-effect handling remain with the incumbent client. Injected-runner tests prove composition, not live T3 agent obedience or provider availability.

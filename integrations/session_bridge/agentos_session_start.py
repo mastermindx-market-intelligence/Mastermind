@@ -140,14 +140,11 @@ def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER
     try:
         context = load_context(workspace_root=workspace_root, relative_path=plan_path,
                                expected_sha256=plan_sha256, workstream=workstream,
-                               expected_contract_sha256=plan_contract_sha256)
+                               expected_contract_sha256=plan_contract_sha256, context_detail="frontier")
         # Keep every requirement and every task identity/dependency; load the
         # complete off-focus acceptance details from the same pinned plan.
-        brief = {k: v for k, v in context.items() if k != "task_tree"}
-        brief["task_tree"] = [{k: row[k] for k in ("id", "title", "state", "depends_on",
-            "requirement_ids", "definition_sha256", "missing_or_stale_evidence", "source_complete", "evidence")}
-            for row in context["task_tree"]]
-        brief["task_detail_scope"] = "FULL_FOCUS; OFF_FOCUS_ACCEPTANCE_AT_EXACT_SOURCE"
+        from integrations.session_bridge.long_horizon_guidance import compact_context
+        brief = compact_context(context)
         addition = ("\nGitHub-owned plan projection. Source claims, not runtime permission or acceptance.\n"
                     + json.dumps(brief, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
         original = result["hookSpecificOutput"]["additionalContext"]

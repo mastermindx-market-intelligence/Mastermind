@@ -57,3 +57,429 @@ Protected master advanced to `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09`; its obs
 Next: publish this one owned diff, open a Ready PR and use permitted native merge-on-green. Then consume the accepted source in an owned T3 worktree and prove actual skill loading, source restoration, steering retention and bounded native progression through the existing provider/admission owner. Preserve the active engineering program and its settings. Source tests, repository discovery files and editable design are not a live-model or fleet-rollout acceptance claim.
 
 DO_NOT_REDO: accepted research, existing T3 native task/goal/continuation services, four completed Paper boards, and the passing source checks absent an affected change. No uncertain source or Paper effect remains outstanding.
+
+## Continued implementation: T3, Hermes and Paperclip
+
+The current Chairman directive extends the original mission to deeper T3 hardening, Hermes-native parity, Grok Bot continuity patterns, and conditional Paperclip adoption with the original bots retained. The source owner, original acceptance, live-writer protections and existing runtime owners remain. Retained procedure pin is `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09`; the observed later protected head `85179e35ce1fd3ddc00e85df5745fee4d5288068` differs only in unrelated redesign instructions and does not invalidate this source slice.
+
+Implemented: shared bounded frontier and execution advice; explicit scope-preserving direction changes; repeated-no-progress detection; implementation-change evidence invalidation; original-effect and budget/stop boundaries; existing T3 handoff/client composition; Hermes native skill, prompt section, hook and read-only tool with compression-lineage recovery, profile isolation and registration lifetime controls. No native runtime, task database, credential store, heartbeat or scheduler was duplicated.
+
+Observed final qualification: 402 tests and 90 subtests passed; 11 actual installed Hermes API checks passed in disposable profiles; nine installed Paperclip adapter checks passed across six isolated HTTP cases. Exact commands, actual native API fingerprints and candidate file hashes are in `docs/evidence/2026-11-09-t3-hermes-horizon-qualification.json`. This does not prove a live bot/model or production UI. The two pre-existing CI guard failures were repaired by reviewing the exact already-merged pool-enum change and updating only the unchanged literal locations and file digest.
+
+The detailed research and pilot decision are in `docs/research/2026-11-09-t3-hermes-paperclip-continuity.md`. Prefer Paperclip's gateway as a management surface over existing Hermes profiles, not the unexamined local adapter that adds --yolo. The existing Paperclip company and paused Meta-CEO record are retained; no live setting was changed. Public Grok patterns are translated into original workflow habits, without claiming private internals or performance parity.
+
+Paper DO_NOT_REDO: original LH01/LH02/LH03/LH06 remain accepted. New LH07 `1SJE-0` on `p-X-0` was edited and screenshot-reviewed in the same Mastermind OS file; its working indicator was released. It specifies the shared continuity layer and paused, original-bot-preserving Paperclip pilot. No new mobile runtime is claimed.
+
+One bounded Fabric census failed at its turn limit and returned no useful evidence; it is terminal and was not replayed. No new native worker or live-model run is claimed. The original Secretary acceptance thread remains the return path; pickup and a reported stand-down do not prove execution or an independently verified global hold.
+
+Next: publish this qualified same-branch delta, consume its actual required GitHub checks/protected release, then use the existing selected native integration owner for installation and live acceptance. Resolve actual profile/session/admission and any binding hold before a gateway pilot. Generic host shell is not a substitute agent-handoff carrier. Keep the whole unfinished acceptance below.
+
+## Machine-readable view of this same plan
+
+Editorial task states and evidence references are source claims, not runtime permission, authenticated results or product acceptance. The same-file view prevents a competing task registry. Original task IDs are retained; the original V1 acceptance remains open. Native implementation details remain in their respective existing owners.
+
+```mastermind-plan
+{
+  "schema": "mastermind.project_task_tree.v1",
+  "workstream": "WS:ORCHESTRATOR-PROJECT-CONTINUITY",
+  "objective": "Complete the assigned T3 and Hermes long-horizon upgrade, verify native behavior, retain whole-project scope, and conditionally adopt Paperclip without replacing existing Hermes bot identity or runtime ownership.",
+  "requirements": [
+    {
+      "id": "REQ1",
+      "text": "Investigate documented Claude harness mechanisms and exact T3 reuse seams."
+    },
+    {
+      "id": "REQ2",
+      "text": "Implement and harden full-scope, dependency-aware T3 execution and prove its real native consumer."
+    },
+    {
+      "id": "REQ3",
+      "text": "Preserve original effects, stop, permissions, budget, evidence and delegated identities."
+    },
+    {
+      "id": "REQ4",
+      "text": "Deliver native-discoverable reusable habits and skills without a duplicate runtime."
+    },
+    {
+      "id": "REQ5",
+      "text": "Implement the corresponding Hermes integration and prove actual bot use through compaction and restart."
+    },
+    {
+      "id": "REQ6",
+      "text": "Investigate Grok Bot public continuity patterns and adopt lawful original habits."
+    },
+    {
+      "id": "REQ7",
+      "text": "Assess Paperclip and migrate the management surface only if original Hermes bot identity and safe scheduling pass real acceptance."
+    },
+    {
+      "id": "REQ8",
+      "text": "Update editable Mastermind OS Paper journeys and build contracts for final integration."
+    },
+    {
+      "id": "REQ9",
+      "text": "Publish verified source through protected release with exact evidence and retain unfinished live acceptance."
+    }
+  ],
+  "allowed_paths": [
+    "integrations/session_bridge",
+    "skills/mastermind-long-horizon",
+    "scripts/build_hermes_long_horizon_plugin.py",
+    "scripts/qualify_hermes_long_horizon.py",
+    "scripts/qualify_paperclip_hermes_gateway.mjs",
+    "tests",
+    "docs/plans/2026-11-09-claude-t3-long-horizon.md",
+    "docs/research",
+    "docs/evidence"
+  ],
+  "non_goals": [
+    "No duplicate scheduler, lifecycle, task, memory, identity or credential owner.",
+    "No provider/account switches, live-writer displacement or replay of uncertain/denied effects.",
+    "No claim of production acceptance, intelligence parity or bug-free UI from source/fixture proof."
+  ],
+  "focus_task_id": "S1",
+  "tasks": [
+    {
+      "id": "R1",
+      "title": "Documented Claude harness investigation",
+      "requirement_ids": [
+        "REQ1"
+      ],
+      "depends_on": [],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Primary-source mechanisms and limitations documented."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "a8d4f872c877f829a04f5e291b89af319d666915fa92d7ec9df89cd53b749ebe",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "T3 incumbent and installed census",
+      "requirement_ids": [
+        "REQ1"
+      ],
+      "depends_on": [
+        "R1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Exact upstream revision and installed capability limits observed."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "e365e47424eed37b00a8b869044b5de8e0f27071f0fd833cb056e53ad6b4111c",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "I1",
+      "title": "Source plan and startup composition",
+      "requirement_ids": [
+        "REQ2",
+        "REQ3"
+      ],
+      "depends_on": [
+        "R2"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Validated scope, dependencies, evidence freshness and source binding."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "8f0daad967edb5333fb2ab6ba99a32ef2d212eb182aaa5f4ff97828179cdc902",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "I2",
+      "title": "Native execution skill and entrypoints",
+      "requirement_ids": [
+        "REQ4"
+      ],
+      "depends_on": [
+        "I1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Canonical skill and native wrappers validated without activating a provider."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "349bd03f995b4f589a7dfb624d7328701b53602b3a00ee0cf926ff28ee3472b8",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "D1",
+      "title": "Original four editable Paper boards",
+      "requirement_ids": [
+        "REQ8"
+      ],
+      "depends_on": [
+        "R2"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "LH01 LH02 LH03 LH06 were read back and screenshot-reviewed."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "9cfb2cf6b233ebb138e54963732ed6048973a7fb100c2ecc26525b09c1e7a537",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "I3",
+      "title": "Hardened T3 client and shared guidance",
+      "requirement_ids": [
+        "REQ2",
+        "REQ3"
+      ],
+      "depends_on": [
+        "I1",
+        "I2"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Existing client composition and recovery negatives pass focused tests."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "295912d55bb933eefce69b3ce783520ed8eeb710cc6c973044574377f1b37a52",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "H1",
+      "title": "Hermes native plugin and package",
+      "requirement_ids": [
+        "REQ3",
+        "REQ4",
+        "REQ5"
+      ],
+      "depends_on": [
+        "I3"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Actual native APIs, compression, isolation, revocation and packaged loading pass."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "03557c86c1d462a32e9937c586286ede67b9bd1552554e8bd8220bc10ca4d926",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "G1",
+      "title": "Grok continuity patterns",
+      "requirement_ids": [
+        "REQ6"
+      ],
+      "depends_on": [
+        "R1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Public patterns distinguished from private internals; reusable original habits recorded."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "cb6a324ae72f82a1a7a37f7d14ee74a34d71c5e7f85b7c670503406f14ef59de",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "P1",
+      "title": "Paperclip incumbent and transport assessment",
+      "requirement_ids": [
+        "REQ7"
+      ],
+      "depends_on": [
+        "H1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Installed gateway qualified with isolated HTTP cases; pilot limits documented."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "3f6bdc77f76cfd9b09ab928a188b3745b2efa30f855c07f5136c9dc692485163",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "D2",
+      "title": "Shared agents and Paperclip build board",
+      "requirement_ids": [
+        "REQ8"
+      ],
+      "depends_on": [
+        "H1",
+        "P1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "LH07 editable board screenshot-reviewed; no production UI claim."
+        }
+      ],
+      "state": "done",
+      "evidence": [
+        {
+          "criterion_id": "A1",
+          "definition_sha256": "28acc54b8da4a50661b6e363127a06ecd533a6f47867f452d425b9b8beeba55c",
+          "ref": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2375",
+          "result": "pass"
+        }
+      ]
+    },
+    {
+      "id": "S1",
+      "title": "Publish and qualify protected source",
+      "requirement_ids": [
+        "REQ9"
+      ],
+      "depends_on": [
+        "I3",
+        "H1",
+        "G1",
+        "P1",
+        "D2"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Exact source published and actual required CI/protected release read back."
+        }
+      ],
+      "state": "in_progress",
+      "evidence": []
+    },
+    {
+      "id": "V1",
+      "title": "Real T3 consumer and original parent acceptance",
+      "requirement_ids": [
+        "REQ2",
+        "REQ3",
+        "REQ4",
+        "REQ9"
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Actual selected T3 consumer proves loading, progression, steering, compaction and recovery."
+        }
+      ],
+      "state": "blocked",
+      "evidence": [],
+      "blocker": "Actual selected native consumer and current admission/control path not yet proven; preserve existing owners and original return path.",
+      "next_action": "After protected release, obtain the existing native owner result or precise current gate; do not substitute a new runtime or generic-shell agent handoff."
+    },
+    {
+      "id": "H2",
+      "title": "Live Hermes original-bot acceptance",
+      "requirement_ids": [
+        "REQ5",
+        "REQ3"
+      ],
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Actual chosen bot/profile/session consumes source and survives real continuation boundaries."
+        }
+      ],
+      "state": "blocked",
+      "evidence": [],
+      "blocker": "Actual selected native consumer and current admission/control path not yet proven; preserve existing owners and original return path.",
+      "next_action": "After protected release, obtain the existing native owner result or precise current gate; do not substitute a new runtime or generic-shell agent handoff."
+    },
+    {
+      "id": "P2",
+      "title": "Conditional Paperclip original-bot pilot",
+      "requirement_ids": [
+        "REQ7"
+      ],
+      "depends_on": [
+        "H2",
+        "P1"
+      ],
+      "acceptance": [
+        {
+          "id": "A1",
+          "text": "Original identity, memory, session isolation, stop, recovery and one dispatch owner verified in UI."
+        }
+      ],
+      "state": "blocked",
+      "evidence": [],
+      "blocker": "Actual selected native consumer and current admission/control path not yet proven; preserve existing owners and original return path.",
+      "next_action": "After protected release, obtain the existing native owner result or precise current gate; do not substitute a new runtime or generic-shell agent handoff."
+    }
+  ]
+}
+```

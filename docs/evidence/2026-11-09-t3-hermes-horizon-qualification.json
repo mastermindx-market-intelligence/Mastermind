@@ -1,0 +1,203 @@
+{
+  "candidate_base_sha": "4eb98fbe79d7085bc73a12cadbe46dbbafec1151",
+  "candidate_state": "OWNED_UNCOMMITTED_SOURCE_WITH_EXACT_FILE_HASHES",
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "-q",
+        "tests/test_t3_project_context.py",
+        "tests/test_t3_web_client.py",
+        "tests/test_t3_web_client_terminal_proof.py",
+        "tests/test_long_horizon_guidance.py",
+        "tests/test_project_task_context.py",
+        "tests/test_agentos_session_start.py",
+        "tests/test_hermes_fabric_native_identity_review.py",
+        "tests/test_executive_reviewed_site_identity_tokens.py"
+      ],
+      "exit_code": 0,
+      "result": {
+        "summary": "402 passed, 90 subtests passed in 13.33s"
+      }
+    },
+    {
+      "command": [
+        "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/7d508aba12f24054b3f42e164a65373d/venv/bin/python",
+        "-I",
+        "scripts/qualify_hermes_long_horizon.py",
+        "--hermes-root",
+        "/Users/chriswong/.hermes/hermes-agent",
+        "--expected-hermes-sha",
+        "ba4ddf9945a213ede9dda016602a86591ed634f9",
+        "--expected-native-api-sha256",
+        "ed210718c3e210e3889c8584ae7f0f5687d7b7395515d033cc7b789fb2cb9d37"
+      ],
+      "exit_code": 0,
+      "result": {
+        "checks": [
+          "actual_native_skill_and_prompt_registration",
+          "actual_native_hook_and_empty_argument_tool_dispatch",
+          "actual_native_leased_compression_restores_latest_plan",
+          "native_fork_delegate_reset_do_not_inherit",
+          "native_profile_isolation_with_same_session_id",
+          "native_tool_collision_refused_without_override",
+          "native_unload_removes_tool_and_fences_retained_handler",
+          "fresh_native_manager_recovers_persisted_compression_identity",
+          "native_config_revocation_is_observed_without_rebinding",
+          "real_packaged_manifest_import_loader_and_native_tool_round_trip",
+          "real_packaged_plugin_native_unload"
+        ],
+        "hermes_sha": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+        "live_agent_behavior": "UNPROVEN",
+        "mission_accepted": false,
+        "model_calls": 0,
+        "native_api_files": {
+          "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+          "hermes_cli/plugins_content.py": "389db50fe4aad14c3e290898b00d61c60db7366cc920eec7dd8fe9ba6934f30d",
+          "hermes_cli/plugins_dispatch.py": "aa12d2c3b48f0af1cfcb837a0b67459c59172b0d40825b7f9b6c09076e141742",
+          "hermes_cli/plugins_ledger.py": "03b27fe16f8ca1033629d68d41ed3ff87b5eb6e743aea1c66243f739ab9ed7f6",
+          "hermes_cli/plugins_loader.py": "91a93ed1ad73a146d9a5f32c659ea481260fcf173f01c175f7aea6c781c07ca8",
+          "hermes_cli/plugins_manifest.py": "89b30e679247a628c7dad93c573afa9f3f22529015b26397de24f5067ff7fc06",
+          "hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2",
+          "hermes_state_compression.py": "be9cc0bdca5fae8d5cbe8a15ca04cb72005228c290fa4e3d0a100e5e30796d7e",
+          "hermes_state_messages.py": "b81c7d272f768a548daa91642bf8283dfad2f592528fbe95c029038a13e7f574",
+          "hermes_state_sessions.py": "85a4abc342fd0711cd750750d2cbc948f85804af1c433dccc8d2454b1e77c18d",
+          "pm/environments.py": "bfddba8093866c66fae12115389d78a2a65adc84f68b634a989775923c42268b",
+          "registration_lifecycle.py": "ae3a37f98fb374ddd18866663558aaebd9d0d27abf55703984e3b2a498ad672b",
+          "tools/registry.py": "6d37a47cf70acf3d1964a9e7bdc525628a754155944fad22e33d38afa2034aa8"
+        },
+        "native_api_sha256": "ed210718c3e210e3889c8584ae7f0f5687d7b7395515d033cc7b789fb2cb9d37",
+        "native_dirty_paths": [
+          "hermes_cli/plugins.py"
+        ],
+        "native_runtime_started": false,
+        "production_profiles_modified": 0,
+        "qualification_scope": "INSTALLED_NATIVE_APIS_WITH_DISPOSABLE_PROFILE_STATE",
+        "schema": "mastermind.hermes_horizon_native_qualification.v1",
+        "source_sha256": {
+          "integrations/session_bridge/hermes_project_plugin.py": "b23c1946467c6c907899ff8009345c0f9b05722a88964273326d5db66824b368",
+          "integrations/session_bridge/hermes_project_plugin.yaml": "52ae995d06f1ca4bab1c4d03e6fca617622a6059300720f46c6fd5d0e130784b",
+          "integrations/session_bridge/long_horizon_guidance.py": "d310986ebdd2a023270f5901e92687b84af40225f8996975167f286323eea9f5",
+          "integrations/session_bridge/project_task_context.py": "68943a458d4f8247f0fb38e9e7d6f904c6baa7d0f55b719438be7d33502c0739",
+          "scripts/build_hermes_long_horizon_plugin.py": "433d2000cb19aad4504e6dcc741c7675c913de2fe6b7c40c45b2ae7d9ef2c6fc",
+          "scripts/qualify_hermes_long_horizon.py": "a13b32c7384ac00f1fa736809732cb4b24c540ebe129b8b66df250d62527bf79",
+          "skills/mastermind-long-horizon/SKILL.md": "a50d22ce0f6fc7c8ec68f2346834d5fdff6df54477bc278f74c1807de6ea2222",
+          "skills/mastermind-long-horizon/references/continuity-patterns.md": "86aa201b389c4a8e94304216d866fc8452481d1ce8a3a3bb4698162d8d65cad3",
+          "skills/mastermind-long-horizon/references/native-hermes.md": "85d96be91b7795c026bfe6000229f92ad8227df8f5ff8fda3557b0b2adee97e7",
+          "skills/mastermind-long-horizon/references/native-t3.md": "59327efc35ac0fcd954f9a60ca67b5f9ad6e415643378e1b016a58286ddbf58c"
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "command": [
+        "node",
+        "scripts/qualify_paperclip_hermes_gateway.mjs",
+        "--adapter-root",
+        "/Volumes/Mastermind/agent-workspaces/cache/npm/_npx/0aa74679bec75e15/node_modules/@paperclipai/hermes-paperclip-adapter",
+        "--expected-execute-sha256",
+        "6025c9c15bea0bae236c900f9da23d85e3fdcdea1017e8ffb2dd7434fdfa2c1d"
+      ],
+      "exit_code": 0,
+      "result": {
+        "adapter_version": "2026.1106.0",
+        "checks": [
+          "issue_keys_are_stable_per_issue_and_separate_across_issues",
+          "explicit_native_session_and_profile_route_are_preserved",
+          "stream_failure_recovers_original_run_without_duplicate_create",
+          "critical_headers_cannot_be_overridden_and_fixture_secret_is_redacted",
+          "native_cancellation_is_not_reported_as_success",
+          "timeout_stops_and_reads_only_the_original_run",
+          "authentication_denial_is_terminal_without_fallback_or_replay",
+          "lost_create_response_is_not_automatically_replayed",
+          "missing_original_run_identity_is_not_accepted"
+        ],
+        "execute_sha256": "6025c9c15bea0bae236c900f9da23d85e3fdcdea1017e8ffb2dd7434fdfa2c1d",
+        "fixture_http_cases": 6,
+        "live_hermes_requests": 0,
+        "live_paperclip_mutations": 0,
+        "mission_accepted": false,
+        "model_calls": 0,
+        "native_bot_adoption": "UNPROVEN",
+        "qualification_scope": "INSTALLED_ADAPTER_WITH_EPHEMERAL_LOOPBACK_GATEWAY_FIXTURE",
+        "schema": "mastermind.paperclip_hermes_transport_qualification.v1",
+        "status": "PASS"
+      }
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "result": {
+        "summary": "PASS"
+      }
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "compileall",
+        "-q",
+        "integrations/session_bridge/project_task_context.py",
+        "integrations/session_bridge/long_horizon_guidance.py",
+        "integrations/session_bridge/hermes_project_plugin.py",
+        "integrations/session_bridge/t3_project_context.py",
+        "scripts/build_hermes_long_horizon_plugin.py",
+        "scripts/qualify_hermes_long_horizon.py"
+      ],
+      "exit_code": 0,
+      "result": {
+        "summary": "PASS"
+      }
+    },
+    {
+      "command": [
+        "node",
+        "--check",
+        "scripts/qualify_paperclip_hermes_gateway.mjs"
+      ],
+      "exit_code": 0,
+      "result": {
+        "summary": "PASS"
+      }
+    }
+  ],
+  "live_model_acceptance": "UNPROVEN",
+  "observed_at": "2026-11-09T14:07:31.042682+00:00",
+  "paper": {
+    "board_id": "1SJE-0",
+    "file_id": "01M3NRCX55B452A12819WNE1RH",
+    "name": "LH07 Agents Shared continuity and Paperclip",
+    "page_id": "p-X-0",
+    "production_acceptance": false,
+    "visual_review": "OBSERVED_BY_ATTENDED_DESIGNER"
+  },
+  "production_profiles_modified": 0,
+  "schema": "mastermind.horizon_hardening_qualification.v1",
+  "source_sha256": {
+    "integrations/session_bridge/agentos_session_start.py": "6b2fa364808371d9bcfc977b323fd14d19b1af7499892d748c2609ee35d67f58",
+    "integrations/session_bridge/hermes_project_plugin.py": "b23c1946467c6c907899ff8009345c0f9b05722a88964273326d5db66824b368",
+    "integrations/session_bridge/long_horizon_guidance.py": "d310986ebdd2a023270f5901e92687b84af40225f8996975167f286323eea9f5",
+    "integrations/session_bridge/project_task_context.py": "68943a458d4f8247f0fb38e9e7d6f904c6baa7d0f55b719438be7d33502c0739",
+    "integrations/session_bridge/t3_project_context.py": "1784b64634ca789ade27b9de9c49fa816418b1b55d08f17d2d418baa9ad27112",
+    "scripts/build_hermes_long_horizon_plugin.py": "433d2000cb19aad4504e6dcc741c7675c913de2fe6b7c40c45b2ae7d9ef2c6fc",
+    "scripts/qualify_hermes_long_horizon.py": "a13b32c7384ac00f1fa736809732cb4b24c540ebe129b8b66df250d62527bf79",
+    "scripts/qualify_paperclip_hermes_gateway.mjs": "00813cb9b035e1d56d6128152ba880c86aa9bdacd5d77cf0e74bd6b9e786b9a0",
+    "skills/mastermind-long-horizon/SKILL.md": "a50d22ce0f6fc7c8ec68f2346834d5fdff6df54477bc278f74c1807de6ea2222",
+    "skills/mastermind-long-horizon/references/continuity-patterns.md": "86aa201b389c4a8e94304216d866fc8452481d1ce8a3a3bb4698162d8d65cad3",
+    "skills/mastermind-long-horizon/references/native-hermes.md": "85d96be91b7795c026bfe6000229f92ad8227df8f5ff8fda3557b0b2adee97e7",
+    "skills/mastermind-long-horizon/references/native-t3.md": "59327efc35ac0fcd954f9a60ca67b5f9ad6e415643378e1b016a58286ddbf58c",
+    "tests/executive_fabric_release_identity_review.py": "ed1f215695608c5212e7cd88b9e2b9f0301009ccbffd83b492dea04e3c16aa83",
+    "tests/test_hermes_fabric_native_identity_review.py": "bde79bbf523ac2e9f2d870edd97af814f81ebe03165808b92b169f14dbd026ee",
+    "tests/test_long_horizon_guidance.py": "66c306fe131e04ada8f16b0f8baea34765332a0eab3720b6beb7fc6cfa8bc1ea",
+    "tests/test_t3_project_context.py": "f9c65c0948498529f27c3769e7f38428aef1e7a6c9b0ef06259d490cf414d590"
+  },
+  "status": "PASS"
+}
