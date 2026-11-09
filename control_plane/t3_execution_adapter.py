@@ -145,6 +145,17 @@ from control_plane.worker_execution_contract import (
 
 T3_NATIVE_ADAPTER_ID = "t3-native"
 
+#: Launch-attestation schema for this adapter.  Distinct from the local
+#: binary schema (``LAUNCH_ATTESTATION_SCHEMA_VERSION``) on purpose: a T3
+#: run is a remote thread, so the attestation binds the durable launch
+#: record (persisted spec + retained neutral ref), never a spawned binary.
+#: A supervisor constructed with ``require_complete_launch_attestation``
+#: therefore refuses T3 launches fail-closed instead of accepting a
+#: binary-shaped claim this adapter cannot honestly make.
+T3_LAUNCH_ATTESTATION_SCHEMA_VERSION = (
+    "mastermind.executive_launch_attestation/t3-native/v1"
+)
+
 # Schema constants for the closed T3 seam records.  The launch envelope
 # deliberately carries NO ``delegatedFrom`` field: external Hermes is not a
 # native T3 provider session, so delegation lineage is never forged.
@@ -1948,6 +1959,63 @@ class T3ExecutionAdapter:
         """The canonical ledgered result reference for a run, if any."""
         run = self._state.load_run(str(run_id))
         return run.result_reference if run is not None else None
+
+    def launch_attestation(self, process_ref: WorkerProcessRef) -> dict[str, object]:
+        """Launch attestation read from DURABLE state (supervisor seam).
+
+        The Executive supervisor binds the admitted isolation manifest and
+        the recovery binding's process identity to this attestation at
+        launch-metadata time.  This adapter attests ONLY what it durably
+        persisted for the run: the original spec (which carries the
+        supervisor-admitted ``isolation_manifest_sha256``) and the retained
+        neutral ref (the identity the recovery binding will compare).  A
+        run without a durable launch record, or a ref that is not the
+        retained one, is a typed refusal — nothing is attested that was
+        not durably launched.
+        """
+        run = self._state.load_run(str(process_ref.run_id))
+        if (
+            run is None
+            or run.spec is None
+            or run.receipt is None
+            or run.original_ref is None
+        ):
+            raise T3ExecutionAdapterError(
+                "launch attestation requires the durable launch record "
+                f"(spec, receipt, original ref) for run {process_ref.run_id!r}"
+            )
+        ref = run.original_ref
+        if (
+            process_ref.run_id != ref.run_id
+            or process_ref.launch_nonce != ref.launch_nonce
+            or process_ref.provider_session_id != ref.provider_session_id
+        ):
+            raise T3ExecutionAdapterError(
+                "launch attestation refused: the supplied ref is not the "
+                f"retained original ref for run {process_ref.run_id!r}"
+            )
+        return {
+            "schema_version": T3_LAUNCH_ATTESTATION_SCHEMA_VERSION,
+            "adapter_id": self.adapter_id,
+            "launch_nonce": ref.launch_nonce,
+            "thread_id": run.receipt.thread_id,
+            "native_run_id": run.receipt.run_id,
+            "isolation_manifest_sha256": run.spec.isolation_manifest_sha256,
+            "expected_base_sha": run.spec.expected_base_sha or "",
+            "observed_base_sha": ref.base_sha,
+            "binary": ref.binary,
+            "process_identity": {
+                "pid": ref.pid,
+                "pgid": ref.pgid,
+                "session_id": ref.session_id,
+                "start_identity": ref.process_start_identity,
+                "boot_id": ref.boot_session_id,
+                "effective_uid": ref.effective_uid,
+                "effective_gid": ref.effective_gid,
+                "real_uid": ref.real_uid,
+                "real_gid": ref.real_gid,
+            },
+        }
 
     # --- start -------------------------------------------------------------
 

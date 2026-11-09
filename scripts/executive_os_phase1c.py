@@ -2297,6 +2297,17 @@ def _service_from_config(
             from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
             paid_adapter=CanonicalPaidFabricWorkerAdapter(runtime,paid_worker_binding_source)
             owners={config.worker_id:primary}
+            # t3-native route: per-worker owners over the reviewed composed
+            # adapter, ONLY when the host is enrolled (a typed T3_NOT_ENROLLED
+            # result composes no owner and leaves this path unchanged).
+            from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+            owners.update(compose_t3_native_owners_for_service(
+                primary, runtime,
+                runs_root=raw['worker_runs_root'],
+                isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+                receipts_root=raw['receipts_root'],
+                worker_user=raw['worker_user'],
+                worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid']))
             for physical in paid_worker_binding_source.bindings:
                 owners[physical.worker_id]=ExecutiveSupervisor(runtime,paid_adapter,
                     runs_root=raw['worker_runs_root'],
@@ -2314,6 +2325,20 @@ def _service_from_config(
             recovery_controller['owners']=mixed.owners
             return mixed
         if fabric_worker_binding_source is None:
+            from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+            t3_owners = compose_t3_native_owners_for_service(
+                primary, runtime,
+                runs_root=raw['worker_runs_root'],
+                isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+                receipts_root=raw['receipts_root'],
+                worker_user=raw['worker_user'],
+                worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid'])
+            if t3_owners:
+                from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+                mixed = MixedExecutionOwnerSupervisor(
+                    primary, {config.worker_id: primary, **t3_owners})
+                recovery_controller['owners'] = mixed.owners
+                return mixed
             return primary
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
         from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
@@ -2321,6 +2346,14 @@ def _service_from_config(
             request_client_factory=fabric_worker_binding_source.client_for,
             attended_probe_source=fabric_attended_probe_source)
         owners = {config.worker_id: primary}
+        from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+        owners.update(compose_t3_native_owners_for_service(
+            primary, runtime,
+            runs_root=raw['worker_runs_root'],
+            isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+            receipts_root=raw['receipts_root'],
+            worker_user=raw['worker_user'],
+            worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid']))
         for physical in fabric_worker_binding_source.bindings:
             if physical.worker_id in owners:
                 continue  # Principal conflicts were refused before clients.
