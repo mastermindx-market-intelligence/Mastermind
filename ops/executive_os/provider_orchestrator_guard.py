@@ -10,12 +10,18 @@ child routing fence.
 WO-11 (MMOS V1, CRITICAL): for sessions the placement owner has armed onto the
 shared placement path, every paid launch and native delegation must be covered
 by the CURRENT broker-issued ExecutionBinding.v1, validated against the
-owner-issued placement receipt over the authenticated owner channel. Refusal
-classes: missing binding, stale fence, provider substitution after reservation,
-unaccounted descendant. There is no independent signing authority — the binding
-is only an assignment of opaque references, trusted exactly as far as it matches
-the owner's current lease. The gate fences the launches it observes through this
-provider hook; it does not claim to fence arbitrary processes.
+owner-issued placement receipt, accepted only from a path the fenced session
+cannot write (owner service-account channel). Refusal classes: missing binding,
+stale fence, provider substitution after reservation, unaccounted descendant.
+Runtime-multiplexed launches (for/while/until bodies, xargs/parallel/
+find -exec), interpreter one-liners and computed command words carrying
+wrapper tokens are refused as unaccounted/unobservable, and POSIX
+line-continuation splits are canonicalised so no constructed path escapes
+the gate.
+There is no independent signing authority — the binding is only an assignment
+of opaque references, trusted exactly as far as it matches the owner's current
+lease. The gate fences every lexically observed launch in the commands it is
+shown through this provider hook; it does not claim to fence arbitrary processes.
 """
 from __future__ import annotations
 
@@ -24,6 +30,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 import time
@@ -151,18 +158,114 @@ _BINDING_IDENTITY_FIELDS = (
     "logical_child_key",
     "request_digest",
     "attempt_ref",
+    "assignment_generation",
 )
 _BINDING_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+#: Optional owner-projected integrity pin for the receipt file: the SHA-256
+#: of the receipt bytes the owner wrote. Defence in depth only — the trust
+#: basis is the owner-only receipt channel (see ``_receipt_channel_problem``).
+PLACEMENT_RECEIPT_DIGEST_ENV = "MASTERMIND_PLACEMENT_RECEIPT_DIGEST"
+#: Owner-projected positive allowlist for the receipt channel: the uids
+#: allowed to own the receipt path and every component of it (root/uid 0 is
+#: always allowed for components). Without it the channel would be only
+#: negatively defined ("anything the principal cannot write"), which admits
+#: any third local account as a counterfeit owner channel (REVIEW_2329 r2
+#: N-4). Mandatory: an armed session without a projected allowlist gets no
+#: launches (fail closed).
+PLACEMENT_RECEIPT_OWNER_UIDS_ENV = "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS"
+#: The only lease state that admits a launch (exact, case-sensitive).
+LEASE_STATE_HELD = "HELD"
+#: Exact env tokens that arm the gate (a projected binding also arms it).
+SHARED_PLACEMENT_ARM_TOKENS = ("1", "true", "yes", "on")
 
-# Provider/pool token of each supported paid-launch wrapper shape.
-_POOL_RUN_RE = re.compile(r"(?is)\bpool\s+run\s+([A-Za-z0-9_.-]+)")
-_POOL_REMOTE_RE = re.compile(
-    r"(?is)\bpool\s+remote\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)")
-_SUB_SH_RE = re.compile(r"(?is)\bsub\.sh\s+([A-Za-z0-9_.-]+)")
-_REMOTE_SUB_SH_RE = re.compile(
-    r"(?is)\bremote_sub\.sh\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)")
-_SLOT_RE = re.compile(r"(?is)\bslot\.py\s+([A-Za-z0-9_.-]+)")
-
+#: Closed per-wrapper mode vocabularies (the alternations FABRIC_LAUNCH_RE
+#: recognizes). Under shared placement a wrapper invoked with any OTHER
+#: mode is an unknown paid launch and is refused, never ignored.
+_SUB_MODES = frozenset(_SUB_LAUNCH_MODE[3:-1].split("|"))
+_REMOTE_MODES = frozenset(_REMOTE_LAUNCH_MODE[3:-1].split("|"))
+_SLOT_POOLS = frozenset(_SLOT_POOL[3:-1].split("|"))
+#: Wrapper-internal pure helper modes that never acquire a slot or spawn a
+#: provider (documented in sub.sh): not paid launches.
+NON_LAUNCH_WRAPPER_MODES = frozenset({"__launch_plan", "__glm_memory"})
+#: Every wrapper shape: (name, index of the mode/pool argument, closed mode
+#: vocabulary or None for the open ``pool`` vocabulary, matched exactly).
+_WRAPPER_SHAPES = {
+    "pool run": (0, None),
+    "pool remote": (1, None),
+    "sub.sh": (0, _SUB_MODES),
+    "remote_sub.sh": (1, _REMOTE_MODES),
+    "slot.py": (0, _SLOT_POOLS),
+}
+_WRAPPER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?P<wrapper>pool[ \t]+(?:run|remote)|remote_sub\.sh|sub\.sh|slot\.py)"
+    r"(?![A-Za-z0-9_.-])",
+    re.I,
+)
+_WRAPPER_ARG_RE = re.compile(r"[ \t]+([^\s;&|<>()`{}]+)")
+_SIMPLE_COMMAND_SPLIT_RE = re.compile(r"[;&|\n(){}`]|\$\(")
+#: Read-only inspectors: a wrapper NAME given to them as an argument is a
+#: file being read, not a launch (``grep -n slot.py docs/runbook.md``).
+_INSPECTORS = frozenset({
+    "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg",
+    "wc", "ls", "stat", "file", "diff", "cmp", "shasum", "sha1sum",
+    "sha256sum", "md5", "md5sum", "nl", "od", "xxd",
+})
+_COMMAND_PREFIX_WORDS = frozenset({
+    "do", "then", "else", "elif", "if", "while", "until", "!",
+})
+#: Constructs that can change the launch environment outside lexical
+#: observation: eval/source of computed text, shell startup files, and
+#: assignments through a computed variable name.
+#: Wrapper source fed to a shell (``cat sub.sh | bash -s grok``) launches
+#: without a lexically visible invocation.
+_SHELL_FEED_RE = re.compile(
+    r"\|\s*(?:\S*/)?(?:ba|z|da|k)?sh\b"
+    r"|(?:^|[\s;&|(])(?:\S*/)?(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*<"
+)
+_UNOBSERVABLE_ENV_RE = re.compile(
+    r"(?:^|[;&|(`{\n]|\$\()\s*(?:eval|source|\.)(?=\s)"
+    r"|(?:^|[\s;&|(`{])(?:BASH_ENV|ENV)\+?="
+    r"|(?:^|[\s;&|(`{])(?:export|declare|typeset|readonly|local)"
+    r"(?:\s+-\S+)*\s+[A-Za-z0-9_]*\$"
+    r"|(?:^|[\s;&|(`{])printf\s+-v\s*\$"
+)
+#: Wrapper names as bare words: the computed-launch refusals below fire only
+#: when a wrapper token is present in the text (REVIEW_2329 r2 N-3). Computed
+#: commands without wrapper tokens are the documented arbitrary-process limit.
+_WRAPPER_NAME_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
+    re.I,
+)
+#: Interpreter invocations whose PROGRAM TEXT rides in the command itself
+#: (``python -c/-m``, ``perl/node/ruby/osascript -e``, ``php -r``): a launch
+#: assembled inside that text executes without a lexically observed wrapper
+#: invocation (REVIEW_2329 r2 N-3/C4-C5). Shell wrappers (bash/sh/zsh) are
+#: deliberately NOT listed — nested shells are the five-shapes scan's own
+#: territory and their text IS the command the gate judges.
+_INTERPRETER_EVAL_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:python[23]?(?:\.\d+)?|perl|ruby|node(?:js)?|osascript|php)\s+"
+    r"(?:[^;&|\n]*\s)?-[cemr]"
+)
+#: Loop bodies (for/while/until) execute their contents N times: one lexical
+#: launch inside one is N paid children under one binding's single attempt
+#: (REVIEW_2329 r2 N-2/C1).
+_LOOP_BODY_RE = re.compile(r"\bdo\b.*?\bdone\b", re.S)
+#: Batch executors that run their argument command once per input item
+#: (REVIEW_2329 r2 N-2/C2-C3, find -exec).
+_BATCH_EXECUTOR_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:xargs|parallel|find)\b[^;&|\n]*",
+    re.I,
+)
+#: Prefix runners that only wrap a FOLLOWING command word, so an indirect
+#: word after them is still the launched command (``env X=1 $P run ...``).
+_RUNNER_WORDS = frozenset({
+    "env", "exec", "command", "builtin", "nohup", "setsid",
+    "stdbuf", "nice", "timeout",
+})
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -303,23 +406,44 @@ def repeat_poll_reason(key: str, *, now: float | None = None) -> str | None:
     return None
 
 
-def _command_assignment(command: str, name: str) -> tuple[bool, str]:
+def _command_assignments(command: str, name: str) -> list[str]:
+    """EVERY shell-level ``NAME=value`` assignment of ``name`` in the command,
+    in positional order (prefix assignments, ``env NAME=…``, nested
+    ``export NAME=…`` inside quoted sub-commands). A dynamic value (``$``,
+    backtick) cannot prove stable identity and is recorded as ``''``.
+
+    POSIX applies prefix assignments left-to-right (the LAST wins in the
+    launched child) and a nested ``export`` overrides at runtime, so any
+    check that inspects only the first occurrence compares a decoy while
+    the child runs under a different identity. Callers must therefore
+    judge all occurrences, never one.
+    """
     pattern = re.compile(
         rf"(?:^|[\s;&|]){re.escape(name)}="
         rf"(?:'([^']*)'|\"([^\"]*)\"|([^\s;&|]*))"
     )
-    match = pattern.search(command)
-    if not match:
+    values: list[str] = []
+    for match in pattern.finditer(command):
+        value = next(
+            (value for value in match.groups() if value is not None),
+            "",
+        ).strip()
+        if any(token in value for token in ("$", "`")):
+            value = ""
+        values.append(value)
+    return values
+
+
+def _command_assignment(command: str, name: str) -> tuple[bool, str]:
+    """(assigned?, effective value): the value the launched child actually
+    receives — the LAST literal assignment — or ``''`` when any occurrence
+    is empty/dynamic (an unstable identity is treated as missing)."""
+    values = _command_assignments(command, name)
+    if not values:
         return False, ""
-    value = next(
-        (value for value in match.groups() if value is not None),
-        "",
-    ).strip()
-    # Dynamic shell expansion cannot prove stable identity. A caller should
-    # inherit an already-bound value or pass an explicit literal.
-    if any(token in value for token in ("$", "`")):
+    if not all(values):
         return True, ""
-    return True, value
+    return True, values[-1]
 
 
 def _command_or_environment_value(command: str, name: str) -> str:
@@ -338,11 +462,9 @@ def shared_placement_armed() -> bool:
     already projected a binding into the session environment."""
     if os.environ.get(BINDING_ENV, "").strip():
         return True
-    return os.environ.get(SHARED_PLACEMENT_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
+    return (
+        os.environ.get(SHARED_PLACEMENT_ENV, "").strip().lower()
+        in SHARED_PLACEMENT_ARM_TOKENS
     )
 
 
@@ -360,42 +482,330 @@ def _binding_problems(binding: object, owner: str) -> str:
     if not _BINDING_HEX64_RE.match(str(binding.get("request_digest") or "")):
         return f"{owner}: request_digest must be a 64-char lowercase hex digest"
     for name in ("fence_counter", "assignment_generation"):
-        value = binding.get(name, 0)
+        # Required, never defaulted: an absent fence must not pass as fence 0.
+        value = binding.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return f"{owner}: {name} must be an integer >= 0"
+            return f"{owner}: {name} must be present as an integer >= 0"
     return ""
+
+
+def _canonical_command(command: str) -> str:
+    """The command with shell quoting (quotes, backslashes) removed, so a
+    name or mode split or hidden by quotes (``"POOL_ORCH""ESTRATOR_ID=x"``,
+    ``sub.sh "grok"``) is scanned as the shell will see it. A backslash-
+    newline is a POSIX line continuation and the shell joins it with
+    NOTHING (REVIEW_2329 r2 N-1): ``POOL_ORCH\\<newline>ESTRATOR_ID=x`` and
+    ``pool ru<newline>n`` canonicalise to the joined words, never to two
+    words with an inserted space."""
+    return re.sub(r"[\"'\\]", "", command.replace("\\\n", ""))
+
+
+def _simple_command_head(canon: str, offset: int) -> str:
+    """Basename of the first word of the simple command containing
+    ``offset`` (assignments and compound-command keywords skipped)."""
+    starts = [m.end() for m in _SIMPLE_COMMAND_SPLIT_RE.finditer(canon, 0, offset)]
+    prefix = canon[(starts[-1] if starts else 0):offset].split()
+    for word in prefix:
+        if word in _COMMAND_PREFIX_WORDS or re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+            continue
+        return word.rsplit("/", 1)[-1].lower()
+    return ""
+
+
+def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
+    """EVERY wrapper invocation in ``command``, positional:
+    ``(offset, wrapper, token, known_mode)`` for all five shapes, repeated.
+
+    Unlike :data:`FABRIC_LAUNCH_RE`, the mode is NOT required to be on the
+    wrapper's list: an off-list mode (``sub.sh zebra-glm``) is still an
+    invocation (``known_mode=False``) so it can be refused instead of
+    passing unobserved. A wrapper name with no argument, an argument of a
+    read-only inspector (``cat sub.sh``), or a documented pure helper mode
+    (``sub.sh __launch_plan``) is not a paid launch.
+    """
+    canon = _canonical_command(command)
+    found: list[tuple[int, str, str, bool]] = []
+    for match in _WRAPPER_RE.finditer(canon):
+        wrapper = re.sub(r"\s+", " ", match.group("wrapper").lower())
+        index, modes = _WRAPPER_SHAPES[wrapper]
+        args: list[str] = []
+        position = match.end()
+        while len(args) < index + 2:
+            arg = _WRAPPER_ARG_RE.match(canon, position)
+            if not arg:
+                break
+            args.append(arg.group(1).lower())
+            position = arg.end()
+        if not args:
+            continue
+        head = _simple_command_head(canon, match.start())
+        if head in _INSPECTORS:
+            continue
+        token = args[index] if len(args) > index else ""
+        if token in NON_LAUNCH_WRAPPER_MODES or (
+            len(args) > index + 1 and args[index + 1] == "__launch_plan"
+        ):
+            continue
+        known = bool(token) and (modes is None or token in modes)
+        found.append((match.start(), wrapper, token, known))
+    return found
+
+
+def launch_provider_tokens(command: str) -> list[tuple[int, str]]:
+    """``(offset, token)`` for EVERY paid launch in ``command``, positional.
+
+    Covers every wrapper shape: ``pool run <pool>``, ``pool remote <host>
+    <pool>``, ``sub.sh <mode>``, ``remote_sub.sh <host> <mode>`` and
+    ``slot.py <pool>`` — the same wrappers every engine's paid launch goes
+    through. Each token is read from its own launch's arguments, so a later
+    launch can never stand in for an earlier one.
+    """
+    return [(offset, token) for offset, _, token, _ in _wrapper_invocations(command)]
 
 
 def launch_provider_token(command: str) -> str:
-    """The provider/pool token of a matched paid launch (lowercased), or ''.
+    """The provider/pool token of the FIRST paid launch (lowercased), or ''.
+    Gate logic must use :func:`launch_provider_tokens` (all launches)."""
+    tokens = launch_provider_tokens(command)
+    return tokens[0][1] if tokens else ""
 
-    Covers every wrapper shape the common launch path recognizes:
-    ``pool run <pool>``, ``pool remote <host> <pool>``, ``sub.sh <mode>``,
-    ``remote_sub.sh <host> <mode>`` and ``slot.py <pool>`` — the same
-    wrappers every engine's paid launch goes through, which is what makes
-    the gate engine-independent.
+
+def _indirect_command_word(canon: str) -> str | None:
+    """The first command word computed at runtime — ``$P`` / ``${P}`` in
+    ``P=pool; $P run ...`` (REVIEW_2329 r2 N-3/C6) — or None. Assignments,
+    shell keywords, options and prefix runners are skipped, so
+    ``env NAME=x pool ...``, ``echo $X`` and ``command -v y`` stay concrete;
+    an option-less ``timeout``/``nice`` operand (a duration/niceness) is an
+    argument, not the command."""
+    for segment in re.split(r"[;&|\n()]", canon):
+        words = segment.split()
+        index = 0
+        operand_pending = False
+        while index < len(words):
+            word = words[index]
+            if word in _RUNNER_WORDS:
+                operand_pending = word in ("timeout", "nice")
+            elif word in _COMMAND_PREFIX_WORDS or word.startswith("-"):
+                pass
+            elif re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                pass
+            elif operand_pending and re.fullmatch(r"\d[\w.:+-]*", word):
+                operand_pending = False
+                index += 1
+                continue
+            else:
+                operand_pending = False
+                if word.startswith("$"):
+                    return word
+                break
+            index += 1
+    return None
+
+
+def _deny_computed_launch(canon: str) -> None:
+    """Refuse launch-shaped text no lexically observed wrapper invocation
+    can cover (REVIEW_2329 r2 N-3): interpreter one-liners carrying wrapper
+    tokens (``python3 -c 'subprocess.run(["pool",...])'``, ``perl -e
+    'exec("pool",...)'``) and computed command words (``P=pool; $P run``).
+    Armed sessions only; a wrapper NAME must appear in the text, otherwise
+    the command is the documented arbitrary-process limit, not this gate's
+    fence. Conservative by design: an interpreter flag cluster containing
+    c/e/m/r plus a wrapper word anywhere in the same simple command is
+    denied even when innocent."""
+    if not _WRAPPER_NAME_RE.search(canon):
+        return
+    if _INTERPRETER_EVAL_RE.search(canon):
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — an "
+            "interpreter one-liner (python -c/-m, perl/node/ruby/osascript "
+            "-e, php -r) carrying wrapper tokens constructs the launch at "
+            "runtime, so provider substitution, the identity projection "
+            "and the one-attempt law cannot be checked. Run the paid "
+            "launch as a plain command."
+        )
+    word = _indirect_command_word(canon)
+    if word is not None:
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — the "
+            f"command word {word!r} is computed at runtime, so the wrapper "
+            "invocation and any identity assignment around it cannot be "
+            "observed. Invoke the wrapper by its literal name."
+        )
+
+
+def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
+    """True when a wrapper invocation sits inside a construct that executes
+    it N times at runtime: a for/while/until body (``do ... done``) or an
+    xargs/parallel/find -exec executor's argument tail (REVIEW_2329 r2
+    N-2). One binding covers exactly one attempt, so N runtime children
+    under one lexical launch are refused as unaccounted descendants."""
+    spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
+    spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
+    return any(
+        start <= offset < end for start, end in spans for offset in offsets
+    )
+
+
+def _env_clear_offsets(canon: str) -> list[int]:
+    """Offsets of ``env`` invocations that clear the inherited environment
+    (``env -i``, ``env -``, ``--ignore-environment``, clustered ``-iv``) or
+    re-split their arguments (``-S``), which can hide a clear."""
+    offsets: list[int] = []
+    for match in re.finditer(r"(?<![A-Za-z0-9_.-])env(?=[ \t])", canon):
+        words = re.match(r"[^;&|\n()`]*", canon[match.end():]).group(0).split()
+        index = 0
+        while index < len(words):
+            word = words[index]
+            if (
+                word in ("-", "--ignore-environment", "-S")
+                or word.startswith("--split-string")
+                or re.fullmatch(r"-[A-Za-z]*[iS][A-Za-z]*", word)
+            ):
+                offsets.append(match.start())
+                break
+            if word in ("-u", "-C", "-P", "--unset", "--chdir"):
+                index += 2
+                continue
+            if word.startswith("-") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word):
+                index += 1
+                continue
+            break
+    return offsets
+
+
+def _effective_identity_values(command: str, name: str) -> list[str] | None:
+    """Canonical view of every way ``command`` sets ``name`` for its child.
+
+    Returns ``None`` when the command does not touch ``name`` (the inherited
+    session value governs); otherwise EVERY value the child could receive:
+    each literal assignment in any form — prefix (last wins), ``env``,
+    ``export``/``declare``/``readonly``, ``+=``, quoted or split by quotes,
+    nested inside ``sh -c '…'`` — plus ``''`` for every clearing or
+    non-literal form (``unset``, ``env -u``, ``env -i`` not followed by a
+    reassignment, ``printf -v``, ``read``, ``declare -n``, ``${NAME:=…}``,
+    dynamic ``$``/backtick values). The caller refuses unless every value
+    equals the server-derived projection.
     """
-    for regex, group in (
-        (_POOL_REMOTE_RE, 2),
-        (_REMOTE_SUB_SH_RE, 2),
-        (_POOL_RUN_RE, 1),
-        (_SUB_SH_RE, 1),
-        (_SLOT_RE, 1),
-    ):
-        match = regex.search(command)
-        if match:
-            return match.group(group).strip().lower()
+    canon = _canonical_command(command)
+    values = list(_command_assignments(command, name))
+    events: list[tuple[int, str]] = []
+    occurrence = re.compile(
+        rf"(?:(?<![A-Za-z0-9_])|(?<=-u)){re.escape(name)}(?![A-Za-z0-9_])"
+    )
+    for match in occurrence.finditer(canon):
+        before, after = canon[:match.start()], canon[match.end():]
+        if after.startswith("="):
+            value = re.match(r"=([^\s;&|<>()`{}]*)", after).group(1)
+            events.append((match.start(), "" if "$" in value else value))
+        elif before.endswith("$") or (
+            before.endswith("${") and not re.match(r":?=", after)
+        ):
+            continue  # a read of the value, not a change
+        elif re.search(r"(?:^|[\s;&|(])export\s+$", before) and re.match(
+            r"(?:[\s;&|)]|$)", after
+        ):
+            continue  # bare `export NAME` re-exports the inherited value
+        else:
+            events.append((match.start(), ""))
+    for offset in _env_clear_offsets(canon):
+        if not any(at > offset and value for at, value in events):
+            events.append((offset, ""))
+    canonical = [value for _, value in events]
+    extra = [value for value in values if value not in canonical]
+    if not canonical and not extra:
+        return None
+    return canonical + extra
+
+
+def _principal_ids() -> tuple[int, frozenset[int]]:
+    """(effective uid, group ids) of the fenced principal (this session)."""
+    return os.geteuid(), frozenset({os.getegid(), *os.getgroups()})
+
+
+def _principal_controls(info: os.stat_result, uid: int, gids: frozenset[int]) -> bool:
+    if uid == 0 or info.st_uid == uid:
+        return True  # root, or the owner (who can always chmod/replace)
+    mode = info.st_mode
+    if stat.S_ISLNK(mode):
+        return False  # replacing a symlink is governed by its directory
+    writable = bool(mode & stat.S_IWOTH) or (
+        info.st_gid in gids and bool(mode & stat.S_IWGRP)
+    )
+    if writable and stat.S_ISDIR(mode) and mode & stat.S_ISVTX:
+        return False  # sticky: entries the principal does not own are safe
+    return writable
+
+
+def _owner_uid_allowlist() -> tuple[int, ...] | None:
+    """The owner-asserted uid allowlist for the receipt channel, ``()`` when
+    malformed (refuse everything), or None when not projected."""
+    raw = os.environ.get(PLACEMENT_RECEIPT_OWNER_UIDS_ENV, "").strip()
+    if not raw:
+        return None
+    uids: list[int] = []
+    for token in re.split(r"[,\s]+", raw):
+        if not token.isdigit():
+            return ()
+        uids.append(int(token))
+    return tuple(uids)
+
+
+def _receipt_channel_problem(path_text: str) -> str:
+    """'' when the receipt can only have been produced by the placement owner.
+
+    Trust basis (no signing authority exists by design): the owner runs as
+    its own service account (``_mastermind_exec``) and projects the receipt
+    into a path the fenced principal cannot write. The channel is defined
+    POSITIVELY, not just negatively (REVIEW_2329 r2 N-4): every component
+    of both the literal and the resolved path must be owned by root or by a
+    uid on the owner-projected allowlist (``_owner_uid_allowlist``;
+    mandatory — without it no path qualifies), AND outside the principal's
+    control — not owned by it, not writable by it — so it can neither
+    rewrite the receipt, restore an older copy, re-point a symlink, nor
+    pass off another local account's file as the owner channel. A receipt
+    the session could have written itself is refused outright.
+    """
+    uid, gids = _principal_ids()
+    allowlist = _owner_uid_allowlist()
+    if allowlist is None:
+        return (
+            "the owner-uid allowlist "
+            f"({PLACEMENT_RECEIPT_OWNER_UIDS_ENV}) is not projected, so no "
+            "receipt path can be positively attributed to the placement "
+            "owner"
+        )
+    if not allowlist:
+        return (
+            "the owner-uid allowlist "
+            f"({PLACEMENT_RECEIPT_OWNER_UIDS_ENV}) is malformed; expected "
+            "comma-separated positive uids"
+        )
+    allowed_owners = {0, *allowlist}
+    literal = Path(os.path.abspath(path_text))
+    resolved = Path(os.path.realpath(path_text))
+    for chain in (literal, resolved):
+        for component in (*reversed(chain.parents), chain):
+            try:
+                info = os.lstat(component)
+            except OSError:
+                return f"{component} cannot be inspected"
+            if _principal_controls(info, uid, gids):
+                return (
+                    f"{component} is owned or writable by this session's "
+                    "principal"
+                )
+            if info.st_uid not in allowed_owners:
+                return (
+                    f"{component} is owned by uid {info.st_uid}, which is "
+                    "neither root nor on the owner-uid allowlist the "
+                    "placement owner projected"
+                )
+    try:
+        if not stat.S_ISREG(os.stat(resolved).st_mode):
+            return f"{resolved} is not a regular file"
+    except OSError:
+        return f"{resolved} cannot be inspected"
     return ""
-
-
-def _provider_token_matches(token: str, allowed: set[str]) -> bool:
-    """Composite launch modes (``glm-codex``, ``codex-native``) match when a
-    dash/underscore segment equals a reserved value; a wholly different lane
-    (``grok`` vs a ``glm`` reservation) does not."""
-    if not token:
-        return True
-    segments = set(re.split(r"[-_]", token))
-    return any(value and (value == token or value in segments) for value in allowed)
 
 
 def _expected_projection(binding: dict) -> dict[str, str]:
@@ -413,9 +823,7 @@ def _expected_projection(binding: dict) -> dict[str, str]:
     }
 
 
-def validate_execution_binding(
-    command: str, launch: "re.Match[str] | None" = None
-) -> None:
+def validate_execution_binding(command: str) -> None:
     """Refuse paid launches/delegations not covered by the CURRENT
     broker-issued ExecutionBinding (WO-11; Rev 4 S3.D l.287-289, S4 steps
     3-4).
@@ -423,11 +831,45 @@ def validate_execution_binding(
     Refusal classes: missing binding, stale fence (the reservation moved,
     was released or expired), provider substitution after reservation, and
     unaccounted descendants (a binding that does not cover this launch's
-    child identity). The binding is only an assignment of opaque references
-    — never a credential, and there is no independent signing authority:
-    it is trusted exactly as far as it matches the authenticated owner's
-    current lease receipt. This gate fences the launches it observes
-    through the provider hook; it does not fence arbitrary processes.
+    child identity, or more than one paid launch under one binding). The
+    binding is only an assignment of opaque references — never a
+    credential, and there is no independent signing authority: it is
+    trusted exactly as far as it matches the owner's current lease receipt.
+
+    Trust basis and what remains trusting:
+
+    * Session environment (binding, receipt path, optional digest pin): the
+      owner projects it into the provider process; a launched command cannot
+      alter the environment this hook runs in, so command-level assignments
+      of these names are ignored.
+    * Receipt: accepted only from an owner-only channel — every component
+      of its path must be owned by root or a uid on the owner-projected
+      allowlist AND outside the fenced principal's control (see
+      ``_receipt_channel_problem``). The principal therefore cannot forge,
+      roll back or replay it, no third local account's file qualifies as
+      the channel, and a receipt it could have written is refused. This
+      relies on the OS uid boundary between the session and the owner's
+      service account: a same-uid owner gets no shared-placement launches
+      at all (fail closed), and root is outside this model.
+    * Lease currency: the receipt is as current as the owner's re-projection
+      (atomic replace per lease event, WO-18). If the owner stops
+      re-projecting, ``lease_expires_at_ms`` still bounds the lease.
+
+    Lexical scope (documented, not claimed): the gate judges the command
+    text it is shown — every wrapper invocation in it (all five shapes,
+    repeated, heredoc bodies included, off-list modes refused) and every
+    identity assignment form, with backslash-newline canonicalised as a
+    POSIX join (empty string). Runtime-multiplexed launches (for/while/
+    until bodies, xargs/parallel/find -exec executors) are refused as
+    unaccounted descendants; interpreter one-liners and computed command
+    words carrying wrapper tokens are refused as unobservable
+    (conservative — an interpreter flag cluster c/e/m/r plus a wrapper
+    word in the same simple command is denied even when innocent).
+    Scripts staged in an EARLIER command or a
+    file and executed later, and environment injected by provider-side
+    mechanisms outside the command, are not observed; eval/source/
+    computed-name assignments in a launch command are refused as
+    unobservable.
     """
     raw_binding = os.environ.get(BINDING_ENV, "").strip()
     if not raw_binding:
@@ -458,8 +900,19 @@ def validate_execution_binding(
             "cannot be checked against the current lease. Never launch a "
             "paid child while placement truth is uncertain."
         )
+    channel_problem = _receipt_channel_problem(receipt_path)
+    if channel_problem:
+        deny(
+            "Mastermind shared-placement guard: the placement receipt is not "
+            f"owner-authenticated — {channel_problem}, so the fenced session "
+            "could have forged, rolled back or replayed it. The receipt must "
+            "be projected by the placement owner into a path this session "
+            "cannot write. Never launch a paid child while placement truth "
+            "is uncertain."
+        )
     try:
-        receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+        receipt_bytes = Path(receipt_path).read_bytes()
+        receipt = json.loads(receipt_bytes.decode("utf-8"))
     except (OSError, ValueError):
         deny(
             "Mastermind shared-placement guard: the owner placement receipt "
@@ -467,6 +920,23 @@ def validate_execution_binding(
             "against the current lease. Never launch a paid child while "
             "placement truth is uncertain."
         )
+    pinned_digest = os.environ.get(PLACEMENT_RECEIPT_DIGEST_ENV, "").strip().lower()
+    if pinned_digest:
+        if not _BINDING_HEX64_RE.match(pinned_digest):
+            deny(
+                "Mastermind shared-placement guard: receipt integrity — "
+                f"{PLACEMENT_RECEIPT_DIGEST_ENV} must be the 64-char hex "
+                "SHA-256 of the owner-written receipt."
+            )
+        if hashlib.sha256(receipt_bytes).hexdigest() != pinned_digest:
+            deny(
+                "Mastermind shared-placement guard: receipt integrity — the "
+                f"placement receipt at {receipt_path} does not match the "
+                "digest the owner pinned into this session; the receipt was "
+                "rewritten, replayed or re-projected since claim. Re-claim "
+                "through the placement authority instead of launching on an "
+                "unverifiable lease."
+            )
     if (
         not isinstance(receipt, dict)
         or str(receipt.get("schema") or "") != PLACEMENT_RECEIPT_SCHEMA
@@ -482,9 +952,8 @@ def validate_execution_binding(
 
     # Unaccounted descendants: the presented binding must BE the owner's
     # current fenced assignment — same (root, immediate parent, logical
-    # child) identity, same admitted digest, same fenced attempt. A binding
-    # for a different child under this session is a descendant the
-    # placement authority never admitted or claimed.
+    # child) identity, same admitted digest, same fenced attempt and
+    # assignment generation.
     for name in _BINDING_IDENTITY_FIELDS:
         if str(binding.get(name)) != str(current.get(name)):
             deny(
@@ -504,15 +973,24 @@ def validate_execution_binding(
             "Mastermind shared-placement guard: placement receipt "
             "fence_counter must be an integer."
         )
-    fence_held = binding.get("fence_counter", 0)
-    lease_state = str(receipt.get("lease_state") or "").strip().upper()
+    if fence_now != current.get("fence_counter") or str(
+        receipt.get("attempt_ref")
+    ) != str(current.get("attempt_ref")):
+        deny(
+            "Mastermind shared-placement guard: placement receipt is "
+            "internally inconsistent (top-level fence_counter/attempt_ref "
+            "disagree with its embedded execution_binding)."
+        )
+    fence_held = binding.get("fence_counter")
+    lease_state = receipt.get("lease_state")
     expires_ms = receipt.get("lease_expires_at_ms")
-    expired = (
-        isinstance(expires_ms, int)
-        and not isinstance(expires_ms, bool)
-        and int(time.time() * 1000) >= expires_ms
-    )
-    if fence_held != fence_now or lease_state != "HELD" or expired:
+    if isinstance(expires_ms, bool) or not isinstance(expires_ms, int):
+        deny(
+            "Mastermind shared-placement guard: placement receipt "
+            "lease_expires_at_ms must be an integer (epoch milliseconds)."
+        )
+    expired = int(time.time() * 1000) >= expires_ms
+    if fence_held != fence_now or lease_state != LEASE_STATE_HELD or expired:
         deny(
             "Mastermind shared-placement guard: stale fence — the presented "
             f"binding holds fence {fence_held} but the owner's current "
@@ -522,56 +1000,121 @@ def validate_execution_binding(
             "authority instead of launching on a superseded assignment."
         )
 
-    # Server-derived projections: the effective identity (explicit command
-    # assignment wins over inherited environment) must equal what the
-    # binding projects.
+    if not command:
+        launches: list[tuple[int, str, str, bool]] = []
+    else:
+        if _UNOBSERVABLE_ENV_RE.search(_canonical_command(command)):
+            deny(
+                "Mastermind shared-placement guard: unobservable launch "
+                "environment — eval, source/., BASH_ENV/ENV or a computed "
+                "variable name can change the child's POOL_* identity outside "
+                "what this guard can check. Run the paid launch as a plain "
+                "command."
+            )
+        launches = _wrapper_invocations(command)
+        if launches and _runtime_multiplexed(
+            _canonical_command(command),
+            [offset for offset, _, _, _ in launches],
+        ):
+            deny(
+                "Mastermind shared-placement guard: runtime-multiplexed "
+                "launch — a for/while/until loop body or an xargs/parallel/"
+                "find -exec executor repeats this paid launch at runtime, "
+                "but the current binding covers exactly one attempt. Every "
+                "paid child must be admitted and claimed through the "
+                "placement authority before launch."
+            )
+
+    # Server-derived projections: EVERY identity value the launched child
+    # could receive must equal what the binding projects (canonical view of
+    # all assignment/clearing forms; see _effective_identity_values).
     for env_name, expected_value in _expected_projection(binding).items():
-        effective = _command_or_environment_value(command, env_name)
-        if effective != expected_value:
+        declared = _effective_identity_values(command, env_name)
+        if declared is None:
+            declared = [os.environ.get(env_name, "").strip()]
+        offending = [value for value in declared if value != expected_value]
+        if offending:
             deny(
                 "Mastermind shared-placement guard: "
                 f"{env_name} is a server-derived projection of the current "
                 f"{EXECUTION_BINDING_SCHEMA}; this launch declares "
-                f"{effective!r} but the binding projects {expected_value!r}. "
-                "A child cannot re-root, re-parent or promote itself by "
-                "changing the environment."
+                f"{offending[0]!r} but the binding projects {expected_value!r}"
+                + (
+                    f" ({len(declared)} assignments of {env_name} in one "
+                    "command; every one must equal the projection)"
+                    if len(declared) > 1
+                    else ""
+                )
+                + ". A child cannot re-root, re-parent or promote itself by "
+                "changing the environment (unset/env -i/nested shells count)."
             )
 
-    # Provider substitution: after reservation the launch must use the
-    # reserved provider/pool, not a different paid lane.
-    if launch is not None:
-        token = launch_provider_token(command[launch.start():])
-        allowed = {
-            str(binding.get("pool_ref") or "").strip().lower(),
-            str(binding.get("provider_ref") or "").strip().lower(),
-        }
-        if not _provider_token_matches(token, allowed):
-            reserved = sorted(name for name in allowed if name)
+    # Every paid launch in the command, positionally: an off-list wrapper
+    # mode is refused (never ignored); every token must equal the reserved
+    # pool_ref EXACTLY (no composite/segment acceptance); one binding covers
+    # one attempt, so a second launch is an unaccounted descendant.
+    reserved = str(binding.get("pool_ref") or "").strip().lower()
+    for _, wrapper, token, known in launches:
+        if not known:
+            deny(
+                "Mastermind shared-placement guard: unknown wrapper mode — "
+                f"{wrapper} {token or '<missing>'!r} is not on the recognised "
+                "paid-launch vocabulary, so it is treated as a paid launch the "
+                "guard cannot attribute and refused."
+            )
+        if token != reserved:
             deny(
                 "Mastermind shared-placement guard: provider substitution — "
-                f"the current binding reserved {reserved} but this launch "
-                f"requests {token!r}. A reservation cannot be re-pointed at "
-                "a different provider after the fact; re-claim through the "
+                f"the current binding reserved pool_ref {reserved!r} but this "
+                f"launch requests {token!r}. Launch tokens must equal the "
+                "reserved pool exactly; a reservation cannot be re-pointed at "
+                "a different provider after the fact. Re-claim through the "
                 "placement authority."
             )
+    if len(launches) > 1:
+        deny(
+            "Mastermind shared-placement guard: unaccounted descendant — "
+            f"this command carries {len(launches)} paid launches "
+            f"{[token for _, _, token, _ in launches]} but the current binding "
+            "covers exactly one attempt. Every paid child must be admitted "
+            "and claimed through the placement authority before launch."
+        )
 
 
-def guard_fabric_launch(command: str) -> None:
-    launch = FABRIC_LAUNCH_RE.search(command)
-    if launch is None:
+def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
+    raw = command if raw_command is None else raw_command
+    launches = list(FABRIC_LAUNCH_RE.finditer(command))
+    armed = shared_placement_armed()
+    # An off-list wrapper mode is still an observed launch (REVIEW_2329
+    # M-4): under shared placement it is refused by the gate; otherwise it
+    # gets the legacy identity checks instead of passing unchecked.
+    invocations = _wrapper_invocations(raw if armed else command)
+    if armed:
+        canon = _canonical_command(raw)
+        if _WRAPPER_RE.search(canon) and _SHELL_FEED_RE.search(canon):
+            deny(
+                "Mastermind shared-placement guard: unobservable launch — "
+                "wrapper source fed to a shell launches without a visible "
+                "wrapper invocation. Invoke the wrapper directly."
+            )
+        # REVIEW_2329 r2 N-3: interpreter one-liners and computed command
+        # words carrying wrapper tokens never reach the wrapper scan, so
+        # they are refused here — BEFORE the no-launch early return that
+        # used to let an armed session launch with zero binding validation.
+        _deny_computed_launch(canon)
+    if not launches and not invocations:
         return
 
     # WO-11: shared-placement sessions validate the broker-issued
     # ExecutionBinding against the owner's current lease BEFORE any other
     # launch check — on the common paid-launch path, engine-independent.
-    if shared_placement_armed():
-        validate_execution_binding(command, launch)
+    # The armed gate judges the raw command, heredoc bodies included.
+    if armed:
+        validate_execution_binding(raw)
 
     inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
-    root_assigned, assigned_root = _command_assignment(
-        command, "POOL_ORCHESTRATOR_ID"
-    )
-    if inherited_root and root_assigned and assigned_root != inherited_root:
+    assigned_roots = _command_assignments(command, "POOL_ORCHESTRATOR_ID")
+    if inherited_root and any(root != inherited_root for root in assigned_roots):
         deny(
             "Mastermind Fabric root-budget guard: POOL_ORCHESTRATOR_ID may not "
             "be rebound inside an already-rooted provider session. Preserve the "
@@ -600,7 +1143,7 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
         return
     command = str(tool_input.get("command") or "")
     clean = strip_heredocs(command)
-    guard_fabric_launch(clean)
+    guard_fabric_launch(clean, command)
     if "gh " not in clean:
         return
 
