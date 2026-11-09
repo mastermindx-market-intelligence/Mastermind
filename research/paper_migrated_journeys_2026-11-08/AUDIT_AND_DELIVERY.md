@@ -20,7 +20,7 @@ Direct entry points for the fourteen files amended in this successor. Each file 
 | [Forex](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0) | Separated local preparation, account saving and uncertain outcomes; updated My watches entry paths. |
 | [Breadth](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0) | Completed selected-session inspectors and accessible data/recovery references. |
 | [Catalyst](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0) | Aligned four review-level entry actions with the existing local-save behavior. |
-| [Market Structure / Stages](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) | Qualified dated context and added EN/ZH exact-value companions, with 105 cells verified in each. |
+| [Market Structure / Stages](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) | Added EN/ZH exact-value companions and a populated 390px Stage screener with separate clocks, classification recency and local-watch meaning. |
 | [Confluence](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0) | Added protected-list read-failure states that retain permitted public context. |
 | [Returns Calendar](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Q-0) | Added current-source early-close and evidence-state references; qualified historical fixtures. |
 | [T47 ranked search](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) | Made Clear restore the previous disclosure choice and focus in paired EN/ZH draft states. |
@@ -837,9 +837,71 @@ No medical or market conclusion, source record, research save, alert delivery, r
 
 The bounded read-only Policy audit found no justified new amendment in the inspected navigation, evidence/date semantics, source-note counts, missing-data treatment or responsive disclosures. It identified later documented changes beyond the accepted PR2302 work, including the [saved design/build packet](https://github.com/mastermindx-market-intelligence/macro/blob/0e9ccf41a0bb62ba0c0b28fd716b39017afd468e/research/design_candidates/production_design_20261108/CONTINUED_IMPROVEMENTS.md), mobile control sizing and narrow chart reflow. Those later writers' work and the existing release/source/unknown-effect boundaries remain intact. This successor made no Policy mutation and does not recertify its runtime integrations.
 
+
+## Stage Universe — complete the populated phone path
+
+The [Market Structure, Stages and Allocation file](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) had a populated desktop screener at `O4-0`, while its390px Stage board `U9-0` covered unavailable, loading and empty states only. Root also inspected the migrated Terminal destination, file `01M3NSZGE8JWN2EZCSF0DT05RM`, page `p-18-0`: its Complete board `1XGS-0` retained the same degraded-state coverage. Neither inspected destination supplied a populated phone counterpart.
+
+### Incumbent source and scope
+
+The binding remains candidate [#10734](https://github.com/mastermindx-market-intelligence/Macro/pull/10734), head `4690c9e9e3bd32943f4d551318210165147a4eb9`, Draft/unarmed. Root read `templates/stage_analysis.html.j2`, blob `6f78d601b974288204b5d186b3cb728344221ae4`, at that immutable head.
+
+The existing source owns loaded-row ticker/name search, region/stage filters, row watch membership, readiness-gated CSV export of the current filtered view, and distinct target-classification-week and price-data-session fields. Watch membership uses the browser-local `sga_watch` store; it does not establish an account alert. The inspected filter predicate contains no watchlist-only filter, so the new phone omits that unsupported desktop shortcut. No new route, account store, monitor or control plane was introduced.
+
+The candidate runtime has additional table columns and formats ATR/price as a percentage. The existing Paper fixture stores raw fractions. This new card layout is explicitly a **proposed responsive design**, and its labels preserve those raw fractions rather than silently converting or mislabeling them. It is not a capture of the candidate runtime.
+
+### Native populated view
+
+New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390**, is390×2892 at x4545/y−901, with an80px horizontal gap from the existing source-data companion. It reuses the existing dark phone shell, with content-sized sections and20px side padding.
+
+| Section | Native node | Delivered behavior and meaning |
+| --- | --- | --- |
+| Header | `1NO-0` | Classification week2026-10-30 and price-data session2026-11-02 are separately labeled; the design is illustrative. |
+| Population | `1NX-0` |1,300 classified names, presented in a2×2 grid: Basing300/23.1%, Advancing580/44.6%, Topping240/18.5%, Declining180/13.8%. Unresolved names are excluded from the proportions; zero differs from unavailable. |
+| Navigation | `1OQ-0` | Six existing domain tabs reflow into two rows of44px targets. |
+| Screener controls | `1P6-0` | US, All stages, labeled company/ticker search and Export current view have44px targets. The five displayed samples are distinct from the1,300-name population. |
+| Five cards | `1PO-0` | Every original company, stage, last value, stored rating, ATR multiple, raw ATR/price fraction, recency and watch marker is preserved. Each watch target is44×44. |
+| Reading/source binding | `1T7-0` | Explains stored illustrative ratings, stale/unverified exclusion from current ranks, raw fraction versus ATR multiple, browser-local watch scope, and the proposed layout/runtime-proof boundary. |
+| Closing disclosure | `1JQ-0` | Retains the illustrative companies/values and classification-as-research-context qualification. |
+
+The five card roots are `1PP-0`, `1QE-0`, `1R3-0`, `1RS-0` and `1SH-0`. CHAR retains **Stale ·2026-10-23**; DELT retains **Week unverified**. ALFA, BRAV and ECHO retain their2026-10-30 current classification labels. BRAV alone retains the filled watch star. The precise0.020 fraction and0.0 ATR zero remain distinct from unavailable evidence.
+
+The desktop footer `U8-0` now points to **07 /1JP-0** and preserves its specimen qualification. The original desktop data, recovery atlas `U9-0`, existing source-data companions, base phone, Terminal destination, reference holds and incomplete-migration status remain unchanged.
+
+### Verification and release
+
+Root inspected native screenshots of the header, population grid, navigation, controls, all five complete cards, reading contract and desktop reference footer. Native bounds verify the final footer ends20px above the2892px frame bottom; all child sections fit the350px content width. No accent rail was added.
+
+Exact native text comparison passed:
+
+- All **40 of40 row data cells** match the original desktop fixture.
+- All **12 of12 population values** match the original fixture.
+- All **83 unaffected desktop text leaves** remain identical.
+
+All10 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `1JP-0` and `O4-0`.
+
+- `paper-stage-populated-phone-copy-20261109-c4-sd`
+- `paper-stage-populated-phone-header-20261109-c4-sd`
+- `paper-stage-populated-phone-population-20261109-c4-sd`
+- `paper-stage-populated-phone-navigation-20261109-c4-sd`
+- `paper-stage-populated-phone-controls-20261109-c4-sd`
+- `paper-stage-populated-phone-rows-20261109-c4-sd`
+- `paper-stage-populated-phone-reading-contract-20261109-c4-sd`
+- `paper-stage-populated-phone-reference-20261109-c4-sd`
+- `paper-stage-populated-phone-name-20261109-c4-sd`
+- `paper-stage-populated-phone-finish-20261109-c4-sd`
+
+This phase completes the missing populated phone design. It does not prove browser filtering, keyboard behavior, watch-storage persistence, CSV download, account behavior, deployment or release acceptance.
+
+### Additional bounded audits — preserve existing work
+
+The read-only MarketOntology audit identified current R22–R25 architecture, responsive and evidence contracts plus later scenario-review/compare states that already cover unavailable sources, version identity and uncertain saves. The inspected candidate #10704 at `e971475d130393ed3419156890a3f08390efe80b` remained open and unmerged. No new Paper amendment or implementation acceptance was warranted.
+
+The read-only News Intelligence audit found later Activity, count-window and publisher-return work in the file's current authority map and candidate #10874 at `6ac8c20013dbea575f7007d51ba37d952056f927`. The retained recovery states and later writers' work were preserved. This audit did not turn an absent branch file into a missing-design claim and did not recertify browser or production behavior. Neither file was mutated by this successor.
+
 ## Active continuation
 
-The successor now covers fourteen design files, with a direct entry map near the top of this report. Preserve accepted work and existing holds. Bounded read-only audits are checking current MarketOntology and News Intelligence for a material remaining gap beyond prior accepted or later live work. Continue with an evidence-supported improvement only; preserve coherent surfaces and their existing owners.
+The successor covers fourteen design files, with a direct entry map and the newly completed populated Stage phone. Preserve accepted work and existing holds. Continue bounded read-only reasoning across remaining current destinations to find a material, evidence-supported architecture or feature gap; keep each new amendment within its existing source and design owner.
 
 
 ## Acceptance boundary
