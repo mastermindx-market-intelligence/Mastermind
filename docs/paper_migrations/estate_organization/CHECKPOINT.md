@@ -34,11 +34,11 @@ Terminal C9-0 was read again and preserved. Original Terminal remains working un
 
 ## Release reconciliation
 
-Original native CLI actor remains mastermindxryan on m2studio, source author MastermindX1. The earlier auto-merge request no longer has a queue entry; PR #2364 remains OPEN, same head, unmerged. It was deliberately returned to Draft for this authorized continuation. Diagnose original run/queue outcome before a newly qualified release request; do not replay the former request. The administrative branch-protection 403 remains denied; no alternate account/carrier retry. Actual native controls/required evidence bind.
+Original native CLI actor remains mastermindxryan on m2studio, source author MastermindX1. The earlier auto-merge request no longer has a queue entry; PR #2364 remains OPEN, same head, unmerged. It was deliberately returned to Draft for this authorized continuation. Original merge-group 5a2335ab3524ad1233df4bd9345fd87ef425503c failed both attempt-1 workflows: CI [42572460035](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42572460035) failed the D8 source-diff identity scan in shard 4 and its aggregate gate; Hermes [42572459987](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42572459987) failed its pinned KittenTTS download with HTTP 504 before qualification steps. Failed-check removal is consistent with these results; the actual queue-removal reason is not established. Diagnose the exact source-diff failure before newly qualified delivery; do not replay the former request. The administrative branch-protection 403 remains denied; no alternate account/carrier retry. Actual native controls/required evidence bind.
 
 ## Local Agent README rollout
 
-Verified 15 of 50 planned local guides at 2026-11-09T11:56:17.029Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector, Crypto and F02 pilot screenshots are readable without clipping or overlap. The central bounded-reading recipe is also visually verified. The first 15 guide footers explicitly distinguish dated scope evidence from the current checkpoint; later guides use that same template. No product board was rewritten.
+Verified 20 of 50 planned local guides at 2026-11-09T12:03:37.574Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector, Crypto and F02 pilot screenshots are readable without clipping or overlap. The central bounded-reading recipe is also visually verified. The first 15 guide footers explicitly distinguish dated scope evidence from the current checkpoint; later guides use that same template. No product board was rewritten.
 
 | File ID | Guide page | Exact guide node | Strategy |
 | --- | --- | --- | --- |
@@ -57,9 +57,14 @@ Verified 15 of 50 planned local guides at 2026-11-09T11:56:17.029Z. Each complet
 | `01M32XYWDYSFTNDZVJKQ5QHT33` | `p-9-0` | `4H7-0` | dedicated_agent_page |
 | `01M6Y2Z642VN20X8WDSWV07M0M` | `p-2-0` | `29O-0` | dedicated_agent_page |
 | `01M6Y31C449F02KGRNPGK94Q8D` | `p-3-0` | `1FO-0` | dedicated_agent_page |
+| `01M6Y32A3E4XC51FQVJN98YRPH` | `p-3-0` | `38N-0` | dedicated_agent_page |
+| `01M6Y309YH7PJZMF23R7EDH3CM` | `p-3-0` | `2SF-0` | dedicated_agent_page |
+| `01M6Y2P933V2Z18V1S8703YXEJ` | `p-3-0` | `1WL-0` | dedicated_agent_page |
+| `01M6Y2GT8S3YP4TK052PPESZEC` | `p-5-0` | `3V9-0` | dedicated_agent_page |
+| `01M6Y3DCDDW541ZR38J1V52A9Y` | `p-5-0` | `2Q1-0` | dedicated_agent_page |
 
 The existing FILE_INDEX.json holds each target's exact read_next routes and local_agent_guide_plan, including stable operation prefixes and the eight reusable guidance targets. Completed agent_entry locators include the small guide node_id; read that node rather than the entire canvas.
 
 ## Exact next action
 
-Continue with **Shared Market · Tools and Research Launcher**, file `01M6Y32A3E4XC51FQVJN98YRPH`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.
+Continue with **Intelligence Hub · R4 Workspace**, file `01M2VWK62FA5S4VVF6G7SBPE5J`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.

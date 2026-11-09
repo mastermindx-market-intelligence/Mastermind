@@ -7,7 +7,7 @@
   "counts": {
     "resources": 83,
     "readable_design_files": 80,
-    "pages": 569,
+    "pages": 575,
     "dividers": 19
   },
   "entry_url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
@@ -1487,9 +1487,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -1520,11 +1527,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "page_id": "p-3-0",
+        "board_id": "38N-0",
+        "node_id": "38N-0",
+        "url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
@@ -1556,12 +1566,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-16",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:58:43.999Z"
     },
     {
       "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
@@ -1576,9 +1587,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -1609,11 +1627,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "page_id": "p-3-0",
+        "board_id": "2SF-0",
+        "node_id": "2SF-0",
+        "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
@@ -1656,12 +1677,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-17",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:59:36.213Z"
     },
     {
       "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
@@ -1676,9 +1698,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -1709,11 +1738,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "page_id": "p-3-0",
+        "board_id": "1WL-0",
+        "node_id": "1WL-0",
+        "url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
@@ -1756,12 +1788,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-18",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T12:00:18.765Z"
     },
     {
       "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
@@ -1776,9 +1809,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 3,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -1786,6 +1826,13 @@
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0",
           "baseline_name": "F01 · Shell system · v1 candidate · Review pending"
+        },
+        {
+          "type": "page",
+          "id": "p-4-0",
+          "name": "Today · Daily desk · Implementation candidate · 9 Nov",
+          "icon": "design",
+          "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-4-0"
         },
         {
           "type": "page",
@@ -1817,11 +1864,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "page_id": "p-5-0",
+        "board_id": "3V9-0",
+        "node_id": "3V9-0",
+        "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
@@ -1886,12 +1936,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-19",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T12:01:08.250Z"
     },
     {
       "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
@@ -1906,9 +1957,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 4,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -1955,11 +2013,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "page_id": "p-5-0",
+        "board_id": "2Q1-0",
+        "node_id": "2Q1-0",
+        "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
@@ -2013,12 +2074,13 @@
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-20",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T12:01:45.564Z"
     },
     {
       "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
@@ -10964,7 +11026,7 @@
     }
   ],
   "observed_at": "2026-11-09 11:03:44 UTC",
-  "organization_verified_at": "2026-11-09T11:56:17.029Z",
+  "organization_verified_at": "2026-11-09T12:03:37.574Z",
   "agent_navigation": {
     "schema": "paper.estate.agent_navigation.v1",
     "protocol": {
@@ -10977,9 +11039,9 @@
     "roles_are_navigation_not_permissions": true,
     "source_acceptance_not_refreshed_by_metadata": true,
     "product_extraction": "Agent guides and navigation-only boards are internal documentation. Select exact product boards after scope/source inspection.",
-    "rollout": "15/50 local guides verified; central protocol applied.",
+    "rollout": "20/50 local guides verified; central protocol applied.",
     "source_record": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6738066883",
-    "local_guides_verified": 15,
+    "local_guides_verified": 20,
     "local_guides_planned": 50
   }
 }

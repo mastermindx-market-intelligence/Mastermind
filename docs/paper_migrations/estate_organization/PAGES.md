@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T11:56:17.029Z. 569 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T12:03:37.574Z. 575 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
@@ -184,10 +184,11 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y31C449F02KG
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-3-0) | — |
 | `p-1-0` | [Shared Market · All Tools + Research Launcher · Reference](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0) | — |
 | `p-2-0` | [Build · Mobile category navigation](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-2-0) | — |
 
@@ -195,10 +196,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-3-0) | — |
 | `p-1-0` | [Shared Market · Watchlists + Save States · Reference](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0) | — |
 | `p-2-0` | [Proposed · Saved item to exact watchlist](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) | — |
 
@@ -206,10 +208,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-3-0) | — |
 | `p-1-0` | [Mastermind · Shared Shell · Review 01 · 2026-09-24](https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0) | — |
 | `p-2-0` | [Investor Shell · Market Overview · Design Candidates](https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-2-0) | — |
 
@@ -217,11 +220,13 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: proposal. F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-5-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-5-0) | — |
 | `p-1-0` | [F01 · Shell system · v1 candidate · Review pending](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0) | — |
+| `p-4-0` | [Today · Daily desk · Implementation candidate · 9 Nov](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-4-0) | — |
 | `p-3-0` | [Proposed · Today comparison basis](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-3-0) | — |
 | `p-2-0` | [Shared Shell · Integration reference · R1](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) | Shared Shell · Completion & Integration · R1 |
 
@@ -229,10 +234,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-5-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-5-0) | — |
 | `p-1-0` | [Confluence Screener · Governed Reference · 2026-09-22](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0) | — |
 | `p-2-0` | [Confluence Screener · R2 · 2026-09-26](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0) | — |
 | `p-3-0` | [R3 · Public snapshot states](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-3-0) | — |
