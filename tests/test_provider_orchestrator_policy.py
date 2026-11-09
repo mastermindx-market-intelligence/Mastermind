@@ -1583,8 +1583,21 @@ def test_m1_every_identity_assignment_is_held_to_the_projection(
     output = _emitted(capsys)
     assert output["permissionDecision"] == "deny"
     reason = output["permissionDecisionReason"]
-    assert "server-derived projection" in reason
-    assert "assignments of POOL_" in reason
+    # r6 (LANE_EXECUTIVE_DIRECTOR_C3 ledger, T-1): the nested-export and
+    # dynamic-value rows are now refused by the ADMIT rule before the
+    # projection check runs (an ``export`` builtin in the -c body / a
+    # computed ``$OTHER`` assignment are not an admitted form). Verdict
+    # unchanged (deny); the reason is the structural code.
+    structural = {
+        "export POOL_ORCHESTRATOR_ID": "R6_ENV_BUILTIN",
+        "=$OTHER": "R6_EXPANSION",
+    }
+    code = next((c for marker, c in structural.items() if marker in command), "")
+    if code:
+        assert code in reason
+    else:
+        assert "server-derived projection" in reason
+        assert "assignments of POOL_" in reason
 
     # The helper itself reports every occurrence in positional order.
     assert guard._command_assignments(
@@ -1713,7 +1726,7 @@ def test_m2_receipt_internal_consistency_and_expiry_type_are_enforced(
             "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
             "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3; "
             "pool run grok b /tmp grok-4.6",
-            "provider substitution",
+            "R6_COMPOUND_LIST",  # r6 ledger T-2: was "provider substitution"
         ),
         # P3c: substituted first launch, matching later launch (regex
         # priority used to grab the later `pool run glm`).
@@ -1721,14 +1734,14 @@ def test_m2_receipt_internal_consistency_and_expiry_type_are_enforced(
             "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
             "POOL_TASK_CLASS=code /opt/mastermind/ext/sub.sh grok /tmp/p.txt "
             "/tmp grok-4.6; pool run glm a /tmp glm-5.3",
-            "provider substitution",
+            "R6_COMPOUND_LIST",  # r6 ledger T-2: was "provider substitution"
         ),
         # P3d: decoy launch text inside an echo, real launch substituted.
         (
             'echo "pool run glm"; POOL_ORCHESTRATOR_ID=root-orch-1 '
             "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
             "/opt/mastermind/ext/sub.sh grok /tmp/p.txt /tmp grok-4.6",
-            "provider substitution",
+            "R6_COMPOUND_LIST",  # r6 ledger T-2: was "provider substitution"
         ),
         # Two launches that BOTH match the reservation: one binding covers
         # exactly one attempt, so the second is an unaccounted descendant.
@@ -1903,17 +1916,34 @@ def test_m1_canonical_identity_still_admits_faithful_launches(
     monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
     monkeypatch.setenv("POOL_TASK_CLASS", "code")
     for command in (
-        # env -i followed by the projected identity is faithful.
-        "env -i POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
-        "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
-        # Reads and bare re-exports of the inherited value change nothing.
-        'echo "$POOL_ORCHESTRATOR_ID ${POOL_PARENT_RUN_ID}"; '
-        "export POOL_ORCHESTRATOR_ID; pool run glm a /tmp glm-5.3",
         # Quoted literal equal to the projection.
         "env \"POOL_ORCHESTRATOR_ID=root-orch-1\" pool run glm a /tmp glm-5.3",
+        # The faithful spelling of the former env -i row (no -i).
+        "env POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
     ):
         _guard_launch(shared_placement, command)
         assert capsys.readouterr().out == "", command
+    # r6 (ledger T-3): two former ALLOW rows are now refused by the ADMIT
+    # rule. ``env -i`` also strips the owner-projected binding/receipt
+    # environment from the launched child, and a compound line (read;
+    # export; launch) is not one plain launch — the same reads/exports
+    # stay available as their own commands.
+    for command, code in (
+        (
+            "env -i POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
+            "R6_PREFIX_FORM",
+        ),
+        (
+            'echo "$POOL_ORCHESTRATOR_ID ${POOL_PARENT_RUN_ID}"; '
+            "export POOL_ORCHESTRATOR_ID; pool run glm a /tmp glm-5.3",
+            "R6_COMPOUND_LIST",
+        ),
+    ):
+        with pytest.raises(SystemExit):
+            _guard_launch(shared_placement, command)
+        assert code in _emitted(capsys)["permissionDecisionReason"], command
 
 
 def test_m2_receipt_the_fenced_principal_can_write_is_refused(
@@ -2023,7 +2053,9 @@ def test_m3_every_wrapper_shape_is_enumerated_and_checked(
             shared_placement,
             f"{prefix}pool run glm a /tmp m; true; true; /opt/x/remote_sub.sh h grok p",
         )
-    assert "'grok'" in _emitted(capsys)["permissionDecisionReason"]
+    # r6 ledger T-4: refused as a compound list before token comparison
+    # (was asserted via the substituted token 'grok').
+    assert "R6_COMPOUND_LIST" in _emitted(capsys)["permissionDecisionReason"]
     # Wrapper source fed to a shell is not a visible invocation: refused.
     with pytest.raises(SystemExit):
         _guard_launch(shared_placement, f"{prefix}cat /opt/x/sub.sh | bash -s grok a")
@@ -2045,7 +2077,10 @@ def test_minor_heredoc_staged_wrapper_launch_is_judged_under_shared_placement(
     )
     with pytest.raises(SystemExit):
         _guard_launch(shared_placement, command)
-    assert "'grok'" in _emitted(capsys)["permissionDecisionReason"]
+    # r6 ledger T-5: the here-document itself refuses (was asserted via the
+    # substituted token 'grok' found inside the heredoc body).
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "R6_HEREDOC" in reason
 
 
 def test_minor_binding_counters_are_required_and_generation_compared(
@@ -2215,19 +2250,24 @@ def test_n2_runtime_multiplexed_launches_are_refused(
     assert "exactly one attempt" in reason
 
 
-def test_n2_launch_feeding_a_batch_tool_stays_allowed(
+def test_n2_launch_feeding_a_batch_tool_is_refused_under_r6(
     shared_placement: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    # A launch that runs ONCE and pipes into xargs is not multiplexed;
-    # only a launch inside the executor's own argument tail is refused.
+    # r6 ledger T-6 (was ..._stays_allowed): the r6 ADMIT rule admits a
+    # pipe only between read-only inspectors; ``xargs`` executes a program
+    # per input line, so a launch piped into it is no longer one plain
+    # launch. The plain launch alone stays admitted.
     _install(monkeypatch, tmp_path, _binding())
-    _guard_launch(
-        shared_placement,
-        _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3 | xargs grep -l glm",
-    )
+    with pytest.raises(SystemExit):
+        _guard_launch(
+            shared_placement,
+            _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3 | xargs grep -l glm",
+        )
+    assert "R6_PIPELINE" in _emitted(capsys)["permissionDecisionReason"]
+    _guard_launch(shared_placement, _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3")
     assert capsys.readouterr().out == ""
 
 
@@ -2599,7 +2639,6 @@ def test_r5_b1_structural_refusals_stay_scoped(
         _IDENTITY_PREFIX + "bash -c 'pool run glm a /tmp glm-5.3'",
         # Wrapper name present but only as data for inspectors/printers.
         "cat results.txt | grep pool",
-        "cat > /tmp/pool.json <<'EOF'\n{\"pool\": \"glm\"}\nEOF",
         "{ echo grouped; }",
         # Computed/interpreter commands with NO wrapper token anywhere.
         "TOOL=ls; $TOOL -la /tmp",
@@ -2608,6 +2647,15 @@ def test_r5_b1_structural_refusals_stay_scoped(
     ):
         _guard_launch(shared_placement, command)
         assert capsys.readouterr().out == "", command
+    # r6 ledger T-7: a here-document in a command that names a wrapper is
+    # refused (its body is program text for whatever reads it); write such
+    # a file with a non-shell tool or without the wrapper word.
+    with pytest.raises(SystemExit):
+        _guard_launch(
+            shared_placement,
+            "cat > /tmp/pool.json <<'EOF'\n{\"pool\": \"glm\"}\nEOF",
+        )
+    assert "R6_HEREDOC" in _emitted(capsys)["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize(
@@ -2723,19 +2771,496 @@ def test_r5_mb_nested_eval_source_dot(
     assert "unobservable launch environment" in reason
 
 
-def test_r5_mb_separate_process_dot_stays_allowed(
+def test_r5_mb_separate_process_dot_is_refused_under_r6(
     shared_placement: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    # N5-ctl2 pinned behaviour: a nested shell that sources and EXITS
-    # before the launch cannot change the launch environment, so it stays
-    # allowed — the refusal is scoped to the SAME nested script that
-    # performs the launch.
+    # r6 ledger T-8 (was ..._stays_allowed, N5-ctl2): one LINE carrying the
+    # nested source AND the launch is a compound list, refused by the r6
+    # ADMIT rule. The N5-ctl2 intent survives as two separate commands:
+    # the sourcing shell names no wrapper (out of scope) and the plain
+    # launch is admitted.
     _r5_armed(shared_placement, monkeypatch, tmp_path)
-    _guard_launch(
-        shared_placement,
-        "bash -c '. ./env.sh'; " + _R5_LAUNCH,
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, "bash -c '. ./env.sh'; " + _R5_LAUNCH)
+    assert "R6_COMPOUND_LIST" in _emitted(capsys)["permissionDecisionReason"]
+    for command in ("bash -c '. ./env.sh'", _R5_LAUNCH):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+# --- rework r6: REVIEW_C_E_OPUS_20261109 A1 (findings 1-4) — ADMIT rule ---------
+#
+# The reviewer's adversarial-shape table, row for row, as the regression
+# suite (ledger: integrations/mmos/LANE_EXECUTIVE_DIRECTOR_C3.md). Classes
+# follow the review: MULT (one visible launch run N times), ID (identity
+# rewritten unseen), REG (r4 refused), r5-deny (already refused by r5),
+# obs-1 (honest single launch observed), deferred, doc-limit (finding 4),
+# control (honest launches/reads). Expected verdicts: every MULT/ID/REG and
+# r5-deny row DENY; obs-1 rows ALLOW when the shape is in the r6 admit
+# grammar (exec/command/nohup/setsid/timeout/nice) and DENY otherwise
+# (env -S, zsh -c, fish -c, chroot, tmux, screen — outside the closed
+# grammar by design, ledger "obs-1 verdict changes"); controls ALLOW.
+#
+# Fail-before: MASTERMIND_R6_GUARD_UNDER_TEST=<path to a guard module> runs
+# this same table against that module (verdicts only), e.g. the r5 guard
+# from ``git show f6ed10a32:ops/executive_os/provider_orchestrator_guard.py``.
+
+_R6_P = _IDENTITY_PREFIX  # faithful projected identity prefix
+_R6_L = _R6_P + "pool run glm a /tmp glm-5.3"  # faithful plain launch
+_R6_B = "pool run glm a /tmp glm-5.3"  # bare launch (inherited identity)
+_R6_SPLIT = "X='export POOL_ORCH' Y='ESTRATOR_ID=root-other'"
+_R6_PY_LOOP = "import os\nfor _ in range(3): os.system(\"" + _R6_L + "\")"
+
+#: (id, command, expected verdict, review class, r6 code that must appear)
+_R6_TABLE = [
+    # --- r5 already refused these; r6 must keep refusing them ---
+    ("xargs-sh-c", "printf 'a\\nb\\n' | xargs -I{} sh -c '" + _R6_L + "'",
+     "deny", "r5-deny", "R6_PIPELINE"),
+    ("find-exec-sh-c", "find /tmp -name '*.txt' -exec sh -c '" + _R6_L + "' \\;",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("awk-BEGIN-system",
+     "awk 'BEGIN{for(i=0;i<3;i++) system(\"" + _R6_L + "\")}'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("perl-e", "perl -e 'system(\"" + _R6_L + "\") for 1..3'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("ruby-e", "ruby -e '3.times { system(\"" + _R6_L + "\") }'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("node-e", "node -e 'for (let i = 0; i < 3; i++) "
+     "require(\"child_process\").execSync(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("python3-m", "python3 -m timeit -n 3 'import os; os.system(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("indirection", "P=pool; Q=P; ${!Q} run glm a /tmp glm-5.3",
+     "deny", "r5-deny", "R6_EXPANSION"),
+    ("eval-cmdsubst", 'eval "$(echo ' + _R6_B + ')"',
+     "deny", "r5-deny", "R6_COMMAND_SUBSTITUTION"),
+    ("here-string-python", "python3 <<< 'import os; os.system(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_HEREDOC"),
+    ("here-string-bash", "bash <<< '" + _R6_L + "'",
+     "deny", "r5-deny", "R6_HEREDOC"),
+    ("procsubst-bash", "bash <(echo '" + _R6_L + "')",
+     "deny", "r5-deny", "R6_PROCESS_SUBSTITUTION"),
+    ("bash-lc-eval-split", _R6_SPLIT + " bash -lc 'eval \"$X$Y\"; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_NESTED_SHELL"),
+    ("env-bash-c-eval-split",
+     "env " + _R6_SPLIT + " bash -c 'eval \"$X$Y\"; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_ENV_BUILTIN"),
+    ("sudo-bash-c-eval", "sudo -n bash -c 'eval \"$X\"; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("osascript-js",
+     "osascript -l JavaScript -e 'app.doShellScript(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("php-r", "php -r 'for ($i = 0; $i < 3; $i++) shell_exec(\"" + _R6_L + "\");'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("lua-e", "lua -e 'for i = 1, 3 do os.execute(\"" + _R6_L + "\") end'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("expect-c", "expect -c 'spawn " + _R6_B + "; expect eof'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("dash-c-eval", "dash -c 'eval \"$X\"; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_NESTED_SHELL"),
+    ("mksh-c-eval", "mksh -c 'eval \"$X\"; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_NESTED_SHELL"),
+    ("pwsh-c", "pwsh -c '1..3 | ForEach-Object { " + _R6_B + " }'",
+     "deny", "r5-deny", "R6_NESTED_SHELL"),
+    ("julia-e", "julia -e 'for i in 1:3; run(`" + _R6_B + "`); end'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("python3.12-c", "python3.12 -c 'import os; os.system(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("path-python-c", "/usr/bin/python3 -c 'import os; os.system(\"" + _R6_L + "\")'",
+     "deny", "r5-deny", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("bash-norc-c-source", "bash --norc -c 'source ./forged.env; " + _R6_L + "'",
+     "deny", "r5-deny", "R6_NESTED_SHELL"),
+    ("bash-c-function-twice", "bash -c 'f() { " + _R6_L + "; }; f; f'",
+     "deny", "r5-deny", "R6_GROUPING"),
+    ("set-a-dot-top", "set -a; . ./forged.env; " + _R6_B,
+     "deny", "r5-deny", "R6_ENV_BUILTIN"),
+    ("BASH_ENV-export", "export BASH_ENV=./forged.env; bash -c '" + _R6_L + "'",
+     "deny", "r5-deny", "R6_COMPOUND_LIST"),
+    # --- obs-1 (honest single launch observed by r5) ---
+    ("env-S", "env -S '" + _R6_L + "'", "deny", "obs-1", "R6_PREFIX_FORM"),
+    ("exec", _R6_P + "exec " + _R6_B, "allow", "obs-1", ""),
+    ("command", _R6_P + "command " + _R6_B, "allow", "obs-1", ""),
+    ("zsh-c", "zsh -c '" + _R6_L + "'", "deny", "obs-1", "R6_NESTED_SHELL"),
+    ("fish-c-single", "fish -c '" + _R6_L + "'", "deny", "obs-1", "R6_NESTED_SHELL"),
+    ("nohup", _R6_P + "nohup " + _R6_B, "allow", "obs-1", ""),
+    ("setsid", _R6_P + "setsid " + _R6_B, "allow", "obs-1", ""),
+    ("timeout", _R6_P + "timeout 600 " + _R6_B, "allow", "obs-1", ""),
+    ("nice", _R6_P + "nice -n 5 " + _R6_B, "allow", "obs-1", ""),
+    ("chroot", _R6_P + "chroot / " + _R6_B, "deny", "obs-1", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("tmux", "tmux new-session -d '" + _R6_L + "'",
+     "deny", "obs-1", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("screen", "screen -dmS lane sh -c '" + _R6_L + "'",
+     "deny", "obs-1", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("at-now", "echo '" + _R6_L + "' | at now", "deny", "deferred", "R6_PIPELINE"),
+    # --- MULT: one visible launch executed N times ---
+    ("array-expansion-twice", "a=(" + _R6_B + '); "${a[@]}"; "${a[@]}"',
+     "deny", "MULT", "R6_EXPANSION"),
+    ("var-wordsplit-twice", "C='" + _R6_B + "'; $C; $C", "deny", "MULT", "R6_EXPANSION"),
+    ("script-file-multiplied",
+     "yes '" + _R6_L + "' | head -n 3 > /tmp/lane.sh; bash /tmp/lane.sh",
+     "deny", "MULT", "R6_COMPOUND_LIST"),
+    # One visible recipe line, three targets: make runs it three times.
+    ("make-stdin", "printf 'all: a b c\\na b c:\\n\\t" + _R6_L + "\\n' | make -f -",
+     "deny", "MULT", "R6_PIPELINE"),
+    ("printf-format-reuse-sh-file",
+     "printf '" + _R6_L + "\\n%.0s' 1 2 3 > /tmp/lane.sh; sh /tmp/lane.sh",
+     "deny", "MULT", "R6_COMPOUND_LIST"),
+    ("bash-lc-function-twice", "bash -lc 'f() { " + _R6_L + "; }; f; f'",
+     "deny", "MULT", "R6_NESTED_SHELL"),
+    ("env-bash-c-function-twice", "env bash -c 'f() { " + _R6_L + "; }; f; f'",
+     "deny", "MULT", "R6_GROUPING"),
+    ("busybox-sh-c-fn", "busybox sh -c 'f() { " + _R6_L + "; }; f; f'",
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("zsh-repeat", "zsh -c 'repeat 3 " + _R6_L + "'", "deny", "MULT", "R6_NESTED_SHELL"),
+    ("zsh-for-short", "zsh -c 'for i (1 2 3) " + _R6_L + "'",
+     "deny", "MULT", "R6_NESTED_SHELL"),
+    ("fish-c-loop", "fish -c 'for i in 1 2 3; " + _R6_L + "; end'",
+     "deny", "MULT", "R6_NESTED_SHELL"),
+    ("tcsh-c-repeat", "tcsh -c 'repeat 3 env " + _R6_L + "'",
+     "deny", "MULT", "R6_NESTED_SHELL"),
+    ("func-if-body", "f() if true; then " + _R6_L + "; fi; f; f",
+     "deny", "MULT", "R6_GROUPING"),
+    ("func-case-body", "f() case x in x) " + _R6_L + ";; esac; f; f",
+     "deny", "MULT", "R6_GROUPING"),
+    ("alias-reuse", "shopt -s expand_aliases\nalias launch='" + _R6_L
+     + "'\nlaunch\nlaunch", "deny", "MULT", "R6_ENV_BUILTIN"),
+    ("builtin-trap", "builtin trap '" + _R6_L + "' USR1; kill -USR1 $$; kill -USR1 $$",
+     "deny", "MULT", "R6_ENV_BUILTIN"),
+    ("hyperfine", "hyperfine --runs 3 '" + _R6_L + "'",
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("git-bisect-run", "git bisect run env " + _R6_L,
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("entr", "ls notes.txt | entr env " + _R6_L, "deny", "MULT", "R6_PIPELINE"),
+    ("launchctl-submit", "launchctl submit -l lane -- env " + _R6_L,
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("crontab", "echo '* * * * * " + _R6_L + "' | crontab -",
+     "deny", "MULT", "R6_PIPELINE"),
+    ("swift-stdin", "echo 'import Foundation; for _ in 0..<3 { let p = Process(); "
+     "p.launchPath = \"/usr/bin/env\"; p.arguments = [\"pool\", \"run\", \"glm\"]; "
+     "try! p.run() }' | swift -", "deny", "MULT", "R6_PIPELINE"),
+    ("Rscript-loop", "Rscript -e 'for (i in 1:3) system(\"" + _R6_L + "\")'",
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("R-e-loop", "R -e 'for (i in 1:3) system(\"" + _R6_L + "\")'",
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("env-python3-c-loop", "env python3 -c '" + _R6_PY_LOOP + "'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("sudo-perl-e-loop", "sudo -n perl -e 'system(\"" + _R6_L + "\") for 1..3'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("nice-node-e", "nice node -e 'for (let i = 0; i < 3; i++) "
+     "require(\"child_process\").execSync(\"" + _R6_L + "\")'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("timeout-ruby-e", "timeout 60 ruby -e '3.times { system(\"" + _R6_L + "\") }'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("exec-python3-c", "exec python3 -c '" + _R6_PY_LOOP + "'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("uv-run-python-c", "uv run python -c '" + _R6_PY_LOOP + "'",
+     "deny", "REG", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("command-awk", "command awk 'BEGIN{for(i=0;i<3;i++) system(\"" + _R6_L + "\")}'",
+     "deny", "MULT", "R6_NOT_A_PLAIN_LAUNCH"),
+    # --- ID: launch identity rewritten unseen ---
+    ("builtin-eval-split-identity", _R6_SPLIT + '; builtin eval "$X$Y"; ' + _R6_B,
+     "deny", "ID", "R6_ENV_BUILTIN"),
+    ("then-eval-split-identity",
+     _R6_SPLIT + '; if :; then eval "$X$Y"; fi; ' + _R6_B,
+     "deny", "ID", "R6_KEYWORD"),
+    ("bash-lc-dot-source", "bash -lc '. ./forged.env; " + _R6_B + "'",
+     "deny", "ID", "R6_NESTED_SHELL"),
+    ("env-bash-c-dot-source", "env bash -c '. ./forged.env; " + _R6_B + "'",
+     "deny", "ID", "R6_ENV_BUILTIN"),
+    ("bash-xc-source", "bash -xc 'source ./forged.env; " + _R6_B + "'",
+     "deny", "ID", "R6_NESTED_SHELL"),
+    ("builtin-source-top", "builtin source ./forged.env; " + _R6_B,
+     "deny", "ID", "R6_ENV_BUILTIN"),
+    ("command-dot-top", "command . ./forged.env; " + _R6_B,
+     "deny", "ID", "R6_ENV_BUILTIN"),
+    ("if-source-top", "if source ./forged.env; then " + _R6_B + "; fi",
+     "deny", "ID", "R6_KEYWORD"),
+    ("zsh-ZDOTDIR", "ZDOTDIR=/tmp/evil zsh -c '" + _R6_B + "'",
+     "deny", "ID", "R6_ASSIGNMENT"),
+    # --- doc-limit (finding 4): partial wrapper names now name the wrapper ---
+    ("ansi-c-quoting", "$'\\x70ool' run glm a /tmp glm-5.3",
+     "deny", "doc-limit", "R6_EXPANSION"),
+    ("ansi-c-quoting-token-elsewhere", _R6_L + "; $'\\x70ool' run glm a /tmp glm-5.3",
+     "deny", "doc-limit", "R6_COMPOUND_LIST"),
+    ("param-glue", "p=po; ${p}ol run glm a /tmp glm-5.3",
+     "deny", "doc-limit", "R6_EXPANSION"),
+    # Still out of scope (r2 arbitrary-process limit, pinned on purpose): a
+    # WHOLLY computed command word carries no wrapper name at all.
+    ("computed-word-out-of-scope", "$(printf '\\160\\157\\157\\154') run glm a /tmp glm-5.3",
+     "allow", "doc-limit", ""),
+    ("env-word-out-of-scope", "$LAUNCHER run glm a /tmp glm-5.3",
+     "allow", "doc-limit", ""),
+    # --- honest controls ---
+    ("control-plain-launch", _R6_L, "allow", "control", ""),
+    ("control-slot-py", _R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run",
+     "allow", "control", ""),
+    ("control-faithful-bash-c", "bash -c '" + _R6_L + "'", "allow", "control", ""),
+    ("control-faithful-bash-c-outer-identity", _R6_P + "bash -c '" + _R6_B + "'",
+     "allow", "control", ""),
+    ("control-inherited-bare-launch", _R6_B, "allow", "control", ""),
+    ("control-cat-sub-sh", "cat /opt/mastermind/ext/sub.sh", "allow", "control", ""),
+    ("control-python3-m-pytest",
+     "python3 -m pytest tests/test_provider_orchestrator_policy.py",
+     "allow", "control", ""),
+    ("control-gh-pr-view", "gh pr view 2329", "allow", "control", ""),
+]
+
+
+def _r6_guard_under_test():
+    """The guard module the r6 table judges: this repository's guard, or —
+    for fail-before evidence only — the module at
+    ``MASTERMIND_R6_GUARD_UNDER_TEST``."""
+    path = os.environ.get("MASTERMIND_R6_GUARD_UNDER_TEST", "").strip()
+    if not path:
+        return guard
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("r6_guard_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_R6_GUARD = _r6_guard_under_test()
+
+
+def _r6_armed_with_identity(
+    shared_placement: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    module=guard,
+) -> None:
+    monkeypatch.setattr(
+        module, "_principal_ids",
+        lambda: (os.geteuid() + 4242, frozenset()), raising=False,
     )
-    assert capsys.readouterr().out == ""
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    monkeypatch.delenv("ENV", raising=False)
+
+
+def _r6_verdict(module, cwd: Path, command: str, capsys) -> tuple[str, str]:
+    try:
+        module.guard_bash(_payload(cwd, command), {"command": command})
+    except SystemExit:
+        output = _emitted(capsys)
+        return output.get("permissionDecision", "context"), output.get(
+            "permissionDecisionReason", ""
+        )
+    return ("allow", "") if capsys.readouterr().out == "" else ("context", "")
+
+
+@pytest.mark.parametrize("row", _R6_TABLE, ids=[row[0] for row in _R6_TABLE])
+def test_r6_reviewer_adversarial_shape_table(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple[str, str, str, str, str],
+) -> None:
+    _, command, expected, _, code = row
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path, _R6_GUARD)
+    verdict, reason = _r6_verdict(_R6_GUARD, shared_placement, command, capsys)
+    assert verdict == expected, reason
+    if _R6_GUARD is guard and expected == "deny":
+        # The structural ADMIT rule is what refused, with its typed code.
+        assert code in reason, reason
+        assert reason.startswith(
+            "Mastermind shared-placement guard: unobservable launch"
+        )
+
+
+def test_r6_table_covers_every_review_class() -> None:
+    classes: dict[str, int] = {}
+    for _, _, _, klass, _ in _R6_TABLE:
+        classes[klass] = classes.get(klass, 0) + 1
+    # Review totals: 31 MULT incl. 6 REG + command-awk, 9 ID, 2 doc-limit
+    # (+1 finding-4 ${p}ol row and 2 pinned out-of-scope rows), 12 obs-1,
+    # 1 deferred, 29 r5-deny, 8 control rows (7 controls; faithful bash -c
+    # in both identity placements).
+    assert classes["MULT"] + classes["REG"] == 31
+    assert classes["REG"] == 6
+    assert classes["ID"] == 9
+    assert classes["obs-1"] == 12 and classes["deferred"] == 1
+    assert classes["r5-deny"] == 29
+    assert classes["doc-limit"] == 5
+    assert classes["control"] == 8
+    assert all(
+        expected == "deny"
+        for _, _, expected, klass, _ in _R6_TABLE
+        if klass in ("MULT", "REG", "ID", "r5-deny", "deferred")
+    )
+
+
+@pytest.mark.parametrize(
+    "command, code",
+    [
+        # Tokenizer failure refuses (never guessed).
+        (_R6_L + " 'unterminated", "R6_TOKENIZE_FAILED"),
+        (_R6_P + "pool run glm a\r /tmp glm-5.3", "R6_TOKENIZE_FAILED"),
+        (_R6_L + " >", "R6_TOKENIZE_FAILED"),
+        # Partial wrapper names glued to patterns name the wrapper.
+        ("/opt/mastermind/ext/po?l run glm a /tmp glm-5.3", "R6_NOT_A_PLAIN_LAUNCH"),
+        ("{p,}ool run glm a /tmp glm-5.3", "R6_NOT_A_PLAIN_LAUNCH"),
+        ('"$p"ool run glm a /tmp glm-5.3', "R6_EXPANSION"),
+        ("/opt/mastermind/ext/$s.sh glm a /tmp glm-5.3", "R6_EXPANSION"),
+        ("$'\\160ool' run glm a /tmp glm-5.3", "R6_EXPANSION"),
+        # Nested shell grammar: exactly bash/sh -c '<one plain launch>'.
+        ("bash -c \"bash -c '" + _R6_B + "'\"", "R6_NESTED_SHELL"),
+        ("bash -c '" + _R6_L + "' arg0", "R6_NESTED_SHELL"),
+        ("bash -c -- '" + _R6_L + "'", "R6_NESTED_SHELL"),
+        ("bash -c 'cat /opt/mastermind/ext/sub.sh'", "R6_NOT_A_PLAIN_LAUNCH"),
+        ('bash -c "' + _R6_P + 'pool run glm $X /tmp glm-5.3"', "R6_EXPANSION"),
+        # Interpreter/runner lists are not load-bearing: unlisted ones refuse.
+        ("guile -c '(system \"" + _R6_L + "\")'", "R6_NOT_A_PLAIN_LAUNCH"),
+        ("elixir -e 'System.cmd(\"pool\", [\"run\", \"glm\"])'", "R6_NOT_A_PLAIN_LAUNCH"),
+        ("rg --pre 'pool run glm' -n x docs", "R6_NOT_A_PLAIN_LAUNCH"),
+        ("less /opt/mastermind/ext/sub.sh", "R6_NOT_A_PLAIN_LAUNCH"),
+        # Assignment allowlist: only literal projected identity names.
+        ("FOO=1 " + _R6_L, "R6_ASSIGNMENT"),
+        ("PATH=/tmp/evil:/usr/bin " + _R6_L, "unobservable launch environment"),
+        ("env 'BASH_FUNC_pool%%=() { :; }' " + _R6_B, "R6_NOT_A_PLAIN_LAUNCH"),
+        ("POOL_ORCHESTRATOR_ID+=-x " + _R6_B, "R6_ASSIGNMENT"),
+        ("env -u POOL_ORCHESTRATOR_ID " + _R6_B, "R6_PREFIX_FORM"),
+        # Transparent prefixes take no other options.
+        (_R6_P + "timeout -s KILL 60 " + _R6_B, "R6_PREFIX_FORM"),
+        (_R6_P + "exec -a pool " + _R6_B, "R6_PREFIX_FORM"),
+        (_R6_P + "time " + _R6_B, "R6_KEYWORD"),
+        # Globs/braces in launch words and unadmitted redirections.
+        (_R6_P + "pool run glm a /tmp/*.txt glm-5.3", "R6_GLOB_OR_BRACE"),
+        (_R6_L + " <> /tmp/lane.io", "R6_REDIRECTION"),
+        # Background / subshell / brace group around a single launch.
+        (_R6_L + " &", "R6_COMPOUND_LIST"),
+        ("( " + _R6_L + " )", "R6_GROUPING"),
+        ("{ " + _R6_L + "; }", "R6_KEYWORD"),
+        ("! " + _R6_L, "R6_KEYWORD"),
+        # A pipe out of a launch or into a non-inspector.
+        (_R6_L + " | tee /tmp/lane.log", "R6_PIPELINE"),
+        ("grep -n pool docs/x.md | sh", "R6_PIPELINE"),
+        # python3 is admitted only with slot.py as its literal first operand.
+        (_R6_P + "python3 -u /opt/mastermind/ext/slot.py glm -- run", "R6_NOT_A_PLAIN_LAUNCH"),
+        (_R6_P + "python3 /opt/x/other.py /opt/mastermind/ext/slot.py glm",
+         "R6_NOT_A_PLAIN_LAUNCH"),
+    ],
+)
+def test_r6_admit_rule_refuses_everything_outside_the_closed_grammar(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    code: str,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+    assert verdict == "deny", command
+    assert code in reason, reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Plain redirections with literal targets.
+        _R6_L + " > /tmp/lane.log 2>&1",
+        _R6_L + " < /tmp/packet.txt",
+        # Whitespace/comment framing and a POSIX continuation are not shapes.
+        _R6_L + "\n",
+        "\n" + _R6_L,
+        _R6_L + "  # one bounded child",
+        _R6_P + "pool ru" + _NL + "n glm a /tmp glm-5.3",
+        # Quoted literal arguments and a quoted wrapper path.
+        _R6_P + "pool run glm 'fix the pool; then (x) $5' /tmp glm-5.3",
+        _R6_P + 'pool run glm "fix the pool; then (x)" /tmp glm-5.3',
+        _R6_P + '"/opt/mastermind/ext/sub.sh" glm a /tmp glm-5.3',
+        # Stacked transparent prefixes and env identity assignments.
+        "env " + _R6_P + "nohup nice -n 5 timeout 90m " + _R6_B,
+        "exec env " + _R6_P + _R6_B,
+        # Inspector-only reads (single and piped) naming a wrapper.
+        "grep -n 'pool run' docs/runbook.md | head -5",
+        "ls /opt/mastermind/ext/*.sh",
+        "echo pool",
+        # Non-launch wrapper invocations stay plain invocations.
+        "pool status",
+        "/opt/mastermind/ext/sub.sh __launch_plan glm /tmp",
+    ],
+)
+def test_r6_admit_rule_admits_the_closed_grammar(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    assert guard.r6_refusal_codes(command) == [], command
+    verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+    assert verdict == "allow", reason
+
+
+def test_r6_admitted_launch_still_reaches_every_binding_check(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Admission is structural only: an admitted plain launch is still held
+    # to the binding gate (stale fence, projection, token equality, count).
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    substituted = _R6_P + "pool run grok a /tmp grok-4.6"
+    assert guard.r6_refusal_codes(substituted) == []
+    assert _r6_verdict(guard, shared_placement, substituted, capsys)[1].count(
+        "provider substitution") == 1
+    rerooted = "POOL_ORCHESTRATOR_ID=root-other " + _R6_B
+    assert "server-derived projection" in _r6_verdict(
+        guard, shared_placement, rerooted, capsys)[1]
+    # A second wrapper invocation inside a quoted argument is still counted.
+    nested_text = _R6_P + 'pool run glm "then pool run glm b" /tmp glm-5.3'
+    assert guard.r6_refusal_codes(nested_text) == []
+    assert "unaccounted descendant" in _r6_verdict(
+        guard, shared_placement, nested_text, capsys)[1]
+    current = _binding(fence_counter=3)
+    _install(monkeypatch, tmp_path, _binding(fence_counter=2),
+             receipt=_receipt(current, fence_counter=3))
+    assert "stale fence" in _r6_verdict(guard, shared_placement, _R6_L, capsys)[1]
+
+
+def test_r6_nested_shell_refused_when_the_session_sets_bash_env(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    faithful = "bash -c '" + _R6_L + "'"
+    assert _r6_verdict(guard, shared_placement, faithful, capsys)[0] == "allow"
+    monkeypatch.setenv("BASH_ENV", "/tmp/forged.env")
+    verdict, reason = _r6_verdict(guard, shared_placement, faithful, capsys)
+    assert verdict == "deny" and "BASH_ENV" in reason and "R6_NESTED_SHELL" in reason
+
+
+def test_r6_scope_stays_the_documented_wrapper_name_limit() -> None:
+    # In scope: literal names, decoded ANSI-C, expansion/glob-glued partials.
+    for command in (
+        "cat sub.sh", "x=pool", "$'\\x70ool' run", "${p}ol run", "po?l run",
+        "{p,}ool run", "$(echo p)ool run", "/opt/x/$s.sh glm", "p'oo'l run",
+    ):
+        assert guard.r6_names_wrapper(command), command
+    # Out of scope (REVIEW_2329 r2 arbitrary-process limit): no wrapper name.
+    for command in (
+        "$W run glm", "$(printf x) run glm", "ls *.sh", "python3 *.py",
+        "pytest tests/test_provider_orchestrator_policy.py", "gh pr view 2329",
+        "echo pool_ref", "TOOL=ls; $TOOL -la /tmp",
+    ):
+        assert not guard.r6_names_wrapper(command), command
+
+
+def test_r6_dead_interpreter_lists_are_gone() -> None:
+    # Finding 1 (R|Rscript dead regex): the r5 interpreter/always-inline
+    # head regexes are deleted — no list is load-bearing under r6.
+    for name in ("_INTERPRETER_HEAD_RE", "_ALWAYS_INLINE_HEAD_RE",
+                 "_deny_structurally_unobservable", "_SHELL_FEED_RE"):
+        assert not hasattr(guard, name), name

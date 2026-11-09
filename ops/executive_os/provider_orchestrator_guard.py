@@ -13,17 +13,13 @@ by the CURRENT broker-issued ExecutionBinding.v1, validated against the
 owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
-The gate classifies the SHAPE of the command structurally (a quote-aware shell
-scanner — see the ``_shell_scan`` layer): interpreter invocations judged by how
-their program is delivered (inline flag text / pipe / heredoc / computed
-argument — every flag spelling alike), computed words refused wherever a
-wrapper name substituted for them would complete a paid launch (shadow
-substitution — no runner allowlist), command substitution anywhere, launches
-inside runtime-multiplying or deferred shapes (loop bodies, function bodies,
-brace groups, xargs/parallel/find -exec, trap payloads, watch repeaters), and
-eval/source/'.' inside the nested -c script that performs the launch. POSIX
-line-continuation splits are canonicalised so no constructed path escapes
-the gate.
+The gate judges command SHAPE with an ADMIT rule (r6 — see
+``r6_refusal_codes``): a command that names a paid-launch wrapper is admitted
+only as ONE plain top-level launch (optionally behind a closed set of
+transparent prefixes), one faithful ``bash -c '<plain launch>'``, or a
+read-only inspector pipeline; every other shape naming a wrapper is refused
+with a typed ``R6_*`` code, read by a real tokenizer (a tokenizer failure
+refuses). POSIX line continuations are joined, never split.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -31,6 +27,7 @@ shown through this provider hook; it does not claim to fence arbitrary processes
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -223,12 +220,6 @@ _COMMAND_PREFIX_WORDS = frozenset({
 #: Constructs that can change the launch environment outside lexical
 #: observation: eval/source of computed text, shell startup files, and
 #: assignments through a computed variable name.
-#: Wrapper source fed to a shell (``cat sub.sh | bash -s grok``) launches
-#: without a lexically visible invocation.
-_SHELL_FEED_RE = re.compile(
-    r"\|\s*(?:\S*/)?(?:ba|z|da|k)?sh\b"
-    r"|(?:^|[\s;&|(])(?:\S*/)?(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*<"
-)
 _UNOBSERVABLE_ENV_RE = re.compile(
     r"(?:^|[;&|(`{\n]|\$\()\s*(?:eval|source|\.)(?=\s)"
     r"|(?:^|[\s;&|(`{])(?:BASH_ENV|ENV)\+?="
@@ -256,227 +247,420 @@ _BATCH_EXECUTOR_RE = re.compile(
     re.I,
 )
 
-# --- structural shell-shape scanner (WO-11 r5; REVIEW_2329 r3 B-1/M-A/M-B) -----
+# --- r6 ADMIT rule (WO-11 r6; REVIEW_C_E_OPUS_20261109 A1 findings 1-4) -------
 #
-# The r3 review's core finding was that the r4 refusals were pattern
-# allowlists over an open shell grammar: a one-letter flag change
-# (``python3 -Sc``), a long flag (``node --eval``), a stdin-fed program
-# (``python3 - <<EOF``, ``echo code | python3``), an unlisted runner
-# (``time/sudo/caffeinate/ssh $P run ...``), a function body, a brace-body
-# loop or a nested-shell ``eval`` restored the original bypass. This layer
-# replaces those lists with a real (small) shell scanner: the raw command is
-# tokenised quote-aware into words/operators/heredocs, grouped into simple
-# commands, and the SHAPE of each simple command is classified:
+# r3-r5 refused SHAPES from deny lists over an open shell grammar, and every
+# list had a gap: a runner in front of an interpreter (``env python3 -c``), a
+# function body ending at its first separator (``f() if …; fi``), a nested
+# shell flag other than exactly ``-c`` (``bash -lc``), ``builtin eval``,
+# ``alias``/``hyperfine``/``entr``/zsh ``repeat``. r6 INVERTS the rule. Under
+# shared placement a command whose text names a paid-launch wrapper is
+# ADMITTED only when the whole line is exactly one of three closed forms, read
+# by a real tokenizer (quote, escape and line-continuation aware, explicit
+# operator detection; a tokenizer failure REFUSES):
 #
-#   * an interpreter invocation is judged by HOW IT RECEIVES ITS PROGRAM
-#     (inline flag text, pipe, heredoc, computed argument) — never by which
-#     letters the flags spell — so every flag cluster and spelling variant
-#     is refused equally, while the documented script-file form
-#     (``python3 .../slot.py glm -- run``) stays observed;
-#   * a computed word (``$P``, ``${P}``, ``$(...)``, backticks) is refused
-#     wherever substituting a wrapper name for it would make the command a
-#     paid launch (shadow substitution) — no runner allowlist to evade;
-#   * a wrapper launch inside any shape that can execute it more than once
-#     or later (function bodies, brace groups, trap payloads, watch) is a
-#     runtime-multiplexed launch;
-#   * ``eval``/``source``/``.`` inside the same nested ``-c`` script that
-#     performs the launch makes the launch environment unobservable.
+#   LAUNCH     [identity assignment]* [transparent prefix]*
+#              ( <wrapper> | python[3[.N]] <path>/slot.py ) <literal arg>*
+#   NESTED     [identity assignment]* [transparent prefix]*
+#              ( bash | sh ) -c '<body>'     where <body> is itself one LAUNCH
+#   INSPECTOR  <inspector> <literal arg>* ( | <inspector> <literal arg>* )*
 #
-# The layer is conservative by design (over-refusal is honest, under-refusal
-# is a bypass) and is gated on a wrapper NAME appearing anywhere in the
-# canonical command, exactly like the r4 computed-launch gate it replaces.
+#   identity assignment  a literal POOL_ORCHESTRATOR_ID / POOL_PARENT_RUN_ID /
+#                        POOL_TASK_CLASS (still held to the binding's
+#                        projection by validate_execution_binding)
+#   transparent prefix   env NAME=value… (no options; same identity names),
+#                        nohup, nice [-n N], timeout DURATION, setsid, exec,
+#                        command (no other options)
+#
+# plus plain file redirections (``<``, ``>``, ``>>``, ``>|``, ``>&``, ``<&``,
+# ``&>``, ``&>>``) with literal targets, and NOTHING else on the line. Every
+# other command that names a wrapper is REFUSED with typed ``R6_*`` codes. The
+# interpreter/runner lists of r3-r5 are no longer load-bearing: an unlisted
+# interpreter or runner is simply not one of the admitted forms.
+#
+# Out of scope — the documented arbitrary-process limit (REVIEW_2329 r2): a
+# command that names no wrapper at all. "Names a wrapper" is widened cheaply
+# and honestly beyond the literal name: ANSI-C quoted text is decoded
+# (``$'\x70ool'``), and a word that glues a $-expansion, command substitution
+# or glob/brace pattern to a partial wrapper name (``${p}ol``, ``$s.sh``,
+# ``po?l``, ``{p,}ool``) counts as naming it. A word that is ENTIRELY computed
+# (``$W``, ``$(cmd)``, ``*``) names nothing and stays out of scope.
 
-#: Token kinds emitted by :func:`_shell_scan`.
-_WORD, _OP, _HEREDOC = "word", "op", "heredoc"
-#: Characters that terminate an unquoted word / act as shell operators.
-_OP_CHARS = frozenset(";&|()<>\n")
-#: Two/three-character operators, longest first for greedy matching.
-_MULTI_OPS = (
-    ";;&", "&&", "||", ";;", "<<-", "<<<", "<<", ">>", ">&", "<&", ">|",
+_R6_WRAPPER_BASENAMES = ("pool", "sub.sh", "remote_sub.sh", "slot.py")
+#: (stem, extension) per wrapper basename: a glob must spell at least two
+#: characters of the STEM before it counts as naming the wrapper (``*.sh``
+#: alone does not; ``su*.sh`` / ``po?l`` do).
+_R6_WRAPPER_STEMS = {
+    "pool": ("pool", ""),
+    "sub.sh": ("sub", ".sh"),
+    "remote_sub.sh": ("remote_sub", ".sh"),
+    "slot.py": ("slot", ".py"),
+}
+#: The only assignments a launch may carry (shell prefix or ``env`` argument).
+_R6_ADMITTED_ASSIGNMENTS = frozenset(_FABRIC_IDENTITY_NAMES)
+#: Assignment names that make a shell, interpreter or loader run code, change
+#: how the wrapper word resolves, or rewrite the guard's own channel. Every
+#: non-identity assignment is refused anyway; these get the explicit
+#: "unobservable launch environment" wording.
+_R6_ENVIRONMENT_INPUT_NAMES = frozenset({
+    "BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "PS4", "SHELLOPTS",
+    "BASHOPTS", "IFS", "PATH", "CDPATH", "FPATH", "HOME", "GLOBIGNORE",
+    "POOL_EXECUTION_BINDING",
+})
+_R6_ENVIRONMENT_INPUT_PREFIXES = (
+    "BASH_FUNC_", "LD_", "DYLD_", "PYTHON", "NODE_", "PERL", "RUBY",
+    "MASTERMIND_",
 )
-#: Operators that separate one simple command from the next.
-_SEPARATOR_OPS = frozenset({";", "&", "|", "&&", "||", ";;", "\n", "(", ")"})
-#: Words that may precede the command word without being it (reserved words).
-_COMMAND_KEYWORDS = frozenset({
+_R6_TRANSPARENT_PREFIXES = frozenset({
+    "env", "nohup", "nice", "timeout", "setsid", "exec", "command",
+})
+_R6_MAX_PREFIXES = 4
+_R6_DURATION_RE = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+_R6_NICENESS_RE = re.compile(r"^-?\d+$")
+_R6_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(\+?)=")
+_R6_PYTHON_RE = re.compile(r"^python(?:3(?:\.\d+)?)?$")
+#: Shells admitted for the NESTED form (``bash -c`` / ``sh -c``):
+#: non-interactive, they read no startup file except BASH_ENV/ENV, which the
+#: guard checks in the session environment.
+_R6_NESTED_SHELLS = frozenset({"bash", "sh"})
+#: Shells recognised only to give a precise refusal (zsh reads .zshenv —
+#: ZDOTDIR — and fish config.fish before every ``-c`` body; others differ in
+#: grammar).
+_R6_OTHER_SHELLS = frozenset({
+    "zsh", "dash", "ksh", "mksh", "yash", "ash", "posh", "rbash", "fish",
+    "tcsh", "csh", "pwsh",
+})
+#: Read-only inspectors admitted in the INSPECTOR form: none of them executes
+#: an argument. Narrower than ``_INSPECTORS``: ``rg`` (``--pre`` runs a
+#: command per file) and ``less``/``more`` (shell escapes, LESSOPEN) execute.
+_R6_INSPECTORS = frozenset({
+    "cat", "head", "tail", "grep", "egrep", "fgrep", "wc", "ls", "stat",
+    "file", "diff", "cmp", "shasum", "sha1sum", "sha256sum", "md5",
+    "md5sum", "nl", "od", "xxd", "echo",
+})
+#: Reserved words in command position (bash, plus the zsh/csh loop words).
+_R6_RESERVED_WORDS = frozenset({
     "if", "then", "elif", "else", "fi", "for", "while", "until", "do",
-    "done", "case", "esac", "in", "select", "time", "coproc", "function",
-    "!", "{", "}", "[[", "]]",
+    "done", "case", "esac", "select", "function", "time", "coproc",
+    "repeat", "foreach", "end", "in", "!", "{", "}", "[[", "]]",
 })
-#: A word whose text contains any of these is computed at runtime.
-_COMPUTED_WORD_RE = re.compile(r"[$`]")
-#: Runtime-computed segments inside a word (used for shadow substitution).
-_COMPUTED_SEGMENT_RE = re.compile(
-    r"\$\([^()]*\)|\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|`[^`]*`"
-)
-#: Interpreter programs: the launched program is text the command carries,
-#: not a process the guard can attribute (REVIEW_2329 r3 B-1). Judged by
-#: program-delivery shape, never by flag spelling.
-_INTERPRETER_HEAD_RE = re.compile(
-    r"^(?:python[23]?(?:\.\d+)?|pythonw|perl|ruby|irb|node|nodejs|deno|bun|"
-    r"php|osascript|lua|luajit|tclsh|wish|R|Rscript)$"
-)
-#: Interpreters whose program text is ALWAYS an argument (no script-file
-#: form exists): any invocation is an inline-program launch.
-_ALWAYS_INLINE_HEAD_RE = re.compile(r"^(?:gawk|mawk|nawk|awk|sed|jq)$")
-#: Shell programs whose ``-c`` argument is a nested script body.
-_SHELL_HEAD_RE = re.compile(r"^(?:ba|z|da|k|a|l|po)?sh$")
-#: Wrapper basenames used for shadow substitution.
-_SHADOW_WRAPPER_TOKENS = ("pool", "sub.sh", "remote_sub.sh", "slot.py")
-#: Units that only print or return status: a wrapper token inside them is
-#: text being shown, never a launch (shadow-substitution scope only).
-_PRINT_ONLY_HEADS = frozenset({
-    "echo", "printf", "true", "false", ":", *sorted(_INSPECTORS),
+#: Builtins in command position that rewrite identity, aliases, functions,
+#: traps or shell options for what runs next.
+_R6_ENV_BUILTINS = frozenset({
+    "eval", "source", ".", "alias", "unalias", "trap", "builtin", "enable",
+    "declare", "typeset", "export", "readonly", "local", "set", "shopt",
+    "unset", "hash", "let", "read", "mapfile", "readarray", "emulate",
+    "setopt", "unsetopt", "autoload", "zmodload", "functions", "fc", "bind",
 })
-#: Words of the trap/watch commands that stage or repeat a launch.
-_LAUNCH_STAGE_HEADS = frozenset({"trap", "watch"})
-_ASSIGNMENT_WORD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+#: Operators, longest first.
+_R6_OPERATORS = (
+    ";;&", "<<<", "<<-", "&>>", ";;", ";&", "&&", "||", "|&", "<<", "<>",
+    "<&", "<(", ">>", ">&", ">|", ">(", "&>", ";", "&", "|", "<", ">", "(",
+    ")", "\n",
+)
+_R6_LIST_OPERATORS = frozenset({";", "&", "&&", "||", "\n", ";;", ";&", ";;&"})
+_R6_PIPE_OPERATORS = frozenset({"|", "|&"})
+_R6_REDIRECTIONS = frozenset({"<", ">", ">>", ">|", ">&", "<&", "&>", "&>>", "<>"})
+_R6_ADMITTED_REDIRECTIONS = _R6_REDIRECTIONS - {"<>"}
+#: Word segment kinds whose text is fixed at parse time.
+_R6_LITERAL_SEGMENTS = frozenset({"lit", "sq", "dq", "esc"})
+_R6_GLOB_CHARS = frozenset("*?[{}")
+_R6_ANSI_SIMPLE_ESCAPES = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n",
+    "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+_R6_ANSI_C_RE = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
+_R6_COMPUTED_RE = re.compile(
+    r"\$\{[^{}]*\}|\$\([^()]*\)|`[^`]*`|\$\[[^\]]*\]"
+    r"|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]"
+)
+_R6_ROUGH_WORD_SPLIT_RE = re.compile(r"[\s;&|<>()\"'\\]+")
+#: Codes that only explain a refusal; on their own they admit.
+_R6_ADVISORY_CODES = frozenset({"R6_DEFERRED_EXPANSION"})
+_R6_CLAUSES = {
+    "R6_TOKENIZE_FAILED": (
+        "the line could not be tokenised ({detail}); an unreadable line is "
+        "refused, never guessed"
+    ),
+    "R6_COMPOUND_LIST": (
+        "it sequences, conditions or backgrounds several commands "
+        "({detail}); another command on the line can repeat the launch "
+        "(runtime-multiplexed), add an unaccounted descendant or change its "
+        "environment first, but the current binding covers exactly one "
+        "attempt"
+    ),
+    "R6_PIPELINE": (
+        "it pipes into or out of a stage that is not a read-only inspector "
+        "({detail}); that stage can run, repeat or feed program text the "
+        "guard cannot attribute"
+    ),
+    "R6_GROUPING": (
+        "it uses a subshell, function definition, array or ( … ) group "
+        "({detail}) that can execute the launch more than once or later "
+        "(runtime-multiplexed), but the current binding covers exactly one "
+        "attempt"
+    ),
+    "R6_KEYWORD": (
+        "the shell keyword {detail} (loop, conditional, case, select, coproc, "
+        "time, repeat or {{ … }} group) can execute the launch more than once "
+        "or later (runtime-multiplexed), but the current binding covers "
+        "exactly one attempt"
+    ),
+    "R6_ENV_BUILTIN": (
+        "unobservable launch environment — {detail} can rewrite POOL_* "
+        "identity, aliases, functions, traps or shell options outside what "
+        "this guard can check, or stage the launch to run again later"
+    ),
+    "R6_COMMAND_SUBSTITUTION": (
+        "command substitution ({detail}) runs inside this very shell and can "
+        "construct or hide a paid launch"
+    ),
+    "R6_PROCESS_SUBSTITUTION": (
+        "process substitution ({detail}) runs a hidden command"
+    ),
+    "R6_HEREDOC": (
+        "a here-document or here-string ({detail}) feeds text that the "
+        "command may execute as a program"
+    ),
+    "R6_EXPANSION": (
+        "the computed word {detail} decides at runtime what runs or what the "
+        "wrapper receives; invoke the wrapper by its literal name with "
+        "literal arguments"
+    ),
+    "R6_DEFERRED_EXPANSION": (
+        "quoted text {detail} carries $-expansions another shell or program "
+        "may evaluate later; invoke the wrapper by its literal name"
+    ),
+    "R6_GLOB_OR_BRACE": (
+        "the unquoted glob/brace pattern {detail} in a launch word expands "
+        "at runtime; pass literal arguments"
+    ),
+    "R6_ASSIGNMENT": (
+        "{detail}; only literal POOL_ORCHESTRATOR_ID / POOL_PARENT_RUN_ID / "
+        "POOL_TASK_CLASS assignments are admitted on a launch (each is then "
+        "held to the binding's projection)"
+    ),
+    "R6_PREFIX_FORM": (
+        "{detail} is outside the transparent prefix grammar (env "
+        "NAME=value, nohup, nice [-n N], timeout DURATION, setsid, exec, "
+        "command — no other options)"
+    ),
+    "R6_REDIRECTION": "the redirection {detail} is not admitted on a launch",
+    "R6_NOT_A_PLAIN_LAUNCH": (
+        "the wrapper name appears, but not as the command word of a plain "
+        "launch — {detail} receives it as data or program text it can execute "
+        "any number of times or later (runtime-multiplexed) while the current "
+        "binding covers exactly one attempt"
+    ),
+    "R6_NESTED_SHELL": (
+        "a nested shell is admitted only as bash -c / sh -c '<one plain "
+        "launch>' with exactly -c and nothing after the body — {detail}"
+    ),
+}
+_R6_REMEDY = (
+    "Run the paid launch as a plain command: the wrapper (or python3 "
+    "…/slot.py) as the command word, optionally behind env NAME=value / "
+    "nohup / nice -n N / timeout DURATION / setsid / exec / command, with "
+    "literal arguments and nothing else on the line (or bash -c '<that one "
+    "launch>')."
+)
 
 
-def _shell_scan(text: str, origin: int = 0, depth: int = 0) -> list[tuple[str, str, int, int]]:
-    """Tokenise ``text`` into ``(kind, text, start, end)`` shell tokens.
-
-    Quote-aware (single/double quotes, backslash escapes, POSIX
-    line-continuation joins), tracks ``$(...)``/``${...}``/backtick
-    segments verbatim inside words (so a word whose expansion decides what
-    runs keeps its ``$``/backtick marker), and consumes heredoc bodies as
-    single ``heredoc`` tokens. ``start``/``end`` are offsets into the
-    ORIGINAL command (``origin`` maps nested bodies back to it). This is a
-    refusal-scan aid, not a shell implementation: constructs it cannot
-    model degrade towards MORE tokens, never fewer.
-    """
-    tokens: list[tuple[str, str, int, int]] = []
-    length = len(text)
+def _r6_decode_ansi_c(body: str) -> str:
+    """Decode the body of a bash ``$'…'`` word (escape set of bash 5)."""
+    out: list[str] = []
     index = 0
-    at_word_start = True
+    length = len(body)
     while index < length:
-        char = text[index]
-        if char in " \t\r":
-            index += 1
-            at_word_start = True
-            continue
-        if char == "#" and at_word_start:
-            newline = text.find("\n", index)
-            index = length if newline < 0 else newline
-            continue
-        if char in _OP_CHARS:
-            index = _scan_operator(text, index, tokens)
-            at_word_start = True
-            continue
-        index = _scan_word(text, index, tokens, at_word_start, depth)
-        at_word_start = False
-    return [(kind, body, origin + start, origin + end)
-            for kind, body, start, end in tokens]
-
-
-def _scan_operator(
-    text: str, index: int, tokens: list[tuple[str, str, int, int]]
-) -> int:
-    length = len(text)
-    matched = next(
-        (op for op in _MULTI_OPS if text.startswith(op, index)), None
-    )
-    if matched is None:
-        matched = text[index]
-    tokens.append((_OP, matched, index, index + len(matched)))
-    index += len(matched)
-    if matched in ("<<", "<<-"):
-        # Consume the delimiter word, then the body up to its line.
-        while index < length and text[index] in " \t":
-            index += 1
-        delimiter_start = index
-        while index < length and text[index] not in " \t\r\n;&|<>":
-            index += 1
-        delimiter = text[delimiter_start:index].strip("'\"")
-        newline = text.find("\n", index)
-        if newline < 0 or not delimiter:
-            return index
-        body_start = newline + 1
-        position = body_start
-        body_end = length
-        while position <= length:
-            line_end = text.find("\n", position)
-            line = text[position:] if line_end < 0 else text[position:line_end]
-            stripped = line.lstrip("\t") if matched == "<<-" else line
-            if stripped.strip() == delimiter:
-                body_end = position
-                position = length if line_end < 0 else line_end + 1
-                break
-            if line_end < 0:
-                position = length + 1
-                break
-            position = line_end + 1
-        tokens.append((_HEREDOC, text[body_start:body_end], body_start, body_end))
-        return min(position, length)
-    return index
-
-
-def _scan_word(
-    text: str,
-    index: int,
-    tokens: list[tuple[str, str, int, int]],
-    at_word_start: bool,
-    depth: int,
-) -> int:
-    length = len(text)
-    parts: list[str] = []
-    start = index
-    while index < length:
-        char = text[index]
-        if char in " \t\r" or char in _OP_CHARS:
-            break
-        if char == "'":
-            close = text.find("'", index + 1)
-            if close < 0:
-                parts.append(text[index + 1:])
-                index = length
-                break
-            parts.append(text[index + 1:close])
-            index = close + 1
-            continue
-        if char == '"':
-            index += 1
-            while index < length and text[index] != '"':
-                if text[index] == "\\" and index + 1 < length:
-                    parts.append(text[index + 1])
-                    index += 2
-                    continue
-                parts.append(text[index])
-                index += 1
+        char = body[index]
+        if char != "\\" or index + 1 >= length:
+            out.append(char)
             index += 1
             continue
-        if char == "\\" and index + 1 < length:
-            if text[index + 1] == "\n":
-                index += 2  # POSIX continuation: join, keep scanning the word
-                continue
-            parts.append(text[index + 1])
+        escape = body[index + 1]
+        if escape in _R6_ANSI_SIMPLE_ESCAPES:
+            out.append(_R6_ANSI_SIMPLE_ESCAPES[escape])
             index += 2
             continue
+        if escape in "01234567":
+            digits = re.match(r"[0-7]{1,3}", body[index + 1:]).group(0)
+            out.append(chr(int(digits, 8) & 0xFF))
+            index += 1 + len(digits)
+            continue
+        if escape in "xuU":
+            width = {"x": 2, "u": 4, "U": 8}[escape]
+            digits_match = re.match(rf"[0-9A-Fa-f]{{1,{width}}}", body[index + 2:])
+            if digits_match:
+                digits = digits_match.group(0)
+                try:
+                    out.append(chr(int(digits, 16)))
+                except (ValueError, OverflowError):
+                    out.append("�")
+                index += 2 + len(digits)
+                continue
+        if escape == "c" and index + 2 < length:
+            out.append(chr(ord(body[index + 2]) & 0x1F))
+            index += 3
+            continue
+        out.append(char + escape)
+        index += 2
+    return "".join(out)
+
+
+def _r6_partial_wrapper(base: str) -> bool:
+    """True when a word's basename, with computed parts (``\\x00``) or glob
+    and brace patterns as wildcards, can spell a wrapper basename."""
+    lowered = base.lower()
+    if "\x00" in lowered:
+        if not lowered.replace("\x00", ""):
+            return False  # entirely computed: names nothing (r2 limit)
+        pattern = ".*".join(re.escape(part) for part in lowered.split("\x00"))
+        return any(re.fullmatch(pattern, name) for name in _R6_WRAPPER_BASENAMES)
+    if not any(char in lowered for char in "*?[{"):
+        return False
+    pattern = re.sub(r"\{[^{}]*\}", "*", lowered)
+    for name in _R6_WRAPPER_BASENAMES:
+        stem, extension = _R6_WRAPPER_STEMS[name]
+        if not fnmatch.fnmatchcase(name, pattern):
+            continue
+        stem_pattern = (
+            pattern[:-len(extension)]
+            if extension and pattern.endswith(extension) else pattern
+        )
+        literal = re.sub(r"\[[^\]]*\]|[*?{}\[\]]", "", stem_pattern)
+        if len(literal) >= 2:
+            return True
+    return False
+
+
+def r6_names_wrapper(raw: str) -> bool:
+    """True when the command text names a paid-launch wrapper (r6 scope).
+
+    Literal wrapper names (quote/backslash/continuation-insensitive, like
+    the r4 gate), ANSI-C quoted text decoded first, and partial wrapper
+    names glued to a $-expansion, command substitution or glob/brace
+    pattern. A wholly computed word names nothing: that is the documented
+    arbitrary-process limit (REVIEW_2329 r2), not this gate's fence.
+    """
+    text = raw.replace("\\\n", "")
+    text = _R6_ANSI_C_RE.sub(lambda match: _r6_decode_ansi_c(match.group(1)), text)
+    if _WRAPPER_NAME_RE.search(re.sub(r"[\"'\\]", "", text)):
+        return True
+    marked = text
+    previous = None
+    while previous != marked:
+        previous = marked
+        marked = _R6_COMPUTED_RE.sub("\x00", marked)
+    for word in _R6_ROUGH_WORD_SPLIT_RE.split(marked):
+        if word and _r6_partial_wrapper(word.rsplit("/", 1)[-1]):
+            return True
+    return False
+
+
+class _R6Word:
+    """One shell word as typed segments: ``lit`` (unquoted), ``sq``, ``dq``,
+    ``esc`` (fixed text) and ``param``/``arith``/``cmdsub``/``ansi``/
+    ``locale`` (computed or re-decoded at runtime)."""
+
+    __slots__ = ("segments",)
+
+    def __init__(self) -> None:
+        self.segments: list[tuple[str, str]] = []
+
+    def add(self, kind: str, text: str) -> None:
+        if kind == "lit" and self.segments and self.segments[-1][0] == "lit":
+            self.segments[-1] = ("lit", self.segments[-1][1] + text)
+        else:
+            self.segments.append((kind, text))
+
+    @property
+    def value(self) -> str:
+        return "".join(text for _, text in self.segments)
+
+    @property
+    def literal(self) -> bool:
+        return all(kind in _R6_LITERAL_SEGMENTS for kind, _ in self.segments)
+
+    def leading_unquoted(self) -> str:
+        if self.segments and self.segments[0][0] == "lit":
+            return self.segments[0][1]
+        return ""
+
+    def has_glob(self) -> bool:
+        return any(
+            kind == "lit" and any(char in _R6_GLOB_CHARS for char in text)
+            for kind, text in self.segments
+        )
+
+    def is_fd_number(self) -> bool:
+        return (
+            len(self.segments) == 1 and self.segments[0][0] == "lit"
+            and self.segments[0][1].isdigit()
+        )
+
+
+def _r6_backtick_end(text: str, index: int) -> int:
+    """Index just past the backtick closing the one at ``index`` (or -1)."""
+    position = index + 1
+    while position < len(text):
+        if text[position] == "\\":
+            position += 2
+            continue
+        if text[position] == "`":
+            return position + 1
+        position += 1
+    return -1
+
+
+def _r6_skip_double(text: str, index: int) -> int:
+    """Index just past the ``"`` closing a double-quoted span (or -1)."""
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == '"':
+            return index + 1
+        if char == "$" and text.startswith("(", index + 1):
+            index = _r6_match_paren(text, index + 1)
+            if index < 0:
+                return -1
+            continue
         if char == "`":
-            close = text.find("`", index + 1)
-            close = length - 1 if close < 0 else close
-            parts.append(text[index:close + 1])  # keep backticks as markers
-            index = close + 1
+            index = _r6_backtick_end(text, index)
+            if index < 0:
+                return -1
             continue
-        if char == "$" and index + 1 < length and text[index + 1] == "(":
-            end = _match_paren(text, index + 1)
-            parts.append(text[index:end])
-            index = end
-            continue
-        parts.append(char)
         index += 1
-    word = "".join(parts)
-    if not word and start == index:
-        index += 1
-    tokens.append((_WORD, word, start, index))
-    return index
+    return -1
 
 
-def _match_paren(text: str, open_index: int) -> int:
-    """Index just past the ``)`` matching the ``(`` at ``open_index``."""
+def _r6_match_paren(text: str, open_index: int) -> int:
+    """Index just past the ``)`` matching ``(`` at ``open_index`` (or -1);
+    quotes, escapes and backticks are skipped."""
     depth = 0
     index = open_index
     while index < len(text):
         char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "'":
+            close = text.find("'", index + 1)
+            if close < 0:
+                return -1
+            index = close + 1
+            continue
+        if char == '"':
+            index = _r6_skip_double(text, index + 1)
+            if index < 0:
+                return -1
+            continue
+        if char == "`":
+            index = _r6_backtick_end(text, index)
+            if index < 0:
+                return -1
+            continue
         if char == "(":
             depth += 1
         elif char == ")":
@@ -484,335 +668,539 @@ def _match_paren(text: str, open_index: int) -> int:
             if depth == 0:
                 return index + 1
         index += 1
-    return len(text)
+    return -1
 
 
-class _Unit:
-    """One simple command: its words, span and delivery context."""
+def _r6_match_brace(text: str, open_index: int) -> int:
+    """Index just past the ``}`` closing ``${`` at ``open_index`` (or -1)."""
+    depth = 0
+    index = open_index
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "'":
+            close = text.find("'", index + 1)
+            if close < 0:
+                return -1
+            index = close + 1
+            continue
+        if char == '"':
+            index = _r6_skip_double(text, index + 1)
+            if index < 0:
+                return -1
+            continue
+        if char == "$" and text.startswith("(", index + 1):
+            index = _r6_match_paren(text, index + 1)
+            if index < 0:
+                return -1
+            continue
+        if char == "`":
+            index = _r6_backtick_end(text, index)
+            if index < 0:
+                return -1
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return -1
 
-    __slots__ = (
-        "words", "start", "end", "pipe_fed", "has_heredoc", "head",
-        "head_index",
-    )
+
+def _r6_dollar(text: str, index: int, word: _R6Word, *, quoted: bool) -> int:
+    """Read the ``$…`` construct at ``index`` into ``word``; new index or -1."""
+    following = text[index + 1] if index + 1 < len(text) else ""
+    if following == "(":
+        end = _r6_match_paren(text, index + 1)
+        if end < 0:
+            return -1
+        kind = "arith" if text.startswith("((", index + 1) else "cmdsub"
+        word.add(kind, text[index:end])
+        return end
+    if following == "{":
+        end = _r6_match_brace(text, index + 1)
+        if end < 0:
+            return -1
+        word.add("param", text[index:end])
+        return end
+    if following == "[":
+        close = text.find("]", index + 2)
+        if close < 0:
+            return -1
+        word.add("arith", text[index:close + 1])
+        return close + 1
+    if following == "'" and not quoted:
+        position = index + 2
+        while position < len(text):
+            if text[position] == "\\":
+                position += 2
+                continue
+            if text[position] == "'":
+                word.add("ansi", text[index:position + 1])
+                return position + 1
+            position += 1
+        return -1
+    if following == '"' and not quoted:
+        inner = _R6Word()
+        end = _r6_double_quoted(text, index + 2, inner)
+        if end < 0:
+            return -1
+        for kind, segment in inner.segments:
+            if kind not in _R6_LITERAL_SEGMENTS:
+                word.add(kind, segment)
+        word.add("locale", text[index:end])
+        return end
+    if re.match(r"[A-Za-z_]", following):
+        end = index + 2
+        while end < len(text) and re.match(r"[A-Za-z0-9_]", text[end]):
+            end += 1
+        word.add("param", text[index:end])
+        return end
+    if following and following in "0123456789@*#?$!-":
+        word.add("param", text[index:index + 2])
+        return index + 2
+    word.add("dq" if quoted else "lit", "$")
+    return index + 1
+
+
+def _r6_double_quoted(text: str, index: int, word: _R6Word) -> int:
+    """Read a double-quoted span starting after its ``"``; new index or -1."""
+    buffer: list[str] = []
+    word.add("dq", "")  # marks the quoting even for an empty ""
+
+    def flush() -> None:
+        if buffer:
+            word.add("dq", "".join(buffer))
+            buffer.clear()
+
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            flush()
+            return index + 1
+        if char == "\\" and index + 1 < len(text):
+            escaped = text[index + 1]
+            if escaped == "\n":
+                index += 2
+                continue
+            if escaped in '$`"\\':
+                buffer.append(escaped)
+                index += 2
+                continue
+            buffer.append("\\")
+            index += 1
+            continue
+        if char == "`":
+            flush()
+            end = _r6_backtick_end(text, index)
+            if end < 0:
+                return -1
+            word.add("cmdsub", text[index:end])
+            index = end
+            continue
+        if char == "$":
+            flush()
+            index = _r6_dollar(text, index, word, quoted=True)
+            if index < 0:
+                return -1
+            continue
+        buffer.append(char)
+        index += 1
+    return -1
+
+
+def _r6_lex(text: str) -> tuple[list[tuple[str, object]], str]:
+    """Tokenise a command line: ``("word", _R6Word)``, ``("op", str)`` and
+    ``("procsub", str)`` tokens. Returns ``(tokens, error)``; a non-empty
+    error means the line cannot be read and must be refused. Lexing stops
+    at a here-document operator (its body is not read: the operator alone
+    refuses)."""
+    tokens: list[tuple[str, object]] = []
+    word: _R6Word | None = None
+    index = 0
+    length = len(text)
+
+    def flush() -> None:
+        nonlocal word
+        if word is not None:
+            tokens.append(("word", word))
+            word = None
+
+    while index < length:
+        char = text[index]
+        if (ord(char) < 32 and char not in "\t\n") or char == "\x7f":
+            return tokens, f"control character {char!r}"
+        if char == "\\" and text.startswith("\n", index + 1):
+            index += 2  # POSIX line continuation joins with nothing
+            continue
+        if char in " \t":
+            flush()
+            index += 1
+            continue
+        if char == "#" and word is None:
+            newline = text.find("\n", index)
+            index = length if newline < 0 else newline
+            continue
+        if char in ";&|<>()\n":
+            if char in "<>" and word is not None and word.is_fd_number():
+                word = None  # the fd number belongs to this redirection
+            flush()
+            operator = next(op for op in _R6_OPERATORS if text.startswith(op, index))
+            if operator in ("<(", ">("):
+                end = _r6_match_paren(text, index + 1)
+                if end < 0:
+                    return tokens, "unterminated process substitution"
+                tokens.append(("procsub", text[index:end]))
+                index = end
+                continue
+            tokens.append(("op", operator))
+            index += len(operator)
+            if operator in ("<<", "<<-"):
+                return tokens, ""
+            continue
+        if word is None:
+            word = _R6Word()
+        if char == "'":
+            close = text.find("'", index + 1)
+            if close < 0:
+                return tokens, "unterminated single quote"
+            word.add("sq", text[index + 1:close])
+            index = close + 1
+            continue
+        if char == '"':
+            index = _r6_double_quoted(text, index + 1, word)
+            if index < 0:
+                return tokens, "unterminated double quote or substitution"
+            continue
+        if char == "\\":
+            if index + 1 >= length:
+                word.add("esc", "\\")
+                index += 1
+                continue
+            word.add("esc", text[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            end = _r6_backtick_end(text, index)
+            if end < 0:
+                return tokens, "unterminated backtick substitution"
+            word.add("cmdsub", text[index:end])
+            index = end
+            continue
+        if char == "$":
+            index = _r6_dollar(text, index, word, quoted=False)
+            if index < 0:
+                return tokens, "unterminated $-expansion"
+            continue
+        word.add("lit", char)
+        index += 1
+    flush()
+    return tokens, ""
+
+
+class _R6Unit:
+    """One simple command: argv words and its redirections."""
+
+    __slots__ = ("words", "redirects")
 
     def __init__(self) -> None:
-        self.words: list[tuple[str, int, int]] = []  # (text, start, end)
-        self.start = -1
-        self.end = -1
-        self.pipe_fed = False
-        self.has_heredoc = False
-        self.head = ""
-        self.head_index = -1
+        self.words: list[_R6Word] = []
+        self.redirects: list[tuple[str, _R6Word]] = []
 
-    def arguments(self) -> list[str]:
-        return [text for text, _, _ in self.words[1:]]
-
-    def span_text(self, raw: str) -> str:
-        return raw[self.start:self.end] if self.start >= 0 else ""
+    def empty(self) -> bool:
+        return not self.words and not self.redirects
 
 
-def _shell_units(
-    tokens: list[tuple[str, str, int, int]]
-) -> list[_Unit]:
-    """Group tokens into simple commands with their delivery context.
-
-    ``{``/``}`` are reserved WORDS that still delimit compound commands,
-    so they end the current simple command like a separator would (a
-    launch inside ``function f { pool run …; }`` must be its own unit with
-    ``pool`` as its head, not an argument swallowed by ``f``)."""
-    units: list[_Unit] = []
-    unit: _Unit | None = None
-    last_separator = ""
-    pending_fd_word: tuple[str, int, int] | None = None
-    for kind, body, start, end in tokens:
-        if kind == _OP:
-            if body in _SEPARATOR_OPS:
-                unit = None
-                last_separator = body
-                pending_fd_word = None
-            elif body.startswith("<<"):
-                if unit is not None:
-                    unit.has_heredoc = True
-            elif unit is None:
-                continue
-            # Redirects (<, >, ...) end any pending fd word but stay in-unit.
-            pending_fd_word = None
-            continue
-        if kind == _HEREDOC:
-            if unit is not None:
-                unit.has_heredoc = True
-            continue
-        if kind == _WORD and body in ("{", "}"):
-            unit = None
-            last_separator = ""
-            pending_fd_word = None
-            continue
-        if unit is None:
-            unit = _Unit()
-            unit.pipe_fed = last_separator == "|"
-            units.append(unit)
-        if pending_fd_word is not None:
-            # ``2>file``: the bare digits belonged to the redirect, not argv.
-            unit.words.pop()
-            pending_fd_word = None
-        unit.words.append((body, start, end))
-        if unit.start < 0:
-            unit.start = start
-        unit.end = end
-        pending_fd_word = (body, start, end) if body.isdigit() else None
-    for candidate in units:
-        candidate.head, candidate.head_index = _command_head(candidate)
-    return units
+def _r6_clip(text: str) -> str:
+    return repr(text if len(text) <= 48 else text[:45] + "...")
 
 
-def _command_head(unit: _Unit) -> tuple[str, int]:
-    """``(basename, index)`` of the unit's command word (assignments and
-    keywords skipped), or ``("", -1)``."""
-    for index, (text, _, _) in enumerate(unit.words):
-        if text in _COMMAND_KEYWORDS or _ASSIGNMENT_WORD_RE.match(text):
-            continue
-        if text.startswith("-"):
-            continue
-        return text.rsplit("/", 1)[-1].lower(), index
-    return "", -1
+def _r6_name(word: _R6Word) -> str:
+    """The basename of a literal word (``""`` when computed)."""
+    return word.value.rsplit("/", 1)[-1] if word.literal else ""
 
 
-def _unit_is_launch(unit: _Unit) -> bool:
-    """True when the unit IS a lexically visible wrapper launch."""
-    head = unit.head
-    words = [text for text, _, _ in unit.words]
-    if head == "pool":
-        after = words[unit.head_index + 1:unit.head_index + 2]
-        return bool(after) and after[0] in ("run", "remote")
-    if head in ("sub.sh", "remote_sub.sh", "slot.py"):
-        return True
-    if _INTERPRETER_HEAD_RE.match(head) or _ALWAYS_INLINE_HEAD_RE.match(head):
-        return any(
-            _COMPUTED_WORD_RE.search(text) is None
-            and text.rsplit("/", 1)[-1] == "slot.py"
-            for text in words[unit.head_index + 1:]
-            if not text.startswith("-")
-        )
-    return False
-
-
-def _shadow_launch_possible(unit: _Unit) -> bool:
-    """True when substituting a wrapper name for a computed word of this
-    unit would make it a paid launch (REVIEW_2329 r3 B-1 computed words).
-
-    No runner allowlist: ANY simple command whose computed word could
-    expand to a wrapper — ``$P run grok``, ``sudo -n $P run grok``,
-    ``su -c '$P run grok'``, ``time $P run grok`` — is a possible
-    unattributable launch, while a computed word that can never complete a
-    wrapper shape (``echo "$POOL_ORCHESTRATOR_ID"``) stays allowed.
-    Assignment VALUES are excluded (they cannot become the command word;
-    their own law is the projection check), and a unit that already IS a
-    lexically visible launch is left to the launch pipeline — the wrapper
-    invocation is observed, and a computed mode token is refused there by
-    token equality.
-    """
-    if _unit_is_launch(unit):
-        return False
-    if unit.head in _PRINT_ONLY_HEADS:
-        return False
-    words = [
-        text for text, _, _ in unit.words
-        if not _ASSIGNMENT_WORD_RE.match(text)
-    ]
-    computed = [
-        text for text in words if _COMPUTED_WORD_RE.search(text)
-    ]
-    if not computed:
-        return False
-
-    def _shadow_variants(text: str, token: str) -> list[str]:
-        # Each computed segment in turn becomes the wrapper token while the
-        # word's other computed segments expand to nothing: a quoted word
-        # never word-splits, so one word can only ever contribute ONE
-        # wrapper-shaped argument.
-        variants: list[str] = []
-        for match in _COMPUTED_SEGMENT_RE.finditer(text):
-            variants.append(
-                _COMPUTED_SEGMENT_RE.sub("", text[:match.start()])
-                + token
-                + _COMPUTED_SEGMENT_RE.sub("", text[match.end():])
-            )
-        return variants
-
-    for token in _SHADOW_WRAPPER_TOKENS:
-        for text in computed:
-            for variant in _shadow_variants(text, token):
-                # Alone: the word may carry a whole launch body
-                # (``su -c '$P run grok' root``).
-                if _wrapper_invocations(variant):
-                    return True
-                # In place: the words around it keep their literal
-                # positions (``sudo -n $P run grok``, ``time $P run …``).
-                substituted = [
-                    variant if other == text else other for other in words
-                ]
-                if _wrapper_invocations(" ".join(substituted)):
-                    return True
-    return False
-
-
-def _interpreter_problem(unit: _Unit) -> str:
-    """Why this interpreter invocation's program is unobservable, or ''.
-
-    Judged by HOW the interpreter receives its program — flag text, pipe,
-    heredoc, computed argument — never by which letters a flag spells, so
-    ``-c``, ``-Sc``, ``-Bc``, ``-we``, ``-E``, ``-p``, ``--eval``, ``-ne``
-    are all one refusal class. Following POSIX grammar, only option words
-    BEFORE the first operand are the interpreter's own (anything after the
-    script path — ``slot.py glm … -- run`` — belongs to the script), so the
-    bare script-file form keeps its lexically observed launch.
-    """
-    head = unit.head
-    if _ALWAYS_INLINE_HEAD_RE.match(head):
-        return (
-            f"{head}'s program text is always an inline argument, so a "
-            "launch it carries is assembled at runtime"
-        )
-    if not _INTERPRETER_HEAD_RE.match(head):
-        return ""
-    operands_started = False
-    for text in unit.arguments():
-        if operands_started:
-            if _COMPUTED_WORD_RE.search(text):
-                return (
-                    f"{head} receives a computed argument ({text!r}); the "
-                    "program or its inputs are assembled at runtime"
-                )
-            continue
-        if text == "-":
-            return f"{head} reads its program from stdin ('-')"
-        if text.startswith("-") and text != "--":
+def _r6_assignment_problem(word: _R6Word, name: str, append: bool) -> str:
+    if name not in _R6_ADMITTED_ASSIGNMENTS:
+        if (name in _R6_ENVIRONMENT_INPUT_NAMES
+                or name.startswith(_R6_ENVIRONMENT_INPUT_PREFIXES)):
             return (
-                f"{head} is invoked with option arguments ({text!r}); the "
-                "program may be inline option text (one-liner), which the "
-                "guard cannot attribute"
+                f"assignment {name}= is an unobservable launch environment "
+                "input (startup file, hook, loader, search path or guard "
+                "channel)"
             )
-        if text == "--":
-            continue
-        if _COMPUTED_WORD_RE.search(text):
-            return (
-                f"{head} receives a computed argument ({text!r}); the "
-                "program or its inputs are assembled at runtime"
-            )
-        operands_started = True
-    if unit.pipe_fed:
-        return f"{head} reads its program from the pipe feeding it"
-    if unit.has_heredoc:
-        return f"{head} reads its program from a heredoc"
+        return f"assignment {name}= is not a projected identity name"
+    if append:
+        return f"assignment {name}+= appends to a value the guard cannot see"
+    if not word.literal:
+        return f"assignment {name}= has a computed value"
     return ""
 
 
-def _nested_shell_bodies(
-    units: list[_Unit], raw: str, depth: int
-) -> list[tuple[_Unit, list[tuple[str, str, int, int]]]]:
-    """``(shell_unit, body_tokens)`` for every ``sh -c <script>`` body."""
-    bodies: list[tuple[_Unit, list[tuple[str, str, int, int]]]] = []
-    if depth >= 4:
-        return bodies
-    for unit in units:
-        if not _SHELL_HEAD_RE.match(unit.head):
-            continue
-        words = unit.words
-        for position in range(1, len(words) - 1):
-            text, start, end = words[position]
-            if text != "-c":
-                continue
-            body_text, _, _ = words[position + 1]
-            bodies.append((unit, _shell_scan(body_text, start, depth + 1)))
-            break
-    return bodies
-
-
-def _all_units(
-    tokens: list[tuple[str, str, int, int]], raw: str, depth: int = 0
-) -> list[_Unit]:
-    """Units of this token stream plus every nested ``-c`` body's units."""
-    units = _shell_units(tokens)
-    for _, body_tokens in _nested_shell_bodies(units, raw, depth):
-        units.extend(_all_units(body_tokens, raw, depth + 1))
-    return units
-
-
-def _brace_group_spans(
-    tokens: list[tuple[str, str, int, int]],
-) -> list[tuple[int, int]]:
-    """Spans of ``{ ... }`` groups (loop bodies, function bodies, grouped
-    repeats) among these tokens (REVIEW_2329 r3 M-A). ``{``/``}`` are shell
-    reserved WORDS, so they appear here as word tokens."""
-    spans: list[tuple[int, int]] = []
-    stack: list[int] = []
-    for kind, body, start, end in tokens:
-        if kind != _WORD:
-            continue
-        if body == "{":
-            stack.append(start)
-        elif body == "}" and stack:
-            opened = stack.pop()
-            spans.append((opened, end))
-    return spans
-
-
-def _function_body_spans(
-    tokens: list[tuple[str, str, int, int]], units: list[_Unit]
-) -> list[tuple[int, int]]:
-    """Spans of function-definition bodies: ``name() { … }`` / ``f() ( … )``
-    / ``function f { … }`` (REVIEW_2329 r3 M-A)."""
-    spans: list[tuple[int, int]] = []
-    for position in range(len(tokens) - 2):
-        kind, body, start, end = tokens[position]
-        if kind != _WORD or _ASSIGNMENT_WORD_RE.match(body):
-            continue
-        if (tokens[position + 1][:2] == (_OP, "(")
-                and tokens[position + 2][:2] == (_OP, ")")
-                and tokens[position + 1][2] == end
-                and tokens[position + 2][2] == tokens[position + 1][3]):
-            body_start = tokens[position + 2][3]
-            body_end = _compound_end(tokens, position + 3)
-            if body_end > body_start:
-                spans.append((body_start, body_end))
-    return spans
-
-
-def _compound_end(
-    tokens: list[tuple[str, str, int, int]], index: int
+def _r6_prefix(
+    name: str, words: list[_R6Word], index: int, codes: list[tuple[str, str]]
 ) -> int:
-    """End offset of the compound command starting at ``index``: a brace
-    group (reserved-word ``{``), a parenthesised subshell, or one simple
-    command up to its separator."""
-    depth = 0
-    brace_depth = 0
-    for kind, body, _, end in tokens[index:]:
-        if kind == _WORD:
-            if body == "{":
-                brace_depth += 1
+    """Consume one transparent prefix's own arguments; the next index."""
+    if name == "env":
+        while index < len(words):
+            word = words[index]
+            if word.value.startswith("-"):
+                codes.append(("R6_PREFIX_FORM", f"env {word.value}"))
+                index += 1
                 continue
-            if body == "}":
-                if brace_depth == 0:
-                    return end
-                brace_depth -= 1
-                continue
-            continue
-        if body == "(":
-            depth += 1
-            continue
-        if body == ")":
-            if depth == 0:
-                return end
-            depth -= 1
-            continue
-        if body in _SEPARATOR_OPS and depth == 0 and brace_depth == 0:
-            return end
-    return tokens[-1][3] if tokens else 0
+            match = _R6_ASSIGNMENT_RE.match(word.value)
+            if match is None:
+                break
+            problem = _r6_assignment_problem(word, match.group(1), bool(match.group(2)))
+            if problem:
+                codes.append(("R6_ASSIGNMENT", problem))
+            index += 1
+        return index
+    if name == "nice" and index + 1 < len(words) and words[index].value == "-n":
+        if words[index + 1].literal and _R6_NICENESS_RE.match(words[index + 1].value):
+            return index + 2
+    if name == "timeout":
+        if (index < len(words) and words[index].literal
+                and _R6_DURATION_RE.match(words[index].value)):
+            return index + 1
+        codes.append((
+            "R6_PREFIX_FORM",
+            "timeout without exactly one literal DURATION before the command",
+        ))
+    while index < len(words) and words[index].value.startswith("-"):
+        codes.append(("R6_PREFIX_FORM", f"{name} {words[index].value}"))
+        index += 1
+    return index
 
 
-def _launch_in_text(text: str) -> bool:
-    """A lexically visible wrapper launch inside a plain text span."""
-    return bool(_wrapper_invocations(text))
+def _r6_nested(
+    shell: str, args: list[_R6Word], *, nested: bool,
+    codes: list[tuple[str, str]],
+) -> str:
+    """Judge ``<shell> …`` as the NESTED form; returns ``"nested"`` or ``""``."""
+    problems: list[str] = []
+    if nested:
+        problems.append("a shell inside a nested -c body")
+    if shell not in _R6_NESTED_SHELLS:
+        problems.append(
+            f"{shell} is not admitted (its startup files or a different "
+            "grammar run with the body)"
+        )
+    if not args or not args[0].literal or args[0].value != "-c":
+        problems.append(
+            f"{shell} must take exactly -c as its only option "
+            f"(got {_r6_clip(args[0].value) if args else 'no option'})"
+        )
+    if len(args) != 2:
+        problems.append("exactly one -c body and nothing after it")
+    for name in ("BASH_ENV", "ENV"):
+        if os.environ.get(name, "").strip():
+            problems.append(
+                f"the session environment sets {name}, which the nested "
+                "shell may load before the body"
+            )
+    body_codes: list[tuple[str, str]] = []
+    body_at = next(
+        (position for position, word in enumerate(args)
+         if word.literal and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word.value)),
+        None,
+    )
+    if body_at is not None and body_at + 1 < len(args):
+        body = args[body_at + 1]
+        if body.literal:
+            body_codes = _r6_analyse(body.value, nested=True)
+        # A computed body is reported by the computed-word scan.
+    if problems:
+        codes.append(("R6_NESTED_SHELL", "; ".join(problems)))
+    codes.extend(body_codes)
+    return "" if problems or body_codes else "nested"
+
+
+def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> str:
+    """Classify one simple command: ``"launch"``, ``"nested"``,
+    ``"inspector"`` or ``""`` (not admitted; reason appended to codes)."""
+    for operator, target in unit.redirects:
+        if target.has_glob():
+            codes.append(("R6_GLOB_OR_BRACE", f"{operator} {target.value}"))
+    words = unit.words
+    if not words:
+        codes.append(("R6_NOT_A_PLAIN_LAUNCH", "a command with no command word"))
+        return ""
+    index = 0
+    while index < len(words):
+        match = _R6_ASSIGNMENT_RE.match(words[index].leading_unquoted())
+        if match is None:
+            break
+        problem = _r6_assignment_problem(
+            words[index], match.group(1), bool(match.group(2))
+        )
+        if problem:
+            codes.append(("R6_ASSIGNMENT", problem))
+        index += 1
+    assigned = index > 0
+    if index == len(words):
+        codes.append((
+            "R6_NOT_A_PLAIN_LAUNCH",
+            "an assignment-only command (it changes this shell's state for "
+            "the commands after it)",
+        ))
+        return ""
+    prefixes = 0
+    while index < len(words) and _r6_name(words[index]).lower() in _R6_TRANSPARENT_PREFIXES:
+        prefixes += 1
+        if prefixes > _R6_MAX_PREFIXES:
+            codes.append(("R6_PREFIX_FORM", "more than four stacked prefixes"))
+            return ""
+        index = _r6_prefix(_r6_name(words[index]).lower(), words, index + 1, codes)
+    if index >= len(words):
+        codes.append(("R6_NOT_A_PLAIN_LAUNCH", "no command word after the prefixes"))
+        return ""
+    head = words[index]
+    name = _r6_name(head)
+    if name in _R6_RESERVED_WORDS:
+        codes.append(("R6_KEYWORD", repr(name)))
+        return ""
+    if name in _R6_ENV_BUILTINS:
+        codes.append(("R6_ENV_BUILTIN", repr(name)))
+        return ""
+    if not name or head.has_glob():
+        codes.append((
+            "R6_NOT_A_PLAIN_LAUNCH",
+            f"the computed or pattern command word {_r6_clip(head.value)}",
+        ))
+        return ""
+    lowered = name.lower()
+    if lowered in _R6_WRAPPER_BASENAMES:
+        args = words[index + 1:]
+    elif _R6_PYTHON_RE.match(lowered):
+        script = words[index + 1] if index + 1 < len(words) else None
+        if (script is None or not script.literal or script.has_glob()
+                or script.value.startswith("-")
+                or _r6_name(script).lower() != "slot.py"):
+            codes.append((
+                "R6_NOT_A_PLAIN_LAUNCH",
+                f"{name} with anything but a literal …/slot.py first operand "
+                "(inline program, option, stdin or another script)",
+            ))
+            return ""
+        args = words[index + 2:]
+    elif lowered in _R6_NESTED_SHELLS or lowered in _R6_OTHER_SHELLS:
+        return _r6_nested(lowered, words[index + 1:], nested=nested, codes=codes)
+    elif lowered in _R6_INSPECTORS and not assigned and not prefixes and not nested:
+        return "inspector"
+    else:
+        codes.append(("R6_NOT_A_PLAIN_LAUNCH", repr(name)))
+        return ""
+    for arg in args:
+        if arg.has_glob():
+            codes.append(("R6_GLOB_OR_BRACE", _r6_clip(arg.value)))
+    return "launch"
+
+
+def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
+    """Every r6 code for ``text`` (``[]`` = admitted). ``nested`` judges a
+    ``bash -c`` body: only a single LAUNCH is admitted there."""
+    tokens, error = _r6_lex(text)
+    if error:
+        return [("R6_TOKENIZE_FAILED", error)]
+    codes: list[tuple[str, str]] = []
+    units = [_R6Unit()]
+    separators: list[str] = []
+    pending: str | None = None
+    for kind, item in tokens:
+        if kind == "word":
+            if pending is not None:
+                units[-1].redirects.append((pending, item))
+                pending = None
+            else:
+                units[-1].words.append(item)
+            continue
+        if kind == "procsub":
+            codes.append(("R6_PROCESS_SUBSTITUTION", _r6_clip(str(item))))
+            continue
+        operator = str(item)
+        if pending is not None:
+            codes.append(("R6_TOKENIZE_FAILED", f"{pending!r} has no target"))
+            pending = None
+        if operator in ("<<", "<<-"):
+            codes.append(("R6_HEREDOC", operator))
+            continue
+        if operator == "<<<" or operator in _R6_REDIRECTIONS:
+            if operator == "<<<":
+                codes.append(("R6_HEREDOC", operator))
+            elif operator not in _R6_ADMITTED_REDIRECTIONS:
+                codes.append(("R6_REDIRECTION", operator))
+            pending = operator
+            continue
+        if operator in ("(", ")"):
+            codes.append(("R6_GROUPING", operator))
+        separators.append(operator)
+        units.append(_R6Unit())
+    if pending is not None:
+        codes.append(("R6_TOKENIZE_FAILED", f"{pending!r} has no target"))
+    # Leading/trailing newlines are whitespace, not another command.
+    while separators and separators[0] == "\n" and units[0].empty():
+        units.pop(0)
+        separators.pop(0)
+    while separators and separators[-1] == "\n" and units[-1].empty():
+        units.pop()
+        separators.pop()
+    for unit in units:
+        for word in [*unit.words, *(target for _, target in unit.redirects)]:
+            for segment_kind, segment in word.segments:
+                if segment_kind == "cmdsub":
+                    codes.append(("R6_COMMAND_SUBSTITUTION", _r6_clip(segment)))
+                elif segment_kind not in _R6_LITERAL_SEGMENTS:
+                    codes.append(("R6_EXPANSION", _r6_clip(segment)))
+                elif segment_kind == "sq" and ("$" in segment or "`" in segment):
+                    codes.append(("R6_DEFERRED_EXPANSION", _r6_clip(segment)))
+    forms = [_r6_unit(unit, nested=nested, codes=codes) for unit in units]
+    list_operators = sorted({op for op in separators if op in _R6_LIST_OPERATORS})
+    if list_operators:
+        codes.append((
+            "R6_COMPOUND_LIST",
+            " ".join("newline" if op == "\n" else op for op in list_operators),
+        ))
+    if any(op in _R6_PIPE_OPERATORS for op in separators) and (
+        nested or any(form != "inspector" for form in forms)
+    ):
+        codes.append(("R6_PIPELINE", "| with a non-inspector stage"))
+    return codes
+
+
+def r6_refusal_codes(raw: str) -> list[tuple[str, str]]:
+    """The r6 ADMIT rule: ``[]`` when ``raw`` is out of scope (names no
+    wrapper) or is exactly one admitted form; otherwise every typed
+    ``(code, detail)`` explaining the refusal."""
+    if not r6_names_wrapper(raw):
+        return []
+    codes = _r6_analyse(raw, nested=False)
+    if all(code in _R6_ADVISORY_CODES for code, _ in codes):
+        return []
+    return codes
+
+
+def _r6_reason(codes: list[tuple[str, str]]) -> str:
+    grouped: dict[str, list[str]] = {}
+    for code, detail in codes:
+        details = grouped.setdefault(code, [])
+        if detail and detail not in details and len(details) < 3:
+            details.append(detail)
+    clauses = [
+        _R6_CLAUSES[code].format(detail=", ".join(details) or "-")
+        for code, details in grouped.items()
+    ]
+    return (
+        "Mastermind shared-placement guard: unobservable launch — this "
+        "command names a paid-launch wrapper but is not one plain top-level "
+        "launch (r6 admit rule; refusal codes: " + ", ".join(grouped) + "): "
+        + "; ".join(clauses) + ". " + _R6_REMEDY
+    )
+
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -1117,137 +1505,6 @@ def launch_provider_token(command: str) -> str:
     return tokens[0][1] if tokens else ""
 
 
-def _deny_structurally_unobservable(raw: str) -> None:
-    """Refuse command SHAPES no lexically observed wrapper invocation can
-    cover (WO-11 r5; REVIEW_2329 r3 B-1, M-A, M-B).
-
-    Armed sessions only, and only when a wrapper NAME appears somewhere in
-    the canonical command — otherwise the command is the documented
-    arbitrary-process limit, not this gate's fence. The raw command is
-    tokenised (quote-aware, heredoc and nested ``-c`` bodies included) and
-    classified structurally:
-
-    * interpreter invocations whose program is delivered as inline flag
-      text / pipe / heredoc / computed argument (``python3 -Sc``,
-      ``perl -we``, ``node --eval``, ``python3 - <<EOF``, ``echo | python3``,
-      ``awk 'system("pool …")'``) — refused regardless of flag spelling;
-    * computed words (``$P``, ``${P}``, ``$(...)``, backticks) wherever a
-      wrapper name substituted for them would complete a paid launch —
-      ``time|sudo|caffeinate|ssh|su -c|flock|systemd-run … $P run grok``,
-      ``P=sub.sh; sudo $P glm`` — no runner allowlist to evade;
-    * command substitution (``$(...)``, backticks) anywhere in the command
-      — its expansion is executed and can hide a second launch;
-    * wrapper launches inside shapes that execute them more than once or
-      later: function-definition bodies, ``{ … }`` brace groups (including
-      bash brace-body loops), ``trap`` payloads, ``watch`` repeaters;
-    * ``eval``/``source``/``.`` inside the same nested ``-c`` script that
-      performs the launch (the launch environment becomes unobservable).
-
-    Conservative by design: over-refusal is honest, under-refusal is a
-    bypass. The bare interpreter script-file form
-    (``python3 …/slot.py glm -- run``) keeps its lexically observed launch.
-    """
-    canon = _canonical_command(raw)
-    if not _WRAPPER_NAME_RE.search(canon):
-        return
-    tokens = _shell_scan(raw)
-    units = _shell_units(tokens)
-    nested = _nested_shell_bodies(units, raw, 0)
-    all_units = list(units)
-    for _, body_tokens in nested:
-        all_units.extend(_all_units(body_tokens, raw, 1))
-    all_tokens = list(tokens)
-    for _, body_tokens in nested:
-        all_tokens.extend(body_tokens)
-
-    # B-1: interpreter program delivery.
-    for unit in all_units:
-        problem = _interpreter_problem(unit)
-        if problem:
-            deny(
-                "Mastermind shared-placement guard: unobservable launch — "
-                f"{problem}. The launch this interpreter could carry is "
-                "assembled at runtime, so provider substitution, the "
-                "identity projection and the one-attempt law cannot be "
-                "checked. Run the paid launch as a plain command."
-            )
-
-    # M-B: eval/source/. inside the nested -c script that launches (before
-    # the computed-word loop, so the nested launcher's own $X/$Y identity
-    # assembly reports the environment it actually corrupts).
-    for _, body_tokens in nested:
-        body_text = " ".join(body for _, body, _, _ in body_tokens)
-        if not (_launch_in_text(body_text)):
-            continue
-        for kind, body, _, _ in body_tokens:
-            if kind == _WORD and body in ("eval", "source", "."):
-                deny(
-                    "Mastermind shared-placement guard: unobservable "
-                    "launch environment — eval, source or '.' inside the "
-                    "same nested shell script that performs the launch "
-                    "can change the child's POOL_* identity outside what "
-                    "this guard can check. Run the paid launch as a plain "
-                    "command."
-                )
-
-    # B-1: computed words by shadow substitution; $(…)/backticks anywhere.
-    for unit in all_units:
-        for text, _, _ in unit.words:
-            if "$(" in text or "`" in text:
-                deny(
-                    "Mastermind shared-placement guard: unobservable "
-                    f"launch — the computed word {text!r} contains a "
-                    "command substitution, whose expansion runs in this "
-                    "very shell and can construct or hide a paid launch "
-                    "the guard cannot attribute. Pass literal arguments."
-                )
-        if _shadow_launch_possible(unit):
-            deny(
-                "Mastermind shared-placement guard: unobservable launch — "
-                "a computed word ($… or `…`) in this command could expand "
-                "to a paid-launch wrapper (time/sudo/env/ssh/su/flock/"
-                "systemd-run … $P run …), so the wrapper invocation and "
-                "any identity assignment around it cannot be observed. "
-                "Invoke the wrapper by its literal name."
-            )
-
-    # M-A: launches inside runtime-multiplying or deferred shapes.
-    launch_spans = [
-        (unit.start, unit.end)
-        for unit in all_units
-        if _unit_is_launch(unit)
-    ]
-    group_spans = _brace_group_spans(all_tokens)
-    group_spans += _function_body_spans(all_tokens, all_units)
-    for start, end in group_spans:
-        if any(s >= start and e <= end for s, e in launch_spans):
-            deny(
-                "Mastermind shared-placement guard: runtime-multiplexed "
-                "launch — a paid launch sits inside a function body or "
-                "{ … } brace group (loop body / grouped repeat), which "
-                "can execute it more than once or later, but the current "
-                "binding covers exactly one attempt. Every paid child "
-                "must be admitted and claimed through the placement "
-                "authority before launch."
-            )
-    for unit in all_units:
-        if unit.head not in _LAUNCH_STAGE_HEADS:
-            continue
-        role = "trap payload" if unit.head == "trap" else "watch repeater"
-        arguments = " ".join(
-            text for text, _, _ in unit.words[unit.head_index + 1:]
-        )
-        if _launch_in_text(arguments):
-            deny(
-                "Mastermind shared-placement guard: runtime-multiplexed "
-                f"launch — a paid launch is staged inside a {role}, which "
-                "can execute it more than once or later, but the current "
-                "binding covers exactly one attempt. Every paid child "
-                "must be admitted and claimed through the placement "
-                "authority before launch."
-            )
-
-
 def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
     """True when a wrapper invocation sits inside a construct that executes
     it N times at runtime: a for/while/until body (``do ... done``) or an
@@ -1474,23 +1731,15 @@ def validate_execution_binding(command: str) -> None:
     text it is shown — every wrapper invocation in it (all five shapes,
     repeated, heredoc bodies included, off-list modes refused) and every
     identity assignment form, with backslash-newline canonicalised as a
-    POSIX join (empty string). Command SHAPES are classified structurally
-    (``_deny_structurally_unobservable``): interpreter invocations whose
-    program is inline flag text, piped, heredoc-fed or computed are
-    refused regardless of flag spelling; computed words are refused
-    wherever a wrapper substituted for them would complete a launch
-    (shadow substitution); command substitution is refused anywhere;
-    launches inside loop bodies, function bodies, brace groups, batch
-    executors (xargs/parallel/find -exec), trap payloads and watch
-    repeaters are refused as unaccounted descendants; eval/source/'.' in
-    the nested -c script that performs the launch is refused as an
-    unobservable environment (conservative — the bare interpreter
-    script-file form ``python3 …/slot.py glm -- run`` stays observed).
-    Scripts staged in an EARLIER command or a
-    file and executed later, and environment injected by provider-side
-    mechanisms outside the command, are not observed; eval/source/
-    computed-name assignments in a launch command are refused as
-    unobservable.
+    POSIX join (empty string). Before this function runs, the r6 ADMIT rule
+    (``r6_refusal_codes``) has already refused every command that names a
+    wrapper but is not one plain launch / one faithful ``bash -c`` launch /
+    an inspector-only read. The r4 deny checks below stay as defence in
+    depth on what r6 admitted. Not observed: a command that names no
+    wrapper at all (arbitrary-process limit), scripts or binaries staged
+    in an EARLIER command or file and executed later (including a staged
+    file shadowing the wrapper on PATH), and environment injected by
+    provider-side mechanisms outside the command.
     """
     raw_binding = os.environ.get(BINDING_ENV, "").strip()
     if not raw_binding:
@@ -1711,19 +1960,14 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
     # gets the legacy identity checks instead of passing unchecked.
     invocations = _wrapper_invocations(raw if armed else command)
     if armed:
-        canon = _canonical_command(raw)
-        if _WRAPPER_RE.search(canon) and _SHELL_FEED_RE.search(canon):
-            deny(
-                "Mastermind shared-placement guard: unobservable launch — "
-                "wrapper source fed to a shell launches without a visible "
-                "wrapper invocation. Invoke the wrapper directly."
-            )
-        # REVIEW_2329 r3 B-1/M-A/M-B: interpreter one-liners, computed
-        # command words, runtime-multiplexing shapes and nested-shell
-        # eval/source never reach the wrapper scan, so they are refused
-        # here — BEFORE the no-launch early return that used to let an
-        # armed session launch with zero binding validation.
-        _deny_structurally_unobservable(raw)
+        # WO-11 r6 ADMIT rule (REVIEW_C_E_OPUS_20261109 A1): a command that
+        # names a wrapper is admitted only as one plain LAUNCH, one faithful
+        # bash -c '<plain launch>' or an inspector-only read; every other
+        # shape is refused HERE — before the no-launch early return, so a
+        # shape that hides its launch never reaches it unvalidated.
+        refusal = r6_refusal_codes(raw)
+        if refusal:
+            deny(_r6_reason(refusal))
     if not launches and not invocations:
         return
 

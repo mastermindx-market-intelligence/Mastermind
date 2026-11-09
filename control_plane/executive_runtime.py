@@ -18919,13 +18919,23 @@ def _join_native_runtime_binding(
       the SAME upstream command instead of minting a second native thread
       (idempotency identity is the persisted (namespace, key) pair —
       T3_HANDOFF_V2 §2);
-    * ``caller_namespace`` — the adapter's pinned request namespace, i.e.
-      the namespace the launch envelope will carry.
+    * ``caller_namespace`` — deliberately LEFT EMPTY (REVIEW_C_E_OPUS_20261109
+      A2). The adapter reads this field as a BARE authenticated principal
+      (OAuth client) and qualifies it itself (``t3_request_namespace``), so
+      stamping the adapter's fixed namespace here made a port without a
+      principal launch under ``<namespace>:<namespace>``. The claim
+      transaction knows no OAuth client at all — it holds the Executive
+      worker/lease identity, not the credential the T3 port authenticates
+      with — so there is nothing true to stamp. The original OAuth
+      namespace (DONE_WHEN 4) is attested by the adapter's port at launch
+      and persisted with the launch intent/receipt (the adapter's
+      ``request_namespace``); joining that record back onto the Executive
+      ledger is the adapter seam's job, not invented here.
 
-    Every joined value is derived from the SAME issued binding, so the
-    adapter's later ``derive_t3_client_request_id`` reproduces
-    ``operation_key`` byte for byte; a drifted or hand-edited binding fails
-    that join instead of launching under a different identity. Any other
+    ``operation_key`` is derived from the SAME issued binding, so the
+    adapter's later ``derive_t3_client_request_id`` reproduces it byte for
+    byte; a drifted or hand-edited binding fails that join instead of
+    launching under a different identity. Any other
     adapter id returns the binding unchanged (a plain v1 record); an
     adapter id that does not resolve, or a t3 seam that is not implemented,
     fails CLOSED with a typed ``StateConflict`` inside the claim
@@ -18953,16 +18963,14 @@ def _join_native_runtime_binding(
             f"claimed route adapter {effective!r} is registered but not"
             " implemented; the t3-native seam cannot bind a live worker"
         )
-    from control_plane.t3_execution_adapter import (
-        T3_REQUEST_NAMESPACE,
-        derive_t3_client_request_id,
-    )
+    from control_plane.t3_execution_adapter import derive_t3_client_request_id
     operation_key = derive_t3_client_request_id(binding)
+    # caller_namespace stays "" — see the docstring (no claim-time principal).
     return dataclasses.replace(
         binding,
         runtime_kind=descriptor.runtime_kind,
         operation_key=operation_key,
-        caller_namespace=T3_REQUEST_NAMESPACE,
+        caller_namespace="",
     )
 
 
