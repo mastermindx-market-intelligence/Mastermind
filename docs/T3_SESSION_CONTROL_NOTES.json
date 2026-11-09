@@ -36,6 +36,19 @@
       ],
       "run_id": "ordinal4",
       "thread_id": "mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93"
+    },
+    {
+      "author_ref": "github:mastermindxryan",
+      "body": "Correction to native-t3-lifecycle-result: the parent source review (PR #2374 comment 6738835434) REJECTED that candidate. Its handler-level check-then-act preconditions were not the requested atomic expected-state guard, and same-instance model selection did not enforce capacity_fabric. Repaired in the same isolated checkout (upstream base unchanged at 0770446869d247a8b28c27d7ed93f47f8ff0c1e4): (1) preconditions moved into native commands at the serialized Orchestrator boundary. thread.delete gains optional expectedTitle/expectedUpdatedAt/onlyIfIdle and thread.model-selection.set gains optional expectedUpdatedAt/onlyIfIdle in packages/contracts; the orchestrator enforces them under the per-thread lock before planning, and violations fail as native rejected command receipts on the original commandId, so reconciliation replays the receipt instead of re-sending. (2) set_model now binds to the CALLING credential's own provider instance (capacity_fabric in this deployment; ProviderDriverKind is an open slug so no deployment string is hardcoded): thread credential required, selections on other instances, target threads on other instances, and provider switches refused. (3) archive/unarchive removed from t3_thread_lifecycle; parent reuses t3_thread_organize for those. New orchestrator-level race tests at the commit barrier (raced update vs parked delete under the thread lock, stale expectedTitle, live-run refusal, happy path): affected describe 10/10; handler tests 6/6; neighbor access suites 78/78; typecheck clean; vp run check:changed fully green; agentContextBudget.json 49613. Deliverables replaced in the requesting session workspace: candidate.patch (894 lines, 7 files: contracts, Orchestrator, tools, handlers, both test files, budget json) and a rewritten test-report.md with truthful acceptance status. REMAINING LIMITS: expectedUpdatedAt equality is millisecond granularity on updatedAt (the exact-title guard covers delete value confirmation; model-selection has no value guard); work a provider reports asynchronously after the under-lock idle check is still handled by native delete cancellation; a named-instance config surface for a different fixed instance would be a larger owner change. Final acceptance remains with the parent; nothing deployed or pushed. Prior note preserved verbatim; original ordinal3 task and ordinal4 run unchanged.",
+      "kind": "correction",
+      "note_id": "native-t3-lifecycle-correction",
+      "recorded_at": "2026-11-09T12:42:02Z",
+      "references": [
+        "https://github.com/pingdotgg/t3code/commit/0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2374#issuecomment-6738835434"
+      ],
+      "run_id": "ordinal5",
+      "thread_id": "mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93"
     }
   ],
   "mission_id": "t3-session-control-v3",
