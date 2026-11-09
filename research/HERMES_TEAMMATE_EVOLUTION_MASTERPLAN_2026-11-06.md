@@ -1,8 +1,8 @@
 # Hermes as a persistent Mastermind teammate
 ## Research findings, architecture decisions, and implementation masterplan
 
-**Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §§56–61. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Research date:** 6 November 2026\
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–61. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.\
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
