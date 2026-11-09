@@ -4,7 +4,7 @@
   "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
   "root": "2DK-0",
   "observedAtUtc": "2026-11-09T00:14:39.425Z",
-  "classification": "EFFECT_UNKNOWN_ORIGINAL_CARRIER_NO_REPLAY",
+  "classification": "CURRENT_SOURCE_UNCHANGED_ORIGINAL_TRANSPORT_EFFECT_FENCED",
   "intent": {
     "operationId": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
     "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
@@ -333,5 +333,145 @@
     }
   ],
   "completedOtherBatchEdits": 38,
-  "next": "Reconcile original target through the same Mastermind Paper app when transport is usable. Do not replay or change carriers for this mutation. Independent source evidence/design preparation remains authorized."
+  "next": "Do not replay the original2DK operation or mutate its2AO artboard. Continue independently scoped boards with fresh source checks on the same admitted carrier. Missing original adapter receipt remains explicit.",
+  "computedStyleRead": {
+    "envelope": {
+      "state": "OBSERVED",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"file\": {\n    \"id\": \"01M6Y3VVGX4K4MXZ8JK2A1YG28\",\n    \"name\": \"Mastermind - Bonds and Transmission - Pre-R30 Archive\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"6234666b\"\n  }\n}"
+          },
+          {
+            "type": "text",
+            "text": "{\n  \"styles\": {\n    \"2DK-0\": {\n      \"paddingBlock\": \"11px\",\n      \"paddingInline\": \"14px\",\n      \"backgroundColor\": \"var(--mx-dark-panel2)\",\n      \"borderLeftWidth\": \"2px\",\n      \"borderLeftStyle\": \"solid\",\n      \"borderLeftColor\": \"var(--mx-dark-warn)\"\n    },\n    \"2DL-0\": {\n      \"fontSize\": \"11px\",\n      \"lineHeight\": \"150%\",\n      \"fontFamily\": \"var(--font-ui)\",\n      \"fontWeight\": 400,\n      \"whiteSpace\": \"pre-wrap\",\n      \"color\": \"var(--mx-dark-muted)\"\n    }\n  }\n}"
+          }
+        ]
+      }
+    },
+    "blocks": [
+      {
+        "file": {
+          "id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+          "name": "Mastermind - Bonds and Transmission - Pre-R30 Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        }
+      },
+      {
+        "styles": {
+          "2DK-0": {
+            "paddingBlock": "11px",
+            "paddingInline": "14px",
+            "backgroundColor": "var(--mx-dark-panel2)",
+            "borderLeftWidth": "2px",
+            "borderLeftStyle": "solid",
+            "borderLeftColor": "var(--mx-dark-warn)"
+          },
+          "2DL-0": {
+            "fontSize": "11px",
+            "lineHeight": "150%",
+            "fontFamily": "var(--font-ui)",
+            "fontWeight": 400,
+            "whiteSpace": "pre-wrap",
+            "color": "var(--mx-dark-muted)"
+          }
+        }
+      }
+    ],
+    "data": {
+      "styles": {
+        "2DK-0": {
+          "paddingBlock": "11px",
+          "paddingInline": "14px",
+          "backgroundColor": "var(--mx-dark-panel2)",
+          "borderLeftWidth": "2px",
+          "borderLeftStyle": "solid",
+          "borderLeftColor": "var(--mx-dark-warn)"
+        },
+        "2DL-0": {
+          "fontSize": "11px",
+          "lineHeight": "150%",
+          "fontFamily": "var(--font-ui)",
+          "fontWeight": 400,
+          "whiteSpace": "pre-wrap",
+          "color": "var(--mx-dark-muted)"
+        }
+      }
+    }
+  },
+  "finalJsxRead": {
+    "envelope": {
+      "state": "OBSERVED",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"file\": {\n    \"id\": \"01M6Y3VVGX4K4MXZ8JK2A1YG28\",\n    \"name\": \"Mastermind - Bonds and Transmission - Pre-R30 Archive\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"6234666b\"\n  }\n}"
+          },
+          {
+            "type": "text",
+            "text": "(\n    <div id=\"2DK-0\" style={{ backgroundColor: 'var(--mx-dark-panel2)', borderLeftColor: 'var(--mx-dark-warn)', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', fontSynthesis: 'none', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingBlock: '11px', paddingInline: '14px', WebkitFontSmoothing: 'antialiased' }}>\n      <div id=\"2DL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', fontFamily: 'var(--font-ui)', fontSize: '11px', lineHeight: '150%' }}>\n        Do not average changed and unchanged families into a middling score. The disagreement is the decision: rates pressure is real; higher-order stress is not confirmed.\n      </div>\n    </div>\n  )"
+          }
+        ]
+      }
+    },
+    "blocks": [
+      {
+        "file": {
+          "id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+          "name": "Mastermind - Bonds and Transmission - Pre-R30 Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        }
+      },
+      {
+        "text": "(\n    <div id=\"2DK-0\" style={{ backgroundColor: 'var(--mx-dark-panel2)', borderLeftColor: 'var(--mx-dark-warn)', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', fontSynthesis: 'none', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingBlock: '11px', paddingInline: '14px', WebkitFontSmoothing: 'antialiased' }}>\n      <div id=\"2DL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', fontFamily: 'var(--font-ui)', fontSize: '11px', lineHeight: '150%' }}>\n        Do not average changed and unchanged families into a middling score. The disagreement is the decision: rates pressure is real; higher-order stress is not confirmed.\n      </div>\n    </div>\n  )"
+      }
+    ],
+    "data": {
+      "text": "(\n    <div id=\"2DK-0\" style={{ backgroundColor: 'var(--mx-dark-panel2)', borderLeftColor: 'var(--mx-dark-warn)', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', fontSynthesis: 'none', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingBlock: '11px', paddingInline: '14px', WebkitFontSmoothing: 'antialiased' }}>\n      <div id=\"2DL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', fontFamily: 'var(--font-ui)', fontSize: '11px', lineHeight: '150%' }}>\n        Do not average changed and unchanged families into a middling score. The disagreement is the decision: rates pressure is real; higher-order stress is not confirmed.\n      </div>\n    </div>\n  )"
+    }
+  },
+  "currentSourceUnchangedVerified": true,
+  "fence": {
+    "operationId": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
+    "carrier": "Mastermind Paper direct app",
+    "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+    "artboardId": "2AO-0",
+    "nodeIds": [
+      "2DK-0",
+      "2DL-0",
+      "2D5-0"
+    ],
+    "intent": {
+      "operationId": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
+      "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+      "nodeId": "2DK-0",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+        "targetNodeId": "2DK-0",
+        "mode": "replace",
+        "html": "<x-paper-clone node-id=\"2DK-0\" style=\"border-left-color:#00000000;\" />"
+      },
+      "guard": "ff274eafab9cc820263379992c43c96f9059c89523213d19be130a070e19aeb3",
+      "inputCheckpoint": {
+        "path": "research/paper_estate_accent_audit_2026-11-08/BATCH_INPUTS/resume-002.json",
+        "sha": "002c54bf2ce666c2520f960a37c7b6bd4b85935a"
+      }
+    },
+    "sourceCheckpoint": {
+      "path": "research/paper_estate_accent_audit_2026-11-08/BATCH_INPUTS/resume-002.json",
+      "sha": "002c54bf2ce666c2520f960a37c7b6bd4b85935a"
+    },
+    "status": "ORIGINAL_TRANSPORT_EFFECT_FENCED",
+    "currentSourceUnchangedVerified": true,
+    "notReplayed": true,
+    "receiptMissing": true,
+    "reason": "The original request timed out without an adapter receipt. Exact current JSX matches its preserved preimage and native parent/geometry are unchanged. Keep the original operation and its artboard fenced; independent boards may continue."
+  }
 }
