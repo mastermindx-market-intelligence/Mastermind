@@ -1,0 +1,596 @@
+{
+  "schema": "mastermind.t3_durable_canary_receipt/v1",
+  "revision": "r2",
+  "harness_port": "T3McpToolPort",
+  "recorded_at": "2026-11-09T14:37:09.908008+00:00",
+  "started_at": "2026-11-09T14:36:25.095759+00:00",
+  "outcome": "DONE",
+  "blocked_gate": null,
+  "label": "MMOS durable canary r2",
+  "code": {
+    "adapter_commit_sha": "128e5e8be5cb4a6ef4c33921c79c82401324e298",
+    "adapter_file_sha256": "3b931f5b16af0e8b89f3e20c8268a7c45d04b86a1a4f54b4692423bffefe1ed5",
+    "harness_file_sha256": "ed52a5655efaec93dcd2c3d54b4366e92d1fa08c91a731e8437aa4d34c812b94",
+    "adapter_and_harness_tree_clean": true
+  },
+  "adapter_commit_sha": "128e5e8be5cb4a6ef4c33921c79c82401324e298",
+  "environment": {
+    "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+    "label": "m2studio",
+    "serverVersion": "0.1.7",
+    "platform": {
+      "os": "darwin",
+      "arch": "arm64",
+      "machine": "mac-studio"
+    },
+    "endpoint": "http://127.0.0.1:3773/mcp"
+  },
+  "authenticated_namespace": {
+    "attestation": "T3McpToolPort.from token claims: client:<auth session id>",
+    "client_a_upstream_namespace_sha256": "d314591c9504e0835c809ae98f0ff4d79cf3975e657f0eea309454521f5783ed",
+    "client_a_qualified_namespace_sha256": "266f5d8f3bbb0c3e23a866321563b3859d5db6643f6c49050832912b8fca4e9b"
+  },
+  "provider": {
+    "providerInstanceId": "capacity_fabric",
+    "model": "glm-5.3-flash",
+    "selection_rule": "fixed by the A4 brief (no fallback)"
+  },
+  "providers_enabled": [
+    "capacity_fabric",
+    "fabric_claude",
+    "fabric_experiential"
+  ],
+  "providers_disabled": [
+    {
+      "id": "codex",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "claudeAgent",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "experiential",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "cursor",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "grok",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "opencode",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "opencode_opencode1",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "antigravity",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "fx",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "kiro",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "GLM2",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "muse",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "pi",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    }
+  ],
+  "store": {
+    "path": "~/.hermes/profiles/engineering/cache/scratch/t3_durable_canary_r2/batch/state.sqlite3",
+    "sha256": "45d71cd144e6018c3174045ae63a0735586e3c5dff49cf08768c7b20cfc15cc6",
+    "implementation": "SQLiteT3AdapterStateStore",
+    "fresh_state_file": true,
+    "note": "fresh r2 scratch store; NOT data/control_plane (the Executive file is pinned)"
+  },
+  "scenarios": {
+    "s1": {
+      "name": "crash-after-receipt cold restart (zero native calls)",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27",
+      "processes": {
+        "p1": {
+          "role": "s1-p1",
+          "pid": 99451,
+          "crash_point": "after_receipt_persist_before_ack",
+          "client_request_id": "3e5e5c9e0fd99ee8a3e652a07ad8c57b6456e3066903a74cba069ef68e2b88c0",
+          "upstream_echo_proven": true,
+          "native": {
+            "thread_id": "mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27",
+            "run_id": "run:thread:mcp%3Alaunch%3Ac15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27:ordinal:1",
+            "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+            "launch_status": "preparing"
+          },
+          "durable_state": "intent+receipt+original_ref COMMITTED",
+          "crashed_at": "2026-11-09T14:36:26.189951+00:00"
+        },
+        "p2": {
+          "role": "s1-p2",
+          "outcome": "OK",
+          "reattach": {
+            "returned_retained_ref": true,
+            "native_calls": 0,
+            "counts_after_reattach": {
+              "launch": 0,
+              "replay": 0,
+              "read": 0,
+              "interrupt": 0
+            },
+            "elapsed_s": 10.055
+          },
+          "second_start": {
+            "refused": true,
+            "error": "T3LaunchClaimConflictError",
+            "counts_after": {
+              "launch": 0,
+              "replay": 0,
+              "read": 0,
+              "interrupt": 0
+            }
+          },
+          "thread_id": "mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27",
+          "thread_matches_p1_side_file": true,
+          "thread_id_matches_client_a_derivation": true,
+          "status_sequence": [
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "collect": {
+            "collect_ok": true,
+            "collected_status": "SUCCEEDED",
+            "result_text_tail": "T3-CANARY-OK r2-s1",
+            "result_ledgered": true,
+            "result_ref": "t3://thread/mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27/run/run:thread:mcp%3Alaunch%3Ac15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27:ordinal:1/item/turn-item:provider:claudeAgent:native-item:a4532c9d-c1f3-4eba-a0fc-f57dd53ceaec",
+            "head_read_item_count": 2,
+            "run_assistant_items": 1,
+            "final_assistant_item_id": "turn-item:provider:claudeAgent:native-item:a4532c9d-c1f3-4eba-a0fc-f57dd53ceaec",
+            "ledger_names_final_assistant_item": true,
+            "nonce_in_collected_text": true,
+            "nonce_in_final_item": true,
+            "thread_run_count": 1,
+            "runs_observed": [
+              {
+                "run_id": "run:thread:mcp%3Alaunch%3Ac15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27:ordinal:1",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ]
+          },
+          "port_counts_final": {
+            "launch": 0,
+            "replay": 0,
+            "read": 5,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T14:36:36.472675+00:00"
+        }
+      }
+    },
+    "s2": {
+      "name": "crash-after-launch-before-receipt: same-client replay adopts the original",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:b0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8",
+      "processes": {
+        "p1": {
+          "role": "s2-p1",
+          "pid": 236,
+          "crash_point": "after_launch_before_receipt_persist",
+          "client_request_id": "c35de1d6047af115338c51444d6ff3b84bfc6529bfda9ddff4322e2ed2cd43ea",
+          "native": {
+            "thread_id": "mcp:launch:b0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8",
+            "run_id": "run:thread:mcp%3Alaunch%3Ab0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8:ordinal:1",
+            "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+            "launch_status": "preparing"
+          },
+          "upstream_echo_proven": true,
+          "port_counts": {
+            "launch": 1,
+            "replay": 0,
+            "read": 0,
+            "interrupt": 0
+          },
+          "crashed_at": "2026-11-09T14:36:36.726427+00:00"
+        },
+        "p2": {
+          "role": "s2-p2",
+          "outcome": "OK",
+          "recovery": {
+            "path": "reattach -> replay_launch (same OAuth client, same clientRequestId)",
+            "counts_after_reattach": {
+              "launch": 0,
+              "replay": 1,
+              "read": 0,
+              "interrupt": 0
+            },
+            "elapsed_s": 15.116,
+            "client_request_id": "c35de1d6047af115338c51444d6ff3b84bfc6529bfda9ddff4322e2ed2cd43ea",
+            "request_namespace_sha256": "266f5d8f3bbb0c3e23a866321563b3859d5db6643f6c49050832912b8fca4e9b",
+            "upstream_echo_proven": true
+          },
+          "native_launch_calls_total": 1,
+          "thread_id": "mcp:launch:b0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8",
+          "thread_equals_p1_side_file": true,
+          "thread_id_matches_client_a_derivation": true,
+          "status_sequence": [
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "collect": {
+            "collect_ok": true,
+            "collected_status": "SUCCEEDED",
+            "result_text_tail": "T3-CANARY-OK r2-s2",
+            "result_ledgered": true,
+            "result_ref": "t3://thread/mcp:launch:b0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8/run/run:thread:mcp%3Alaunch%3Ab0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8:ordinal:1/item/turn-item:provider:claudeAgent:native-item:139c9ea9-c382-4184-a2c3-b116545f215d",
+            "head_read_item_count": 2,
+            "run_assistant_items": 1,
+            "final_assistant_item_id": "turn-item:provider:claudeAgent:native-item:139c9ea9-c382-4184-a2c3-b116545f215d",
+            "ledger_names_final_assistant_item": true,
+            "nonce_in_collected_text": true,
+            "nonce_in_final_item": true,
+            "thread_run_count": 1,
+            "runs_observed": [
+              {
+                "run_id": "run:thread:mcp%3Alaunch%3Ab0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8:ordinal:1",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ]
+          },
+          "port_counts_final": {
+            "launch": 0,
+            "replay": 1,
+            "read": 6,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T14:36:52.052502+00:00"
+        }
+      }
+    },
+    "s3": {
+      "name": "real second OAuth client: PRINCIPAL_MISMATCH locally; upstream mints a different thread",
+      "outcome": "PASS",
+      "local_refusal": "PASS",
+      "upstream_namespace_proof": "PASS",
+      "thread_id": "mcp:launch:4bc1eccd14d45e6e7d86eebda3e777e3a2cedfc34b0d27fc9b4491caa4fda225",
+      "processes": {
+        "p": {
+          "role": "s3",
+          "outcome": "OK",
+          "client_b_upstream_namespace_sha256": "c00c6ada590cfadba6912924ed2e91cb664d4f18a2326ca703a6b9b6481f4f4c",
+          "client_a_upstream_namespace_sha256": "d314591c9504e0835c809ae98f0ff4d79cf3975e657f0eea309454521f5783ed",
+          "distinct_oauth_clients": true,
+          "attempts": [
+            {
+              "scenario": "s1",
+              "operation": "reattach",
+              "refused": true,
+              "reason": "PRINCIPAL_MISMATCH",
+              "native_calls": 0
+            },
+            {
+              "scenario": "s1",
+              "operation": "start",
+              "refused": true,
+              "error": "T3LaunchClaimConflictError",
+              "native_calls": 0
+            },
+            {
+              "scenario": "s2",
+              "operation": "reattach",
+              "refused": true,
+              "reason": "PRINCIPAL_MISMATCH",
+              "native_calls": 0
+            },
+            {
+              "scenario": "s2",
+              "operation": "start",
+              "refused": true,
+              "error": "T3LaunchClaimConflictError",
+              "native_calls": 0
+            }
+          ],
+          "refused_locally_with_zero_native_calls": true,
+          "reattach_reason_principal_mismatch": true,
+          "adapter_port_calls": 0,
+          "same_key_client_request_id": "3e5e5c9e0fd99ee8a3e652a07ad8c57b6456e3066903a74cba069ef68e2b88c0",
+          "s1_thread_id": "mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27",
+          "direct_upstream_probe": {
+            "attempted": true,
+            "launched_at": "2026-11-09T14:36:52.784460+00:00",
+            "thread_id": "mcp:launch:4bc1eccd14d45e6e7d86eebda3e777e3a2cedfc34b0d27fc9b4491caa4fda225",
+            "run_id": null,
+            "differs_from_s1_thread": true,
+            "matches_client_b_derivation": true,
+            "client_a_derivation_is_s1_thread": true,
+            "message_sent": false
+          },
+          "finished_at": "2026-11-09T14:36:52.813147+00:00"
+        }
+      }
+    },
+    "s4": {
+      "name": "exact-run interrupt: requested vs settled, never inferred",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:b15a5d33a8e4c5e629e61b0eee2bb8f013a70b89c80a8f63a4b280a7997297fa",
+      "processes": {
+        "p": {
+          "role": "s4",
+          "outcome": "OK",
+          "thread_id": "mcp:launch:b15a5d33a8e4c5e629e61b0eee2bb8f013a70b89c80a8f63a4b280a7997297fa",
+          "native_run_id": "run:thread:mcp%3Alaunch%3Ab15a5d33a8e4c5e629e61b0eee2bb8f013a70b89c80a8f63a4b280a7997297fa:ordinal:1",
+          "was_live_at_interrupt": true,
+          "pre_interrupt_states": [
+            "STARTING",
+            "RUNNING"
+          ],
+          "interrupt": {
+            "requested_at": "2026-11-09T14:36:54.164787+00:00",
+            "payload_thread_matches": true,
+            "payload_run_matches": true,
+            "upstream_echo_verified": true,
+            "error": "",
+            "signal_sent": true,
+            "already_exited": false
+          },
+          "ledger_after_cancel": {
+            "requested": true,
+            "signal_sent": true,
+            "already_exited": false,
+            "settled": false,
+            "settled_state": null,
+            "requested_at": "2026-11-09T14:36:54.195945+00:00",
+            "settled_at": null
+          },
+          "ledger_final": {
+            "requested": true,
+            "signal_sent": true,
+            "already_exited": false,
+            "settled": true,
+            "settled_state": "CANCELLED",
+            "requested_at": "2026-11-09T14:36:54.195945+00:00",
+            "settled_at": "2026-11-09T14:36:59.225550+00:00"
+          },
+          "status_sequence_after_interrupt": [
+            "CANCELLING",
+            "CANCELLED"
+          ],
+          "final_state": "CANCELLED",
+          "honesty": {
+            "settle_claimed_without_terminal_observation": false,
+            "requested_before_settle": true
+          },
+          "settle_observation": {
+            "observed_at": "2026-11-09T14:36:59.227859+00:00",
+            "exact_run_read": "ok",
+            "exact_run_native_status": "interrupted",
+            "project_row": {
+              "status": "interrupted",
+              "settled": false,
+              "settled_at": null
+            }
+          },
+          "port_counts": {
+            "launch": 1,
+            "replay": 0,
+            "read": 5,
+            "interrupt": 1
+          },
+          "finished_at": "2026-11-09T14:36:59.285084+00:00"
+        }
+      }
+    },
+    "s5": {
+      "name": "lost reply after commit (isError orchestration_error): intent kept, replay adopts original",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe",
+      "processes": {
+        "p1": {
+          "role": "s5-p1",
+          "outcome": "OK",
+          "start_outcome": "T3LaunchEffectUnknownError",
+          "injected": "isError orchestration_error AFTER the real launch committed",
+          "classifier_definitive_refusal": false,
+          "intent_kept": true,
+          "receipt_persisted": false,
+          "transport_observed_committed_thread": {
+            "thread_id": "mcp:launch:2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe",
+            "run_id": "run:thread:mcp%3Alaunch%3A2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe:ordinal:1"
+          },
+          "committed_thread_matches_client_a_derivation": true,
+          "port_counts": {
+            "launch": 1,
+            "replay": 0,
+            "read": 0,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T14:36:59.546912+00:00"
+        },
+        "p2": {
+          "role": "s5-p2",
+          "outcome": "OK",
+          "recovery": {
+            "counts_after_reattach": {
+              "launch": 0,
+              "replay": 1,
+              "read": 0,
+              "interrupt": 0
+            },
+            "upstream_echo_proven": true
+          },
+          "thread_id": "mcp:launch:2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe",
+          "adopted_original_committed_thread": true,
+          "native_launch_calls_total": 1,
+          "status_sequence": [
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "collect": {
+            "collect_ok": true,
+            "collected_status": "SUCCEEDED",
+            "result_text_tail": "T3-CANARY-OK r2-s5",
+            "result_ledgered": true,
+            "result_ref": "t3://thread/mcp:launch:2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe/run/run:thread:mcp%3Alaunch%3A2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe:ordinal:1/item/turn-item:provider:claudeAgent:native-item:3d117e43-8c22-400c-bcab-20a068664850",
+            "head_read_item_count": 2,
+            "run_assistant_items": 1,
+            "final_assistant_item_id": "turn-item:provider:claudeAgent:native-item:3d117e43-8c22-400c-bcab-20a068664850",
+            "ledger_names_final_assistant_item": true,
+            "nonce_in_collected_text": true,
+            "nonce_in_final_item": true,
+            "thread_run_count": 1,
+            "runs_observed": [
+              {
+                "run_id": "run:thread:mcp%3Alaunch%3A2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe:ordinal:1",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ]
+          },
+          "port_counts_final": {
+            "launch": 0,
+            "replay": 1,
+            "read": 5,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T14:37:09.883544+00:00"
+        }
+      }
+    }
+  },
+  "processes": [
+    {
+      "role": "prep",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:25.142380+00:00",
+      "finished_at": "2026-11-09T14:36:25.890050+00:00"
+    },
+    {
+      "role": "s1-p1",
+      "returncode": 90,
+      "expected_returncode": 90,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:25.903290+00:00",
+      "finished_at": "2026-11-09T14:36:26.193729+00:00"
+    },
+    {
+      "role": "s1-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:26.193890+00:00",
+      "finished_at": "2026-11-09T14:36:36.493677+00:00"
+    },
+    {
+      "role": "s2-p1",
+      "returncode": 91,
+      "expected_returncode": 91,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:36.494982+00:00",
+      "finished_at": "2026-11-09T14:36:36.729823+00:00"
+    },
+    {
+      "role": "s2-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:36.729922+00:00",
+      "finished_at": "2026-11-09T14:36:52.086131+00:00"
+    },
+    {
+      "role": "s3",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:52.087392+00:00",
+      "finished_at": "2026-11-09T14:36:52.839059+00:00"
+    },
+    {
+      "role": "s4",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:52.839956+00:00",
+      "finished_at": "2026-11-09T14:36:59.319189+00:00"
+    },
+    {
+      "role": "s5-p1",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:59.320579+00:00",
+      "finished_at": "2026-11-09T14:36:59.568508+00:00"
+    },
+    {
+      "role": "s5-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-09T14:36:59.569194+00:00",
+      "finished_at": "2026-11-09T14:37:09.905259+00:00"
+    }
+  ],
+  "threads_minted_ids": [
+    "mcp:launch:c15936fe227b7c9ab8fb896edce16513bbf0b916d59e66b4355a703c56995a27",
+    "mcp:launch:b0d6a873c63f2dcdacc3999e86418aabf2dec7333fb72d5fb8d3ffde450c04d8",
+    "mcp:launch:4bc1eccd14d45e6e7d86eebda3e777e3a2cedfc34b0d27fc9b4491caa4fda225",
+    "mcp:launch:b15a5d33a8e4c5e629e61b0eee2bb8f013a70b89c80a8f63a4b280a7997297fa",
+    "mcp:launch:2a6d4267ccfef77895ec30b5ff925ce92ba7be9d32ef4cbd252713c5f562debe"
+  ],
+  "threads_minted": 5,
+  "thread_budget": 5,
+  "budget_reservations": [
+    "s1-p1",
+    "s2-p1",
+    "s3",
+    "s4",
+    "s5-p1"
+  ]
+}

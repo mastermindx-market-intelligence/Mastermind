@@ -679,6 +679,7 @@ async def role_s1_p2(events: list) -> dict:
     adapter = T3ExecutionAdapter(port, binding_source_for, CanaryInspector(), state_store=store)
     t0 = time.monotonic()
     ref = await adapter.reattach(run.spec, _recovery_binding(run.spec, run.original_ref))
+    reattach_elapsed_s = round(time.monotonic() - t0, 3)
     counts_after_reattach = port.counts()
     assert ref == run.original_ref
     assert not port.calls, f"S1-P2 reattach must make ZERO native calls: {port.calls}"
@@ -702,7 +703,10 @@ async def role_s1_p2(events: list) -> dict:
             "returned_retained_ref": True,
             "native_calls": 0,
             "counts_after_reattach": counts_after_reattach,
-            "elapsed_s": round(time.monotonic() - t0, 3),
+            # r2 harness defect (fixed after the r2 run): r2 recorded
+            # ``elapsed_s`` at ROLE END (reattach start -> after the terminal
+            # wait).  This is the reattach call alone.
+            "reattach_elapsed_s": reattach_elapsed_s,
         },
         "second_start": {"refused": bool(start_refusal), "error": start_refusal,
                          "counts_after": counts_after_second_start},
@@ -739,6 +743,7 @@ async def role_s2_p2(events: list) -> dict:
     adapter = T3ExecutionAdapter(port, binding_source_for, CanaryInspector(), state_store=store)
     t0 = time.monotonic()
     ref = await adapter.reattach(run.spec, _recovery_binding(run.spec, _pre_ack_ref(run.spec, intent.client_request_id)))
+    reattach_elapsed_s = round(time.monotonic() - t0, 3)
     counts_after_reattach = port.counts()
     assert counts_after_reattach["replay"] == 1 and counts_after_reattach["launch"] == 0, counts_after_reattach
     p1 = _load_side("s2-p1")
@@ -754,7 +759,7 @@ async def role_s2_p2(events: list) -> dict:
         "recovery": {
             "path": "reattach -> replay_launch (same OAuth client, same clientRequestId)",
             "counts_after_reattach": counts_after_reattach,
-            "elapsed_s": round(time.monotonic() - t0, 3),
+            "reattach_elapsed_s": reattach_elapsed_s,  # see S1-P2 note
             "client_request_id": intent.client_request_id,
             "request_namespace_sha256": _sha(intent.request_namespace),
             "upstream_echo_proven": echo_proven,

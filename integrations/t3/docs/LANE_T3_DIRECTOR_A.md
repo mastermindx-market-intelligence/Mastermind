@@ -298,3 +298,130 @@ tests/test_t3_upstream_patch.py tests/test_session_bridge_t3.py tests/test_worke
 tests/test_rev5_contracts_v1_1.py tests/test_t3_attempt_fleet_projection.py
 tests/test_mmos_negative_matrix.py tests/test_executive_claim_job_placement_authority.py
 tests/test_t3_durable_canary_receipt.py` → see the final commit message for the exact count.
+
+## A4 — re-audit N1–N9, harness swap, live canary r2 (Director A4, 2026-11-09)
+
+Source of findings: the distinct re-audit of A3's rework, carried as the authoritative
+acceptance spec in the A4 brief (no separate re-audit document is in the repository; the
+brief lists N1–N7 and N9 — **N8 was not provided to this lane** and is reported as such).
+Base: `t3/t3-hermes-restart-recovery` @ `1fb4a9a6d`. Branch: `t3/a4-liveport-fixes-canary`.
+Code commit used by the live run: `128e5e8be` (recorded in the r2 receipt and checked by its
+pin test against the adapter file bytes at that commit).
+
+**Fail-before method.** No stash: `git archive HEAD -- control_plane tests integrations config
+common scripts ops pyproject.toml | tar -x -C /tmp/a4-failbefore/tree` (adapter byte-identical
+to `HEAD`, verified with `cmp`). Baseline in the export: the required suite list = **275
+passed, 1 xfailed** (the xfail is pre-existing). Overlaying ONLY the two new test files on the
+pre-fix tree: **36 failed / 88 passed**; post-fix the same two files: **108 passed**.
+Several N1/N4/N6 tests fail pre-fix as "API absent" (`TypeError` on `tool_error_code=`, missing
+`T3LaunchSpecNotDurableError`/`adopt_stranded_launch`), so the reviewer's N1 double-launch was
+also reproduced BEHAVIOURALLY on the pre-fix tree with pre-fix API only
+(`/tmp/a4-failbefore/probe_n1.py`, donor server model): a post-commit `isError` → intent
+cleared → a second OAuth client's `start` ACKed → **2 upstream threads for one logical run**.
+Post-fix: `T3LaunchEffectUnknownError`, intent kept, second client
+`T3LaunchClaimConflictError`, **1 thread**.
+
+### Finding → fix → test
+
+Tests below live in `tests/test_t3_execution_adapter.py` unless marked `[D]`
+(`tests/test_t3_adapter_durability.py`). `DonorMcpServer` is a donor-faithful model (shared
+upstream state, per-OAuth-session `client:<sid>` namespace, head paging with
+`limit`/`hasMore`/`nextPosition`, `recentRuns` capped by `runLimit`, `t3_thread_wait` exact-run
+lookup, declared-failure `isError` bodies).
+
+| # | Sev | Fix (file:symbol) | Regression test(s) | Fail-before (pre-fix) | After |
+|---|---|---|---|---|---|
+| N1 | MAJOR | `t3_mcp_failure_is_definitive_refusal(exc, tool=)` — TOTAL (any exception ⇒ UNKNOWN), explicit allowlists from donor source: `_T3_MCP_PRE_DISPATCH_HTTP_STATUSES` = {400, 401, 403, 405, 406, 415}; JSON-RPC {−32700, −32600, −32601, −32602}; `_T3_MCP_PRE_DISPATCH_TOOL_ERROR_CODES` per mutating tool (launch: `capability_denied`, `parent_not_active`, `thread_not_found`, `target_required`, runtime/interaction escalation; interrupt: `capability_denied`, `parent_not_active`, `thread_not_found`). UNKNOWN: `invalid_request` (also returned AFTER `thread.create` committed: the initial `message.dispatch` is refused by `assertDispatchTargetEnabled` / `refuseAboveRuntimeModeCeiling`, both mapped to `invalid_request`), `orchestration_error` (`unavailable()` wraps post-commit failures), codeless `isError` (effect's internal-error text), HTTP 404 (effect McpServer replaces an already produced tool response with a bare 404 when the session ended mid-request), 408/409/422/429/499/5xx, non-`int` statuses, unknown tools. `t3_mcp_tool_error_code` parses only the donor declared-failure shape (`failureMode:"return"` → `content[].text` = JSON `{_tag:"OrchestratorMcpFailure", code, message}`); `T3McpTransportError.tool_error_code`; `T3McpToolPort._invoke`; `t3_live_proof.McpHttp.call_tool` carries the code | `A4ReauditN1ClassifierTests::test_n1_classifier_table` (42 rows), `::test_n1_tool_error_code_parses_only_the_donor_declared_failure_shape`; `A4ReauditLivePortTests::test_n1_is_error_after_commit_keeps_intent_and_replay_adopts_original`, `::test_n1_mcp_isError_with_an_allowlisted_code_is_a_clean_refusal`; `T3LivePortReworkTests::test_lost_replies_keep_the_intent_and_clean_refusals_roll_back` (A3 table corrected: 429 and codeless/`invalid_request` `isError` moved to UNKNOWN); `A4HarnessTests::test_mcp_http_carries_the_donor_failure_code`, `::test_canary_s5_injection_keeps_the_intent_and_replay_adopts` | API absent (`TypeError`); behavioural probe: intent cleared, 2 upstream threads | pass: intent kept, replay adopts the ORIGINAL thread, 1 thread; LIVE S5 |
+| N2 | MINOR | `T3McpToolPort.read_result`: `complete` only when a page says `hasMore is False`; page budget exhausted, stalled/garbled `nextPosition` with `hasMore` ⇒ `result_ref=""` (refuse), the intermediate item is never named | `A4ReauditLivePortTests::test_n2_terminal_read_refuses_when_pages_run_out_with_has_more` (1,200-item timeline vs the 20×50 budget), `::test_n2_stalled_paging_with_has_more_refuses`, `::test_n2_terminal_read_names_the_final_item_of_a_complete_timeline` (900 items → `i-900`) | collect NOT refused (ledgered `step 1000`) | pass; LIVE S1/S2/S5 name the final assistant item |
+| N3 | MINOR | `_refuse_foreign_adapter_table` (`PRAGMA table_info`: mandatory v1 columns + optional post-v1 columns, each with declared type / NOT NULL / pk) runs before ANY DDL in `_ensure_schema` (same IMMEDIATE tx) and in `open_read_only` | `[D] A4ReauditN3StoreTests::test_n3_same_name_foreign_tables_are_refused_before_any_ddl` (7 shapes; columns unchanged; read-only open refused too), `::test_n3_a_genuine_v1_table_is_accepted_and_upgraded_in_place` | all 7 opened and ran DDL | pass |
+| N4 | MINOR | `_require_durable_spec` (encode → `_t3_spec_from_json` → sha compare; total) BEFORE the claim in `start`, and in `reattach` / `adopt_stranded_launch`; typed `T3LaunchSpecNotDurableError` (`code="T3_SPEC_NOT_DURABLE"`) | `A4ReauditAdapterTests::test_n4_undecodable_specs_are_refused_before_any_claim` (`isolation_roots=(["x"],)`, `result_schema_path=123`), `::test_n4_round_trip_drift_is_refused` (`workspace_path="…/./x"` str reloads as a normalized `Path`), `::test_n4_sqlite_store_never_persists_an_undecodable_spec` | intent persisted, launch called | pass: no row, no native call |
+| N5 | MINOR | `T3McpToolPort._launch`: a `threadId` that is not this client's `t3_expected_launch_thread_id` ⇒ `T3UnknownOutcomeError`; `start()` ACKs only a receipt whose echo equals EXACTLY `(namespace, key)` (a missing echo is unproven too) | `A4ReauditLivePortTests::test_n5_unproven_thread_id_is_unknown_and_never_acked`, `::test_n5_adapter_never_acks_an_echo_free_receipt`; `T3LivePortReworkTests::test_receipt_echoes_come_only_from_the_upstream_thread_id` (updated) | ACKed with empty echoes | pass: intent kept, no receipt |
+| N6 | NOTE | `T3ExecutionAdapter.adopt_stranded_launch` + optional port seam `T3McpToolPort.read_launch_thread` (see design note) | `A4ReauditAdapterTests::test_n6_any_session_adopts_a_stranded_launch_by_deterministic_read`, `::test_n6_absence_proves_nothing_and_keeps_the_intent`, `::test_n6_ports_without_the_read_seam_are_refused` | API absent | pass (PROVEN_BY_TEST only; not exercised live) |
+| N7 | NOTE | `_require_run_state` applies `_require_namespace_continuity(native_call=False)` before ANY native call of `status` / `cancel` / `collect_result` | `A4ReauditAdapterTests::test_n7_status_cancel_collect_check_namespace_continuity` (different principal ⇒ `PRINCIPAL_MISMATCH`, unattested ⇒ `UNATTESTED`; zero native calls; no cancel record) | operated under a foreign principal | pass |
+| N8 | — | not provided in the A4 brief; nothing changed for it | — | — | open (unknown content) |
+| N9 | NOTE | reads request `runLimit=50` (donor max); a run absent from `recentRuns` while `thread.runCount` exceeds the listing is looked up EXACTLY with `t3_thread_wait {threadId, runId, timeoutMs: 1}` (donor `waitForThread`: `runs.find(id)`, `run_not_found` otherwise); a reply naming another run (restart continuation) or `run_not_found` stays unknown | `A4ReauditLivePortTests::test_n9_run_beyond_recent_runs_is_looked_up_exactly` (61 runs), `::test_n9_exact_lookup_never_guesses`, `::test_n9_listed_run_needs_no_lookup` | `RUNNING != SUCCEEDED` (run unlisted past 10) | pass (PROVEN_BY_TEST; live runs never exceeded 50) |
+| D1 | MAJOR (A4-rated dry-run finding, not reviewer-rated) | `_T3_STATUS_MAP` gains the donor run vocabulary: `preparing`→STARTING, `waiting`→RUNNING, `interrupted`→CANCELLED, `rolled_back`→CANCELLED. Before, an interrupted run fell through to the non-terminal RUNNING default, so a requested cancel could NEVER settle (status stuck at CANCELLING) | `A4DryRunStatusVocabularyTests::test_d1_every_donor_run_status_maps_honestly`, `::test_d1_an_interrupted_run_settles_the_requested_cancel` | `interrupted`/`rolled_back`/`preparing` mis-mapped; never settled | pass; LIVE S4 settled from the run's own `interrupted` |
+
+**N6 design note (what was and was not done).** Stranded claims still have NO expiry, by
+design: an intent that may have an effect must never time out into a relaunch. `reattach`
+is unchanged — a different principal is still refused `PRINCIPAL_MISMATCH` and NO replay
+ever runs under another principal. The new, separate `adopt_stranded_launch` makes NO
+mutating native call: it derives `t3_expected_launch_thread_id(<persisted client:<sid>>,
+<persisted key>)` from the ORIGINAL persisted namespace (nothing but that command can mint
+that id) and reads it through the port's read-only `read_launch_thread` under ANY session;
+the launch run is the item whose `messageId == threadId` (donor: `MessageId.make(commandId)`).
+Presence ⇒ the receipt (echo = the persisted identity the id proves) and ref are persisted
+write-once; absence or an unidentified run proves NOTHING (the original launch may still be in
+flight) ⇒ `T3LaunchEffectUnknownError`, intent kept. After adoption the run still belongs to
+its original principal (N7): another principal can observe that it is no longer
+EFFECT_UNKNOWN but cannot status/cancel/collect it. Legacy unqualified namespaces are refused
+(`LEGACY_NAMESPACE_UNVERIFIABLE`).
+
+### Harness swap (r2)
+
+`CanaryLivePort` is gone. `t3_durable_canary.py` now runs the adapter's reference
+`T3McpToolPort` (subclass `CanaryToolPort` adds ONLY call accounting and the S2 `os._exit`
+hook after `super()._launch` returned) over `t3_live_proof.McpHttp` (typed
+`T3McpTransportError` incl. `tool_error_code`). It attests `client:<sid>` from the token
+claims, proves every receipt by `t3_expected_launch_thread_id`, never copies echo fields from
+the request, and reads `recentRuns[].runId`. S1's crash stays in `CrashHookStore`; S5's lost
+reply is a harness transport wrapper (`LostReplyTransport`). Fresh state root
+`~/.hermes/profiles/engineering/cache/scratch/t3_durable_canary_r2/`; client tokens cached
+0600 in distinct scratch files (`t3_canary_r2_client_{a,b}_token.txt`, never printed); a
+durable 5-thread budget is reserved BEFORE each minting role. `t3_live_proof.obtain_mcp_access_token`
+gained `token_path`/`label` parameters (defaults unchanged). Pre-flight: the whole driver was
+dry-run twice against a scratch fake MCP server speaking the donor shapes (not committed) —
+the first dry run exposed D1. New receipt `t3_durable_canary_receipt_r2.json` (r1 receipt
+byte-identical, sha pinned); pin test `tests/test_t3_durable_canary_receipt_r2.py` (14 tests).
+
+### Live canary r2 (m2studio, T3 0.1.7, `capacity_fabric` / `glm-5.3-flash`, adapter `128e5e8be`)
+
+Outcome **DONE**; threads used **5 / 5** (budget exhausted exactly; nothing retried). All
+roles exited as expected (prep 0, S1-P1 90, S1-P2 0, S2-P1 91, S2-P2 0, S3 0, S4 0, S5-P1 0,
+S5-P2 0). Native-call counts are the `T3McpToolPort` port counts per process.
+
+| Scenario | Thread | Evidence | Result |
+|---|---|---|---|
+| S1 crash after receipt | `mcp:launch:c15936fe…5a27` | P1: launch 1, `upstream_echo_proven=true`, receipt COMMITTED, exit 90. P2: reattach with **0 native calls** (retained ref); second `start` refused `T3LaunchClaimConflictError` with **0 native calls**; `RUNNING → SUCCEEDED`; `collect_result` ledgered the run's FINAL assistant item (`…native-item:a4532c9d…`, cross-checked by a full head read); `T3-CANARY-OK r2-s1`; thread runCount 1 | PASS |
+| S2 crash after launch, before receipt | `mcp:launch:b0d6a873…04d8` | P1: launch 1, exit 91 after the native launch returned. P2 (same OAuth client, new process/MCP session): replay 1, launch 0, **`upstream_echo_proven=true`**, thread == P1's, **launch count total 1**, thread runCount 1; `T3-CANARY-OK r2-s2` | PASS |
+| S3 real second OAuth client | `mcp:launch:4bc1eccd…a225` | second pairing ⇒ different `client:<sid>` (sha256 projections differ). Adapter: reattach S1/S2 ⇒ **`PRINCIPAL_MISMATCH`**, `start` S1/S2 ⇒ `T3LaunchClaimConflictError`, all **0 native calls**. Upstream: the SAME clientRequestId (S1's) launched directly by client B with NO message minted a DIFFERENT thread equal to client B's derivation (`runId: null` — no model turn), while client A's derivation equals S1's thread: **namespace = OAuth client, live** | PASS |
+| S4 exact-run interrupt | `mcp:launch:b15a5d33…97fa` | `STARTING, RUNNING` before the interrupt; payload carried `threadId` + native `runId`, upstream echo verified; ledger after cancel: requested, NOT settled; then `CANCELLING → CANCELLED` with the settle recorded only after the exact run's own status read `interrupted` (≈5 s); launch 1, interrupt 1, reads 5 | PASS |
+| S5 lost reply after commit | `mcp:launch:2a6d4267…debe` | P1: the real launch COMMITTED (transport saw the thread, matching client A's derivation), harness then raised the donor's `isError` `orchestration_error` ⇒ classifier UNKNOWN ⇒ `T3LaunchEffectUnknownError`, **intent kept, no receipt**. P2: replay 1, launch 0, `upstream_echo_proven=true`, **adopted the original committed thread, launch count total 1**, thread runCount 1; `T3-CANARY-OK r2-s5` | PASS |
+
+Live observations (recorded, not inferred):
+
+1. **r1 finding 4 re-attributed.** r1 reported "CANCELLING can outlast a 420 s poll". With D1
+   fixed, S4 settled ≈5 s after the interrupt from the run's own `interrupted` status — the r1
+   symptom matches the adapter vocabulary gap (D1), not slow upstream settling.
+2. r1 finding 3 (interrupted scratch thread unreadable on the exact-run path) did NOT
+   reproduce: the S4 thread read normally right after settling.
+3. Upstream's thread-row `settled` flag stayed `false` after the run was `interrupted`; it is a
+   thread-level flag, not run termination — the ledger's settle is evidenced by the exact
+   run's status, never by that flag.
+4. A fresh launch first reports run status `preparing` (now mapped to STARTING).
+5. Upstream run ids are `run:thread:<url-encoded threadId>:ordinal:<n>`; item ids for this
+   provider instance are `turn-item:provider:claudeAgent:native-item:<uuid>`.
+6. Harness reporting defect: r2's `elapsed_s` under S1-P2 `reattach` / S2-P2 `recovery` was
+   computed at role END (reattach start → after the terminal wait), not the reattach call
+   alone; fixed after the run (`reattach_elapsed_s`). The receipt is left exactly as the live
+   driver wrote it.
+
+### Evidence scope — still SOURCE_ONLY / NOT PROVEN
+
+- Upstream admission patch: SOURCE_ONLY (never booted in a live T3).
+- Audit #14: no runtime composes the adapter or produces the pre-ACK `WorkerRecoveryBinding`;
+  `t3-native` stays UNSELECTED (selection is a deployment act).
+- N6 adoption, N9 exact-run lookup (no live thread exceeded 50 runs), N3/N4 refusals, D1's
+  `rolled_back` mapping: PROVEN_BY_TEST only.
+- N1 live coverage is the S5 harness injection of the donor's post-commit `isError` shape — a
+  simulated lost reply after a REAL commit, not an observed upstream failure; the HTTP/JSON-RPC
+  allowlists are proven by test and by donor reading only.
+- N8: unknown (not provided).
+
+**Verification (2026-11-09).** `env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q
+tests/test_t3_adapter_durability.py tests/test_t3_execution_adapter.py
+tests/test_t3_upstream_patch.py tests/test_session_bridge_t3.py tests/test_worker_adapter.py
+tests/test_rev5_contracts_v1_1.py tests/test_executive_claim_job_placement_authority.py
+tests/test_t3_durable_canary_receipt.py tests/test_t3_durable_canary_receipt_r2.py
+tests/test_t3_attempt_fleet_projection.py tests/test_workspace_t3_attempt_fleet_read.py
+tests/test_mmos_negative_matrix.py` → **315 passed, 1 xfailed** (xfail pre-existing at base).
