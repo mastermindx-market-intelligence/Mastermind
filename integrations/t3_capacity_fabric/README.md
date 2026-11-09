@@ -23,6 +23,7 @@ a T3 restart.
 
 | endpoint | gateway | pool | catalogue |
 |---|---|---|---|
+| `unified_router` | `http://127.0.0.1:8313` (`ai.mastermind.fabric-router`) | **all pools** behind one intelligent edge: Claude Max, Experiential Max, GLM coding plan, Bailian token plan (3 keys), MiniMax token plan, BytePlus coding plan | 32 models + `fabric/frontier\|balanced\|fast` routing aliases |
 | `anthropic_oauth` | `http://127.0.0.1:8312` (`ai.mastermind.anthropic-gateway`) | Claude Max OAuth accounts (`max-*`) with rolling 5h/weekly budgets, cooldowns, model weights, round-robin | 12 Claude ids incl. `claude-opus-5-5`, `claude-fable-5.1` |
 | `experiential` | `http://127.0.0.1:8311` (`ai.mastermind.experiential-gateway`) | Experiential Labs keys behind durable sliding-window RPM admission; Anthropic Messages surface (`/v1/messages`) admitted by the operator-deployed `EXPLABS_ANTHROPIC_MODELS` catalogue | operator-configured multi-vendor slugs |
 

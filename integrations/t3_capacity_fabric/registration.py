@@ -100,7 +100,7 @@ def _catalogue_for(endpoint: FabricEndpoint,
     admitted = admitted_catalogue(endpoint)
     if admitted is not None:
         return admitted
-    return fetch_catalog(endpoint, load_proxy_token(endpoint.env_file))
+    return fetch_catalog(endpoint, load_proxy_token(endpoint.env_file, endpoint.token_env_name))
 
 
 def plan_registration(endpoints: tuple[FabricEndpoint, ...], *,
@@ -123,7 +123,7 @@ def plan_registration(endpoints: tuple[FabricEndpoint, ...], *,
             models = _catalogue_for(endpoint, catalogues)
             report.models = models
             instance = build_provider_instance(
-                endpoint, models, load_proxy_token(endpoint.env_file),
+                endpoint, models, load_proxy_token(endpoint.env_file, endpoint.token_env_name),
                 home_root=home_root)
             settings = t3_config.read_settings(t3_config.settings_path(userdata))
             current = settings.get("providerInstances", {}).get(endpoint.instance_id)
@@ -154,7 +154,7 @@ def apply_registration(endpoints: tuple[FabricEndpoint, ...], *,
             reports.append(report)
             continue
         try:
-            token = load_proxy_token(endpoint.env_file)
+            token = load_proxy_token(endpoint.env_file, endpoint.token_env_name)
             models = _catalogue_for(endpoint, catalogues)
             report.models = models
             instance = build_provider_instance(endpoint, models, token,

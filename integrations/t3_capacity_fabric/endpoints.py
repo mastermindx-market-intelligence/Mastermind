@@ -27,11 +27,27 @@ class FabricEndpoint:
     accent_color: str = "violet"
     preferred_fast_model: str | None = None
     catalogue_env: str | None = None
+    token_env_name: str = "FABRIC_PROXY_TOKEN"
 
 
 def default_endpoints(home: Path = _DEFAULT_HOME) -> tuple[FabricEndpoint, ...]:
-    """The installed fabric serving endpoints, in stable registration order."""
+    """The installed fabric serving endpoints, in stable registration order.
+
+    The unified router comes first: it is the fabric's single intelligent edge
+    (every pool, cross-pool load balancing, ``fabric/*`` routing aliases). The
+    per-pool gateways remain registered as direct escape hatches.
+    """
     return (
+        FabricEndpoint(
+            endpoint_id="unified_router",
+            instance_id="capacity_fabric",
+            display_name="Capacity Fabric",
+            base_url="http://127.0.0.1:8313",
+            env_file=home / "fabric-router" / "router.env",
+            accent_color="emerald",
+            token_env_name="FABRIC_ROUTER_TOKEN",
+            preferred_fast_model="glm-5.3-flash",
+        ),
         FabricEndpoint(
             endpoint_id="anthropic_oauth",
             instance_id="fabric_claude",
@@ -64,11 +80,11 @@ def read_env_value(env_file: Path, name: str) -> str | None:
     return None
 
 
-def load_proxy_token(env_file: Path) -> str:
-    """Read FABRIC_PROXY_TOKEN from a gateway env file; no other values."""
-    token = read_env_value(env_file, "FABRIC_PROXY_TOKEN") or ""
+def load_proxy_token(env_file: Path, name: str = "FABRIC_PROXY_TOKEN") -> str:
+    """Read the gateway token from its env file; no other values."""
+    token = read_env_value(env_file, name) or ""
     if not token:
-        raise ValueError(f"FABRIC_PROXY_TOKEN missing in {env_file}")
+        raise ValueError(f"{name} missing in {env_file}")
     return token
 
 

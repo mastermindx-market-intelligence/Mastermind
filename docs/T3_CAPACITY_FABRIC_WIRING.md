@@ -16,6 +16,40 @@ slug. No T3-side fallback, retry ladder or second provider is configured: a
 fabric refusal (budget window, cooldown, queue deadline, plan policy) surfaces
 to the thread unchanged.
 
+## The unified router (all pools, all keys, smart routing)
+
+`ops/native_fabric/unified_router` (launchd `ai.mastermind.fabric-router`,
+`127.0.0.1:8313`) is the fabric's single intelligent edge. T3's provider
+**Capacity Fabric** (`capacity_fabric`) points at it and exposes the union
+catalogue (32 models + `fabric/frontier|balanced|fast` routing aliases).
+
+- **Every pool, every key, no new custody**: routes compose the incumbent
+  owners — the two local gateways (their own loopback tokens), the GLM coding
+  plan (`~/.glm/config.json`), the Bailian token plan (3-key rotation,
+  `~/.bailian/config.json`), the MiniMax token plan (`~/.minimax/config.json`)
+  and the BytePlus coding plan key — each read live at request time through
+  the same pointers the incumbents use. PAYG keys (Z.AI `paas`) are
+  deliberately not routed: subscription surfaces only, no silent spend.
+- **Smart routing**: exact slugs resolve to all serving routes in priority
+  tiers; within a tier, weighted selection with caller affinity
+  (`metadata.user_id`) preserves prompt-cache locality. `fabric/*` aliases are
+  ordered family cascades, so an exhausted pool transparently uses the next
+  family. 429/5xx benches a route locally (30s x failures, capped) and the
+  next request fails over — admission-time only, never a replay after a
+  possible effect.
+- **Wire coverage**: all default pools speak Anthropic wire natively
+  (passthrough, streaming untouched); OpenAI-wire pools route through the
+  closed translator (`wire.py`: tools, SSE events, usage round trips).
+- **Truthful capacity**: the Bailian monthly exhaustion surfaced above is a
+  real vendor quota state passed through verbatim — the router never invents
+  headroom.
+
+`GET /statusz` reports per-route health/counters (never keys); `GET /v1/models`
+is the unified catalogue. Remaining un-routed capacity: Codex ChatGPT seats
+(backend protocol owned by the codex CLI lane), xAI OAuth (token-refresh lane),
+OpenCode-Go free tier and the Cursor pool — each drops in as one more route
+entry plus key pointer.
+
 ## Architecture
 
 ```
