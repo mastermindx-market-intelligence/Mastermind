@@ -93,7 +93,7 @@ DEFAULT_CONF = {
         "intelligence": "intelligence", "intel": "intelligence", "data": "intelligence",
         "product": "product", "design": "product",
         "reliability": "reliability", "finops": "reliability", "sre": "reliability",
-        "chief of staff": "chief-of-staff", "cos": "chief-of-staff",
+        "chief-of-staff": "chief-of-staff", "chief of staff": "chief-of-staff", "cos": "chief-of-staff",
         "secretary": "secretary",
         "meta-ceo": "meta-ceo", "meta ceo": "meta-ceo", "ceo": "meta-ceo",
     },
