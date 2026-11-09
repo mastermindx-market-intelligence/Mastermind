@@ -13,6 +13,11 @@ by the CURRENT broker-issued ExecutionBinding.v1, validated against the
 owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
+Runtime-multiplexed launches (for/while/until bodies, xargs/parallel/
+find -exec), interpreter one-liners and computed command words carrying
+wrapper tokens are refused as unaccounted/unobservable, and POSIX
+line-continuation splits are canonicalised so no constructed path escapes
+the gate.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -160,6 +165,14 @@ _BINDING_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 #: of the receipt bytes the owner wrote. Defence in depth only — the trust
 #: basis is the owner-only receipt channel (see ``_receipt_channel_problem``).
 PLACEMENT_RECEIPT_DIGEST_ENV = "MASTERMIND_PLACEMENT_RECEIPT_DIGEST"
+#: Owner-projected positive allowlist for the receipt channel: the uids
+#: allowed to own the receipt path and every component of it (root/uid 0 is
+#: always allowed for components). Without it the channel would be only
+#: negatively defined ("anything the principal cannot write"), which admits
+#: any third local account as a counterfeit owner channel (REVIEW_2329 r2
+#: N-4). Mandatory: an armed session without a projected allowlist gets no
+#: launches (fail closed).
+PLACEMENT_RECEIPT_OWNER_UIDS_ENV = "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS"
 #: The only lease state that admits a launch (exact, case-sensitive).
 LEASE_STATE_HELD = "HELD"
 #: Exact env tokens that arm the gate (a projected binding also arms it).
@@ -217,6 +230,42 @@ _UNOBSERVABLE_ENV_RE = re.compile(
     r"(?:\s+-\S+)*\s+[A-Za-z0-9_]*\$"
     r"|(?:^|[\s;&|(`{])printf\s+-v\s*\$"
 )
+#: Wrapper names as bare words: the computed-launch refusals below fire only
+#: when a wrapper token is present in the text (REVIEW_2329 r2 N-3). Computed
+#: commands without wrapper tokens are the documented arbitrary-process limit.
+_WRAPPER_NAME_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
+    re.I,
+)
+#: Interpreter invocations whose PROGRAM TEXT rides in the command itself
+#: (``python -c/-m``, ``perl/node/ruby/osascript -e``, ``php -r``): a launch
+#: assembled inside that text executes without a lexically observed wrapper
+#: invocation (REVIEW_2329 r2 N-3/C4-C5). Shell wrappers (bash/sh/zsh) are
+#: deliberately NOT listed — nested shells are the five-shapes scan's own
+#: territory and their text IS the command the gate judges.
+_INTERPRETER_EVAL_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:python[23]?(?:\.\d+)?|perl|ruby|node(?:js)?|osascript|php)\s+"
+    r"(?:[^;&|\n]*\s)?-[cemr]"
+)
+#: Loop bodies (for/while/until) execute their contents N times: one lexical
+#: launch inside one is N paid children under one binding's single attempt
+#: (REVIEW_2329 r2 N-2/C1).
+_LOOP_BODY_RE = re.compile(r"\bdo\b.*?\bdone\b", re.S)
+#: Batch executors that run their argument command once per input item
+#: (REVIEW_2329 r2 N-2/C2-C3, find -exec).
+_BATCH_EXECUTOR_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?:xargs|parallel|find)\b[^;&|\n]*",
+    re.I,
+)
+#: Prefix runners that only wrap a FOLLOWING command word, so an indirect
+#: word after them is still the launched command (``env X=1 $P run ...``).
+_RUNNER_WORDS = frozenset({
+    "env", "exec", "command", "builtin", "nohup", "setsid",
+    "stdbuf", "nice", "timeout",
+})
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -443,8 +492,12 @@ def _binding_problems(binding: object, owner: str) -> str:
 def _canonical_command(command: str) -> str:
     """The command with shell quoting (quotes, backslashes) removed, so a
     name or mode split or hidden by quotes (``"POOL_ORCH""ESTRATOR_ID=x"``,
-    ``sub.sh "grok"``) is scanned as the shell will see it."""
-    return re.sub(r"[\"'\\]", "", command.replace("\\\n", " "))
+    ``sub.sh "grok"``) is scanned as the shell will see it. A backslash-
+    newline is a POSIX line continuation and the shell joins it with
+    NOTHING (REVIEW_2329 r2 N-1): ``POOL_ORCH\\<newline>ESTRATOR_ID=x`` and
+    ``pool ru<newline>n`` canonicalise to the joined words, never to two
+    words with an inserted space."""
+    return re.sub(r"[\"'\\]", "", command.replace("\\\n", ""))
 
 
 def _simple_command_head(canon: str, offset: int) -> str:
@@ -515,6 +568,82 @@ def launch_provider_token(command: str) -> str:
     Gate logic must use :func:`launch_provider_tokens` (all launches)."""
     tokens = launch_provider_tokens(command)
     return tokens[0][1] if tokens else ""
+
+
+def _indirect_command_word(canon: str) -> str | None:
+    """The first command word computed at runtime — ``$P`` / ``${P}`` in
+    ``P=pool; $P run ...`` (REVIEW_2329 r2 N-3/C6) — or None. Assignments,
+    shell keywords, options and prefix runners are skipped, so
+    ``env NAME=x pool ...``, ``echo $X`` and ``command -v y`` stay concrete;
+    an option-less ``timeout``/``nice`` operand (a duration/niceness) is an
+    argument, not the command."""
+    for segment in re.split(r"[;&|\n()]", canon):
+        words = segment.split()
+        index = 0
+        operand_pending = False
+        while index < len(words):
+            word = words[index]
+            if word in _RUNNER_WORDS:
+                operand_pending = word in ("timeout", "nice")
+            elif word in _COMMAND_PREFIX_WORDS or word.startswith("-"):
+                pass
+            elif re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                pass
+            elif operand_pending and re.fullmatch(r"\d[\w.:+-]*", word):
+                operand_pending = False
+                index += 1
+                continue
+            else:
+                operand_pending = False
+                if word.startswith("$"):
+                    return word
+                break
+            index += 1
+    return None
+
+
+def _deny_computed_launch(canon: str) -> None:
+    """Refuse launch-shaped text no lexically observed wrapper invocation
+    can cover (REVIEW_2329 r2 N-3): interpreter one-liners carrying wrapper
+    tokens (``python3 -c 'subprocess.run(["pool",...])'``, ``perl -e
+    'exec("pool",...)'``) and computed command words (``P=pool; $P run``).
+    Armed sessions only; a wrapper NAME must appear in the text, otherwise
+    the command is the documented arbitrary-process limit, not this gate's
+    fence. Conservative by design: an interpreter flag cluster containing
+    c/e/m/r plus a wrapper word anywhere in the same simple command is
+    denied even when innocent."""
+    if not _WRAPPER_NAME_RE.search(canon):
+        return
+    if _INTERPRETER_EVAL_RE.search(canon):
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — an "
+            "interpreter one-liner (python -c/-m, perl/node/ruby/osascript "
+            "-e, php -r) carrying wrapper tokens constructs the launch at "
+            "runtime, so provider substitution, the identity projection "
+            "and the one-attempt law cannot be checked. Run the paid "
+            "launch as a plain command."
+        )
+    word = _indirect_command_word(canon)
+    if word is not None:
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — the "
+            f"command word {word!r} is computed at runtime, so the wrapper "
+            "invocation and any identity assignment around it cannot be "
+            "observed. Invoke the wrapper by its literal name."
+        )
+
+
+def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
+    """True when a wrapper invocation sits inside a construct that executes
+    it N times at runtime: a for/while/until body (``do ... done``) or an
+    xargs/parallel/find -exec executor's argument tail (REVIEW_2329 r2
+    N-2). One binding covers exactly one attempt, so N runtime children
+    under one lexical launch are refused as unaccounted descendants."""
+    spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
+    spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
+    return any(
+        start <= offset < end for start, end in spans for offset in offsets
+    )
 
 
 def _env_clear_offsets(canon: str) -> list[int]:
@@ -607,18 +736,51 @@ def _principal_controls(info: os.stat_result, uid: int, gids: frozenset[int]) ->
     return writable
 
 
+def _owner_uid_allowlist() -> tuple[int, ...] | None:
+    """The owner-asserted uid allowlist for the receipt channel, ``()`` when
+    malformed (refuse everything), or None when not projected."""
+    raw = os.environ.get(PLACEMENT_RECEIPT_OWNER_UIDS_ENV, "").strip()
+    if not raw:
+        return None
+    uids: list[int] = []
+    for token in re.split(r"[,\s]+", raw):
+        if not token.isdigit():
+            return ()
+        uids.append(int(token))
+    return tuple(uids)
+
+
 def _receipt_channel_problem(path_text: str) -> str:
     """'' when the receipt can only have been produced by the placement owner.
 
     Trust basis (no signing authority exists by design): the owner runs as
     its own service account (``_mastermind_exec``) and projects the receipt
-    into a path the fenced principal cannot write. Every component of both
-    the literal and the resolved path must be outside the principal's
+    into a path the fenced principal cannot write. The channel is defined
+    POSITIVELY, not just negatively (REVIEW_2329 r2 N-4): every component
+    of both the literal and the resolved path must be owned by root or by a
+    uid on the owner-projected allowlist (``_owner_uid_allowlist``;
+    mandatory — without it no path qualifies), AND outside the principal's
     control — not owned by it, not writable by it — so it can neither
-    rewrite the receipt, restore an older copy, nor re-point a symlink. A
-    receipt the session could have written itself is refused outright.
+    rewrite the receipt, restore an older copy, re-point a symlink, nor
+    pass off another local account's file as the owner channel. A receipt
+    the session could have written itself is refused outright.
     """
     uid, gids = _principal_ids()
+    allowlist = _owner_uid_allowlist()
+    if allowlist is None:
+        return (
+            "the owner-uid allowlist "
+            f"({PLACEMENT_RECEIPT_OWNER_UIDS_ENV}) is not projected, so no "
+            "receipt path can be positively attributed to the placement "
+            "owner"
+        )
+    if not allowlist:
+        return (
+            "the owner-uid allowlist "
+            f"({PLACEMENT_RECEIPT_OWNER_UIDS_ENV}) is malformed; expected "
+            "comma-separated positive uids"
+        )
+    allowed_owners = {0, *allowlist}
     literal = Path(os.path.abspath(path_text))
     resolved = Path(os.path.realpath(path_text))
     for chain in (literal, resolved):
@@ -631,6 +793,12 @@ def _receipt_channel_problem(path_text: str) -> str:
                 return (
                     f"{component} is owned or writable by this session's "
                     "principal"
+                )
+            if info.st_uid not in allowed_owners:
+                return (
+                    f"{component} is owned by uid {info.st_uid}, which is "
+                    "neither root nor on the owner-uid allowlist the "
+                    "placement owner projected"
                 )
     try:
         if not stat.S_ISREG(os.stat(resolved).st_mode):
@@ -675,12 +843,14 @@ def validate_execution_binding(command: str) -> None:
       alter the environment this hook runs in, so command-level assignments
       of these names are ignored.
     * Receipt: accepted only from an owner-only channel — every component
-      of its path must be outside the fenced principal's control (see
+      of its path must be owned by root or a uid on the owner-projected
+      allowlist AND outside the fenced principal's control (see
       ``_receipt_channel_problem``). The principal therefore cannot forge,
-      roll back or replay it; a receipt it could have written is refused.
-      This relies on the OS uid boundary between the session and the
-      owner's service account: a same-uid owner gets no shared-placement
-      launches at all (fail closed), and root is outside this model.
+      roll back or replay it, no third local account's file qualifies as
+      the channel, and a receipt it could have written is refused. This
+      relies on the OS uid boundary between the session and the owner's
+      service account: a same-uid owner gets no shared-placement launches
+      at all (fail closed), and root is outside this model.
     * Lease currency: the receipt is as current as the owner's re-projection
       (atomic replace per lease event, WO-18). If the owner stops
       re-projecting, ``lease_expires_at_ms`` still bounds the lease.
@@ -688,7 +858,14 @@ def validate_execution_binding(command: str) -> None:
     Lexical scope (documented, not claimed): the gate judges the command
     text it is shown — every wrapper invocation in it (all five shapes,
     repeated, heredoc bodies included, off-list modes refused) and every
-    identity assignment form. Scripts staged in an EARLIER command or a
+    identity assignment form, with backslash-newline canonicalised as a
+    POSIX join (empty string). Runtime-multiplexed launches (for/while/
+    until bodies, xargs/parallel/find -exec executors) are refused as
+    unaccounted descendants; interpreter one-liners and computed command
+    words carrying wrapper tokens are refused as unobservable
+    (conservative — an interpreter flag cluster c/e/m/r plus a wrapper
+    word in the same simple command is denied even when innocent).
+    Scripts staged in an EARLIER command or a
     file and executed later, and environment injected by provider-side
     mechanisms outside the command, are not observed; eval/source/
     computed-name assignments in a launch command are refused as
@@ -835,6 +1012,18 @@ def validate_execution_binding(command: str) -> None:
                 "command."
             )
         launches = _wrapper_invocations(command)
+        if launches and _runtime_multiplexed(
+            _canonical_command(command),
+            [offset for offset, _, _, _ in launches],
+        ):
+            deny(
+                "Mastermind shared-placement guard: runtime-multiplexed "
+                "launch — a for/while/until loop body or an xargs/parallel/"
+                "find -exec executor repeats this paid launch at runtime, "
+                "but the current binding covers exactly one attempt. Every "
+                "paid child must be admitted and claimed through the "
+                "placement authority before launch."
+            )
 
     # Server-derived projections: EVERY identity value the launched child
     # could receive must equal what the binding projects (canonical view of
@@ -908,6 +1097,11 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
                 "wrapper source fed to a shell launches without a visible "
                 "wrapper invocation. Invoke the wrapper directly."
             )
+        # REVIEW_2329 r2 N-3: interpreter one-liners and computed command
+        # words carrying wrapper tokens never reach the wrapper scan, so
+        # they are refused here — BEFORE the no-launch early return that
+        # used to let an armed session launch with zero binding validation.
+        _deny_computed_launch(canon)
     if not launches and not invocations:
         return
 
