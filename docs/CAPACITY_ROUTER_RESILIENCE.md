@@ -240,3 +240,62 @@ Protected master advanced from the procedure pin to 3652d890 through the disjoin
 Hermes GitHub-plugin change. Applicable procedure bytes are unchanged; the source
 qualification above still states its exact input and runtime. The original live
 router and consumer configuration remain unchanged by this operation.
+
+
+## Original predecessor repaired and composed
+
+Original #2367 now carries dc59c41e97b263a784997a7e0fbe610e304a4dc3.
+Its tree 3d1c015d98b1440d874970108056b58827a2f334 matches the native qualified
+repair tree exactly. The PR has 56 changed files after removing the 3,924
+accidental dependency files; all declared manifests/locks and application
+changes remain. Its source repair, tests and custody are recorded in
+docs/CAPACITY_ROUTER_PARENT_CI_REPAIR.md and the original PR body.
+
+This scoped branch composes that original repair with the already qualified nine
+router files. This is a material dependency repair: it restores immutable provider
+commitments, fixes the Unix transport path and removes the accidental dependency
+installations. It is not an ancestry-only refresh or another publication carrier.
+Combined-source qualification and protected release still apply.
+
+The exact original D8 HEAD guard passed on native repair commit 7d778687,
+as did four dispatcher tests. Ordinary discovery skipped the eleven paired
+cross-repository tests; their explicit required CI step remains owed. Do not
+reinterpret those skips as a paired consumer proof.
+
+### Existing-owner integration findings for UR7–UR10
+
+The Workspace Capacity view is explicitly NONE_PREVIEW_ONLY and requires
+admission_authorized=False. Its displayed headroom, preview eligibility and
+queued waiters must never grant an inference slot.
+
+The existing APPLICATION Broker owns atomic admission under its file lock and
+SQLite transaction. GoLeaseGateway mediates original selection, begin, immutable
+prepare, recovery and settlement. Its current admitted contract is nonstream
+/v1/chat/completions with registered Go/Bailian HTTP and native CLI transports;
+that is not an admitted raw Anthropic/Responses streaming contract for 8313.
+Extend that owner contract and its recipe/capability bindings before using it
+for this edge. Never fake a nonstream request or directly create another ledger.
+
+Actual configured pool aliases already share the canonical provider/account
+lease count. Explicit shared quota_scope also joins cooldown and recovery-probe
+holds, but the inspected ordinary account count remains provider/account-local.
+Matching scope strings alone do not prove a shared cross-product concurrency
+budget. H3/account-owner attestation must supply that physical-account join;
+provider/model names and credential hashes are not substitutes.
+
+The existing picker has tri-state, model-specific capability semantics: a required
+capability must be explicitly true. Reuse its owner declarations and transport
+needs, without creating another editable model table. Caller fairness likewise
+needs an authenticated owner identity and the existing queue/budget controls;
+a caller-supplied consumer label cannot authorize priority.
+
+Acceptance for those phases includes one atomic winner for one shared slot,
+retained uncertain effects across restart/rotation, every required quota window,
+stale/missing/conflicting evidence as unknown, exact-model/capability preservation,
+and original owner settlement after streaming disconnect. Local resource cleanup
+does not establish release of an unresolved provider-side account lease.
+
+Safe routing-side follow-up can make the same selection code's exclusions and
+tie-breaks inspectable and measure a shadow policy without additional provider
+calls. Adaptive production weights require representative evidence and evaluated
+model quality; synthetic tests cannot enable them.

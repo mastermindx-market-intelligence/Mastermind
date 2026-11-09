@@ -690,7 +690,8 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
 # Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '6eb8e085971a44eef40f68cc6192479c8ac47981cf886fdae72cb41aeb7eb8e5', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
+# Fixed Capacity READ composition: original reviewed block and tokens unchanged.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '78985a75fb22a41c1261a82399b44ef884b3b5ba0b0cfb6f35adc9406c815b9b', 'sites': ((927, 71, 74, 'int', '400'), (938, 71, 74, 'int', '403'), (946, 71, 74, 'int', '400'), (952, 79, 82, 'int', '400'), (961, 71, 74, 'int', '400'), (971, 71, 74, 'int', '403'), (976, 76, 79, 'int', '503'), (982, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -754,7 +755,8 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '3c2cac6101f754ff5f6c52aee1ebe14d2f247bf212a0317f6970732cade6fb17', 'sites': ((715, 93, 96, 'int', '403'), (717, 56, 59, 'int', '403'), (724, 46, 49, 'int', '403'), (725, 56, 59, 'int', '403'))}
+# Fixed Capacity READ composition: original reviewed block and tokens unchanged.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'ecac40b3e1bc54ad965a2dfa900378bc24a363c134bcbc9723d8d393870ef724', 'sites': ((719, 93, 96, 'int', '403'), (721, 56, 59, 'int', '403'), (728, 46, 49, 'int', '403'), (729, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -806,7 +808,8 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
 # Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture function.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6592b76edb1d58dab83ef905de596919b58995c13e099d8ca9437b35b9b1a040', 'sites': ((3739, 68, 71, 'int', '503'), (3744, 69, 72, 'int', '503'), (3748, 67, 70, 'int', '503'))}
+# Fixed Capacity READ composition: original reviewed block and tokens unchanged.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ace408ab1b186d614086923fef677000247a1074361c61a5578e78bbc5571844', 'sites': ((3769, 68, 71, 'int', '503'), (3774, 69, 72, 'int', '503'), (3778, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -1261,3 +1264,11 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Capacity projection source review: these two fifteen-minute observation and
+# consumer-evidence lifetimes are durations, never account/principal identities.
+# Whole-file hash and complete typed tokens only; every drift restores D8.
+REVIEWED_FILES['control_plane/workspace_capacity_fabric.py'] = {
+    'sha256': 'f48347aa98d894368e7e175263427c55f79c066cb3c7dfd7f32ea4253db53892',
+    'sites': ((234, 66, 69, 'int', '900'), (277, 106, 109, 'int', '900')),
+}
