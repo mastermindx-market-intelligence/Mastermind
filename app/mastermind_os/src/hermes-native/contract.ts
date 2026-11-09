@@ -138,7 +138,8 @@ export function parseNativeView(value: unknown): NativeView {
     return { id: id(s.id), title: text(s.title, 512), running: s.running === null ? null : flag(s.running), messageCount: number(s.messageCount) };
   });
   if (v.receipt !== undefined) {
-    const r = record(v.receipt, ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration", "failureReason"]);
+    const r = record(v.receipt, ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration", "failureReason"],
+      ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration"]);
     if (number(r.sequence) < 1) return invalid();
     if (r.failureReason !== undefined && r.failureReason !== null
         && (typeof r.failureReason !== "string" || !failureReasons.has(r.failureReason as ContinuationFailureReason))) return invalid();

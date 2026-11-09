@@ -28,6 +28,8 @@ const isoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2
 const reasonPattern = /^[A-Z][A-Z0-9_]{1,63}$/;
 
 function invalid(): never { throw new Error("NATIVE_RESPONSE_INVALID"); }
+function text(value: unknown, maximum: number, options?: { empty?: boolean }): string;
+function text(value: unknown, maximum: number, options: { nullable: true; empty?: boolean }): string | null;
 function text(value: unknown, maximum: number, options: { nullable?: boolean; empty?: boolean } = {}): string | null {
   if (options.nullable && value === null) return null;
   if (typeof value !== "string" || (!options.empty && value.length === 0) || value.length > maximum) return invalid();

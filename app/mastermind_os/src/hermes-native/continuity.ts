@@ -79,7 +79,9 @@ function fromSession(view: NativeView): BotContinuity {
   if (session.promptsPending === true) {
     return { kind: "gateway_busy", sessionId: session.id, reason: "prompt_pending" };
   }
-  return { kind: "idle", sessionId: session.id };
+  // unobserved (null) liveness is not quiet: unknown stays unknown
+  if (session.running === false) return { kind: "idle", sessionId: session.id };
+  return { kind: "unclassified", code: "NO_OBSERVATION" };
 }
 
 export function classifyContinuity(input: ContinuityInput): BotContinuity {
