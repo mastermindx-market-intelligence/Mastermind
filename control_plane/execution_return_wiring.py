@@ -163,6 +163,27 @@ class ExecutionReturnWiring:
             return block if isinstance(block, dict) else None
         return None
 
+    def _t3_attested_namespace(self, job: Any) -> str:
+        """The request namespace the adapter persisted for this attempt's
+        launch (receipt first, intent second); empty when none is ledgered."""
+        if self._t3_adapter is None or not job.current_attempt_id:
+            return ""
+        run_id = self._t3_run_resolver(job.current_attempt_id)
+        if not run_id:
+            return ""
+        for reader in ("launch_receipt", "launch_intent"):
+            method = getattr(self._t3_adapter, reader, None)
+            if method is None:
+                continue
+            try:
+                record = method(run_id)
+            except Exception:
+                continue
+            namespace = getattr(record, "request_namespace", "") if record is not None else ""
+            if isinstance(namespace, str) and namespace:
+                return namespace
+        return ""
+
     def _t3_result_reference(self, job: Any) -> tuple[str | None, str | None, list[str]]:
         """(native thread id, native run id, artifact refs) from the adapter
         ledger, honestly empty when no ledgered reference exists."""
@@ -264,11 +285,21 @@ class ExecutionReturnWiring:
         requester_block = (
             provenance.get("original_requester")
             if isinstance(provenance, dict) else None)
-        namespace = str(binding.get("caller_namespace") or "")
-        if not isinstance(requester_block, dict) or not namespace:
+        # The authenticated namespace is what the PORT attested at launch and
+        # the adapter persisted with the intent/receipt (REVIEW_C_E_OPUS A2:
+        # the claim stamps no namespace; an empty caller_namespace is the
+        # claim's honest statement, never a value to return).
+        namespace = self._t3_attested_namespace(job) or str(
+            binding.get("caller_namespace") or "")
+        if not isinstance(requester_block, dict):
             self._record_refusal(
                 store, job, attempt_id, "ORIGINAL_BINDING_MISSING",
                 "admission carried no v1.2 original_requester block")
+            return None
+        if not namespace:
+            self._record_refusal(
+                store, job, attempt_id, "ORIGINAL_BINDING_MISSING",
+                "no attested launch namespace persisted for this attempt")
             return None
         child_request = provenance.get("child_request") if isinstance(provenance, dict) else {}
         idempotency_key = (

@@ -121,11 +121,16 @@ class FakeInspector:
         return {"pid": pid}
 
 
-class RecordingT3Port(CountingT3Port):
-    """CountingT3Port that also records every launch envelope verbatim."""
+E2E_PRINCIPAL = "oauth-client-e2e"
 
-    def __init__(self) -> None:
-        super().__init__()
+
+class RecordingT3Port(CountingT3Port):
+    """CountingT3Port that attests a principal (the reviewed adapter refuses
+    an unattested port before any native call) and records every launch
+    envelope verbatim."""
+
+    def __init__(self, principal: str = E2E_PRINCIPAL) -> None:
+        super().__init__(principal)
         self.envelopes: list = []
 
     async def launch_thread(self, envelope):
@@ -375,24 +380,22 @@ def test_e2e_admission_to_t3_native_launch_seal_and_return(tmp_path):
     }
 
     # Claim: C's v1.1 join — t3-native binding with the deterministic
-    # native idempotency key and the adapter's pinned namespace.
+    # native idempotency key; the claim stamps NO namespace (the claim
+    # transaction knows no OAuth principal — REVIEW_C_E_OPUS A2).
     assert e2e.binding.runtime_kind == "t3-native"
-    assert e2e.binding.caller_namespace == T3_REQUEST_NAMESPACE
+    assert e2e.binding.caller_namespace == ""
     assert e2e.binding.operation_key == derive_t3_client_request_id(e2e.binding)
 
     # Launch: EXACTLY ONE native launch, and the envelope the adapter sent
     # carries the binding's persisted operation key verbatim and the
-    # binding's caller namespace as its principal suffix (the adapter
-    # composes the full idempotency namespace under the pinned base —
-    # ports that cannot report a principal use the broker projection).
+    # PORT-attested principal as the namespace suffix under the pinned base.
     assert e2e.port.launch_count == 1
     assert len(e2e.port.envelopes) == 1
     envelope = e2e.port.envelopes[0]
     assert envelope.client_request_id == e2e.binding.operation_key
-    assert envelope.request_namespace == t3_request_namespace(
-        e2e.binding.caller_namespace)
-    assert _namespace_principal(
-        envelope.request_namespace) == e2e.binding.caller_namespace
+    assert envelope.request_namespace == t3_request_namespace(E2E_PRINCIPAL)
+    assert _namespace_principal(envelope.request_namespace) == E2E_PRINCIPAL
+    assert envelope.request_namespace.count(T3_REQUEST_NAMESPACE) == 1
 
     # Seal + return: delivered once to the ORIGINAL conversation, receipt
     # durable as an events row, acceptance honestly not_accepted.
@@ -405,8 +408,10 @@ def test_e2e_admission_to_t3_native_launch_seal_and_return(tmp_path):
     assert record["acceptance"] == "not_accepted"
     assert record["stage"] == "checks_green"  # PR open, all checks concluded
     assert record["github"]["merge_state"] == "not_merged"  # open PR, unmerged
+    # The returned namespace is the one the adapter PERSISTED at launch
+    # (port-attested), never the claim's empty caller_namespace.
     assert record["original_requester"]["authenticated_namespace"] == (
-        T3_REQUEST_NAMESPACE)
+        envelope.request_namespace)
     assert record["attempt"]["t3_thread_id"] == e2e.ref.provider_session_id
     assert record["attempt"]["seal_digest"]
 
