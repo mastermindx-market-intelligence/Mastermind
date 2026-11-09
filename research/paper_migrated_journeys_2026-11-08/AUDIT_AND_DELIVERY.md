@@ -15,7 +15,7 @@ Direct entry points for the 21 files amended in this successor. Each file retain
 | Area | Delivered design change |
 | --- | --- |
 | [Portfolio](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0) | Separated selected receipts, history availability and unresolved requests; added four phone outcomes. |
-| [Bonds](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0) | Added publication recovery and EN/ZH source-aware return, cancel and reset references. |
+| [Bonds](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0) | Added publication recovery and EN/ZH source-aware return, cancel and reset references. |
 | [Government Revenue](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0) | Restored the two 320px result-state return actions. |
 | [Forex](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0) | Separated local preparation, account saving and uncertain outcomes; updated My watches entry paths. |
 | [Breadth](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0) | Completed selected-session inspectors and accessible data/recovery references. |
@@ -1275,9 +1275,37 @@ A bounded read-only audit of `01M6Y39WH7QVTH07RTWHTSRP65` found an explicit prim
 
 The contract distinguishes requested and actual endpoints, selected sessions, 21 intervals versus 22 closes, price/coverage/adjustment limits, exact symbol/date/basis identity and superseded responses. AAPL historical dossier and NVDA newer studies retain their separate identities. No additional amendment was justified. All retained historical prices/clocks and held `AD-0` remain unchanged.
 
+## Delivery verification — exact destinations and preserved period semantics
+
+### Entry pages and recorded effects agree
+
+Root compared every row in the21-file delivery map with the corresponding successful native edit records. Twenty page pointers already matched. The Bonds/cross-asset row still pointed to `p-1-0`, while all20 recorded changes addressed `p-2-0`. A fresh native read confirmed the current recovery board `3PO-0` and entry map `1T0-0` on that exact page. The delivery link now opens [the correct Bonds recovery page](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0).
+
+The21 mapped file identities exactly equal the21 successfully amended file identities. Each file's last observed owned editing action is its explicit `finish_working_on_nodes`. Historical exceptional receipts remain documented: the Breadth insertion's original-target readback confirmed no effect before the distinct repair, and the unsupported Expectation `finish` name was resolved through the catalog's reviewed action. No uncertain new mutation remains open in this successor.
+
+A separate editorial pass inserted missing spaces in the handoff prose. Its verification preserved every non-whitespace character, numeric sequence, inline/fenced code segment and URL. No value, identity, source reference or receipt changed.
+
+### Proposed CAGR coverage already expresses the correct distinctions
+
+The separately Proposed page [`p-3-0`](https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-3-0) retains its existing period `107-0`, recovery `10S-0` and copy/build `11D-0` boards. The bounded review found no new design defect.
+
+Root independently read the period and build content and recomputed the illustrative arithmetic:
+
+| Case | Verified result | Existing design meaning |
+| --- | --- | --- |
+| $10,000 → $7,500,15Oct2024 to15Oct2026 | 730 elapsed days;730/365.25 =1.9986310746 years; CAGR−13.405991% | −13.41% annualized,−25.0% total; date basis remains explicit. |
+| Same amounts, explicitly selected2Years | CAGR−13.397460% | −13.40%; a distinct user-selected period basis. |
+| $10,000 at7% for10years | $19,671.5136 final value; +96.715136% total | $19,672 and+96.7%, explicitly an arithmetic projection. |
+
+The annualized rate is a constant-rate equivalent, not each year's actual return. Invalid/reversed date states retain fields, withhold the current result/Copy and require an explicit switch to retained Years. Copy failure preserves a valid calculation and supplies the attempted text for manual recovery. The existing build contract already addresses obsolete completion feedback and exact copied-period identity.
+
+Root fetched the current formula/date section of [templates/calculators/cagr.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/01de061e44666b6be101315bbf03f61e3d2573b9/templates/calculators/cagr.html.j2), blob `4212a92c15220568653c31dbc6ef5506758c135f`. The bounded source comparison found that blob unchanged from the native `5eb1603edb4486f06c74df7c43a1082427a59b6e` binding. The existing implicit Years fallback and lossy copied-period rounding remain explicitly identified design-to-implementation gaps; they were not falsely reported as implemented.
+
+No CAGR board, formula, route, source or clipboard owner was modified. Its Proposed status and runtime-proof obligations remain intact.
+
 ## Active continuation
 
-The successor covers 21 design files. All concrete findings from the latest bounded reviews—Expectation finder availability, Hub directory drift, Bonds duration-review parity, tool-search example completeness and the foundations handoff—are implemented and verified in Paper. Later Crypto, Risk, OS sharing, canonical F02 and Returns dossier coverage was preserved where another amendment would duplicate existing work. Remaining runtime, account, source-integration, held-target and release obligations retain their existing owners; static design proof does not close them.
+The successor covers 21 design files. The concrete Paper corrections identified in this audit are implemented, visually checked and saved with exact readback. Every delivery-map page now agrees with the recorded native target. Bounded later reviews preserved Crypto, Risk, OS sharing, canonical F02, Returns dossier and Proposed CAGR coverage where a new amendment would duplicate valid existing work. Remaining runtime, account, source-integration, held-target and release obligations retain their existing owners; static design proof does not close them.
 
 ## Acceptance boundary
 
