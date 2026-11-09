@@ -1,11 +1,16 @@
 import {
   createExecutiveSessionBinding,
   type ExecutiveSessionBinding,
+  type ExecutiveSessionSelection,
+  type ExecutiveSessionTargetKind,
   type ExecutiveSessionTransport,
   type QualifiedSessionAnswerRead,
+  type QualifiedSessionDispatch,
+  sessionTargetKind,
 } from "./executive-session-command-port";
 import type { MissionSelection } from "../mission";
 import type {
+  CommandIntent,
   FiniteCommandPort,
   PendingPointerStore,
   OperationPointer,
@@ -29,7 +34,8 @@ import type {
 /** Read-only original-owner correlation, never a DSH or company-session ID. */
 export interface CurrentExecutiveSessionObservation {
   readonly targetRef: string;
-  readonly selection: MissionSelection;
+  /** The verified session selection; it carries the closed target kind. */
+  readonly selection: ExecutiveSessionSelection;
   readonly principalScope: string;
   readonly generation: string;
 }
@@ -37,6 +43,13 @@ export type SessionCommandPort = FiniteCommandPort & {
   readonly currentTargetRef: () => string | null;
   /** Optional for old mounts; absence cannot be treated as a bound session. */
   readonly currentObservation?: () => CurrentExecutiveSessionObservation | null;
+  /** The one qualified SEND. It returns the closed receipt and, for a
+   * Secretary target, the validated native public result of that same send. */
+  readonly submitQualified?: (
+    pointer: OperationPointer,
+    intent: CommandIntent,
+    signal: AbortSignal,
+  ) => Promise<QualifiedSessionDispatch>;
   readonly readOriginalReferences?: (selection: MissionSelection, signal: AbortSignal,
                                      cursor?: string) => Promise<unknown>;
   /** Bounded same-project saved history, independent of the selected root's
@@ -60,8 +73,9 @@ export type MountedExecutiveSessionBinding = Omit<ExecutiveSessionBinding, "port
 export interface OsExecutiveSessionHost {
   readonly binding: MountedExecutiveSessionBinding;
   readonly ready: Promise<void>;
-  /** Push the exact current selection; invalidates before any re-read. */
-  refresh(selection: MissionSelection | null): Promise<void>;
+  /** Push the exact current selection and closed target kind; invalidates
+   * before any re-read. */
+  refresh(selection: ExecutiveSessionSelection | null): Promise<void>;
   /** Register the explicit synchronous completion-condition provider. */
   setStopCondition(provider: () => unknown): void;
   dispose(): void;
@@ -71,7 +85,7 @@ export function createOsExecutiveSessionHost(
   transport: ExecutiveSessionTransport,
   store: PendingPointerStore,
 ): OsExecutiveSessionHost {
-  let selection: MissionSelection | null = null;
+  let selection: ExecutiveSessionSelection | null = null;
   let stopCondition: () => unknown = () => undefined;
   const handle = createExecutiveSessionBinding({
     transport,
@@ -86,6 +100,10 @@ export function createOsExecutiveSessionHost(
       context: () => original.context(),
       prepare: (intent) => original.prepare(intent),
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
+      // The same single send; the qualified entry only adds the validated
+      // native public result of that one send.
+      submitQualified: (pointer, intent, signal) =>
+        original.submitQualified(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
       readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
       projectHistory: transport.projectReferences ? {
@@ -159,8 +177,10 @@ export function createOsExecutiveSessionHost(
         // from a target digest or the visible session title alone.
         const state = handle.sessionState();
         const owner = original.context();
+        const kind = state ? sessionTargetKind(state.selection) : null;
         if (!state || state.selectionState !== "RESOLVED" ||
-            !state.capabilities.send || !state.target || !owner ||
+            !state.capabilities.send || !state.target || !owner || kind === null ||
+            state.target.kind !== kind ||
             state.principalScope !== owner.principalScope) return null;
         return {
           targetRef: state.target.target_ref,
@@ -175,7 +195,11 @@ export function createOsExecutiveSessionHost(
     binding,
     ready: handle.ready,
     refresh(next) {
-      selection = next ? { workRef: next.workRef, rootJobId: next.rootJobId } : null;
+      // The closed target kind travels with the selection; a kind change is a
+      // different selection and invalidates before any re-read.
+      selection = next
+        ? { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: next.targetKind }
+        : null;
       return handle.refresh();
     },
     setStopCondition(provider) {

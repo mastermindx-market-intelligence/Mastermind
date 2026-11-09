@@ -368,13 +368,14 @@ def test_route_mounts_through_the_executive_mcp_transport_allowlist(rsa_key, tmp
 
 
 def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
-    from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES
+    from ops.executive_os.os_public_edge import (GET_ROUTES, POST_ROUTES,
+        PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, AUTHORIZATION_IDENTITY_GET_ROUTES)
 
     assert GET_ROUTES.count(ROUTE) == 1
     # The composed profile retains the legacy ordering, then appends the
     # reference reader, Control Room reads, Fabric reads and the later
-    # project/archive/knowledge and source-operation reads in that order.
-    assert GET_ROUTES == (
+    # project/archive/knowledge and source-operation reads, then the BYOK roles metadata read.
+    assert PRE_AUTHORIZATION_IDENTITY_GET_ROUTES == (
         "/os/", "/os/auth/callback", "/workspace/programs/current",
         "/workspace/work/current", "/workspace/mission/current",
         "/workspace/mission/v3/current", "/workspace/result/current",
@@ -395,8 +396,12 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
         "/workspace/project-instructions/current",
         "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation",
         "/workspace/project-access/current",
+        "/workspace/source-operation/options", "/workspace/resources/host-observation/current",
         "/workspace/mission-result/current",
+        "/workspace/native-draft-identity/current",
+        "/workspace/byok/roles/current",
     )
+    assert GET_ROUTES == PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + AUTHORIZATION_IDENTITY_GET_ROUTES
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes

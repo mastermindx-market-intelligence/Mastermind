@@ -49,6 +49,34 @@ class FabricTaskError(RuntimeError):
     pass
 
 
+# Closed diagnostics only: these labels grant no routing, retry or acceptance.
+# Never retain arbitrary picker text, provider output, paths or account detail.
+_REQUEST_REFUSAL_CODES = frozenset({
+    "NO_OPERATOR_AVAILABLE", "NO_POOL_AVAILABLE", "NO_ROUTE",
+    "ROUTE_INCOMPLETE", "REQUEST_ROUTING_RETURN_UNQUALIFIED",
+    "REQUEST_MAX_TURNS_INVALID", "REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED",
+    "ECONOMIC_POLICY_REFUSED", "UNCLASSIFIED_PRELAUNCH_REFUSAL",
+})
+
+
+def _safe_request_refusal_code(exc: BaseException) -> str:
+    unknown = "UNCLASSIFIED_PRELAUNCH_REFUSAL"
+    if type(exc) is not FabricTaskError:
+        return unknown
+    args = exc.args
+    if not args or type(args[0]) is not str or len(args[0]) > 1024:
+        return unknown
+    message = args[0]
+    # The deadline-aware picker runs in an owned subprocess. It returns only
+    # this fixed no-operator marker; historical receipts omitted the cause.
+    if message == "NONE reason=no_operator_available":
+        return "NO_OPERATOR_AVAILABLE"
+    if message == "NONE reason=no_pool_available":
+        return "NO_POOL_AVAILABLE"
+    code = message.partition(":")[0]
+    return code if code in _REQUEST_REFUSAL_CODES else unknown
+
+
 def validate_run_id(value: object) -> str:
     token = str(value or "").strip()
     if not RUN_ID_RE.fullmatch(token):
@@ -704,12 +732,20 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         metadata_error = exc
     if missing_log:
         retained = here / "state" / "remote_sub" / f"{rid}.request.json"
-        if retained.exists() or retained.is_symlink():
+        retained_present, artifact_unverified = True, False
+        try:
+            retained.lstat()
+        except FileNotFoundError:
+            retained_present = False
+        except OSError:
+            retained_present, artifact_unverified = False, True
+        if retained_present:
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
                     raise FabricTaskError("retained_request_invalid")
                 state = "REQUEST_RETAINED_NO_START_EVIDENCE"
+                refusal_diagnostic: dict[str, str] = {}
                 refused = retained.with_name(rid + ".request-refused.json")
                 launch = retained.with_name(rid + ".request-launch.json")
                 if refused.exists() and not (launch.exists() or launch.is_symlink()):
@@ -722,6 +758,10 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                             or proof.get("launch_attempted") is not False):
                         raise FabricTaskError("retained_refusal_invalid")
                     state = "REQUEST_REFUSED_BEFORE_LAUNCH"
+                    code = proof.get("refusal_code")
+                    refusal_diagnostic["request_refusal_code"] = (
+                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES
+                        else "UNCLASSIFIED_PRELAUNCH_REFUSAL")
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": state, "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
@@ -729,17 +769,32 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                     "request_root_id": row.get("root_id"), "request_parent_run_id": row.get("parent_run_id"),
                     "execution_absence_proven": state == "REQUEST_REFUSED_BEFORE_LAUNCH",
                     "background_execution": False, "request_retained": True,
-                    "same_run_replay_allowed": False}
+                    "same_run_replay_allowed": False, **refusal_diagnostic}
             except (OSError, ValueError, FabricTaskError, AttributeError):
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
                     **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+        # The packet is fsynced before its descriptor. A crash in that window
+        # still occupies the original run, as does an orphan result. Check only
+        # the fixed artifacts guarded by request(); their presence or unreadable
+        # metadata proves neither execution absence nor root identity. Never read
+        # their contents or turn a missing log into permission to redispatch.
+        if not artifact_unverified:
+            for artifact in (retained.with_name(f"{rid}.request.packet"), result_path):
+                try:
+                    artifact.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    pass
+                artifact_unverified = True
+                break
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
-            "state": "NOT_FOUND",
-            **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
+            "state": "STATUS_UNREADABLE" if artifact_unverified else "NOT_FOUND",
+            **_acceptance_unknown("ARTIFACT_UNVERIFIED" if artifact_unverified else "EXECUTION_NOT_ELIGIBLE"),
             "rc": None,
             "signal": None,
             "result_available": False,
@@ -903,7 +958,6 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         if observation is not None:
             status["controller_observation"] = observation
     status.update(_acceptance_projection(rid, status, original_log, **owner))
-    status.update(_terminal_provider_projection(rid, status, original_log, **owner))
     if state == "ACTIVE_OR_WAITING":
         status.update(_active_lineage_projection(rid, original_log, **owner))
     for suffix in (".session-retained.json", ".session-created.json"):
@@ -929,81 +983,6 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         except (OSError, ValueError, AttributeError, FabricTaskError):
             continue
     return status
-
-
-def _terminal_provider_projection(rid: str, status: dict[str, Any], controller_log: bytes,
-                                  *, owner_ext: Path | None = None) -> dict[str, Any]:
-    """Project the existing original turn-limit proof, never authorize replay.
-
-    A Claude SDK catalog notice is not proof of provider model rejection.  The
-    local original process and provider receipts, already owned by the controller,
-    carry the authoritative CLI subtype.  Missing or drifting evidence stays
-    unclassified; no model string or captured prose is interpreted as authority.
-    """
-    if (status.get("state") != "TERMINAL" or type(status.get("rc")) is not int
-            or status["rc"] == 0 or status.get("signal") != "other"):
-        return {}
-    marker = f"PROVIDER_OUTCOME_RECORDED file={rid}.provider.json".encode()
-    if marker not in controller_log:
-        return {}
-    here = HERE if owner_ext is None else Path(owner_ext)
-    if not here.is_absolute() or ".." in here.parts:
-        return {}
-    owner = {} if owner_ext is None else {"owner_ext": here}
-    base = here / "state" / "remote_sub"
-    provider_path = base / f"{rid}.provider.json"
-    process_path = base / f"{rid}.process.jsonl"
-    try:
-        def original_bytes(path: Path, limit: int) -> bytes:
-            before = path.lstat()
-            if (before.st_uid != os.getuid() or before.st_nlink != 1
-                    or before.st_mode & 0o022):
-                raise FabricTaskError("unsafe provider receipt")
-            raw = _bounded_regular(path, limit)
-            after = path.lstat()
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
-                    before.st_ctime_ns) != (after.st_dev, after.st_ino,
-                                            after.st_size, after.st_mtime_ns,
-                                            after.st_ctime_ns):
-                raise FabricTaskError("provider receipt changed")
-            return raw
-
-        from artifact_reader import strict_json
-        provider_raw = original_bytes(provider_path, 16_384)
-        provider = strict_json(provider_raw)
-        process_raw = original_bytes(process_path, 16_384)
-        process_lines = process_raw.splitlines()
-        if len(process_lines) != 1:
-            return {}
-        process = strict_json(process_lines[0])
-        from provider_outcome import validate_receipt
-        validate_receipt(provider, process, rid)
-        if (status.get("root_id") is not None and provider.get("root_id") != status["root_id"]):
-            return {}
-        if (provider.get("command_rc") != status["rc"]
-                or provider.get("kind") != "turn_limit"
-                or provider.get("cli_subtype") != "error_max_turns"
-                or provider.get("cli_terminal_reason") != "max_turns"):
-            return {}
-        log_path, _ = _paths(rid, **owner)
-        if _bounded_regular(log_path, MAX_LOG_BYTES) != controller_log:
-            return {}
-        # Recheck the original receipts after classification; never project a
-        # mixture of changed receipts or another owner namespace.
-        if (original_bytes(provider_path, 16_384) != provider_raw
-                or original_bytes(process_path, 16_384) != process_raw):
-            return {}
-        return {"terminal_provider_diagnostic": {
-            "kind": "turn_limit",
-            "cli_subtype": "error_max_turns",
-            "source": "validated_original_provider_process_receipt",
-            "replay_authorized": False,
-            "workspace_changes": "NOT_INSPECTED",
-            "recovery_action": "RECONCILE_ORIGINAL_WORKSPACE",
-        }}
-    except (OSError, ValueError, TypeError, KeyError, ImportError,
-            FabricTaskError, RecursionError, AttributeError):
-        return {}
 
 
 def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
@@ -1215,18 +1194,6 @@ def request(
                 remaining = min(remaining, request_remaining_seconds)
             env["POOL_COMMISSION_REMAINING_SECONDS"] = str(remaining)
     observed_root = resolve_request_root(root_id, env)
-    request_complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
-    if max_turns is not None and request_complexity in {"C2_COMPLEX_BOUNDED", "C3_FRONTIER_JUDGMENT"}:
-        # Advisory only: an intentional caller ceiling remains binding. The
-        # installed wrapper, not this reader, owns the actual effective limit.
-        print("REQUEST_TURN_BUDGET " + json.dumps({
-            "code": "EXPLICIT_COMPLEX_TASK_TURN_CEILING",
-            "requested_max_turns": max_turns,
-            "task_complexity": request_complexity,
-            "effective_max_turns": None,
-            "limit_source": "caller_request",
-            "retry_authorized": False,
-        }, sort_keys=True), file=sys.stderr, flush=True)
     # Freeze the input before route selection. Exhausted capacity or an ended
     # caller must not destroy the only copy of an unfinished commission. These
     # are per-run artifacts, not queued work or permission to resume a process.
@@ -1333,7 +1300,7 @@ def request(
         if not guard.get("allowed"):
             raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
         if new_macro_worktree is not None:
-            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
+            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
                 raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
             if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
                 raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
@@ -1481,6 +1448,7 @@ def request(
                     **({"selection_diagnostics": selection_diagnostics}
                        if selection_diagnostics is not None else {}),
                     "reason": "prelaunch_" + type(exc).__name__,
+                    "refusal_code": _safe_request_refusal_code(exc),
                     **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
                 })
@@ -1626,7 +1594,7 @@ def plan_accepted_macro_worktree_release(
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
         r"\[remote_sub id=" + re.escape(rid) +
-        r" host=(?P<host>ubuntu[0-3])\] "
+        r" host=(?P<host>ubuntu[0-4])\] "
         r"FABRIC_NEW_MACRO_WORKTREE run=" + re.escape(rid) +
         r" commit=(?P<sha>[0-9a-f]{40}) "
         r"root=(?P<root>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "
@@ -1752,7 +1720,9 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--class", dest="task_class", required=True)
     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
-    p_request.add_argument("--cwd", default=os.getcwd())
+    # Resolve an implicit working directory on the receiving host.
+    # The receiving host still validates explicit --cwd values.
+    p_request.add_argument("--cwd", default="~")
     p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
                            help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
     p_request.add_argument("--cpu-scope-percent", type=int, choices=(100, 200, 400),
@@ -1762,7 +1732,7 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
     p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
-    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")
+    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
     p_request.add_argument("--root")
@@ -1772,7 +1742,7 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--model", dest="requested_model")
     p_request.add_argument("--not-before", help="Strict UTC Z lower bound for this new request; never queues or authorizes retry")
     p_request.add_argument("--max-turns", type=int,
-                           help="Intentional per-request Claude turn ceiling (1..400); omit for complex work unless a tighter limit is required; only reduces the existing admitted wrapper limit")
+                           help="Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit")
     p_request.add_argument("--quota-fallback", action="store_true",
                            help="Bounded foreground successors for proven initial quota rejection; inspect with status --follow")
 

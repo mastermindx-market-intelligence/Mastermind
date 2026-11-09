@@ -51,10 +51,12 @@ export const SOURCE_OPERATION_STATUS_SCHEMA =
  */
 export const ORIGINAL_OPERATION_ID_PREFIXES = {
   publish_project_proposal: "mmos-project-create-",
+  publish_project_plan_proposal: "mmos-project-plan-proposal-",
   ADOPT_PLAN: "mmos-project-adopt-",
   ACCEPT_DIRECTION: "mmos-direction-accept-",
   add_project_file: "mmos-project-file-add-",
   set_project_communication_preference: "mmos-project-preference-set-",
+  correct_project_discovery: "mmos-project-discovery-correct-",
 } as const;
 
 /** The five source-operation actions of the shared schema. */

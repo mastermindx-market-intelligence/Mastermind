@@ -19,5 +19,19 @@ Complex-task explicit ceilings produce an advisory, not a new refusal gate, and 
 
 Direct integration rationale: PRINCIPAL_JUDGMENT / CRITICAL_PATH_SHORTCUT for reconciling overlapping source and original effects while the result path itself is under repair. No independent review is commissioned merely from risk tier. Organizational plan projection is not claimed; this is source evidence linked to #2090, not Executive admission.
 
+## Convergence with the protected native generation (2026-11-08)
+Merging the current protected master generation (`native-manifest.json`
+`22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada`) resolved
+this PR onto the MCP boundary only. `rollout/build_review_stage.py` validates
+five composed-parent identities over the whole member digest map, so new
+`candidate/fabric_task.py` or `candidate/provider_outcome.py` bytes cannot be
+staged without re-sealing that generation, regenerating `native-manifest.json`
+and `native-source-inventory.json`, and replacing the 2026-11-08 qualification
+receipts. That re-qualification stays a separate native-generation change; this
+PR ships the caller-facing intentional-budget advisory (`fabric_request`
+`max_turns` help, `request_budget_advisory`) and its MCP test. The native
+`_terminal_provider_projection`, the native turn-budget warning line and the
+provider/process receipt diagnostics are carried by the follow-up re-seal.
+
 ## Release constraint observed during qualification
 The wider native security composition suite has 32 Mac sparse-observer failures caused by informational `advice.sparseIndexExpanded` stderr in unchanged protected code. PR #2007 already owns the precise fix. No blanket test-green claim, copied competing fix, runtime activation, or original-work retry follows from this source qualification.

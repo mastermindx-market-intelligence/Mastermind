@@ -132,3 +132,14 @@ it('retires retained original-status callbacks on unmount without erasing the du
   const scope=f.journey.context.owner_context.principal_scope,original=await f.store.read(scope);f.unmount();
   await check();expect(f.transport.reconcileSourceOperation).not.toHaveBeenCalled();expect(await f.store.read(scope)).toEqual(original);
 });
+
+it('inspects the exact lost-prepare original without source, prepare, reserve, submit or replay',async()=>{
+ const f=setup();
+ const request=f.request,lookup={action:'add_project_file' as const,request_id:request.request_id,work_ref:request.work_ref,source_commit:request.source_commit,base_revision:request.base_revision,request_sha256:await publicRequestSha256(request),expected_preference_revision:null};
+ await act(async()=>{const status=await f.result.current.inspectOriginal(lookup);expect(status.selection.request_id).toBe(request.request_id);});
+ expect(f.transport.readSourceOperation).toHaveBeenCalledExactlyOnceWith(lookup,expect.any(AbortSignal));
+ expect(f.transport.prepareSourceOperation).not.toHaveBeenCalled();expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
+ expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
+ f.revoke();await expect(f.result.current.inspectOriginal(lookup)).rejects.toThrow();
+ expect(f.transport.readSourceOperation).toHaveBeenCalledTimes(1);
+});

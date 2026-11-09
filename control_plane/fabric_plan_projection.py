@@ -33,24 +33,31 @@ _ADMISSION_STATE = "ADMITTED"
 
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
+_COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
 _EXECUTION_PLAN_SCHEMA_V1 = "mastermind.execution_plan/v1"
 _EXECUTION_PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 _EXECUTION_PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 _EXECUTION_PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
-_ADMISSION_SCHEMAS = (_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2)
+_EXECUTION_PLAN_SCHEMA_V5 = "mastermind.execution_plan/v5"
+_ADMISSION_SCHEMAS = (
+    _COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2,
+    _COO_PLAN_ADMISSION_SCHEMA_V3,
+)
 _EXECUTION_PLAN_SCHEMAS = (
     _EXECUTION_PLAN_SCHEMA_V1,
     _EXECUTION_PLAN_SCHEMA_V2,
     _EXECUTION_PLAN_SCHEMA_V3,
     _EXECUTION_PLAN_SCHEMA_V4,
+    _EXECUTION_PLAN_SCHEMA_V5,
 )
-# Canonical pairing: dependency-carrying plans v3/v4 ride admission v2, while
-# v1/v2 plans ride admission v1 and project empty dependency lists.
+# Canonical pairing: v5 uses hierarchy admission v3; v3/v4 use admission v2.
+# Legacy v1/v2 use admission v1 and project empty dependency lists.
 _DEPENDENCY_PLAN_SCHEMAS = frozenset(
-    {_EXECUTION_PLAN_SCHEMA_V3, _EXECUTION_PLAN_SCHEMA_V4}
+    {_EXECUTION_PLAN_SCHEMA_V3, _EXECUTION_PLAN_SCHEMA_V4, _EXECUTION_PLAN_SCHEMA_V5}
 )
 
 _MAX_PLAN_STEPS = 8
+_MAX_HIERARCHICAL_PLAN_STEPS = 16
 _MAX_OBJECTIVE_TEXT = 4096
 
 # Defensive shapes for exactly the fields this view displays.  The canonical
@@ -156,7 +163,9 @@ def _validated_headers(
     ):
         _refuse("SOURCE_UNAVAILABLE")
     expected_admission_schema = (
-        _COO_PLAN_ADMISSION_SCHEMA_V2
+        _COO_PLAN_ADMISSION_SCHEMA_V3
+        if plan_schema == _EXECUTION_PLAN_SCHEMA_V5
+        else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_schema in _DEPENDENCY_PLAN_SCHEMAS
         else _COO_PLAN_ADMISSION_SCHEMA_V1
     )
@@ -166,6 +175,13 @@ def _validated_headers(
         _identifier(admission.get("root_job_id")) != root_job_id
         or _identifier(plan.get("root_job_id")) != root_job_id
     ):
+        _refuse("SOURCE_UNAVAILABLE")
+    if plan_schema == _EXECUTION_PLAN_SCHEMA_V5 and (
+        _identifier(admission.get("coordinator_job_id")) != root_job_id
+        or _identifier(plan.get("coordinator_job_id")) != root_job_id
+    ):
+        # This existing selector displays the original root plan only. Nested
+        # coordinators retain their own local step identities and cannot alias it.
         _refuse("SOURCE_UNAVAILABLE")
     plan_attempt_id = _identifier(plan.get("plan_attempt_id"))
     if (
@@ -225,7 +241,9 @@ def _projected_steps(
 
     plan_steps = plan.get("steps")
     reserved_steps = admission.get("steps")
-    if not isinstance(plan_steps, list) or not plan_steps or len(plan_steps) > _MAX_PLAN_STEPS:
+    maximum = (_MAX_HIERARCHICAL_PLAN_STEPS
+               if plan_schema == _EXECUTION_PLAN_SCHEMA_V5 else _MAX_PLAN_STEPS)
+    if not isinstance(plan_steps, list) or not plan_steps or len(plan_steps) > maximum:
         _refuse("SOURCE_UNAVAILABLE")
     if not isinstance(reserved_steps, list) or len(reserved_steps) != len(plan_steps):
         _refuse("SOURCE_UNAVAILABLE")

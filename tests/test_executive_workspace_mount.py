@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-import test_executive_mcp_app_composition as existing
+from tests import test_executive_mcp_app_composition as existing
 from integrations.executive_mcp import server
 from ops.executive_os import executive_mcp_entry as entry
 
@@ -71,6 +71,23 @@ def test_absent_mounts_keep_legacy_closed(settings):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
             for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/mission-result/current','/workspace/window/current','/os/'):
                 assert (await client.get(path)).status_code==404
+    asyncio.run(check())
+
+
+def test_byok_fixed_route_uses_existing_outer_fence(settings):
+    workspace = Mount()
+    app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink(), workspace_app=workspace)
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=entry.PUBLIC_ORIGIN) as client:
+            path = '/workspace/byok/roles/current'
+            assert (await client.get(path)).status_code == 200
+            assert workspace.calls == [(path, b'')]
+            for method, target in [('GET', path+'?host=ubuntu1'), ('GET', path+'/'),
+                    ('GET', '/workspace/byok%2Froles/current'), ('HEAD', path), ('POST', path)]:
+                assert (await client.request(method, target)).status_code == 404
+            assert (await client.get(path, headers=[('Authorization', 'Bearer a'),
+                ('Authorization', 'Bearer b')])).status_code in (400, 401)
+            assert workspace.calls == [(path, b'')]
     asyncio.run(check())
 
 

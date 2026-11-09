@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { AuthState } from "./host";
+import { BYOK_ROLES_SCHEMA, type ByokRolesRead } from "./meta-ceo/byok-roles-read";
 import { controlRoomFixture, missionFixture } from "./test-fixtures";
 import type {
   CommandIntent,
@@ -23,7 +24,7 @@ const invoke = vi.fn().mockResolvedValue({
   transport: "UNCONFIGURED",
   state: "BUILT_NOT_PROVEN",
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false, invoke: (...args: unknown[]) => invoke(...args) }));
 
 const DIRECTION = "Ship the bounded launch slice.";
 const MANIFEST = {
@@ -169,8 +170,13 @@ async function openOffice(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /** One frozen direction preview on the Office, ready for the handoff. */
-async function freezeDirection(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Direction to Meta-CEO"), DIRECTION);
+async function freezeDirection(user: ReturnType<typeof userEvent.setup>, paste = false) {
+  // These owner-lifecycle cases may use one real focused paste gesture. They
+  // do not assert keyboard-per-character behavior or bypass the input owner.
+  if (paste) {
+    await user.click(screen.getByLabelText("Direction to Meta-CEO"));
+    await user.paste(DIRECTION);
+  } else await user.type(screen.getByLabelText("Direction to Meta-CEO"), DIRECTION);
   await user.click(screen.getByRole("button", { name: "Review direction preview" }));
   const preview = await screen.findByRole("region", { name: "Direction preview" });
   expect(preview.textContent).toContain(DIRECTION);
@@ -233,7 +239,7 @@ describe("Office direction handoff into the existing launch owner", () => {
     const user = userEvent.setup();
     render(<App />);
     await openOffice(user);
-    await freezeDirection(user);
+    await freezeDirection(user, true);
     await user.click(screen.getByRole("button", { name: "Start new work" }));
     await user.click(await screen.findByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
@@ -244,7 +250,8 @@ describe("Office direction handoff into the existing launch owner", () => {
     await user.click(await screen.findByRole("button", { name: "Work queue" }));
     expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
     // The settled Office handoff cannot fence a later independent launch.
-    await user.type(screen.getByLabelText("Goal"), "A new launch after the first receipt.");
+    await user.click(screen.getByLabelText("Goal"));
+    await user.paste("A new launch after the first receipt.");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(2));
     expect(made.prepare.mock.calls[1][0].payload).toHaveProperty(
@@ -379,11 +386,12 @@ describe("Office direction handoff into the existing launch owner", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "Work queue" }));
-    await user.type(await screen.findByLabelText("Goal"), "An earlier unsent goal.");
+    await user.click(await screen.findByLabelText("Goal"));
+    await user.paste("An earlier unsent goal.");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.prepare).toHaveBeenCalledTimes(1));
     await openOffice(user);
-    await freezeDirection(user);
+    await freezeDirection(user, true);
     await user.click(screen.getByRole("button", { name: "Start new work" }));
     expect(previewRefusal()).toHaveProperty(
       "textContent",
@@ -536,5 +544,56 @@ describe("Office uses its exact enrolled workstream through the existing owner",
     expect((screen.getByLabelText("Workstream") as HTMLSelectElement).value).toBe(CCR);
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("Office BYOK observation integration", () => {
+  it("reads and refreshes the role source without changing the frozen direction or preparing work", async () => {
+    const made = installHost();
+    const observed = (): ByokRolesRead => ({
+      schema: BYOK_ROLES_SCHEMA, state: "OBSERVED", reason_code: "OBSERVED",
+      roles: [
+        { role: "mmmeta", state: "CONFIGURATION_OBSERVED", requested_provider: "zai", requested_model: "glm-5.3" },
+        { role: "mmsecretary", state: "ABSENT", requested_provider: null, requested_model: null },
+      ],
+      source_observation: {
+        host_binding_sha256: "a".repeat(64),
+        host_boot_id: "12345678-1234-1234-1234-123456789abc",
+        implementation_sha: "b".repeat(40), metadata_sha256: "c".repeat(64),
+        observed_at_ms: Date.now(),
+      },
+      proof: { credentials_read: false, provider_called: false, service_observed: false,
+        served_model_verified: false, credential_enrollment: "UNVERIFIED" },
+    });
+    const read = vi.fn(async () => observed());
+    window.MastermindMissionHost!.readByokRoles = read;
+    window.MastermindMissionHost!.invalidationGeneration = () => 1;
+    const user = userEvent.setup();
+    render(<App />);
+    expect(read).not.toHaveBeenCalled();
+    await openOffice(user);
+    await screen.findByText("Configuration observed");
+    expect(read).toHaveBeenCalledTimes(1);
+    await freezeDirection(user);
+    await user.click(screen.getByRole("button", { name: "Refresh configuration" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    await screen.findByText("Configuration observed");
+    expect((screen.getByLabelText("Direction to Meta-CEO") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect(screen.getByRole("region", { name: "Direction preview" }).textContent).toContain(DIRECTION);
+    await user.click(screen.getByRole("button", { name: "Review connection · Meta-CEO" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("zai")).toBeTruthy();
+    expect(within(dialog).getByText("glm-5.3")).toBeTruthy();
+    expect(within(dialog).getByText("Not verified")).toBeTruthy();
+    expect(within(dialog).getByText("Unverified")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    expect(made.readOperation).not.toHaveBeenCalled();
+    expect(made.store.read("owner-a")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Start new work" }));
+    expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe(DIRECTION);
+    expect(made.prepare).not.toHaveBeenCalled();
   });
 });

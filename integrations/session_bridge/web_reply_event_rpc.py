@@ -23,6 +23,7 @@ from urllib.parse import urlsplit, unquote
 
 from control_plane.principal_projection import NeutralPrincipalProjection
 from integrations.session_bridge.web_reply_events import EVENT_NAME, reply_event_definition
+from integrations.slack_agent_dialogue.dot_canary_event import EVENT_NAME as DOT_CANARY_EVENT_NAME
 from integrations.session_bridge.web_reply_delivery import _SUB, _secret
 
 VERSION = "2026-07-28"
@@ -209,14 +210,20 @@ class WebReplyEventRpc:
     """One authenticated event protocol delegate, with no storage or HTTP."""
 
     def __init__(self, owner: OriginalReplySubscriptionOwner, *,
-                 clock: Callable[[], int]):
+                 clock: Callable[[], int], canary_owner: Any | None = None):
         if (not callable(getattr(owner, "can_discover", None))
                 or not callable(getattr(owner, "subscribe", None))
                 or not callable(getattr(owner, "unsubscribe", None))
                 or not callable(clock)):
             raise TypeError("existing authenticated subscription owner is required")
+        if canary_owner is not None and any(
+            not callable(getattr(canary_owner, name, None))
+            for name in ("policy_for", "subscribe", "unsubscribe")
+        ):
+            raise TypeError("one authenticated canary subscription owner required")
         self._owner = owner
         self._clock = clock
+        self._canary_owner = canary_owner
 
     async def handle(self, request: Any,
                      principal: NeutralPrincipalProjection) -> dict[str, Any]:
@@ -234,6 +241,17 @@ class WebReplyEventRpc:
             return _err(request_id, -32600, "invalid event protocol request")
         method = request["method"]
         params = request.get("params", {})
+        # The optional Dot canary shares this authenticated MCP route and is OFF
+        # unless the incumbent host injects an authorized subscription owner.
+        # The prior native reply event remains unchanged for all old clients.
+        if (method != "events/list" and type(params) is dict
+                and params.get("name") == DOT_CANARY_EVENT_NAME):
+            if self._canary_owner is None:
+                return _err(request_id, -32602, "invalid event parameters")
+            from .dot_canary_mcp_route import handle_canary
+            return await handle_canary(
+                self._canary_owner, request_id, method, params, principal, self._clock,
+            )
         # Pre-dispatch validation is strictly separate from owner effects.
         # A ValueError after dispatch can mean an ACK was lost after commit.
         try:
@@ -250,7 +268,15 @@ class WebReplyEventRpc:
                 allowed = await self._owner.can_discover(principal)
                 if type(allowed) is not bool:
                     raise TypeError("owner discovery unavailable")
-                return _ok(request_id, {"events": [reply_event_definition()] if allowed else []})
+                events = [reply_event_definition()] if allowed else []
+                if self._canary_owner is not None:
+                    from .dot_canary_mcp_route import discover_canary
+                    definition = await discover_canary(
+                        self._canary_owner, principal, self._clock,
+                    )
+                    if definition is not None:
+                        events.append(definition)
+                return _ok(request_id, {"events": events})
             if method == "events/subscribe":
                 requested = EventSubscribeRequest(
                     request_ref=ref, callback_url=url,

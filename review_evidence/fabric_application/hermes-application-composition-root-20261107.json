@@ -1,0 +1,124 @@
+{
+  "consumer_census_addendum": {
+    "DeepSeek_company_job_ingress": "Protected788c source-only native company-job ingress; not APPLICATION model-pool qualification",
+    "Hermes_primary_application": "Source joins original native enrollment/tunnel and application inference owners; installation/consumer proof remains owed"
+  },
+  "contributor_evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6705166528",
+  "files": {
+    "integrations/studio_direct_mcp/private_service_original_delivery_test.py": {
+      "git_blob": "07297e4a111a2e56e7be337f43042f5f718b589a",
+      "sha256": "27a2bcc542e9d34be8225040e8c923b1bb3f9114d142048e4e5ba0c7016e25bd"
+    },
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": {
+      "git_blob": "eace6fc1b2ed2b5a6db4889fd11a1e660c3122cd",
+      "sha256": "36128047df407955975392e3daffe53aa080bb7488c693154357fe6d35f1e47e"
+    },
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": {
+      "git_blob": "731aaa3f8059347ea5b9e399a9312437f6913aed",
+      "sha256": "347a950560e048929991e0da10d2ca0be4d24c5f4f1760242938efb6a48ce7c9"
+    },
+    "tests/integration/test_fabric_chat_buffered_delivery.py": {
+      "git_blob": "af14102673ec3b89e05222d5d641691388b814f9",
+      "sha256": "9a9d5ce7a037a01ebd03ee46106cfb2d7a16a44d7e4d5fba73a118f575a08887"
+    },
+    "tests/integration/test_fabric_chat_inference_composition.py": {
+      "git_blob": "9ed0edb18f7765b704a55147ef3b649967e60ea6",
+      "sha256": "da6d992eccc2ab9d84b8dac5996436be177ec39de0d678dae037de4d8dc796b3"
+    },
+    "tests/integration/test_fabric_text_native_application.py": {
+      "git_blob": "db5f2e4030c71d23c4df96932ab26d9f4fba07fe",
+      "sha256": "500caa4a431dd1de5a1705203d684a93ce1fae4596efdc0d61174592611eaeb7"
+    },
+    "tests/integration/test_fabric_translation_composition.py": {
+      "git_blob": "651b678f7f4b29dabbfe812cbb1f08d4b83ba9e9",
+      "sha256": "d2761631559714e91d238f1f474d5668d7ff743e80a233113a08be0322168b5c"
+    }
+  },
+  "inherited_style_findings": {
+    "all_bytes_match_qualified_contributor": true,
+    "count": 17,
+    "findings": [
+      ".github/workflows/hermes-application-inference.yml:211: new blank line at EOF.",
+      "integrations/hermes_application_fabric/HOST_INTEGRATION.md:252: new blank line at EOF.",
+      "integrations/hermes_application_fabric/QUALIFICATION.md:392: new blank line at EOF.",
+      "integrations/hermes_application_fabric/README.md:185: new blank line at EOF.",
+      "integrations/hermes_runtime/cli.py:492: new blank line at EOF.",
+      "integrations/hermes_runtime/install.py:516: new blank line at EOF.",
+      "integrations/hermes_runtime/native_gateway_entry.py:625: new blank line at EOF.",
+      "integrations/hermes_runtime/profile.py:468: new blank line at EOF.",
+      "integrations/hermes_runtime/supervisor.py:766: new blank line at EOF.",
+      "integrations/hermes_runtime/tcp_sandbox.py:163: new blank line at EOF.",
+      "integrations/hermes_runtime/tests/test_operator_native_enrollment.py:281: new blank line at EOF.",
+      "ops/executive_os/application_tunnel_control.py:2035: new blank line at EOF.",
+      "ops/executive_os/os_tunnel_entry.py:162: new blank line at EOF.",
+      "ops/executive_os/release_manifest.py:1314: new blank line at EOF.",
+      "ops/native_fabric/quota_continuity/candidate/native_go_entry.py:856: new blank line at EOF.",
+      "ops/native_fabric/quota_continuity/rollout/native_install.py:3040: new blank line at EOF.",
+      "tests/application_tunnel_ci/require_proof.py:48: new blank line at EOF."
+    ],
+    "root_findings": 0,
+    "source": "eaf1b55f157942d8b59b99f0c316304fcc646e3b"
+  },
+  "initial_combined_invocation": {
+    "errors": 83,
+    "failures": 56,
+    "reason": "Wrong paired fixture root and ambient YAML imported by unrelated conftest; corrected paired pass reported separately",
+    "skips": 16,
+    "status": "NOT_ACCEPTED",
+    "tests": 901
+  },
+  "native_enrollment_local": {
+    "accepted": false,
+    "limit_seconds": 900,
+    "log_sha256": "bc161a0cceb5d1c7bdb24183948ac9ad63e605de16f5d94b3a0a159f26442275",
+    "required_hosted_ci_owed": true,
+    "status": "TIME_LIMIT_INCOMPLETE"
+  },
+  "original_J_replayed": false,
+  "paired_proof": {
+    "bytes": 423,
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 1,
+      "tests": 475
+    },
+    "modules": [
+      "tests/test_executive_fabric_release_identity_review.py",
+      "tests/test_advisor_chat.py",
+      "tests/test_advisor_cognition_plane.py",
+      "tests/test_cli_bridge.py",
+      "tests/integration/test_fabric_chat_inference_composition.py",
+      "tests/integration/test_fabric_chat_cross_pool_auto.py",
+      "tests/integration/test_fabric_chat_buffered_delivery.py",
+      "tests/integration/test_fabric_text_cross_pool_auto.py",
+      "tests/integration/test_fabric_text_native_application.py",
+      "tests/integration/test_fabric_translation_composition.py"
+    ],
+    "rc": 0,
+    "seconds": 29.862,
+    "sha256": "7588b800cf22114d2358a88f8562014ad10b3f78bddfa5f4c47a1ed517477317"
+  },
+  "parents": [
+    "84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c",
+    "eaf1b55f157942d8b59b99f0c316304fcc646e3b"
+  ],
+  "production_activation": false,
+  "remaining": [
+    "protected788c native closure composition",
+    "native guard result and rebuild qualification",
+    "Studio retained successor compatibility and8accountpreview",
+    "hosted original-J preflight diagnosis",
+    "native selection/C3 original-J reconciliation/Go enrollment",
+    "VPS deployment and consumer acceptance"
+  ],
+  "schema": "mastermind.hermes_application_root_composition.v1",
+  "synthetic_original_delivery_tests": {
+    "diagnostic_only": true,
+    "executed": 39,
+    "failed": 0,
+    "log_sha256": "bf670dfa67187be87edf219d7d5c902312aa0be3654e9287fc271d9f251a1a9e",
+    "passed": 39,
+    "skipped": 0
+  }
+}

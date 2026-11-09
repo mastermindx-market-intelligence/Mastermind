@@ -20,6 +20,7 @@ from integrations.hermes_runtime.system_service import (
 )
 
 REPO = Path(__file__).resolve().parents[3]
+RELEASE = Path("/opt/mastermind-executive/releases/" + "a" * 40)
 
 
 class RootManagedUnitTests(unittest.TestCase):
@@ -42,7 +43,7 @@ class RootManagedUnitTests(unittest.TestCase):
             runtime_user=kw.get("user", role),
             runtime_group=kw.get("group", role),
             python_executable=kw.get("python", sys.executable),
-            repo_root=kw.get("repo", REPO),
+            repo_root=kw.get("repo", RELEASE),
         )
 
     def test_exact_role_address_without_implicit_user_manager(self):
@@ -78,8 +79,9 @@ class RootManagedUnitTests(unittest.TestCase):
                 self.assertIn("CapabilityBoundingSet=\n", unit)
                 self.assertIn("AmbientCapabilities=\n", unit)
                 self.assertIn("UMask=0077\n", unit)
-                self.assertIn(" -P -m integrations.hermes_runtime supervise ", unit)
-                self.assertIn(" -P -m integrations.hermes_runtime canary ", unit)
+                self.assertIn(f" -I -S -B {RELEASE}/ops/executive_os/release_manifest.py hermes-runtime supervise ", unit)
+                self.assertIn(f" -I -S -B {RELEASE}/ops/executive_os/release_manifest.py hermes-runtime canary ", unit)
+                self.assertNotIn("Environment=PYTHONPATH=", unit)
                 self.assertIn("Environment=PYTHONNOUSERSITE=1\n", unit)
                 self.assertEqual(unit.count("ExecStart="), 1)
                 self.assertEqual(unit.count("ExecReload="), 1)
@@ -110,6 +112,10 @@ class RootManagedUnitTests(unittest.TestCase):
             self.render("mmsecretary", python="/tmp/py;sudo")
         with self.assertRaises(RuntimeRefusal):
             self.render("mmsecretary", repo=Path("/invalid path"))
+        for root in (REPO, Path("/opt/mastermind-executive/releases/not-a-sha"),
+                     RELEASE / "child", Path("/tmp/" + "a" * 40)):
+            with self.subTest(root=root), self.assertRaisesRegex(RuntimeRefusal, "ROOT_UNIT_RELEASE_PATH_INVALID"):
+                self.render("mmsecretary", repo=root)
         bad = replace(self.profile("mmsecretary"), service_name="unrelated.service")
         with self.assertRaises(RuntimeRefusal):
             self.render("mmsecretary", profile=bad)

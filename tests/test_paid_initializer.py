@@ -457,9 +457,19 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     protected=([str(bootstrap.resolve()),str(bootstrap.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
     ancestry=(bootstrap.resolve(),bootstrap) if system_launch else (real,logical,*map(Path,observed.values()))
     ancestors={str(v) for p in ancestry for v in p.parents}
+    # RWE starts through a runner-owned virtual environment. Model only its
+    # exact existing regular startup configuration files, preserving real
+    # content, link, size, getpath and drift checks in the production pin.
+    import stat
+    startup_configs=set()
+    for directory in (logical.parent,logical.parent.parent):
+        candidate=directory/'pyvenv.cfg'
+        try:info=candidate.lstat()
+        except FileNotFoundError:continue
+        if stat.S_ISREG(info.st_mode):startup_configs.add(str(candidate))
     private=[];fault_acl=False
     def distribution(name):
-        return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
+        return str(name) in ancestors or str(name) in startup_configs or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
         return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
     def owned_fstat(fd):
@@ -502,7 +512,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors,root_files=[real])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private)|startup_configs,prefixes=protected+[scratch],root_directories=ancestors,root_files=[real,*startup_configs])
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -573,21 +583,23 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='af824c03baf8036eed0d839cfd312a978305c86c93ddadde76a339f4a8e7b937'
+    assert hashlib.sha256(current_raw).hexdigest()=='22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==104
+    assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py','ext/post_failure_observation.py',
-        'ext/post_failure_observation_delivery.py'}
+        'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
+        'ext/fabric_participant_owner.py','ext/original_advertised_artifact.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
     changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
+        'ext/linux_process_identity.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
         'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     # P8.T1.S7's reviewed diagnostic boundary changes exactly these four
@@ -601,12 +613,21 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
+    application_changed={'ext/lease_broker.py', 'ext/go_lease_capability.py', 'ext/go_lease_gateway.py', 'ext/quota_circuit.py'}
     recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
                       'ext/run_observation_delivery.py'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed
-    # The fair-share repair advances exactly one prior broker member.
-    assert sum(before[p]==current[p] for p in before)==65
-    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed:
+    # Preserve protected Linux process custody, the Ubuntu4 qualifier
+    # and the application A members in the exact historical diff.
+    ubuntu4_changed={'ext/fabric_host_qualification.py'}
+    assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
+    # The procfs fallback and atomic load sampling change only the current lane runtime.
+    census_changed={'ext/lane_runtime.py'}
+    assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
+    assert current['ext/lane_runtime.py']=='b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b'
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
+    # Census fallback advances exactly one additional historical member.
+    assert sum(before[p]==current[p] for p in before)==59
+    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

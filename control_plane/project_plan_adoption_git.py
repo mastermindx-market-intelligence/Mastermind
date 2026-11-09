@@ -116,6 +116,11 @@ def _targets(lookup, phase, images, *, predecessor=None, candidate_path=None, ca
 
 
 class PlanAdoptionGitMode:
+    mode_name = "plan_adoption"
+    allowed_phases = ("CANDIDATE", "ADOPTION")
+    request_keys = REQUEST_KEYS
+    action = "ADOPT_PLAN"
+    lookup = staticmethod(_lookup)
     def __init__(self, publisher, *, authorize, stamp, load, claim):
         self.owner = publisher
         self.seams = {"authorize": authorize, "stamp": stamp, "load": load, "claim": claim}
@@ -304,19 +309,19 @@ class PlanAdoptionGitMode:
 
     def operate(self, value, recipe, principal, *, phase, claim, reconcile=False):
         op = p._Operation(self.owner._binding)
-        op.mode, op.adoption_phase = "plan_adoption", phase
+        op.mode, op.adoption_phase = self.mode_name, phase
         # A reconciliation cannot prove that a prior attempted effect did NOT
         # occur merely because its current grant or read is unavailable.
         op.effects_started = reconcile
         try:
             self._check()
-            if phase not in ("CANDIDATE", "ADOPTION"):
+            if phase not in self.allowed_phases:
                 _fail("REQUEST_INVALID")
             if reconcile:
-                lookup = _lookup(value)
+                lookup = self.lookup(value)
             else:
-                _closed(value, REQUEST_KEYS)
-                lookup = _lookup({"schema": LOOKUP_SCHEMA, "action": "ADOPT_PLAN",
+                _closed(value, self.request_keys)
+                lookup = self.lookup({"schema": LOOKUP_SCHEMA, "action": self.action,
                                    "request_id": value["request_id"], "work_ref": value["work_ref"]})
                 if claim is None:
                     _fail("CLAIM_INVALID")

@@ -1,6 +1,6 @@
 /** Fixed source-action identity context. No source/CAS/adoption readiness is inferred. */
-export type SourceAction = 'publish_project_proposal' | 'ADOPT_PLAN' | 'ACCEPT_DIRECTION'
-  | 'add_project_file' | 'set_project_communication_preference';
+export type SourceAction = 'publish_project_proposal' | 'publish_project_plan_proposal' | 'ADOPT_PLAN' | 'ACCEPT_DIRECTION'
+  | 'add_project_file' | 'set_project_communication_preference' | 'correct_project_discovery';
 export interface SourceOperationContextSelection { action: SourceAction; workRef: string | null }
 export interface SourceOperationContext {
   schema: 'mastermind.workspace_source_operation_context.v1';
@@ -8,8 +8,8 @@ export interface SourceOperationContext {
   owner_context: { principal_scope: string };
   can_inspect: true;
 }
-const actions = new Set<unknown>(['publish_project_proposal','ADOPT_PLAN','ACCEPT_DIRECTION',
-  'add_project_file','set_project_communication_preference']);
+const actions = new Set<unknown>(['publish_project_proposal','publish_project_plan_proposal','ADOPT_PLAN','ACCEPT_DIRECTION',
+  'add_project_file','set_project_communication_preference','correct_project_discovery']);
 function object(value: unknown, keys: string[]): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error();
   const proto = Object.getPrototypeOf(value);

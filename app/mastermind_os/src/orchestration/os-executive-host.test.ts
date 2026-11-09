@@ -26,9 +26,10 @@ function fixture() {
     driftWithoutEvent() { generation++; }, listenerCount: () => listeners.size };
 }
 const disposals: Array<() => void> = [];
-const mount = (f: ReturnType<typeof fixture>, now: () => number = () => 1_000_000) => {
+const mount = (f: ReturnType<typeof fixture>, now: () => number = () => 1_000_000,
+  legacyConfig: typeof config | null = config) => {
   // This unit exercises only the host boundary; the controller/store have their own suite.
-  const host = createOsExecutiveHost(config, f.transport, {} as PendingPointerStore, now);
+  const host = createOsExecutiveHost(legacyConfig, f.transport, {} as PendingPointerStore, now);
   disposals.push(host.dispose); return host;
 };
 afterEach(() => { for (const dispose of disposals.splice(0)) dispose(); vi.useRealTimers(); });
@@ -63,6 +64,29 @@ describe("verified Executive host", () => {
     expect(h.binding.port.context()).toBeNull(); expect(f.transport.context).not.toHaveBeenCalled();
     f.change(true); await tick();
     expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+  });
+  it("qualifies the same auth owner without a manifest and never restores withdrawn or silently replaced authority", async () => {
+    const f = fixture(); f.change(false);
+    const h = mount(f, () => 1_000_000, null); await h.ready;
+    expect(h.binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(h.binding.port.context()).toBeNull();
+    expect(f.transport.context).not.toHaveBeenCalled();
+
+    const late = deferred<unknown>();
+    vi.mocked(f.transport.context).mockReturnValueOnce(late.promise);
+    f.change(true);
+    expect(f.transport.context).toHaveBeenCalledTimes(1);
+    f.change(false);
+    late.resolve(dto()); await tick();
+    expect(h.binding.port.context()).toBeNull();
+
+    f.change(true); await tick();
+    expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+    expect(h.binding.makeLaunchIntent({ goal: "No legacy enrollment", projectRef: "executive-infrastructure", profileRef: "research_only" })).toBeNull();
+    f.driftWithoutEvent();
+    expect(h.binding.port.context()).toBeNull();
+    expect(f.transport.submit).not.toHaveBeenCalled();
+    expect(f.transport.status).not.toHaveBeenCalled();
   });
   it("invalidates immediately and withholds late context across A to B to A", async () => {
     const f = fixture(); const first = deferred<unknown>();

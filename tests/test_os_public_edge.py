@@ -9,8 +9,10 @@ import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os.os_public_edge import (
-    GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_ROUTES, POST_ROUTES,
-    INCUMBENT_POST_ROUTES, SOURCE_POST_ROUTES, SOURCE_MAX_BODY, asset_routes, render, stage,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, GET_ROUTES, LEGACY_POST_ROUTES,
+    MCP_COO_METADATA_ROUTE, MCP_COO_ROUTE, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_METADATA_ROUTES,
+    MCP_ROUTES, POST_ROUTES, INCUMBENT_POST_ROUTES, SOURCE_POST_ROUTES, SOURCE_MAX_BODY,
+    asset_routes, render, stage,
 )
 
 
@@ -29,7 +31,7 @@ def manifest(noir=False, notices=False):
     ]}
 
 
-def test_authenticated_control_room_routes_are_exact_and_method_scoped():
+def test_authenticated_native_and_control_room_routes_are_exact_and_method_scoped():
     from ops.executive_os.os_public_edge import (
         GET_ROUTES, INCUMBENT_GET_ROUTES, POST_ROUTES, INCUMBENT_POST_ROUTES,
     )
@@ -52,7 +54,6 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/current",
         "/workspace/project-instructions/current",
         "/workspace/project-access/current",
-        "/workspace/mission-result/current",
         "/workspace/project-admission/operation",
         "/workspace/projects/archive/current",
         "/workspace/project-knowledge/current",
@@ -60,6 +61,13 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-source/current",
         "/workspace/source-operation/context",
         "/workspace/source-operation/operation",
+        "/workspace/source-operation/options",
+        "/workspace/resources/host-observation/current",
+        "/workspace/mission-result/current",
+        "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
+        "/workspace/native-authorization-identity/content/current",
+        "/workspace/byok/roles/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }
@@ -71,6 +79,36 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/pause",
         "/workspace/project-admission/resume",
         "/workspace/instruction-admission/pause",
+        "/os/executive/project-execution/preview",
+        "/os/executive/project-execution/submit",
+        "/os/executive/project-execution/status",
+        "/os/executive/session/project-executions",
+        "/os/executive/session/project-execution-read",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
+        "/os/executive/session/history-context",
+        "/os/executive/session/conversations",
+        "/os/executive/session/conversation-read",
+        "/os/executive/session/fresh-conversations",
+        "/os/executive/session/fresh-conversation-read",
+        "/os/executive/conversation/preview",
+        "/os/executive/conversation/create",
+        "/os/executive/conversation/status",
+        "/os/executive/conversation/read",
+        "/os/executive/conversation/consume",
+        "/os/executive/conversation/turn",
+        "/os/executive/conversation/turn/status",
+        "/os/executive/conversation/turn/read",
+        "/os/executive/conversation/consume/status",
+        "/os/executive/conversation/turn/preview",
+        "/os/executive/session/send",
+        "/os/executive/direct-native/result",
+        "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+        "/os/executive/company-priorities",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -112,13 +150,13 @@ def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
     config = render(value, 49152)
     # OS GET, legacy POST, source POST and both MCP branches share one relay.
     assert config.count("reverse_proxy 127.0.0.1:49152") == 5
-    # All public POSTs are explicit paths. The new session routes are READ
-    # only; effectful session/send stays closed until the held F2 gate clears.
+    # All public POSTs are explicit paths. The historical reader tuple stays
+    # exact; qualified Session SEND is a separate final-profile addition.
     assert "path " + " ".join(POST_ROUTES) + "\n" in config
     assert INCUMBENT_POST_ROUTES == LEGACY_POST_ROUTES + (
         "/os/executive/session/context", "/os/executive/session/reply",
         "/os/executive/session/references")
-    assert "/os/executive/session/send" not in config
+    assert config.count("/os/executive/session/send") == 1
     assert config.count("max_size 64KB") == 2
     assert config.count("max_size 98304") == 1
     assert SOURCE_MAX_BODY == 98304
@@ -162,12 +200,32 @@ def test_legacy_plus_notices_is_not_an_admitted_five_file_layout():
 def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
     config = render(manifest(noir), 49152)
     # RFC 9728 metadata is GET-only; the Streamable HTTP endpoint is POST-only.
-    assert f"method GET\n      path {MCP_METADATA_ROUTE}\n" in config
-    assert "method POST\n      path /mcp\n" in config
+    # The complete CEO+COO profile extends the same two exact method branches:
+    # one metadata list, one transport list, never a merged branch.
     assert MCP_METADATA_ROUTE == "/.well-known/oauth-protected-resource/mcp"
+    assert MCP_COO_METADATA_ROUTE == "/.well-known/oauth-protected-resource/mcp/coo"
     assert MCP_ROUTES == ("/mcp",)
-    # No wildcard or prefix match can widen the public surface.
-    assert "/mcp*" not in config and "/mcp/" not in config and "/.well-known/*" not in config
+    assert MCP_COO_ROUTE == "/mcp/coo"
+    assert MCP_METADATA_ROUTES == (MCP_METADATA_ROUTE,)
+    assert COMPLETE_MCP_METADATA_ROUTES == (MCP_METADATA_ROUTE, MCP_COO_METADATA_ROUTE)
+    assert COMPLETE_MCP_ROUTES == ("/mcp", "/mcp/coo")
+    assert f"method GET\n      path {MCP_METADATA_ROUTE} {MCP_COO_METADATA_ROUTE}\n" in config
+    assert f"method POST\n      path {MCP_ROUTES[0]} {MCP_COO_ROUTE}\n" in config
+    # Metadata and transport stay separate: one GET matcher, one POST matcher,
+    # neither carrying the other's method or the other's paths.
+    metadata_line = f"path {MCP_METADATA_ROUTE} {MCP_COO_METADATA_ROUTE}\n"
+    transport_line = f"path {MCP_ROUTES[0]} {MCP_COO_ROUTE}\n"
+    assert config.count(metadata_line) == 1 and config.count(transport_line) == 1
+    assert config.count("method GET\n") == 2 and config.count("method POST\n") == 3
+    # No wildcard or prefix match can widen the public surface. Caddy's path
+    # matcher is exact without a wildcard, so each token must be a literal.
+    matcher_paths = [line.split("path ", 1)[1].split() for line in config.splitlines()
+                     if line.strip().startswith("path ")]
+    assert len(matcher_paths) == 5
+    for tokens in matcher_paths:
+        for token in tokens:
+            assert "*" not in token, token
+    assert "/.well-known/*" not in config
     # The /mcp branch alone presents a loopback Host (the gateway SDK fence admits
     # only loopback hosts); every other branch keeps the public host.
     assert config.count("header_up Host 127.0.0.1\n") == 1
@@ -195,8 +253,10 @@ def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
              ("handle @get {", "handle @post {", "handle @sourcepost {", "handle @mcpmeta {", "handle @mcp {", "\n    abort\n")]
     assert order == sorted(order)
     # Caddy performs no authentication or token handling on any branch.
+    # Literal path names may contain authorization; directives/headers may not.
+    non_path_lines = "\n".join(line for line in config.splitlines() if not line.strip().startswith("path "))
     for forbidden in ("basicauth", "forward_auth", "jwt", "authorization", "Authorization"):
-        assert forbidden not in config
+        assert forbidden not in non_path_lines
     # Untrusted forwarding and CDN client-identity headers are stripped on every
     # branch and forwarding identity is rewritten to loopback/https.
     for header in ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
@@ -204,6 +264,47 @@ def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
         assert config.count(f"header_up -{header}\n") == 5
     assert config.count("header_up X-Forwarded-Proto https\n") == 5
     assert config.count("header_up X-Forwarded-For 127.0.0.1\n") == 5
+
+
+@pytest.mark.parametrize("damage", [
+    "ceo-only-metadata", "ceo-only-transport", "extra-metadata-path",
+    "extra-transport-path", "wildcard-metadata", "dropped-metadata",
+])
+def test_render_refuses_a_template_without_the_complete_mcp_path_lists(tmp_path, monkeypatch, damage):
+    """The renderer checks the complete intended lists, not placeholder counts.
+
+    A template that still carries the CEO-only pair, or that widens either
+    list, must not render: the public surface is fixed by the owner, never by
+    the template text.
+    """
+    from ops.executive_os import os_public_edge as edge
+    original = edge._TEMPLATE
+    template = original.read_text(encoding="utf-8")
+    metadata = " ".join(COMPLETE_MCP_METADATA_ROUTES)
+    transport = " ".join(COMPLETE_MCP_ROUTES)
+    if damage == "ceo-only-metadata":
+        template = template.replace(f"path {metadata}\n", f"path {MCP_METADATA_ROUTE}\n")
+    elif damage == "ceo-only-transport":
+        template = template.replace(f"path {transport}\n", f"path {MCP_ROUTES[0]}\n")
+    elif damage == "extra-metadata-path":
+        template = template.replace(
+            f"path {metadata}\n", f"path {metadata} /.well-known/oauth-protected-resource/mcp/extra\n")
+    elif damage == "extra-transport-path":
+        template = template.replace(f"path {transport}\n", f"path {transport} /mcp/extra\n")
+    elif damage == "wildcard-metadata":
+        template = template.replace(f"path {metadata}\n",
+                                    "path /.well-known/oauth-protected-resource/*\n")
+    else:
+        template = template.replace(f"path {metadata}\n", "")
+    assert template != original.read_text(encoding="utf-8")
+    damaged = tmp_path / "damaged.caddy.template"
+    damaged.write_text(template, encoding="utf-8")
+    monkeypatch.setattr(edge, "_TEMPLATE", damaged)
+    with pytest.raises(ValueError, match="template differs"):
+        render(manifest(), 49152)
+    # The undamaged template still renders, so the guard is not a blanket refusal.
+    monkeypatch.setattr(edge, "_TEMPLATE", original)
+    assert render(manifest(), 49152)
 
 
 @pytest.mark.parametrize("path", [
@@ -251,7 +352,8 @@ def test_staging_is_exclusive_and_receipt_observes_exact_bytes(tmp_path):
     output = tmp_path / "os.caddy"
     receipt = stage(manifest=manifest(True), relay_port=49152, output=output)
     assert receipt["installed"] is False
-    assert receipt["mcp"] == {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)}
+    assert receipt["mcp"] == {"get": list(COMPLETE_MCP_METADATA_ROUTES),
+                              "post": list(COMPLETE_MCP_ROUTES)}
     assert receipt["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert output.stat().st_mode & 0o777 == 0o600
     before = output.read_bytes()
@@ -318,11 +420,11 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
     by_paths = {(tuple(match["method"]), tuple(match["path"])): match for match in route_matchers}
     assert (("POST",), tuple(POST_ROUTES)) in by_paths
     assert (("POST",), tuple(SOURCE_POST_ROUTES)) in by_paths
-    assert (("GET",), (MCP_METADATA_ROUTE,)) in by_paths
-    assert (("POST",), tuple(MCP_ROUTES)) in by_paths
-    assert "/os/executive/session/send" not in POST_ROUTES
+    assert (("GET",), tuple(COMPLETE_MCP_METADATA_ROUTES)) in by_paths
+    assert (("POST",), tuple(COMPLETE_MCP_ROUTES)) in by_paths
+    assert POST_ROUTES.count("/os/executive/session/send") == 1
     os_get = [match for match in route_matchers
-              if match["method"] == ["GET"] and match["path"] != [MCP_METADATA_ROUTE]]
+              if match["method"] == ["GET"] and match["path"] != list(COMPLETE_MCP_METADATA_ROUTES)]
     assert len(os_get) == 1
     assert set(os_get[0]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
     assert config["apps"]["http"]["servers"]
@@ -349,7 +451,7 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
         assert len(proxies) == 1
         assert proxies[0]["upstreams"] == [{"dial": "127.0.0.1:49152"}]
         headers = proxies[0]["headers"]["request"]
-        assert headers["set"]["Host"] == (["127.0.0.1"] if paths == list(MCP_ROUTES)
+        assert headers["set"]["Host"] == (["127.0.0.1"] if paths == list(COMPLETE_MCP_ROUTES)
                                            else ["mcp.mastermind-x.com"])
         assert set(headers["delete"]) == {
             "Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
@@ -407,8 +509,9 @@ def test_instruction_read_profile_preserves_old_exact_profile_and_adds_only_get(
 
 
 def test_project_access_adds_one_fixed_read_and_preserves_full_instruction_predecessor():
-    from ops.executive_os.os_public_edge import PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,PRE_MISSION_RESULT_GET_ROUTES
-    assert PRE_MISSION_RESULT_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
-    assert (PRE_PROJECT_ACCESS_GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    from ops.executive_os.os_public_edge import (PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,
+        PRE_JOURNEY_GET_ROUTES,PRE_JOURNEY_POST_ROUTES)
+    assert PRE_JOURNEY_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
+    assert (PRE_PROJECT_ACCESS_GET_ROUTES,PRE_JOURNEY_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert '/workspace/project-access/current' not in POST_ROUTES
     assert not any('/workspace/project-access/pause' in routes for profile in TRANSITION_ROUTE_PROFILES for routes in profile)

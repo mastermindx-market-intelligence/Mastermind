@@ -328,11 +328,17 @@ def _news_row(t: str):
     rec = uni_news or (ndoc.get("tickers") or {}).get(t.upper())
     if not rec:
         return None
+    # Keep clocks paired with the selected news rows. A newer standalone feed
+    # cannot supply provenance for an older unified snapshot.
+    clock_doc = udoc.get("news_freshness") if uni_news else ndoc
+    clock_doc = clock_doc if isinstance(clock_doc, dict) else {}
     # The snapshot's own clocks (news estate D2): a feed the producer RETAINED from a previous
     # build is still shown, but flagged — its headlines are older than the build date says.
-    source_asof = ndoc.get("source_asof")
-    source_asof = source_asof if isinstance(source_asof, str) and source_asof else None  # "" = unstated
-    retained_flag = ndoc.get("retained_from_previous_build")
+    source_asof = clock_doc.get("source_asof")
+    source_asof = source_asof if isinstance(source_asof, str) and source_asof.strip() else None
+    source_basis = clock_doc.get("source_asof_basis")
+    source_basis = source_basis if isinstance(source_basis, str) and source_basis.strip() else None
+    retained_flag = clock_doc.get("retained_from_previous_build")
     retained_flag = retained_flag if isinstance(retained_flag, bool) else None   # null = not stated
     retained = retained_flag is True
     n_recent = rec.get("n_recent") or 0
@@ -347,12 +353,13 @@ def _news_row(t: str):
     if baskets:
         note += f" · {baskets[0]}"
     if retained:
-        reason = ndoc.get("retained_reason")
+        reason = clock_doc.get("retained_reason")
         note += " · retained from previous build" + (f" ({reason})" if isinstance(reason, str) and reason else "")
     return _row("news_flow", {
         "n_recent": n_recent, "sentiment_lean": lean, "n_pos": n_pos, "n_neg": n_neg,
         "baskets": baskets, "sectors": sectors, "is_mag7": is_mag7,
-        "source_asof": source_asof, "retained_from_previous_build": retained_flag,
+        "source_asof": source_asof, "source_asof_basis": source_basis,
+        "retained_from_previous_build": retained_flag,
         "evidence_grade": "vendored_snapshot", "source_file": nrel},
         "stale_retained" if retained else "context", direction, note)
 

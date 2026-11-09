@@ -299,8 +299,9 @@ def _qualify_document(document, *, expected_release_sha):
     _grants(document)
 
 
-def _proposed_mcp(prior, document, *, expected_release_sha):
-    proposed = dict(prior)
+def _proposed_mcp(prior, document, *, expected_release_sha,
+                  capability_profile_digests=None):
+    proposed = copy.deepcopy(prior)
     changed = {"release_sha", "os_executive_transport", "os_executive_resource",
                "os_commission_port"}
     for key in changed - {"release_sha"}:
@@ -311,7 +312,13 @@ def _proposed_mcp(prior, document, *, expected_release_sha):
     proposed["os_commission_port"] = document["studio_port"]
     require(set(prior) | changed >= set(proposed) and set(prior) <= set(proposed),
             "proposed MCP configuration fields differ")
-    for key, value in prior.items():
+    # Only the owner supplies this exact target-registry map. None retains
+    # the legacy pure compiler behavior; no request may select a digest.
+    from ops.executive_os.mcp_component_update import _apply_capability_profile_digests
+    expected = copy.deepcopy(prior)
+    _apply_capability_profile_digests(prior, expected, capability_profile_digests)
+    _apply_capability_profile_digests(prior, proposed, capability_profile_digests)
+    for key, value in expected.items():
         if key not in changed:
             require(proposed[key] == value, "proposed MCP configuration changed "
                     "an unrelated installed field")
@@ -358,7 +365,8 @@ def _proposed_plist(prior_plist, *, prior_release, expected_release_sha):
 
 def compile_gateway_candidates(prior_mcp_bytes, prior_plist_bytes, *,
                                expected_release_sha, expected_bundle_digest,
-                               qualified_publication_inputs):
+                               qualified_publication_inputs,
+                               capability_profile_digests=None):
     """Compile the three fixed candidate artifacts as immutable DATA.
 
     Every join above must hold or this refuses. The returned candidate carries
@@ -391,7 +399,8 @@ def compile_gateway_candidates(prior_mcp_bytes, prior_plist_bytes, *,
                 "qualified helper digest join differs")
 
     proposed_mcp = _proposed_mcp(prior_mcp, document,
-                                 expected_release_sha=expected_release_sha)
+                                 expected_release_sha=expected_release_sha,
+                                 capability_profile_digests=capability_profile_digests)
     require(canonical(proposed_mcp["policies"]) == canonical(prior_mcp["policies"]),
             "proposed MCP policies are unchanged")
     additional = build_additional_policies(proposed_mcp, policies)

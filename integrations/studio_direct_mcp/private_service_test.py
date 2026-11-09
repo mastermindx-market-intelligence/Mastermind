@@ -195,6 +195,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         backend=str(backend),
         fabric_only=False,
         modern_fabric_protocol=None,
+        original_collection=None,
         enable_repository_workspaces=False,
         os_commission_config_sha256=None,
     )
@@ -248,7 +249,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
-    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs")
+    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs", "original-delivery.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -276,6 +277,7 @@ class TestIdentity(unittest.TestCase):
             {
                 "gateway.mjs",
                 "modern-fabric-http.mjs",
+                "original-delivery.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "workspace-access.mjs",
@@ -1340,6 +1342,127 @@ class TestUpgrade(unittest.TestCase):
 # Runtime identity seal
 # -------------------------------------------------------------------
 
+class TestPublicationPaperPreservation(unittest.TestCase):
+    @contextmanager
+    def publication(self, *, account="mastermind-os-publication", advanced=True):
+        import shutil
+        with IsolatedHome(account) as (home, label, roots):
+            tmp = home.parent
+            with mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA), \
+                 mock.patch.object(svc, "PAPER_V20_BRIDGE_SHA256", PAPER_BRIDGE_V20_FIXTURE_SHA):
+                source, node, backend, recorder = _do_stage(tmp, home, account, 45120)
+                config = svc._build_config(
+                    account, "127.0.0.1", 45120, node, backend, roots["state"], home,
+                    repository_workspaces=True, commission_digest="a" * 64,
+                )
+                if advanced:
+                    _seed_paper_runtime(home, svc.PAPER_RUNTIME_V20_REL, PAPER_BRIDGE_V20_FIXTURE)
+                    config["paperDesign"] = svc._paper_design_config(
+                        home, rel=svc.PAPER_RUNTIME_V20_REL,
+                        bridge_sha256=PAPER_BRIDGE_V20_FIXTURE_SHA,
+                    )
+                    shutil.rmtree(home / svc.PAPER_RUNTIME_REL)
+                roots["config"].write_text(json.dumps(config), encoding="utf-8")
+                self.reseal_config(roots)
+                _seed_node_modules(roots)
+                _seal_runtime(account, recorder)
+                args = _stage_args(_make_upgrade_source(tmp), node, backend, account, 45120)
+                args.enable_repository_workspaces = True
+                # This fixture supplies the already-admitted grant result;
+                # the separate commission suite exercises root-file authority.
+                with mock.patch.object(svc, "_run", recorder), \
+                     mock.patch.object(svc, "_commission_setting",
+                                       side_effect=lambda a, _r, _p: a.os_commission_config_sha256 or "a" * 64):
+                    yield home, roots, args, config
+
+    def reseal_config(self, roots):
+        manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+        manifest["configHash"] = svc._sha256_file(roots["config"])
+        roots["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+    def installed_bytes(self, roots):
+        return {path: path.read_bytes() for path in svc._stage_dest_files(roots) if path.is_file()}
+
+    def test_upgrade_keeps_enrolled_v20_without_default_v12(self):
+        with self.publication() as (home, roots, args, before):
+            self.assertFalse((home / svc.PAPER_RUNTIME_REL).exists())
+            rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+            self.assertEqual(after["commissionPublication"], before["commissionPublication"])
+            self.assertEqual(after["repositoryWorkspaces"], before["repositoryWorkspaces"])
+            self.assertEqual(after["gitPublish"], before["gitPublish"])
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["source"], args.source)
+            self.assertEqual(manifest["configHash"], svc._sha256_file(roots["config"]))
+            self.assertFalse((home / svc.PAPER_RUNTIME_REL).exists())
+
+    def test_explicit_grant_refresh_keeps_enrolled_v20(self):
+        with self.publication() as (_home, roots, args, before):
+            args.os_commission_config_sha256 = "b" * 64
+            # The existing commission authority tests qualify the root grant.
+            # Here the normal upgrade must compose that admitted new digest.
+            with mock.patch.object(svc, "_commission_setting", return_value="b" * 64) as grant:
+                rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            grant.assert_called_once()
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+            self.assertEqual(after["commissionPublication"],
+                             {"enabled": True, "configurationDigest": "b" * 64})
+
+    def test_default_publication_runtime_keeps_normal_upgrade(self):
+        with self.publication(advanced=False) as (_home, roots, args, before):
+            rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+
+    def test_self_consistent_unqualified_paper_selection_refuses_before_writes(self):
+        changes = (
+            ("enabled", False), ("enabled", 1), ("pythonPath", "/foreign/python"),
+            ("bridgePath", "/foreign/bridge.py"), ("bridgeSha256", "f" * 64),
+            ("appPath", "/foreign/Paper.app"), ("commandTimeoutMs", 71000),
+            ("commandTimeoutMs", 70000.0),
+            ("unexpected", True),
+        )
+        for key, value in changes:
+            with self.subTest(field=key), self.publication() as (_home, roots, args, config):
+                config["paperDesign"][key] = value
+                roots["config"].write_text(json.dumps(config), encoding="utf-8")
+                self.reseal_config(roots)
+                before = self.installed_bytes(roots)
+                with self.assertRaises(SystemExit):
+                    _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(self.installed_bytes(roots), before)
+
+    def test_unqualified_v20_runtime_refuses_before_writes(self):
+        for change in ("bridge", "receipt", "mode", "missing"):
+            with self.subTest(change=change), self.publication() as (home, roots, args, _config):
+                runtime = home / svc.PAPER_RUNTIME_V20_REL
+                bridge = runtime / "source" / "bridge.py"
+                if change == "bridge":
+                    bridge.write_bytes(b"changed bridge")
+                elif change == "receipt":
+                    (runtime / "RUNTIME.json").write_text("{}", encoding="utf-8")
+                elif change == "mode":
+                    runtime.chmod(0o755)
+                else:
+                    bridge.unlink()
+                before = self.installed_bytes(roots)
+                with self.assertRaises(SystemExit):
+                    _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(self.installed_bytes(roots), before)
+
+    def test_other_accounts_do_not_acquire_publication_runtime_preservation(self):
+        with self.publication(account="test-account") as (_home, roots, args, _config):
+            before = self.installed_bytes(roots)
+            with self.assertRaises(SystemExit):
+                _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(self.installed_bytes(roots), before)
+
+
 class TestRuntimeSeal(unittest.TestCase):
     def _staged_runtime(self, tmp: Path, home: Path):
         src, node, backend, _ = _do_stage(tmp, home)
@@ -1793,8 +1916,49 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "fleet-status-module-upgrade", "seal-runtime", "start", "status", "stop"},
+            {'stage', 'upgrade', 'paper-runtime-upgrade', 'fabric-backend-release', 'native-pool-pin', 'native-pool-pin-forward', 'native-pool-pin-enrollment', 'fleet-status-module-upgrade', 'seal-runtime', 'start', 'status', 'stop', '_original-collection-helper', 'original-predecessor-readback', 'native-pool-pin-publisher'},
         )
+
+    def test_forward_pin_cli_exposes_only_its_closed_inputs(self):
+        parser = svc.build_parser()
+        opts = parser.parse_args([
+            "native-pool-pin-forward",
+            "--account", "chatgpt1",
+            "--forward-go-bundle", "/fixture/retained-go",
+            "--operation", "preview",
+        ])
+        self.assertEqual(opts.func, svc.cmd_native_pool_pin_forward)
+        self.assertEqual(opts.account, "chatgpt1")
+        self.assertEqual(opts.forward_go_bundle, "/fixture/retained-go")
+        self.assertIsNone(opts.expected_plan_sha256)
+        self.assertFalse(hasattr(opts, "successor_bundle"))
+        self.assertFalse(hasattr(opts, "successor_plan_sha256"))
+        self.assertFalse(hasattr(opts, "expected_manifest_sha256"))
+        self.assertFalse(hasattr(opts, "credential"))
+        self.assertFalse(hasattr(opts, "start"))
+        # The incumbent original operands never reach the forward path.
+        for name in ("--successor-bundle", "--successor-plan-sha256",
+                     "--expected-manifest-sha256"):
+            with self.subTest(option=name):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args([
+                        "native-pool-pin-forward",
+                        "--account", "chatgpt1",
+                        "--forward-go-bundle", "/fixture/retained-go",
+                        "--operation", "preview",
+                        name, "value",
+                    ])
+        # The incumbent original command keeps its own surface untouched.
+        with self.assertRaises(SystemExit):
+            parser.parse_args([
+                "native-pool-pin",
+                "--account", "chatgpt1",
+                "--expected-manifest-sha256", "a" * 64,
+                "--successor-bundle", "/fixture",
+                "--successor-plan-sha256", "b" * 64,
+                "--operation", "preview",
+                "--forward-go-bundle", "/fixture/retained-go",
+            ])
 
     def test_source_successor_cli_exposes_no_credential_or_lifecycle_selector(self):
         parser = svc.build_parser()
@@ -1844,6 +2008,24 @@ class TestCLI(unittest.TestCase):
             parser.parse_args(["--help"])
         except SystemExit as e:
             self.assertEqual(e.code, 0)
+
+    def test_native_pin_publisher_cli_is_one_closed_existing_personal_seat(self):
+        parser = svc.build_parser()
+        opts = parser.parse_args([
+            "native-pool-pin-publisher", "--account", "chatgpt2-personal",
+            "--operation", "preview", "--expected-manifest-sha256", "a" * 64,
+        ])
+        self.assertIs(opts.func, svc.cmd_native_pool_pin_publisher)
+        for forbidden in ("admin-business", "chatgpt1", "chatgpt2-business",
+                          "chatgpt3", "chatgpt4", "fabric-read", "other"):
+            with self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "native-pool-pin-publisher", "--account", forbidden,
+                    "--operation", "preview", "--expected-manifest-sha256", "a" * 64,
+                ])
+        for forbidden in ("credential", "force", "skip_integrity", "remote",
+                          "branch", "start", "stop"):
+            self.assertFalse(hasattr(opts, forbidden))
 
 
 # -------------------------------------------------------------------
@@ -2290,11 +2472,23 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
             "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
         })
+        # This generic generation is immutable. C4's later adapter is a
+        # distinct two-module successor, so retain real reviewed old bytes.
+        source_dir = Path(svc.__file__).parent
+        frozen_adapter = source_dir / "fixtures/workspace-access.fleet-v10-merge.mjs"
+        frozen_publisher = source_dir / "fixtures/git-publish.fleet-v10-merge.mjs"
+        self.assertEqual(svc._sha256_file(frozen_publisher),
+                         "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc")
+        self.assertEqual(svc._sha256_file(frozen_adapter),
+                         "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
+        self.assertEqual(svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["workspace-access.mjs"],
+                         "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
         for name in expected_names:
+            payload = frozen_adapter if name == "workspace-access.mjs" else frozen_publisher
             self.assertEqual(
-                svc._sha256_file(Path(svc.__file__).parent / name),
+                svc._sha256_file(payload),
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name],
-                "real incoming module must match the installed-owner target pin")
+                "real reviewed cohort bytes must match the immutable owner target pin")
             self.assertNotEqual(
                 svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name],
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])
@@ -2306,14 +2500,55 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
             "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
         })
+        self.assertEqual(svc.FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256, {
+            "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
+            "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+        })
         self.assertEqual(
             svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
-            "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
+            "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc",
         )
         self.assertNotEqual(
             svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256["git-publish.mjs"],
             svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
         )
+
+    def test_rejection_diagnostics_sealed_predecessor_is_only_eligible_forward_upgrade(self):
+        # A historical exact closed publisher may gain integrated recovery in
+        # the existing same-owner manifest-CAS transaction, no broad fallback.
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots), roots["plist"].read_bytes())
+            installed_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            denied = {name: "0" * 64 for name in installed_pair}
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", denied), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", denied), \
+                 mock.patch.object(svc, "FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256", installed_pair):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(before, (
+                    roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                    self._all_files(roots), roots["plist"].read_bytes()))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+                self.assertEqual(roots["config"].read_bytes(), before[1])
+                self.assertEqual(roots["plist"].read_bytes(), before[3])
+                self.assertEqual(
+                    {name for name in before[2]
+                     if self._all_files(roots)[name] != before[2][name]},
+                    {"git-publish.mjs", "workspace-access.mjs"})
+                svc._verify_staged_install(
+                    "chatgpt1", _label_for("chatgpt1"), roots,
+                    require_runtime_seal=True)
 
     def test_post_merge_publisher_preflight_and_apply_keep_sealed_host_config(self):
         # An installed merge-capable pair can receive the narrow publisher

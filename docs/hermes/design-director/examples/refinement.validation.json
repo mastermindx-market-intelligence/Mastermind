@@ -1,0 +1,9 @@
+{
+  "schema": "mastermind.design.validation.v1",
+  "assignment_id": "sector-clock-refinement",
+  "completion_sha256": "e4de6184b918cb640616c28fe21835d0d7b41df3c08538ccc89d3b8c7866e312",
+  "document_valid": true,
+  "design_accepted": false,
+  "production_proven": false,
+  "meaning": "Document identity and local evidence bytes checked; verify current Paper and review substance."
+}

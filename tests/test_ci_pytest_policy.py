@@ -866,7 +866,7 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """Keep a finite, adequate 60-minute shard window with fail-closed fan-in."""
+    """Keep a finite, adequate 75-minute shard window with fail-closed fan-in."""
     import yaml
 
     workflow = yaml.load(
@@ -878,7 +878,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
     assert shards["permissions"] == {"contents": "read", "actions": "read"}
-    assert shards["timeout-minutes"] == 60
+    assert shards["timeout-minutes"] == 75
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
@@ -930,7 +930,7 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
-    assert 'if [ "$EVENT_TYPE" = "pull_request" ]; then' in gate["run"]
+    assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]

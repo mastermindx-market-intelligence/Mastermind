@@ -240,7 +240,7 @@ def test_exact_executable_bundle_race_stops_before_any_ssh(monkeypatch,name):
     monkeypatch.setattr(owner.delivery,'local_file',changed)
     popen=mock.Mock(side_effect=AssertionError('SSH must not start'))
     monkeypatch.setattr(owner.delivery.subprocess,'Popen',popen)
-    with pytest.raises(ValueError,match='exact_code_bytes_changed'):
+    with pytest.raises(ValueError,match='post_failure_local_preparation_failed'):
         owner.delivery.transport('fixture-only',request,current_sources_sha256=expected)
     popen.assert_not_called()
 

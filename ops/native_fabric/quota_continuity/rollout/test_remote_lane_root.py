@@ -668,14 +668,14 @@ class PhysicalRootCase(unittest.TestCase):
     def test_local_shortcut_refuses_configured_root_before_worker(self):
         replace_private(self.fx.ctl / "hosts.json", json.dumps({"m2": self.entry}).encode())
         exclusive(self.fx.ctl / "sub.sh", b"#!/bin/bash\nprintf 'INERT_LOCAL_BOUNDARY\\n'\n", 0o700)
-        branch = self.shell.split('if [ "$HOST_ARG" = m2 ]; then\n', 1)[1].split(
+        branch = self.shell.split('if [ "$HOST_ARG" = m2 ] && [ "$APPLICATION_ACTIVE" -eq 0 ]; then\n', 1)[1].split(
             "\n# The same canonical registry constraints", 1)[0]
         setup = dict(HOST_ARG="m2", HERE=str(self.fx.ctl), HOSTS_SOURCE=str(self.fx.ctl/"hosts.json"), REMOTE_SUB_PYTHON=sys.executable,
-                     COMMISSION_ACTIVE="0", OPERATOR_CHILD_BUDGET="0", DRY_RUN="0",
+                     COMMISSION_ACTIVE="0", APPLICATION_ACTIVE="0", OPERATOR_CHILD_BUDGET="0", DRY_RUN="0",
                      PACKET=str(self.fx.packet_pin), PACKET_BASE="inert.packet",
                      REMOTE_CWD="~", MODEL=MODEL, MODE="glm")
         prefix = "set -u\n" + "\n".join(k + "=" + shlex.quote(v) for k, v in setup.items())
-        script = prefix + '\nlog() { printf "%s\\n" "$*"; }\nif [ "$HOST_ARG" = m2 ]; then\n' + branch
+        script = prefix + '\nlog() { printf "%s\\n" "$*"; }\nif [ "$HOST_ARG" = m2 ] && [ "$APPLICATION_ACTIVE" -eq 0 ]; then\n' + branch
         env = {k: v for k, v in os.environ.items() if not k.startswith("FABRIC_OPERATOR_")}
         result = subprocess.run(["bash", "-c", script], capture_output=True,
                                 text=True, timeout=15, env=env)

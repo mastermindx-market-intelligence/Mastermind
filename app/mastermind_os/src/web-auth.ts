@@ -1,3 +1,6 @@
+import {hostObservationWebMethods} from "./resources/host-observation-web";
+import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
+import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
 import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
@@ -7,6 +10,7 @@ import { validSourceOperationContextSelection } from './source-operations/contex
 import {createSourceOperationTransport,SOURCE_OPERATION_CAP} from './source-operations/transport';
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
+import {projectConversationArguments,PROJECT_CONVERSATION_READ_PATHS} from './conversations/project-conversation-transport';
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
@@ -39,8 +43,16 @@ import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection 
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
+import { planningArguments, type PlanningOperation } from "./planning/project-planning-transport";
+import { projectExecutionArguments, projectExecutionResult, type ProjectExecutionOperation } from "./planning/project-execution-transport";
 import { attendedSelection } from "./fabric/attended-status";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+  type ExecutiveSessionTransport,
+} from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import type { AuthState, RawClient } from "./host";
 import {
   CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
@@ -416,6 +428,38 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", abort);
     }
   }
+  // Keep a prior interactive workspace grant usable while its replacement is
+  // obtained silently. Auth0 access-token expiry is not a user logout.
+  // Tokens stay private and memory-only; no bearer or refresh secret is persisted.
+  function scheduleTokenLifetime(resource: Resource, token: Token, ticket: number, restored: boolean) {
+    const owns = () => ticket === generation && tokens[resource] === token;
+    const remaining = Math.max(0, token.expires - now());
+    if (resource === "acquisition" || resource === "content") {
+      // Refresh ahead of common 5-minute Auth0 lifetimes, before the signed-in
+      // UI can flicker to the sign-in screen. A rejected silent attempt does
+      // not invalidate a still-live token or initiate a redirect.
+      const headroom = Math.min(60_000, Math.floor(remaining / 5));
+      if (headroom > 0) later(() => {
+        if (owns() && !flow && !explicitlySignedOut && !loggedOutElsewhere()) {
+          void restore(true).catch(() => {});
+        }
+      }, Math.max(0, remaining - headroom));
+    }
+    later(() => {
+      if (!owns()) return;
+      tokens[resource] = null;
+      if (resource === "executive") advanceExecutive();
+      if (resource === "research") invalidateResearch();
+      emit();
+      // Browser sleep/blocked iframes may delay pre-expiry renewal. Recover
+      // once again on expiry, with the existing one-attempt navigation guard.
+      // Research is an explicitly user-granted scope, never auto-restored.
+      if (resource === "acquisition" || resource === "content" ||
+          (restored && resource === "executive")) {
+        void restore(true).catch(() => {});
+      }
+    }, Math.max(0, token.expires - now()));
+  }
   async function transaction(
     resource: Resource,
     current: NonNullable<typeof flow>,
@@ -533,17 +577,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       check(ticket);
       tokens[resource] = token;
       if (resource === "executive") advanceExecutive();
-      later(
-        () => {
-          if (ticket === generation && tokens[resource] === token) {
-            tokens[resource] = null;
-            if (resource === "executive") advanceExecutive();
-            if (resource === "research") invalidateResearch();
-            emit();
-          }
-        },
-        Math.max(0, token.expires - now()),
-      );
+      scheduleTokenLifetime(resource, token, ticket, false);
       emit();
     } finally {
       remove("message", listener);
@@ -607,14 +641,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       tokens[resource] = token;
       if (resource === "acquisition") rememberSignedIn();
       if (resource === "executive") advanceExecutive();
-      later(() => {
-        if (ticket === generation && tokens[resource] === token) {
-          tokens[resource] = null;
-          if (resource === "executive") advanceExecutive();
-          emit();
-          void restore(true);
-        }
-      }, Math.max(0, token.expires - now()));
+      scheduleTokenLifetime(resource, token, ticket, true);
       emit();
     };
     const restoreOne = async (resource: "acquisition" | "content" | "executive") => {
@@ -1115,19 +1142,23 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction",
+    route: "company-priorities" | "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
+    const planning=route.startsWith("project-planning/"), execution=route.startsWith("project-execution/"), fresh=route.startsWith("conversation/");
+    const dual=planning || execution || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
+    const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
+    if (dual && (!workspace || !valid("acquisition"))) throw new Error("WORKSPACE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
+    if ((planning || execution || fresh || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
-    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
+    const body = JSON.stringify((route === "context" || route === "company-priorities") ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1139,10 +1170,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const foregroundResearch = route === "submit" && arguments_ !== null &&
       typeof arguments_ === "object" && !Array.isArray(arguments_) &&
       Reflect.get(arguments_, "execution_profile") === "research_only";
-    const timer = later(abort, foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
+    const timer = later(abort, (planning || execution || fresh) ? Math.max(0,Math.min(300_000,token.expires-now(),dual ? workspace!.expires-now() : Infinity)) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
-      tokens.executive === token && valid("executive");
+      tokens.executive === token && valid("executive") && (!dual ||
+        (generation===workspaceGeneration && tokens.acquisition===workspace && valid("acquisition")));
     let rejectAbort!: (error: Error) => void;
     const cancelled = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
     const rejectCancelled = () => rejectAbort(new Error("EXECUTIVE_REQUEST_CANCELLED"));
@@ -1153,14 +1185,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         const response = await fetchFn(`${ORIGIN}/os/executive/${route}`, {
           method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
           headers: { Accept: "application/json", "Content-Type": "application/json",
-            Authorization: `Bearer ${token.value}` },
+            Authorization: `Bearer ${token.value}`, ...(dual ? {"X-Mastermind-Workspace-Authorization":`Bearer ${workspace!.value}`} : {}) },
           body, signal: controller.signal,
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
-        if (!response.ok && !direct) throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok && !direct && !execution) throw new Error("EXECUTIVE_REQUEST_FAILED");
         const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
-        if (!response.ok && (![401,403,409,503].includes(response.status) || decodeDirectNativeResult(decoded)?.availability!=="UNAVAILABLE"))
-          throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok) {
+          const errorStatuses = execution ? [400, 401, 403, 409, 503] : [401, 403, 409, 503];
+          if (!errorStatuses.includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
+          if (execution) {
+            if (projectExecutionResult(decoded, route.slice("project-execution/".length) as ProjectExecutionOperation).ok !== false)
+              throw new Error("EXECUTIVE_REQUEST_FAILED");
+          } else if (decodeDirectNativeResult(decoded)?.availability !== "UNAVAILABLE") throw new Error("EXECUTIVE_REQUEST_FAILED");
+        }
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
         return decoded;
       })();
@@ -1174,6 +1212,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   return {
+    ...hostObservationWebMethods(read),
     research: {
       authGeneration: () => generation,
       available: () => configured && researchResource !== null && valid("research"),
@@ -1190,8 +1229,15 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
       context: (signal) => executivePost("context", null, signal),
+      companyPriorities: (signal) => executivePost("company-priorities", null, signal),
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
+      projectPlanning: { request: (operation,arguments_,signal) =>
+        executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
+      projectExecution: { request: (operation,arguments_,signal) =>
+        executivePost(`project-execution/${operation}`,projectExecutionArguments(operation,arguments_),signal) },
+      freshConversation: {request:(operation,arguments_,signal)=>
+        executivePost(FRESH_CONVERSATION_PATHS[operation],freshConversationArguments(operation,arguments_),signal)},
       directNative: {
         correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {
@@ -1216,15 +1262,25 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
      * token this reports unavailable and executivePost sends no request.
      */
     executiveSession: {
+      projectConversations: {request: (operation,arguments_,signal) => {
+        const closed=projectConversationArguments(operation,arguments_);
+        return closed ? executivePost(PROJECT_CONVERSATION_READ_PATHS[operation],closed,signal)
+          : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+      }},
       authGeneration: () => executiveGeneration,
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      historyContext: (selection, signal) => {
+        const closed = projectHistorySelection(selection);
+        return closed ? executivePost("session/history-context", {selection: {work_ref: closed.workRef}}, signal)
+          : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+      },
       context: (selection, signal) => {
-        const normalized = normalizeSelection(selection);
+        const normalized = normalizeExecutiveSessionSelection(selection);
         if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
         return executivePost(
           "session/context",
-          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          { selection: sessionSelectionWire(normalized) },
           signal,
         );
       },
@@ -1236,7 +1292,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return closed ? executivePost("session/references", closed, signal)
           : Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
       },
-    } satisfies ExecutiveSessionTransport,
+    } satisfies ProjectConversationHistoryTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.
     invalidationGeneration: () => generation,
@@ -1252,6 +1308,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readByokRoles: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/byok/roles/current`, signal, { cap: BYOK_ROLES_RESPONSE_CAP, typedUnavailableSchema: null }),
     readControlRoomState: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
     readControlRoomDiscovery: ({ signal }) =>
@@ -1327,7 +1385,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         work_ref: selected.work_ref, root_job_id: selected.root_job_id,
       })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
     },
-    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>method==='read'
+    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>(method==='read'||method==='options')
       ?read('acquisition',ORIGIN+path,signal,{cap:SOURCE_OPERATION_CAP,typedUnavailableSchema:null})
       :sourcePost(path,body,signal)),
     readSourceOperationContext: (request) => {
@@ -1397,6 +1455,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
     },
+    readModelConfiguration: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/models/current`,
+      signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };
       if (!validResourceCapacitySelection(selected))

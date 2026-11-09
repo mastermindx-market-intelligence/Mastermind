@@ -24,7 +24,9 @@ def settings(tmp_path, **kw):
         "state_dir": tmp_path,
         "safe_rpm": 5,
         "safe_rpm_shared": 3,
-        "max_queue_wait_s": 0.04,
+        # Response/redaction cases need a finite scheduling budget, not a
+        # 40ms wall-clock race with a busy shared CI worker.
+        "max_queue_wait_s": 1.0,
         "window_s": 60.0,
     }
     data.update(kw)
@@ -143,8 +145,9 @@ def test_metadata_refuses_invalid_or_unsafe_provider_reply(tmp_path, mode, path)
                                           base_url="http://proxy") as client:
                 headers = {"Authorization": "Bearer " + LOCAL}
                 r = await client.get(path, headers=headers)
+                assert r.status_code == (403 if mode == "refusal" else 502), r.text
+                assert seen == [path]
                 await assert_one_metadata_admission(client, headers)
-                assert r.status_code == (403 if mode == "refusal" else 502)
                 assert "SENSITIVE-METADATA" not in r.text
                 assert PROVIDER not in r.text
                 assert LOCAL not in r.text

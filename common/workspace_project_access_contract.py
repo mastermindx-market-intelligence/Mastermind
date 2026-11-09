@@ -12,10 +12,13 @@ from common.workspace_project_instructions_contract import instruction_ref
 
 SCHEMA='mastermind.workspace_project_access.v1'
 SCHEMA_V2='mastermind.workspace_project_access.v2'
+SCHEMA_V3='mastermind.workspace_project_access.v3'
 GRANT_SCHEMA_V5='mastermind.workspace_acquisition_bindings.v5'
+GRANT_SCHEMA_V6='mastermind.workspace_acquisition_bindings.v6'
 MAX_RESPONSE_BYTES=16384
 ACTIONS=('publish_project_proposal','pause_workstream_admission','resume_workstream_admission','ADOPT_PLAN','ACCEPT_DIRECTION','add_project_file','set_project_communication_preference','pause_instruction_admission')
 V5_ACTIONS=ACTIONS+('publish_project_plan_proposal','read_latest_project_data')
+V6_ACTIONS=V5_ACTIONS+('correct_project_discovery',)
 REASONS={'ACCESS_DENIED','SOURCE_UNAVAILABLE','SOURCE_CHANGED','OWNER_NOT_READY'}
 
 
@@ -35,10 +38,10 @@ def _exact(value,keys):
 def validate_body(value,expected=None):
     version=value.get('schema') if type(value) is dict else None
     keys={'schema','selection','availability','source','membership','declaration','grants','reason_codes'}
-    _exact(value,keys|({'grant_schema'} if version==SCHEMA_V2 else set()))
+    _exact(value,keys|({'grant_schema'} if version in {SCHEMA_V2,SCHEMA_V3} else set()))
     selected=validate_selection(value['selection'] if expected is None else expected)
-    if version not in {SCHEMA,SCHEMA_V2} or validate_selection(value['selection'])!=selected:raise ValueError()
-    if version==SCHEMA_V2 and (value['grant_schema']!=GRANT_SCHEMA_V5 or value['availability']!='AVAILABLE' or value['declaration']!='SUPPLIED'):raise ValueError()
+    if version not in {SCHEMA,SCHEMA_V2,SCHEMA_V3} or validate_selection(value['selection'])!=selected:raise ValueError()
+    if version in {SCHEMA_V2,SCHEMA_V3} and (value['grant_schema']!=(GRANT_SCHEMA_V6 if version==SCHEMA_V3 else GRANT_SCHEMA_V5) or value['availability']!='AVAILABLE' or value['declaration']!='SUPPLIED'):raise ValueError()
     if value['availability']=='UNAVAILABLE':
         if any(value[k] is not None for k in ['source','membership','declaration','grants']) or type(value['reason_codes']) is not list or len(value['reason_codes'])!=1 or value['reason_codes'][0] not in REASONS:raise ValueError()
     elif value['availability']=='AVAILABLE':
@@ -48,7 +51,7 @@ def validate_body(value,expected=None):
             if value['grants'] is not None:raise ValueError()
         elif value['declaration']=='SUPPLIED':
             rows=value['grants']
-            actions=V5_ACTIONS if version==SCHEMA_V2 else ACTIONS
+            actions=V6_ACTIONS if version==SCHEMA_V3 else V5_ACTIONS if version==SCHEMA_V2 else ACTIONS
             if type(rows) is not list or len(rows)!=len(actions):raise ValueError()
             for action,row in zip(actions,rows):
                 _exact(row,{'action','scope','work_ref','instruction_ref','supply'})

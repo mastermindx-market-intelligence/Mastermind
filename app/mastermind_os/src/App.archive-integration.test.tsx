@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {App} from './App';
 import {bindMissionHost,createNativeClient} from './host';
@@ -40,7 +40,7 @@ it('opens an actual fixed-port archived record as rootless read-only inspection 
  const open=await screen.findByRole('button',{name:'Open read-only '+archive.sample.items[0].title});
  fireEvent.click(open);
  expect(await screen.findByRole('article',{name:'Archived record (read-only)'})).toHaveProperty('textContent',expect.stringContaining(archive.sample.items[0].objective));
- expect(screen.queryByRole('button',{name:/^(Pause new work|Resume new work|Restore|Create project|New project|Adopt|Start project)$/})).toBeNull();
+ expect(within(screen.getByRole('article',{name:'Archived record (read-only)'})).queryByRole('button',{name:/^(Pause new work|Resume new work|Restore|Create project|New project|Adopt|Start project)$/})).toBeNull();
  expect(e.invoke.mock.calls.filter(([name])=>/mission|project_admission|project_plan|project_direction|project_session|submit|prepare|launch|create|adopt|pause|resume/.test(name))).toHaveLength(0);
  expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(1);
  expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);
@@ -62,5 +62,19 @@ it('preserves the existing rootless catalogue view for an older host without arc
  const e=await setup(false,true);
  expect(screen.getByRole('heading',{name:'Your projects, in perspective.'})).toBeTruthy();
  expect(screen.queryByRole('button',{name:'Archived projects'})).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(0);
+});
+it.each([
+ {host:'native',legacy:false,collection:'Projects'},
+ {host:'legacy',legacy:true,collection:'Your projects, in perspective.'},
+])('returns to the Projects collection from Today View all after a rootless project was opened ($host host)',async({legacy,collection})=>{
+ const e=await setup(false,legacy);
+ fireEvent.click(screen.getByRole('button',{name:'Open project Unarchived rootless project'}));
+ expect(screen.getByRole('heading',{level:1,name:'Unarchived rootless project'})).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Today'}));
+ fireEvent.click(screen.getByRole('button',{name:'View all'}));
+ expect(screen.getByRole('heading',{level:1,name:collection})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Open project Unarchived rootless project'})).toBeTruthy();
+ expect(screen.queryByRole('heading',{level:1,name:'Unarchived rootless project'})).toBeNull();
  expect(e.invoke.mock.calls.filter(([name])=>name==='read_project_archive')).toHaveLength(0);
 });

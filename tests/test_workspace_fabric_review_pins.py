@@ -22,7 +22,8 @@ METHOD = next(node for node in OWNER.body
               and node.name == "_handle_ceo_ingress_connection")
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
-STATUS_SITES = ((5783, 66, 69, 'int'), (5796, 74, 77, 'int'), (5798, 75, 78, 'int'))
+# Model READ and selected-child composition move the same three status operands.
+STATUS_SITES = ((6002, 66, 69, 'int'), (6015, 74, 77, 'int'), (6017, 75, 78, 'int'))
 
 BACKEND_SITES = (
     (120, 73, 76, "int"),

@@ -10,6 +10,7 @@ import asyncio
 from control_plane.workspace_owned_task import await_owned
 import copy
 import dataclasses
+import inspect
 import math
 from http import HTTPStatus
 import re
@@ -498,9 +499,11 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                 canonical_project_data=None,
+                 project_discovery_source_reader=None,
+                 canonical_project_data=None, project_discovery=None,
                  control_room_presenter=None,
-                 control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None):
+                 control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
+                 byok_roles_reader=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
         if project_admission_permissions is not None:
             if type(project_admission_permissions) is not ProjectAdmissionPermissions:
@@ -513,6 +516,7 @@ class WorkspaceReadService:
                 raise ValueError("nominal installed instruction permission source required")
             instruction_admission_permissions.check()
         self._instruction_admission_permissions = instruction_admission_permissions
+        self._project_discovery = project_discovery
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -528,6 +532,12 @@ class WorkspaceReadService:
             if type(control_room_actions) is not ExistingControlRoomActions:
                 raise ValueError("exact existing Control Room action owner required")
         self._control_room_actions = control_room_actions
+        # Installed composition only. No host/path/credential can arrive in an HTTP frame.
+        if byok_roles_reader is not None and not (
+                inspect.iscoroutinefunction(byok_roles_reader)
+                or inspect.iscoroutinefunction(getattr(byok_roles_reader, "__call__", None))):
+            raise ValueError("BYOK source must be a trusted asynchronous reader")
+        self._byok_roles_reader = byok_roles_reader
         self._acquire = acquire
         self._compose = compose
         self._bounded_runtime = bounded_runtime
@@ -603,16 +613,18 @@ class WorkspaceReadService:
             self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
         from control_plane.installed_project_knowledge_readers import (
             AgentOsProjectKnowledgeCatalogueReader, AgentOsProjectKnowledgeMemoryReader,
-            AgentOsProjectKnowledgeSourceReader)
+            AgentOsProjectKnowledgeSourceReader, AgentOsProjectDiscoverySourceReader)
         for reader, reader_type in (
                 (project_knowledge_catalogue_reader, AgentOsProjectKnowledgeCatalogueReader),
                 (project_knowledge_memory_reader, AgentOsProjectKnowledgeMemoryReader),
-                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader)):
+                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader),
+                (project_discovery_source_reader, AgentOsProjectDiscoverySourceReader)):
             if reader is not None and type(reader) is not reader_type:
                 raise ValueError("installed project knowledge reader required")
         self._project_knowledge_catalogue_reader = project_knowledge_catalogue_reader
         self._project_knowledge_memory_reader = project_knowledge_memory_reader
         self._project_knowledge_source_reader = project_knowledge_source_reader
+        self._project_discovery_source_reader = project_discovery_source_reader
         if canonical_project_data is not None:
             from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
             if type(canonical_project_data) is not _ProjectDataReadBinding or canonical_project_data.store is not runtime.store:
@@ -713,20 +725,34 @@ class WorkspaceReadService:
         except Exception: return error("access_denied", 403)
         return result
 
-    def _read_project_plan(self, selected):
+    def _read_project_plan(self, selected, principal=None):
         from common import workspace_project_plan_contract as wire
+        selected=wire.validate_selection(selected)
         before = self.cache.snapshot()
         work_ref = selected["work_ref"]
+        if not _qualified(before):raise ValueError("source_unavailable")
+        data=None
+        if self._canonical_project_data is not None and principal is not None:
+            from control_plane.installed_canonical_project_data_binding import read_installed_project_data
+            data=read_installed_project_data(self._canonical_project_data,principal,operation='project_plan',selection=selected)
         def member(snapshot):
-            if not _qualified(snapshot):
-                raise ValueError("source_unavailable")
-            rows = [row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]
-            if len(rows) != 1:
+            if not _qualified(snapshot):raise ValueError("source_unavailable")
+            rows=[row for row in snapshot.document["work"] if row.get("work_ref")==work_ref]
+            if len(rows)==1:return
+            # Only an actual same-principal CREATE/PLAN publication can expose
+            # a new project beyond the installed C catalogue. This does not
+            # add it to that catalogue or change any other read family.
+            if rows or data is None:raise LookupError("selection_not_found")
+            witness=data[1].witness();publication=witness['source_operation']
+            if (publication is None or data[1].code_commit==data[1].data_commit
+                    or publication['selection']['work_ref']!=work_ref
+                    or publication['selection']['action'] not in {'publish_project_proposal','publish_project_plan_proposal'}):
                 raise LookupError("selection_not_found")
         member(before)
-        if self._project_plan_reader is None:
+        if data is None and self._project_plan_reader is None:
             return wire.unavailable(work_ref, "SOURCE_UNAVAILABLE")
-        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref))
+        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref) if data is None else data[0])
+        if body['selection']!=selected:return wire.unavailable(work_ref,"SOURCE_CHANGED")
         after = self.cache.snapshot()
         member(after)
         if (before.owner is not after.owner or before.instance != after.instance
@@ -736,8 +762,10 @@ class WorkspaceReadService:
             return wire.unavailable(work_ref, "SOURCE_CHANGED")
         if body.get("availability") == "AVAILABLE":
             source = wire.validate_source(body.get("source"), work_ref)
-            if before.document.get("sources", {}).get("macro_sha") != source["commit"]:
+            code=before.document.get("sources", {}).get("macro_sha")
+            if (data is not None and code!=data[1].code_commit) or source['commit']!=(code if data is None else data[1].data_commit):
                 return wire.unavailable(work_ref, "SOURCE_CHANGED")
+        if data is not None:data[1].check()
         bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
         return body
 
@@ -753,7 +781,7 @@ class WorkspaceReadService:
             stamp = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"]))
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"], frame["principal"]))
         try:
             body = await await_owned(task)
             result = {"ok": True, "result": body}
@@ -841,6 +869,7 @@ class WorkspaceReadService:
             "project_knowledge_catalogue": self._project_knowledge_catalogue_reader,
             "project_knowledge_memory": self._project_knowledge_memory_reader,
             "project_knowledge_source": self._project_knowledge_source_reader,
+            "project_discovery_source": self._project_discovery_source_reader,
         }
         reader = readers[operation]
         if reader is None: return wire.unavailable(selected, operation=operation)
@@ -848,8 +877,12 @@ class WorkspaceReadService:
         if self._canonical_project_data is not None:
             from control_plane.installed_canonical_project_data_binding import read_installed_project_data
             data = read_installed_project_data(self._canonical_project_data,principal,operation=operation,selection=selected)
+        if operation == "project_discovery_source" and data is None:
+            # A direct current selector never falls back to the adopted CODE
+            # snapshot when the canonical DATA observation is unavailable.
+            return wire.unavailable(selected, operation=operation)
         body = wire.validate_body(reader.read(**selected) if data is None else data[0], operation=operation)
-        expected = {key: item for key, item in selected.items() if key != "expected_revision"}
+        expected = wire.result_selection(selected)
         if body["selection"] != expected:
             return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
         after = self.cache.snapshot()
@@ -868,7 +901,9 @@ class WorkspaceReadService:
                     return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
             if ((expected_code if data is None else data[1].data_commit) != source["commit"]
                     or (operation == "project_knowledge_source"
-                        and source["revision"] != selected["expected_revision"])):
+                        and source["revision"] != selected["expected_revision"])
+                    or (operation == "project_discovery_source"
+                        and source["commit"] != selected["expected_source_commit"])):
                 return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
         if data is not None:
             data[1].check()
@@ -1036,6 +1071,11 @@ class WorkspaceReadService:
             _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
+        if selected is None and self._project_discovery is not None:
+            from control_plane.workspace_project_discovery_read import read_programs
+            discovered = read_programs(self, frame, before)
+            if discovered is not None:
+                return discovered
         fabric = None
         runtime = None
         if selected is not None:
@@ -1401,12 +1441,23 @@ class WorkspaceReadService:
         try:
             if not _qualified(before, selected):
                 return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
-            policy_before = CooCyclePolicy.load().policy_sha256
+            def policy_digest(version):
+                try:
+                    return CooCyclePolicy.load(version=version).policy_sha256
+                except Exception:
+                    return None
+            # The admitted version is known only after the single Runtime read.
+            # Capture both existing policy owners beforehand, then recheck only
+            # the selected version; an unavailable unrelated policy is no grant
+            # and must not invalidate an otherwise qualified legacy read.
+            policies_before = {version: policy_digest(version) for version in (1, 2)}
             bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
             with bounded.observe_bounded_read() as observation:
                 snapshot = observation.read_admitted_plan_bounded(selected["root_job_id"])
             receipt = observation.receipt  # finalized only after physical close
-            policy_after = CooCyclePolicy.load().policy_sha256
+            admitted_policy = CooCyclePolicy.for_digest(snapshot.admission.get("policy_sha"))
+            policy_before = policies_before.get(admitted_policy.schema_version)
+            policy_after = admitted_policy.policy_sha256
             if (not isinstance(snapshot, BoundedAdmittedPlanSnapshot)
                     or not isinstance(snapshot.root_metadata, BoundedRoleResultRootMetadata)
                     or snapshot.root_job_id != selected["root_job_id"]
@@ -1445,6 +1496,117 @@ class WorkspaceReadService:
             return plan_unavailable(selected, exc.code)
         except Exception:
             return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    def capture_selected_child_target(self, *, work_ref, root_job_id, child_job_ids):
+        """Freeze one trusted host's chosen children through the incumbent read.
+
+        This is a HOST-INTERNAL entry, not an HTTP frame: it takes no
+        principal, it admits nothing and it never dispatches a Job. It
+        reuses the incumbent bounded admitted-plan observation, its VM
+        budget, its one-selection discipline, its identity joins and its
+        close receipt, so the admitted plan and the chosen children are
+        always ONE coherent observation.
+
+        The observation is BRACKETED by the same current Control Room
+        evidence the incumbent admitted-plan read uses: the owner, the
+        instance, the publication, the published document, the source
+        validity and the cache currentness are read before and after the
+        Runtime observation and must be one coherent source. A missing,
+        unqualified or changing Workspace source refuses the capture even
+        when the COO row itself is unchanged, so a CCR responsibility or
+        root publication change can never freeze an old root.
+        """
+        from common.executive_workspace_contract import _check_job_id, _check_work_ref
+        from control_plane.coo_principal_host import SELECTED_CHILD_SOURCE_SCHEMA
+        from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
+        from control_plane.executive_runtime import (
+            BoundedSelectedChildCapture,
+        )
+        if not _check_work_ref(work_ref) or not _check_job_id(root_job_id):
+            raise ValueError("invalid_input")
+        if type(child_job_ids) not in (list, tuple):
+            raise ValueError("invalid_input")
+        chosen = tuple(child_job_ids)
+        if not 1 <= len(chosen) <= 16 or len(set(chosen)) != len(chosen):
+            raise ValueError("invalid_input")
+        if any(type(item) is not str or not _check_job_id(item) for item in chosen):
+            raise ValueError("invalid_input")
+        selection = {"work_ref": work_ref, "root_job_id": root_job_id}
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(before.document, selection)
+        except LookupError:
+            raise ValueError("selection_not_found") from None
+        if not _qualified(before, selection):
+            raise ValueError("source_unavailable")
+        try:
+            policy_before = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+        with bounded.observe_bounded_read() as observation:
+            capture = observation.read_selected_child_target_bounded(
+                root_job_id, child_job_ids=chosen)
+        # The receipt exists only after the physical close of the observation.
+        receipt = observation.receipt
+        try:
+            policy_after = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(after.document, selection)
+        except LookupError:
+            raise ValueError("source_unavailable") from None
+        if not _qualified(after, selection):
+            raise ValueError("source_unavailable")
+        if (before.owner is not after.owner
+                or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or digest(_plan_validity_identity(before.validity))
+                != digest(_plan_validity_identity(after.validity))
+                or digest(before.currentness) != digest(after.currentness)):
+            raise ValueError("source_unavailable")
+        plan = getattr(capture, "plan", None)
+        admission = getattr(plan, "admission", None)
+        if (not isinstance(capture, BoundedSelectedChildCapture)
+                or plan.root_job_id != root_job_id
+                or plan.root_metadata.work_ref not in (None, work_ref)
+                or type(admission) is not dict
+                or policy_before.policy_sha256 != policy_after.policy_sha256
+                or policy_before.source_sha256 != policy_after.source_sha256
+                or receipt.state not in {"SAME", "UNKNOWN"}):
+            raise ValueError("source_unavailable")
+        try:
+            # The admitted policy is the CURRENT policy of its own version.
+            # An unrecognized or stale policy digest is a refusal, never an
+            # upgrade of an existing root.
+            admitted = CooCyclePolicy.for_digest(admission.get("policy_sha"))
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        if admitted.policy_sha256 != admission.get("policy_sha"):
+            raise ValueError("source_unavailable")
+        return {
+            "work_ref": work_ref,
+            "root_job_id": root_job_id,
+            "children": [dict(child) for child in capture.children],
+            "source": {
+                "schema": SELECTED_CHILD_SOURCE_SCHEMA,
+                "plan_attempt_id": admission["plan_attempt_id"],
+                "plan_digest": admission["plan_digest"],
+                "policy_sha": admission["policy_sha"],
+                "reservation_digest": admission["reservation_digest"],
+                "observation_state": receipt.state,
+                "observation_source_identity": receipt.source_identity,
+            },
+        }
 
     async def _handle_v3_frame(self, frame):
         try:
@@ -1724,6 +1886,11 @@ class WorkspaceReadService:
         """Join the canonical v3 companion and reducer through existing custody."""
         selected = frame["selection"]
         before = self.cache.snapshot()
+        if self._project_discovery is not None and not any(row.get('work_ref') == selected['work_ref'] for row in before.document.get('work', [])):
+            if not _qualified(before):
+                raise ValueError('source_unavailable')
+            from control_plane.workspace_project_discovery_read import read_mission
+            return read_mission(self, frame, before)
         _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
@@ -2015,7 +2182,51 @@ class WorkspaceReadService:
             return error("access_denied", 403)
         return result
 
+    async def _handle_byok_frame(self, frame):
+        from common import workspace_byok_read_contract as wire
+        try:
+            checked = copy.deepcopy(wire.validate_frame(frame))
+        except (TypeError, ValueError):
+            return error("invalid_input", HTTPStatus.BAD_REQUEST)
+        principal = checked["principal"]
+        authorizer, reader, runtime = self.authorize, self._byok_roles_reader, self.runtime
+        try:
+            if authorizer(principal) is not True:
+                raise ValueError("access_denied")
+            stamp = permission_stamp(authorizer, principal)
+            if stamp is None or self.authorize is not authorizer:
+                raise ValueError("access_denied")
+        except Exception:
+            return error("access_denied", HTTPStatus.FORBIDDEN)
+        if self._byok_roles_reader is not reader or self.runtime is not runtime:
+            body = wire.unavailable("SOURCE_CHANGED")
+        elif reader is None:
+            body = wire.unavailable("SOURCE_UNBOUND")
+        else:
+            try:
+                if not (inspect.iscoroutinefunction(reader)
+                        or inspect.iscoroutinefunction(getattr(reader, "__call__", None))):
+                    raise ValueError("asynchronous BYOK source required")
+                # One finite read of the role pair, no thread/worker/CLI or retry.
+                body = wire.validate_body(await asyncio.wait_for(reader(), timeout=5.0))
+            except Exception:
+                body = wire.unavailable()
+        try:
+            if (self.authorize is not authorizer or authorizer(principal) is not True
+                    or permission_stamp(authorizer, principal) != stamp):
+                return error("access_denied", HTTPStatus.FORBIDDEN)
+        except Exception:
+            return error("access_denied", HTTPStatus.FORBIDDEN)
+        if self._byok_roles_reader is not reader or self.runtime is not runtime:
+            body = wire.unavailable("SOURCE_CHANGED")
+        elif not wire.current(body, now_ms=int(time.time() * 1000)):
+            body = wire.unavailable("SOURCE_STALE")
+        return {"ok": True, "result": body}
+
     async def handle_frame(self, frame, *, action_host_ready=None):
+        from common import workspace_byok_read_contract as byok_wire
+        if type(frame) is dict and frame.get("schema") == byok_wire.FRAME_SCHEMA:
+            return await self._handle_byok_frame(frame)
         from common.workspace_project_archive_contract import FRAME_SCHEMA as ARCHIVE_FRAME_SCHEMA, PAGE_FRAME_SCHEMA as ARCHIVE_PAGE_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") in {ARCHIVE_FRAME_SCHEMA, ARCHIVE_PAGE_FRAME_SCHEMA}:
             from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
@@ -2073,8 +2284,8 @@ class WorkspaceReadService:
         from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
             return await self._handle_project_session_frame(frame)
-        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA
-        if type(frame) is dict and frame.get("schema") == PROJECT_KNOWLEDGE_FRAME_SCHEMA:
+        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA, DISCOVERY_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") in {PROJECT_KNOWLEDGE_FRAME_SCHEMA, DISCOVERY_FRAME_SCHEMA}:
             return await self._handle_project_knowledge_frame(frame)
         from common.workspace_project_instructions_contract import FRAME_SCHEMA as PROJECT_INSTRUCTIONS_FRAME_SCHEMA
         if frame.get("schema") == PROJECT_INSTRUCTIONS_FRAME_SCHEMA:
@@ -2120,7 +2331,15 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
+        from common import workspace_host_observation_contract as host_observation_wire
+        if type(frame) is dict and frame.get("schema") == host_observation_wire.FRAME_SCHEMA:
+            from control_plane.workspace_host_observation_read import handle_host_observation_frame
+            return await handle_host_observation_frame(self, frame)
         from common import workspace_resource_capacity_contract as capacity_wire
+        from common import workspace_model_configuration_contract as model_configuration_wire
+        if type(frame) is dict and frame.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+            from control_plane.workspace_model_configuration_read import handle_model_configuration_frame
+            return await handle_model_configuration_frame(self, frame)
         if type(frame) is dict and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             from control_plane.workspace_resource_capacity_read import handle_capacity_frame
             return await handle_capacity_frame(self, frame)
@@ -2319,9 +2538,10 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                               canonical_project_data_factory=None,
+                               project_discovery_source_reader=None,
+                               canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
-                               project_admission_permissions=None, instruction_admission_permissions=None):
+                               project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -2352,6 +2572,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
             control_room=control_room, authorize=authorize,
             enrollment=cross_plane_enrollment,
         )
+    if canonical_project_read_bindings_factory is not None and (
+            not callable(canonical_project_read_bindings_factory) or canonical_project_data_factory is not None):
+        raise ValueError('ambiguous installed project DATA composition')
     cache = ExistingControlRoomCache(control_room.current_owner)
     # The original source+permission owner, not a new publisher or identity.
     # Discovery requires an independent callback and remains dark by default.
@@ -2369,6 +2592,19 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     if project_session_source_factory is not None and not callable(project_session_source_factory):
         raise ValueError("project session source factory must be installed")
     def provide(runtime):
+        data_binding = discovery_binding = None
+        if canonical_project_read_bindings_factory is not None:
+            from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
+            from control_plane.installed_project_discovery_binding import _ProjectDiscoveryBinding
+            pair = canonical_project_read_bindings_factory(runtime)
+            if (type(pair) is not tuple or len(pair) != 2
+                    or type(pair[0]) is not _ProjectDataReadBinding or type(pair[1]) is not _ProjectDiscoveryBinding
+                    or pair[0].store is not runtime.store or pair[1].store is not runtime.store
+                    or pair[1].owner.data is not pair[0].owner):
+                raise ValueError('installed project READ owners differ')
+            data_binding, discovery_binding = pair
+        elif canonical_project_data_factory is not None:
+            data_binding = canonical_project_data_factory(runtime)
         session_source = project_session_source_factory(runtime) if project_session_source_factory is not None else None
         if session_source is not None and (type(session_source) is not ExistingManagedProjectSessionSource
                 or session_source._service._require_runtime() is not runtime):
@@ -2376,6 +2612,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity,
                                     control_room_presenter=presenter, control_room_actions=actions,
+                                    byok_roles_reader=byok_roles_reader,
                                     bounded_runtime=bounded_runtime,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,
@@ -2388,11 +2625,13 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
                                     project_knowledge_memory_reader=project_knowledge_memory_reader,
                                     project_knowledge_source_reader=project_knowledge_source_reader,
-                                    canonical_project_data=(None if canonical_project_data_factory is None else canonical_project_data_factory(runtime)),
+                                    project_discovery_source_reader=project_discovery_source_reader,
+                                    canonical_project_data=data_binding, project_discovery=discovery_binding,
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     project_archive_reader=project_archive_reader,
                                     activity_membership=activity_membership,
                                     project_admission_permissions=project_admission_permissions,
                                     instruction_admission_permissions=instruction_admission_permissions)
-    return provide
+    from control_plane.workspace_read_provider_binding import bind_installed_read_provider
+    return bind_installed_read_provider(provide,canonical_project_read_bindings_factory)

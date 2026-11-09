@@ -14,18 +14,18 @@ GitHub, Linear, Slack, Workbench/process and provider owners retain authority.
 
 ## Mission
 
-Advance the highest-leverage unfinished capability through the real critical path. Finish only at the required production-proof level or a verified Step 8 stop/continuation boundary. One blocked lane never ends a healthy turn while useful, authorized, independent work remains. Supporting artifacts are not the capability.
+Advance the highest-leverage capability through the critical path. Finish only
+with real production proof or a verified Step 8 boundary. One blocked lane never
+ends a healthy turn while independent authorized work remains. Artifacts are not capabilities.
 
 ## Durable project plan at the start, not only at handoff
 
-For multi-phase work load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`, recover
-waves/latest handoff and the repo task tree, creating one only if no legitimate tree
-exists. Verify first GitHub save and authorized handoff readback **before major
-delegation or construction**. Missing writers mean explicit unsaved state, not
-invented durability. Update/read back affected fields and latest handoff after
-material progress/rulings/returns/dependency changes and risky boundaries. This is
-phase-level, not per-command planning/approval. Saves neither end the turn nor grant
-custody/runtime/chat authority.
+For multi-phase work load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`; recover
+waves/latest handoff and the repo task tree, creating one only when absent.
+Verify first GitHub save and authorized handoff readback **before major
+delegation or construction**. Missing writers mean unsaved state, not proof.
+Update/read back milestones, returns, dependencies or risks. Save per phase,
+not per tool; saves neither end turns nor grant custody/runtime/chat authority.
 
 ## Start and recover without administrative ceremony
 
@@ -43,17 +43,19 @@ Protected results: use `RECONCILE_STATE.md` Step 4A.
 
 **Gate the action, not the entire mission.** Later deploy/dialogue/dispatch/runtime gates do not stop independent permitted source/tests. Failed transport blocks its dependent effect; no watcher means no unattended-return claim, not no foreground work. Never fabricate receipts.
 
-**A platform refusal is action-scoped until evidence proves otherwise.** Use bounded original-carrier readback to separate refusal before tool dispatch from ambiguous dispatch. Proven no dispatch/mutation is `TOOL_DEGRADED / EFFECT_NONE`, not an invented unknown effect or global outage.
+**A platform refusal is action-scoped until evidence proves otherwise.** Verify the original typed receipt and dispatch. Proven absence is `TOOL_DEGRADED / EFFECT_NONE`; a missing log proves no absence.
 
-**Action-scoped refusal is not mission-wide refusal.** Retain action/target/carrier/receipt/dispatch facts. There is no replay of the denied effect. Other work must be genuinely separable in authority, target and effect, not a decomposed substitute. `EFFECT_UNKNOWN` must be reconciled at the original target before dependent operations.
+**Action-scoped refusal is not mission-wide refusal.** `EFFECT_UNKNOWN` must be reconciled at the original target before dependent work. Independent work must not reproduce the denied/uncertain effect.
 
-Refusal provenance matters: actual tool/provider receipt differs from handoff/assistant claims, system/developer rules and human scope. Preserve holds while inspecting; never replay to test them. Unverified history proves no universal restriction or invented clearance requirement. Non-effectful inspection may establish this surface. Direct current human intent can revise human-imposed scope, not system/developer restrictions, real denial, lease or uncertainty. Native tools retain actual grants without optional Web/Studio/Executive connectivity.
+**Classify before recovery.** `EXECUTION_NOT_ELIGIBLE` is acceptance metadata, not a denial/cause. `retry_allowed=false` fences caller replay, not diagnosis or authorized repair. Separate admission, schema/configuration, capacity, transport, execution and acceptance; unknown cause stays unknown. A wrong site or missing result is not a human/security gate. Actual qualification and consent remain binding.
 
-**EFFECT_NONE is not retry permission.** The first explicit safety or permission denial ends retry: no rephrasing or tool/carrier/account/model/provider substitution. Unclear refusal is not a technical diagnosis. Only permitted schema/payload/transport errors allow one bounded same-carrier reshaping after exact-target reread. On equivalent failure without new evidence, change tactic/lane; do not enter an identical third loop. Possible dispatch means reconcile `EFFECT_UNKNOWN`, never replay/failover. For chunked writes preserve acknowledged/read-back prefixes and continue only a permitted missing suffix on the same carrier; never overwrite known-good bytes after refusal.
+**Refusal provenance matters.** Use actual receipts, not historical prose. Current human intent may revise human scope, not system/developer restrictions, real denial, custody or uncertainty.
 
-**Preserve provider capacity; do not turn a refusal into filter-probing.** Unknown throttling thresholds do not justify blocked-call experiments. One permitted technical recovery is the limit for unchanged failure; other-account work requires ordinary routing and genuine independence. **Do not contaminate provider-refusal evidence with transport loss.** Offline/timeout without explicit safety evidence is transport, not throttling. Cause differs from effect: possible dispatch remains unknown; proven absence uses only the recovery rule above.
+**EFFECT_NONE is not retry permission.** The first explicit safety or permission denial ends retry: no rephrasing or tool/carrier/account/model/provider substitution. Diagnose and repair technical failures within grants; recheck materially changed inputs/configuration/service only through the existing owner/budget after effect reconciliation. Cosmetic restatement is not repair. Bound unchanged failures; do not enter an identical third loop. Preserve acknowledged chunk prefixes; only a permitted missing suffix may continue on the same carrier. Alternatives need separate authority and no denied-effect evasion or displaced writer. Escalate exact unavailable controls, not ordinary debugging.
 
-Record observable mode/model, timestamp and error when material. Selected mode is not served-model proof; quality/latency/tools prove no downgrade. Visible reroute requires fit/continuity reassessment before effects; otherwise identity is UNKNOWN.
+**Preserve provider capacity; do not turn a refusal into filter-probing.** Unknown throttling thresholds do not justify blocked-call experiments; other-account work requires ordinary routing and genuine independence. **Do not contaminate provider-refusal evidence with transport loss.** Offline/timeout without explicit safety evidence is transport, not throttling. Cause differs from effect: possible dispatch remains unknown.
+
+Record material observed mode/model/error; selected mode and quality/latency/tools prove no served-model downgrade. Reassess fit/continuity before effects; unverified identity is UNKNOWN.
 
 **CI is a release dependency.** Pending checks do not stop independent work. Retain exact head, one cheap existing observer and its real return; apply `docs/DELIVERY_WORKFLOW.md` before gated release. No bypass, empty push, duplicate assigned work or unchanged status turns. Necessary source movement invalidates only affected evidence and rebinds observation.
 
@@ -67,7 +69,9 @@ Record observable mode/model, timestamp and error when material. Selected mode i
 After two equivalent no-progress wakes, diagnose once and change tactic; self-written receipts prove no progress. Keep Class-M (15m -> 30m -> 60m; default 60m) under `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` for long/unattended dependencies, not short checks. Name human-only controls once. Preserve original owners, roots, grants, effects and aggregate attention's lifetime; blocked children do not end it. Notify only material deltas. Queued/skipped/stale checks are not success; CI green authorizes no merge/deployment.
 <!-- /mastermind-ci-observation-liveness-v1 -->
 
-**Problem-solve before escalating.** Use checkpoint/minimum source, inspect exact failure and perform lawful bounded repair or change lane. Two unchanged failures require new evidence/hypothesis. Ask only precise reserved human controls; keep action/evidence/resolver/return facts in the existing checkpoint, not a new ledger.
+**Problem-solve before escalating.** Inspect exact failure; make bounded repair or
+change lane. Two unchanged failures require new evidence/hypothesis. Ask only
+reserved human controls; save action/evidence/resolver/return in current checkpoint.
 
 **Stop-at-blocker falsifier.** Before ending identify the next concrete executable action and owner. A local candidate/report/request/CI observation does not exhaust the commission. A pre-effect *technical* refusal permits requalification of the same original operation only on relevant recovery evidence; advance genuinely independent authorized work meanwhile. An explicit permission/safety denial ends retries; an uncertain effect remains frozen on its original carrier. Do not route around either via another branch/provider/writer. All-lanes claims require Step 6 negative-capability evidence for each useful lane, not another form or status cycle.
 
@@ -97,6 +101,10 @@ Do not bounce mature Sol Pro to Extra High and back merely for tools. A genuine 
 
 Execute the next material action in the phase, however many necessary tool operations it takes. Seek a working user/machine capability, removed blocker, real-path proof, genuinely closed authority/review/release gate, lawful durable START, or resolved uncertainty unlocking the next action. Use its canonical tool/owner and preserve INDEX admission, source custody and one-carrier reconciliation. Do not fragment useful depth merely to shorten a turn.
 
+**Reuse-first implementation.** For substantial components apply same-pin
+`docs/REUSE_FIRST_ENGINEERING.md`: check incumbents/OSS and adapt first; protect
+unique quant science, security and real consumer proof. No new survey/gate.
+
 ## Step 2A — Decide execution ownership before routine labor
 
 Prefer paid Fabric for independently executable bounded outcomes when eligible. Commission outcome/question, exact source, scope, acceptance proof, non-goals and escalation; an investigation need not prescribe its answer. The admitted worker investigates, implements, tests and repairs within its grant without command-by-command parent approval.
@@ -104,6 +112,8 @@ Prefer paid Fabric for independently executable bounded outcomes when eligible. 
 Compare framing, review, expected repair and delay with direct work and useful parallel principal work. Token price alone is not accepted-result cost. Substantial direct work needs an actual brief reason in the existing record: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_SHORTCUT`, or `NO_ELIGIBLE_PRE_EFFECT_WORKER`. Reassess as discovery becomes routine or repeated interactions add no value; use neither a delegation percentage nor a tool-call or agent quota. Under WEB_CEO_DELEGATION section 4, native Sol is for needed reasoning/coordinators, not routine labor or silent Fabric fallback.
 
 Manual-carrier acceptance comes from current source law and its designated authority. Submit only through approved Executive ingress or an independently accepted manual carrier; no raw spawn, self-approved transport or second queue. Confidentiality, bounded spend, provider activation, credentials and workspace custody remain hard gates. A listed model/realm is not admission. Existing Capacity/routing owners choose concrete execution; caller-supplied account/home/host/credential cannot replace them. General willingness to spend is not unlimited budget. Reconcile before fallback; never duplicate STARTed/unknown work. Missing submit is a lane blocker, not dispatch or bypass permission.
+
+Direct work includes the principal's own authorized implementation/tests/repair; no failed Fabric dispatch is required first. Preserve live/uncertain workers and denied effects; admit no substitute native labor child.
 
 ## Step 2B — Overlap judgment and execution without multiplying management
 

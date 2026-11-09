@@ -128,25 +128,6 @@ class RequestTurnBudget(unittest.TestCase):
 
 
 
-    def test_complex_request_advises_without_changing_intentional_cap(self):
-        from contextlib import redirect_stderr
-        output = io.StringIO()
-        os.environ['POOL_MAX_TURNS'] = '8'
-        with redirect_stderr(output):
-            result = api.request('fixture-complex', 'fix_build', cwd='~', packet=None,
-                stdin_bytes=b'bounded complex assignment', root_id='fixture-root',
-                parent_run_id='fixture-parent', task_complexity='C2_COMPLEX_BOUNDED',
-                max_turns=64)
-        self.assertEqual(result, 0)
-        line = next(x for x in output.getvalue().splitlines() if x.startswith('REQUEST_TURN_BUDGET '))
-        advisory = json.loads(line.split(' ', 1)[1])
-        self.assertEqual(advisory['code'], 'EXPLICIT_COMPLEX_TASK_TURN_CEILING')
-        self.assertEqual(advisory['requested_max_turns'], 64)
-        self.assertIsNone(advisory['effective_max_turns'])
-        self.assertIs(advisory['retry_authorized'], False)
-        self.assertEqual(self.calls[0][1]['POOL_REQUEST_MAX_TURNS'], '64')
-        self.assertEqual(self.calls[0][1]['POOL_MAX_TURNS'], '8')
-
     def test_uncapped_complex_request_does_not_invent_a_limit(self):
         from contextlib import redirect_stderr
         output = io.StringIO()

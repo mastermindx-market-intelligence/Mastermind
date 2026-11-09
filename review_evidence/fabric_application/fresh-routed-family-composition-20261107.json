@@ -1,0 +1,66 @@
+{
+  "composition": "Runtime enrollment postimages are identical to the qualified v10 source. The fresh-family tests now use the same manifest-bounded namespace owner as Hermes, and pass with a deliberately preloaded foreign module that is restored afterward. The existing enrollment workflow executes the new suite and retains its zero-skip gate.",
+  "files": {
+    ".github/workflows/hermes-application-enrollment.yml": {
+      "git_blob": "9c4d3fccf8db8b40804174d87561d1252ee85db6",
+      "sha256": "56a67062765d62cef10b45a8718f46c0a4913856371bf6a1cbc66999f48ef2da"
+    },
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": {
+      "git_blob": "35596b34ce2f3b58a610421902c425e393517830",
+      "sha256": "ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055"
+    },
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": {
+      "git_blob": "8decd5031b7262b248553346530b2b6d2b78e79c",
+      "sha256": "fa6286a2b742dda1d1d79e4f57b32ab7c8c1063a2243f01e0593407f5ae90283"
+    },
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": {
+      "git_blob": "84a4bc98e37648e87c4b75e44841a3f68f30f4d5",
+      "sha256": "18c46ad90514db94ae9f817d7baaef8b8a56c5a2cf7017a8ca9adfbf5c373317"
+    },
+    "ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py": {
+      "git_blob": "730761b176373a297aa8d2700ac406f7900661e7",
+      "sha256": "6a36ace5edc209a4227382e4787a1fb0851166864f643a3905bb3f010aeda281"
+    },
+    "tests/executive_fabric_release_identity_review.py": {
+      "git_blob": "da94c95459b6f96c1c8de568dee2545449a7f7d5",
+      "sha256": "b4eac72e9628216c6203de2476f781306c3a1a1dbf05fddade7ca1a8a7cab8fd"
+    },
+    "tests/test_hermes_primary_application_enrollment.py": {
+      "git_blob": "174800064a610b2fc41f3cb953b1fb5ba73b28c5",
+      "sha256": "32a5521964f161ba7e098bac717e9b3f6cb8a5d5acd37bb11985c48df331c6c9"
+    },
+    "tests/test_hermes_primary_retained_enrollment.py": {
+      "git_blob": "ca73c0697055b69109a8b438a08cb0fabfd4fd81",
+      "sha256": "5b31725ba9747f71b23b0b68794d7e1ac65736852dc12243dfda388f474fd436"
+    }
+  },
+  "merge": "b07af8f2cb92b14f7b3e8c29330a71f4321a43fa",
+  "new_shared_namespace_proof": {
+    "log_sha256": "88c9c1071ef477adae83abf915a7771fa510aa1c58b3653bf3909cdca3e02759",
+    "preloaded_native_owner_restored": true,
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 375
+    },
+    "xml_sha256": "35c2a37c5a422367c0d62cf41a8e56a143d4bb1deb58455e756a8e85cb15eb50"
+  },
+  "parents": [
+    "91906d0621099901c07a60c1acd9d0843373651e",
+    "bf9beff1df9f87ae6b545ff1c4e62193910a651d"
+  ],
+  "prior_proof": {
+    "fresh_family_resolved_unique_cases": 677,
+    "hosted_ci_failure_repair": {
+      "log_sha256": "44b16bd4498527359b7306cf117766f1369b635407ced40dd9e734294358b5c2",
+      "passed": 77
+    },
+    "metadata_scheduling": {
+      "log_sha256": "90a2e876b6b3d919e661dcbae1714b1b48d5a23bfedc37beb33d1d1183265007",
+      "passed": 71
+    }
+  },
+  "runtime_state": "Unreleased source. No native generation publication/selection, account grant, VPS deployment or consumer acceptance is claimed. Original J remains unconfirmed and is not redispatched.",
+  "schema": "mastermind.fabric_application.fresh_family_composition.v1"
+}

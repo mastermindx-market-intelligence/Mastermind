@@ -1,18 +1,24 @@
 import { ORIGINAL_OPERATION_ID_PREFIXES } from "../planning/plan-adoption-status";
+import {validateDiscoveryCorrectionRequest,validateDiscoveryCorrectionLookup,type DiscoveryCorrectionLookup} from '../knowledge/library/project-discovery-correction';
 import {
   validSourceOperationContextSelection,
   type SourceAction,
 } from "./context";
 export type SourceOperationMethod =
-  "prepare" | "read" | "submit" | "reconcile" | "advance";
-export interface BasicSourceLookup {
+  "options" | "prepare" | "read" | "submit" | "reconcile" | "advance";
+export type BasicSourceLookup = {
   schema: "mastermind.workspace_source_operation_lookup.v1";
   action: SourceAction;
   request_id: string;
   work_ref: string;
-}
+} | {
+  schema: "mastermind.workspace_source_operation_lookup.v1";
+  action: "publish_project_proposal";
+  request_id: string;
+  work_ref: null;
+};
 /** Exact original safe lookup; Knowledge never accepts the basic selector. */
-export interface KnowledgeSourceLookup {
+export interface LegacyKnowledgeSourceLookup {
   action: 'add_project_file' | 'set_project_communication_preference';
   request_id: string;
   work_ref: string;
@@ -21,6 +27,7 @@ export interface KnowledgeSourceLookup {
   request_sha256: string;
   expected_preference_revision: string | null;
 }
+export type KnowledgeSourceLookup = LegacyKnowledgeSourceLookup | DiscoveryCorrectionLookup;
 export type SourceLookup = BasicSourceLookup | KnowledgeSourceLookup;
 export interface SourcePrepare {
   action: SourceAction;
@@ -40,6 +47,7 @@ export interface SourceAdvance {
   phase_receipt_digest: string;
 }
 export interface SourceOperationTransport {
+  readProjectCreationOptions?(signal:AbortSignal):Promise<unknown>;
   prepareSourceOperation(
     input: SourcePrepare,
     signal: AbortSignal,
@@ -202,7 +210,9 @@ export function sourceOperationRequest(
     // A stateful Proxy may change descriptors while clone detaches it. The
     // larger envelope never survives a different detached action.
     if(filePrepare&&body.action!=="add_project_file")invalid();
-    if (method === "prepare") {
+    if (method === "options") {
+      object(body,["action"]);if(body.action!=="publish_project_proposal")invalid();
+    } else if (method === "prepare") {
       object(body, ["action", "request"]);
       const request = object(body.request);
       if(filePrepare){
@@ -221,6 +231,7 @@ export function sourceOperationRequest(
         !Object.hasOwn(ORIGINAL_OPERATION_ID_PREFIXES, body.action)
       )
         invalid();
+      if (body.action === 'correct_project_discovery') validateDiscoveryCorrectionRequest(request);
       const prefix =
         ORIGINAL_OPERATION_ID_PREFIXES[body.action as SourceAction];
       if (
@@ -256,8 +267,12 @@ export function sourceOperationRequest(
       )
         invalid();
     } else {
-      identity(body);
-      if (body.action === "add_project_file" || body.action === "set_project_communication_preference") {
+      if(method === "read" && body.action === "publish_project_proposal" && body.work_ref === null) {
+        const normalized={...body,work_ref:"WS:VALID"};identity(normalized);
+      } else identity(body);
+      if (body.action === 'correct_project_discovery') {
+        validateDiscoveryCorrectionLookup(input);
+      } else if (body.action === "add_project_file" || body.action === "set_project_communication_preference") {
         object(body,["action","request_id","work_ref","source_commit","base_revision","request_sha256","expected_preference_revision"]);
         // This added variant is closed own enumerable data before clone as
         // well; keep every older basic lookup's existing semantics intact.
@@ -298,12 +313,17 @@ export function createSourceOperationTransport(
       if (signal.aborted) throw new Error("READ_CANCELLED");
       const body = sourceOperationRequest(method, input);
       const path =
-        method === "read"
+        method === "options" ? "/workspace/source-operation/options?action=publish_project_proposal" : method === "read"
           ? "/workspace/source-operation/operation?" +
             new URLSearchParams({
               action: String(body.action),
               request_id: String(body.request_id),
               work_ref: String(body.work_ref),
+              ...(body.action==='correct_project_discovery'?{
+                source_commit:String(body.source_commit),base_revision:String(body.base_revision),
+                request_sha256:String(body.request_sha256),discovery_ref:String(body.discovery_ref),
+                expected_discovery_revision:String(body.expected_discovery_revision),
+              }:{}),
               ...((body.action==="add_project_file"||body.action==="set_project_communication_preference")?{
                 source_commit:String(body.source_commit),base_revision:String(body.base_revision),
                 request_sha256:String(body.request_sha256),expected_preference_revision:String(body.expected_preference_revision),
@@ -316,6 +336,7 @@ export function createSourceOperationTransport(
     }
   };
   return {
+    readProjectCreationOptions: (signal) => invoke("options",{action:"publish_project_proposal"},signal),
     prepareSourceOperation: (input, signal) => invoke("prepare", input, signal),
     readSourceOperation: (input, signal) => invoke("read", input, signal),
     submitSourceOperation: (input, signal) => invoke("submit", input, signal),

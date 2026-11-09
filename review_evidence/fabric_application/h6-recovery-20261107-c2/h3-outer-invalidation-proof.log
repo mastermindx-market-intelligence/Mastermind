@@ -1,0 +1,10 @@
+test_pending_refresh_refuses (__main__.main.<locals>.OuterInvalidationTests.test_pending_refresh_refuses) ... ok
+test_failed_refresh_refuses (__main__.main.<locals>.OuterInvalidationTests.test_failed_refresh_refuses) ... ok
+test_terminal_refusal_refuses (__main__.main.<locals>.OuterInvalidationTests.test_terminal_refusal_refuses) ... ok
+test_clean_synthetic_observation_preserves_prior_behavior (__main__.main.<locals>.OuterInvalidationTests.test_clean_synthetic_observation_preserves_prior_behavior) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.238s
+
+OK
+{"output": "/private/tmp/h6-h3-outer-rejection-g2c8b8gl/proof-corrected.json", "tests": 4, "success": true}

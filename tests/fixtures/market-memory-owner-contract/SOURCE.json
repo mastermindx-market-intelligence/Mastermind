@@ -1,0 +1,19 @@
+{
+  "repository": "mastermindx-market-intelligence/macro",
+  "commit": "a6c07e2d3a6e26076fbeabbce409e135582c9f75",
+  "scope": "Immutable public-code compatibility fixture only; no participant/study source or admission.",
+  "files": {
+    "engine/research_factory/market_memory_e0_review_metadata_v2.py": {
+      "sha256": "1a2ff642fcf4d3a4ca73e53ef6aa5c3063683716896bb1e032a1c92ba8f927da",
+      "bytes": 10118
+    },
+    "contracts/market_memory/e0_review_metadata.v2.schema.json": {
+      "sha256": "8adc33815cbe928b4e1e47954d3a3c1109196c9a920f0fe71e2b12e11220fc0b",
+      "bytes": 7605
+    },
+    "contracts/market_memory/e0_reviewer_plan.v1.schema.json": {
+      "sha256": "a586fd7e073e624de8eafc8582e68815d167812732c0fe9673975ea5681ed490",
+      "bytes": 7166
+    }
+  }
+}

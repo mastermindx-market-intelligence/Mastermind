@@ -17,13 +17,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Scope is deliberately calculated from the *protected base* version of
-  # this qualifier and the accepted risk classifier. PR-authored changes to
-  # tests, workflows or the qualifier cannot vote themselves into fast CI.
-  # A new installation without the trusted version falls back to full CI.
+  # Source scope for PR and merge-group is derived from protected code.
+  # A changing/unverifiable queue, CI, security or source-law diff runs full CI.
   pr_scope:
     name: PR test scope
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -32,12 +30,14 @@ jobs:
       mode: ${{ steps.scope.outputs.mode }}
       tier: ${{ steps.scope.outputs.tier }}
       needs_node: ${{ steps.scope.outputs.needs_node }}
+      source_base: ${{ steps.scope.outputs.source_base }}
+      source_head: ${{ steps.scope.outputs.source_head }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify exact PR diff using protected base code
+      - name: Classify integrated source diff using protected base code
         id: scope
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -45,27 +45,41 @@ jobs:
           set -euo pipefail
           trusted="$RUNNER_TEMP/ci-trusted-base"
           mkdir -p "$trusted"
-          if git cat-file -e "${PR_BASE_SHA}:scripts/ci_pr_scope.py" 2>/dev/null &&
-             git cat-file -e "${PR_BASE_SHA}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
-            git archive "$PR_BASE_SHA" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
+          trusted_base="$PR_BASE_SHA"
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            trusted_base="$(git rev-parse --verify refs/remotes/origin/master 2>/dev/null || true)"
+          fi
+          if [ -n "$trusted_base" ] &&
+             git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&
+             git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
+            git archive "$trusted_base" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
               tar -x -C "$trusted"
-            PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
-              --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
-              --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+            if grep -q '^def classify_merge_group(' "$trusted/scripts/ci_pr_scope.py"; then
+              PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
+                --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
+                --event-type "$GITHUB_EVENT_NAME" --protected-base "$trusted_base" \
+                --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+            else
+              # First protected installation: legacy scope has no merge-group
+              # support and this PR modifies CI itself, so it must run FULL.
+              PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
+                --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
+                --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+            fi
           else
             printf 'mode=full\ntier=HOLD\nneeds_node=false\n' >> "$GITHUB_OUTPUT"
             echo 'CI_SCOPE source not in protected base: required full suite'
           fi
 
-  # Ordinary PRs get rapid, bounded feedback while the exact merge-group
-  # candidate still executes *all* canonical discovery-first pytest shards.
+  # Fast and standard integrated queue candidates reuse the same trusted,
+  # bounded PR checks; critical or unqualified groups run every full shard.
   # The stable protected status context is still the final job named 'test'.
   # Heavy work must stop when this same-PR run is superseded/cancelled.
   # Keep the small final test gate on always() so cancellation cannot look green.
   pr_fast:
     name: PR fast checks
     needs: [pr_scope]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -77,8 +91,8 @@ jobs:
           persist-credentials: false
       - name: Verify exact changed source without executing untrusted PR text
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
+          PR_HEAD_SHA: ${{ needs.pr_scope.outputs.source_head }}
         run: |
           set -euo pipefail
           git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"
@@ -88,14 +102,30 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # Source-proximate web tests import app.deps through the real application.
+      # Supply the same immutable engine/lib source as the full-shard job;
+      # no runtime data, new credential policy or alternate dependency owner.
+      - name: Checkout pinned Macro engine for source-proximate tests
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 268a89e3828d848848c77dfe69191c3fa7319361
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Install focused Python test dependencies
         if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
         run: python -m pip install --disable-pip-version-check -e ".[dev]"
       - name: Bounded source-proximate PR tests
         if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
+          PR_HEAD_SHA: ${{ needs.pr_scope.outputs.source_head }}
         run: >-
           python -m scripts.ci_pr_smoke
           --repo . --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
@@ -117,19 +147,19 @@ jobs:
   pytest_shards:
     name: pytest shard ${{ matrix.index }}
     needs: [pr_scope]
-    # All critical/unqualified PRs still run full pytest. Ordinary PRs use
-    # pr_fast; *every* merge-group and master push runs all six canonical
-    # shards (with the existing exact merge-group proof-reuse logic on push).
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    # Critical/unqualified candidates and protected pushes retain full CI.
+    # Only signed, protected-source verified fast/smoke candidates skip shards.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     # Only the test-shard job needs read-only workflow-run evidence.
     permissions:
       contents: read
       actions: read
     runs-on: ubuntu-latest
-    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
-    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
-    # 60 minutes stays inside the merge queue's 100-minute check response limit.
-    timeout-minutes: 60
+    # Keep every prerequisite and the full 45-minute repository allowance.
+    # Actual setup took ~23m; a successful test/upload then crossed job60 in
+    # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
+    # This budget correction does not diagnose a post-test process-exit stall.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -173,11 +203,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: 268a89e3828d848848c77dfe69191c3fa7319361
           path: vendor/macro_src
           sparse-checkout: |
             engine
             lib
+            config
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
@@ -236,8 +267,9 @@ jobs:
         working-directory: integrations/studio_direct_mcp
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
           python -m unittest discover -s . -p 'private_service*test.py'
+          python -m unittest discover -s . -p 'control_bundle*test.py'
 
       - name: Compile source
         if: matrix.index == 0
@@ -302,6 +334,81 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
+      - name: Verify native application admission and dispatch custody
+        if: matrix.index == 0
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite = unittest.TestSuite()
+          for pattern in (
+              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
+              "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_application_auto_request.py", "test_application_cross_pool_auto.py",
+              "test_application_registered_pool_selection.py", "test_application_registered_pool_composition.py",
+              "test_bailian_application_handler_composition.py",
+              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
+              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
+          ):
+              suite.addTests(unittest.defaultTestLoader.discover(
+                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
+          from scripts.ci_native_preflight import unittest_runner
+          result = unittest_runner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PYTEST
+          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
+          trap 'rm -rf "$native_rollout_test_root"' EXIT
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            -p scripts.ci_native_preflight \
+            --junitxml="$native_rollout_test_root/native-proof.xml" \
+            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
+            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
+            tests/test_native_launcher_successor_transition.py
+          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+
+      # A root-only finite owner must have positive proof, not skipped tests.
+      # The container receives only tracked public source and disposable tmpfs.
+      - name: Verify closed application transport in isolated root fixtures
+        if: matrix.index == 0
+        run: |
+          set -euo pipefail
+          application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
+          trap 'rm -rf "$application_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$application_transport_source"
+          # The isolated root has no DAC override; expose only this public archive.
+          chmod 0755 "$application_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile \
+            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
+            mastermind-application-transport:${{ github.sha }}
+
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
       - name: Checkout paired Brain production owner fixture
@@ -309,35 +416,154 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
+          ref: f38c5b9ea25ea598094a309f0edf48e2722408be
           path: .ci-production-macro
           sparse-checkout: |
             engine
             lib
             config
+            tests
+            scripts
+            research/earnings_intelligence/e3/gold
+            ops/launchd
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
-      - name: Verify actual Brain production inference composition
+      - name: Verify exact scoped Fabric model and Metabolism composition
+        if: matrix.index == 0
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'requests>=2.31'
+          exact_composition_proof="$(mktemp -d "$RUNNER_TEMP/fabric-exact-composition.XXXXXX")"
+          trap 'rm -rf "$exact_composition_proof"' EXIT
+          (
+            cd "$GITHUB_WORKSPACE/.ci-production-macro"
+            PYTHONPATH="$PWD" MM_FABRIC_GATEWAY_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+              python -m pytest -q --noconftest -c /dev/null \
+              --junitxml="$exact_composition_proof/exact-proof.xml" \
+              tests/test_fabric_exact_scoped_model_composition.py \
+              tests/test_company_intelligence_event_compiler_e3a.py
+          )
+          python - "$exact_composition_proof/exact-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_EXACT_COMPOSITION_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+          (
+            cd "$GITHUB_WORKSPACE/.ci-production-macro"
+            PYTHONPATH="$PWD" MM_FABRIC_GATEWAY_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+              python -m pytest -q --noconftest -c /dev/null --rootdir="$PWD" \
+              --junitxml="$exact_composition_proof/metabolism-proof.xml" \
+              tests/test_metabolism_audit.py \
+              tests/test_metabolism_fabric_composition.py
+          )
+          python - "$exact_composition_proof/metabolism-proof.xml" <<'PROOF'
+          import collections, json, sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = list(root.iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests.test_metabolism_audit": 185,
+                      "tests.test_metabolism_fabric_composition": 106}
+          counts = collections.Counter()
+          for case in root.iter("testcase"):
+              name = case.get("classname", "")
+              module = next((key for key in expected if name == key or name.startswith(key + ".")), None)
+              assert module is not None, ("unrecognized module", name)
+              counts[module] += 1
+          assert dict(counts) == expected, (dict(counts), expected)
+          assert totals["tests"] == sum(expected.values()), totals
+          assert all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_METABOLISM_COMPOSITION_PROOF " + json.dumps({"totals": totals, "modules": counts}, sort_keys=True))
+          PROOF
+
+      - name: Verify actual Brain Fabric and production inference composition
         if: matrix.index == 0
         env:
           MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_BROWSER: "1"
         run: |
           set -euo pipefail
           brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          brain_composition_root="$(cd "$brain_composition_root" && pwd -P)"
           trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
-          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py |
+          git -c gc.auto=0 archive HEAD brain bot bridge common app config control_plane data_layer portfolio \
+            scripts/translate_all.py \
+            tests/integration/test_production_inference_composition.py \
+            tests/integration/test_fabric_inference_composition.py \
+            tests/integration/test_fabric_translation_composition.py \
+            tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
+            tests/integration/test_fabric_chat_buffered_delivery.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
+            tests/test_advisor_cognition_plane.py \
+            tests/integration/test_fabric_text_native_application.py \
+            tests/integration/test_fabric_text_cross_pool_auto.py \
+            tests/integration/test_technician_fabric_composition.py \
+            tests/integration/test_fabric_portfolio_composition.py \
+            tests/integration/test_fabric_regional_portfolio_composition.py \
+            tests/integration/test_fabric_chat_browser.py \
+            ops/native_fabric/quota_continuity \
+            ops/native_fabric/experiential_proxy/gateway.py |
             tar -x -C "$brain_composition_root"
-          mkdir -p "$brain_composition_root/vendor"
-          ln -s "$GITHUB_WORKSPACE/.ci-production-macro" "$brain_composition_root/vendor/macro"
+          mkdir -p "$brain_composition_root/vendor/macro"
+          # Isolate synthetic owner configuration in a copy of the exact source.
+          cp -R "$GITHUB_WORKSPACE/.ci-production-macro/engine" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/lib" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/config" "$brain_composition_root/vendor/macro/"
+          touch "$brain_composition_root/vendor/macro/.fabric-composition-fixture"
+          export MM_FABRIC_FIXTURE_ROOT="$brain_composition_root/vendor/macro"
           cd "$brain_composition_root"
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_production_inference_composition.py -v
-
-      - name: Prepare fixed test diagnostics
-        run: |
-          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
-          chmod 0700 "$diagnostic_dir"
-          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+            -p 'test_*inference_composition.py' -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_buffered_delivery.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_native_application.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_translation_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m pytest -q --noconftest -c /dev/null \
+            --rootdir="$brain_composition_root" --junitxml="$brain_composition_root/cognition-auto-proof.xml" \
+            tests/test_advisor_cognition_plane.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
+            tests/integration/test_fabric_text_cross_pool_auto.py
+          python - "$brain_composition_root/cognition-auto-proof.xml" <<'PROOF'
+          import collections, json, sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = list(root.iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests.test_advisor_cognition_plane": 12,
+                      "tests.integration.test_fabric_chat_cross_pool_auto": 16,
+                      "tests.integration.test_fabric_text_cross_pool_auto": 14}
+          counts = collections.Counter()
+          for case in root.iter("testcase"):
+              name = case.get("classname", "")
+              module = next((key for key in expected if name == key or name.startswith(key + ".")), None)
+              assert module is not None, ("unrecognized module", name)
+              counts[module] += 1
+          assert dict(counts) == expected, (dict(counts), expected)
+          # JUnit counts may additionally include unittest subtests. The closed
+          # testcase/module inventory above proves every required base case ran.
+          assert totals["tests"] >= sum(expected.values()), totals
+          assert all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_COGNITION_AUTO_PROOF " + json.dumps({"totals": totals, "modules": counts, "reported_subtests": totals["tests"] - sum(counts.values())}, sort_keys=True))
+          PROOF
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_portfolio_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_regional_portfolio_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_cross_pool_auto.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_cross_pool_auto.py -v
+          python -m pip install --disable-pip-version-check playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_browser.py -v
 
       # No shard JOB is skipped. Existing non-pytest security gates always
       # execute; only a previously green, same-SHA native merge-group proof
@@ -351,11 +577,10 @@ jobs:
 
       - name: Run repository test shard
         if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
-        # Give best-effort upload an opportunity inside the 60-minute job.
-        # The prior 38-minute step timed out; its snapshot retained the final
-        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
-        # for setup/cleanup opportunity, not a guaranteed future bound.
-        # Slow setup or runner loss can still prevent artifact delivery.
+        # Preserve the independent 45-minute test limit. Job75 accommodates
+        # observed ~23m prerequisite work plus upload/cleanup; slow setup or
+        # runner loss can still prevent artifact delivery. No exit is inferred
+        # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
@@ -365,15 +590,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-fixed-diagnostics-${{ matrix.index }}
-          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
 
   # Branch protection requires one stable context "test", on both PRs and
-  # native merge_group candidates. A skipped matrix is accepted ONLY for a
-  # verified, completed PR fast lane; merge_group always requires full shards.
-  # There is no green fan-in if scope, smoke, or any required shard failed.
+  # native merge_group candidates. Every skipped matrix requires a proven
+  # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
     name: test
     needs: [pr_scope, pr_fast, pytest_shards]
@@ -397,21 +624,21 @@ jobs:
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_TYPE" = "pull_request" ]; then
+          if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then
             if [ "$PR_SCOPE_STATUS" != success ]; then
-              echo "trusted PR risk-source qualification unavailable"
+              echo "trusted source risk qualification unavailable"
               exit 1
             fi
             case "$PR_SCOPE_MODE" in
               full)
                 if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
-                  echo "critical/unqualified PR must pass all six pytest shards"
+                  echo "critical/unqualified source must pass all six pytest shards"
                   exit 1
                 fi
                 ;;
               fast|smoke)
                 if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then
-                  echo "eligible PR must pass its exact fast/smoke check"
+                  echo "eligible source must pass its exact fast/smoke check"
                   exit 1
                 fi
                 ;;
@@ -421,8 +648,7 @@ jobs:
                 ;;
             esac
           else
-            # No fast mode exists for merge_group, protected pushes, or a
-            # deliberate workflow_dispatch. The full matrix is mandatory.
+            # Protected pushes and deliberate manual CI always run all shards.
             if [ "$SHARDS_STATUS" != success ] ||
                [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
               echo "integration/release CI must pass the full matrix"
@@ -430,5 +656,5 @@ jobs:
             fi
           fi
           # Revalidate the same canonical test discovery/exclusion/cover plan.
-          # PR smoke does not change the module set used in merge_group.
+          # Source-scoped checks never change canonical discovery.
           python scripts/ci_pytest.py --plan-only --jobs 6

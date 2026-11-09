@@ -116,7 +116,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$HOST_ARG" ] && [ -n "$MODE" ] && [ -n "$PACKET" ] && [ -n "$REMOTE_CWD" ] || usage
 case "$MODE" in
-  glm|glm-codex|minimax|minimax-codex|grok|cursor|qwen|go-codex|codex-native|claude-native|oc-free) ;;
+  glm|glm-codex|minimax|minimax-codex|grok|cursor|qwen|go-codex|codex-native|claude-native|oc-free|application) ;;
   *) echo "unsupported mode: $MODE" >&2; exit 2 ;;
 esac
 case "$MODE" in
@@ -260,6 +260,12 @@ declare -a SCRATCH_PATHS=()
 declare -a TEMP_FILES=()
 SCRATCH_PATHS+=()
 TEMP_FILES+=()
+# The APPLICATION purpose is a closed, purpose-isolated branch of this same
+# controller: no worker provider acquire/renew/adopt/settle, no worker ledger,
+# no fabricated Job/Attempt.
+APPLICATION_ACTIVE=0
+APPLICATION_DISPATCH_MODEL=""
+APPLICATION_DISPATCH_DIGEST=""
 
 log() {
   local line
@@ -269,6 +275,30 @@ log() {
     printf '%s\n' "$line" >> "$LOG_FILE" 2>/dev/null || true
   fi
 }
+
+# Route one already-prepared APPLICATION dispatch. The closed data contract is
+# validated here for routing only; the receiving executor authenticates the
+# dispatch against the trusted owner.
+if [ "$MODE" = application ]; then
+  if [ "$REMOTE_CWD" != "~" ]; then
+    echo "APPLICATION_CWD_REFUSED before_lease=1" >&2
+    exit 2
+  fi
+  APPLICATION_DISPATCH_SUMMARY=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
+    application-dispatch-summary "$PACKET") || {
+      RC=78; log "APPLICATION_DISPATCH_REFUSED before_lease=1"; exit "$RC";
+    }
+  read -r APPLICATION_DISPATCH_MODEL APPLICATION_DISPATCH_DIGEST \
+    APPLICATION_PACKET_SHA256 APPLICATION_DISPATCH_HOST APPLICATION_DISPATCH_ID \
+    <<< "$APPLICATION_DISPATCH_SUMMARY"
+  if [ "$HOST_ARG" != "$APPLICATION_DISPATCH_HOST" ] ||
+     [ "$ID" != "$APPLICATION_DISPATCH_ID" ]; then
+    RC=78; log "APPLICATION_ROUTE_SCOPE_REFUSED before_lease=1"; exit "$RC";
+  fi
+  APPLICATION_ACTIVE=1
+  MODEL="$APPLICATION_DISPATCH_MODEL"
+  log "APPLICATION_DISPATCH_ROUTED invocation=$APPLICATION_DISPATCH_DIGEST"
+fi
 
 if [ -n "${FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION:-}" ]; then
   [ "$ID" = fabric-paid-operator-return-proof-01a11e90-v1 ] &&
@@ -306,6 +336,9 @@ fi
 release_lease() {
   # Command substitutions run in a subshell. Retain an unproven local process
   # cleanup in the original log so EXIT cannot lose that custody decision.
+  if [ "${APPLICATION_ACTIVE:-0}" = "1" ]; then
+    return 0  # A owns the provider lease; this controller never releases it.
+  fi
   if [ "${COMMISSION_ACTIVE:-0}" = 1 ] && [ -n "${REMOTE_SUB_LOG_READY:-}" ] &&
      LC_ALL=C awk -v run="$ID" -v host="$HOST_ARG" '
        $2 == "[remote_sub" && $3 == "id=" run && $4 == "host=" host "]" &&
@@ -765,7 +798,7 @@ PY_RETAIN_PLAIN_PACKET
   fi
 fi
 
-if [ "$HOST_ARG" = m2 ]; then
+if [ "$HOST_ARG" = m2 ] && [ "$APPLICATION_ACTIVE" -eq 0 ]; then
   "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" lane-root-local-scope \
     "$HOSTS_SOURCE" "$HOST_ARG" >/dev/null 2>&1 || {
       RC=78; log "REMOTE_LANE_ROOT_LOCAL_SCOPE_REFUSED before_worker=1"; exit "$RC";
@@ -879,9 +912,9 @@ print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit,
 }
 load_host_registry || exit "$RC"
 if [ -n "$NEW_MACRO_COMMIT" ]; then
-  # This initial implementation covers the four Linux fleet hosts only.
+  # Registered Linux fleet hosts; enrollment and donor custody remain separate.
   case "$HOST_ARG" in
-    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
+    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;
     *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
   esac
 fi
@@ -1383,6 +1416,13 @@ SUPPORT_FILES=(
 # The v2 executor imports this explicit sealed dependency only for bound roots.
 [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
 [ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
+# APPLICATION has one explicit closure; ordinary worker membership is unchanged.
+if [ "$APPLICATION_ACTIVE" -eq 1 ]; then
+  [ -f "$HERE/application_native_owner.py" ] || {
+    RC=78; log "APPLICATION_OWNER_ABSENT before_launch=1"; exit "$RC";
+  }
+  SUPPORT_FILES+=(application_native_owner.py)
+fi
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="$REMOTE_LANE_TRANSFER/tmp/$ID.support-src"
  # Retain the exact per-run manifest as the pre-task control-flow identity.
@@ -1914,7 +1954,7 @@ while true; do
       commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
       [ "$commission_poll_remaining" -gt 0 ] || break
     fi
-    if [ -n "$LEASE_ID" ] &&
+    if [ "${APPLICATION_ACTIVE:-0}" -eq 0 ] && [ -n "$LEASE_ID" ] &&
        fabric_poll_heartbeat_due "$((SECONDS - LAST_POLL_BROKER_HEARTBEAT))"; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
       LAST_POLL_BROKER_HEARTBEAT=$SECONDS
@@ -2051,6 +2091,27 @@ if [ "$NATIVE_MODE" -eq 1 ]; then
   then PRESERVE_LEASE=0; log "NATIVE_SETTLED receipt=$(basename "$NATIVE_TERMINAL")"
   else PRESERVE_LEASE=1; log "NATIVE_EFFECT_UNKNOWN same_carrier_reconciliation_required=1"
   fi
+fi
+
+# The APPLICATION branch collects its own typed terminal receipt and exits. A
+# remains the sole durable dispatch/terminal/close owner: no worker ledger row
+# and no provider settlement happens here.
+if [ "${APPLICATION_ACTIVE:-0}" -eq 1 ]; then
+  APPLICATION_TERMINAL="$LOG_DIR/${ID}.application-terminal.json"
+  if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq \
+      "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.application-terminal.json" \
+      "$APPLICATION_TERMINAL" &&
+     APPLICATION_RESULT_RC=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" application-result-valid \
+       "$APPLICATION_TERMINAL" "$PACKET" "$LOCAL_OUT"); then
+    RC="$APPLICATION_RESULT_RC"
+    log "APPLICATION_RESULT_SAVED file=$(basename "$APPLICATION_TERMINAL")"
+  else
+    RC=76
+    log "APPLICATION_RESULT_UNAVAILABLE rc=76 effect_unknown=1 same_carrier_reconciliation_required=1"
+  fi
+  require_bound_lane_layout_after_launch after_collection
+  log "APPLICATION_DONE rc=$RC worker_ledger=0 provider_settlement=owner_a"
+  exit "$RC"
 fi
 
 # Ordinary profiles have no separate native terminal receipt. Their remote RC

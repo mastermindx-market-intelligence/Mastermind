@@ -195,6 +195,7 @@ describe("Work refresh pending-control semantics", () => {
     const readMission = vi.fn(async ({ workRef, rootJobId }: { workRef: string; rootJobId: string }) => missionFixture(workRef, rootJobId));
     window.MastermindMissionHost = { readProgramsObservation, readMission, readWork };
     await mountWork(); await click("Projects"); await click("Open project Alpha program"); await click("Project details");
+    await click("Work controls");
     await act(async () => { Array.from(container.querySelectorAll("summary")).find(n => n.textContent === "More work details")!.click(); });
     await click("Work");
     const url = location.href;

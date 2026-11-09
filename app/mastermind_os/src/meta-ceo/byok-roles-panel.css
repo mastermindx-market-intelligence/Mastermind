@@ -39,17 +39,61 @@
 .byok-role-setup summary { min-height: 44px; padding-block: 12px; color: var(--byok-accent); cursor: pointer; }
 .byok-role-setup ol { padding-left: 18px; margin: 0 0 12px; color: var(--byok-secondary); }
 .byok-role-setup li + li { margin-top: 6px; }
-.byok-roles-panel .byok-role-setup button { min-height: 44px; min-width: 44px; padding: 10px 14px; border: 1px solid #514a3d; border-radius: 8px; background: var(--byok-canvas); color: var(--byok-accent); font: inherit; cursor: pointer; }
-.byok-role-setup button:hover { background: #24211b; }
-.byok-role-setup summary:focus-visible, .byok-role-setup button:focus-visible { outline: 2px solid var(--byok-accent); outline-offset: 3px; }
+.byok-roles-panel .byok-role-setup button,
+.byok-roles-panel .byok-role-review { min-height: 44px; min-width: 44px; padding: 10px 14px; border: 1px solid #514a3d; border-radius: 8px; background: var(--byok-canvas); color: var(--byok-accent); font: inherit; cursor: pointer; }
+.byok-role-setup button:hover, .byok-role-review:hover { background: #24211b; }
+.byok-role-setup summary:focus-visible, .byok-role-setup button:focus-visible,
+.byok-role-review:focus-visible { outline: 2px solid var(--byok-accent); outline-offset: 3px; }
+.byok-roles-panel .byok-role-review { align-self: flex-start; }
 .byok-roles-panel .byok-roles-muted, .byok-roles-panel .byok-roles-note p { color: var(--byok-muted); font-size: 12px; }
 .byok-roles-note { display: grid; gap: 6px; }
+/* Read-only connection review. It opens over the Office and never collects a credential. */
+.byok-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(4, 4, 4, .72);
+}
+.byok-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 22px;
+  border-left: 1px solid var(--byok-line);
+  background: var(--byok-panel);
+  color: var(--byok-text);
+}
+.byok-drawer:focus { outline: none; }
+.byok-drawer:focus-visible { outline: 2px solid var(--byok-accent); outline-offset: -3px; }
+.byok-drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.byok-drawer-eyebrow { color: var(--byok-accent); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+.byok-roles-panel .byok-drawer-header h3 { color: var(--byok-text); font: 600 16px/1.5 Inter, system-ui, sans-serif; }
+.byok-roles-panel .byok-drawer-close { min-height: 44px; min-width: 44px; padding: 10px 14px; border: 1px solid #514a3d; border-radius: 8px; background: var(--byok-canvas); color: var(--byok-accent); font: inherit; cursor: pointer; }
+.byok-drawer-close:hover { background: #24211b; }
+.byok-drawer-close:focus-visible { outline: 2px solid var(--byok-accent); outline-offset: 3px; }
+.byok-drawer-body { display: grid; gap: 18px; }
+.byok-roles-panel .byok-drawer-section h4 { margin: 0 0 8px; color: var(--byok-secondary); font: 600 12px/1.5 Inter, system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+.byok-drawer-rows { display: grid; gap: 10px; margin: 0; }
+.byok-drawer-rows dt { color: var(--byok-muted); font-size: 11px; }
+.byok-drawer-rows dd { margin: 2px 0 0; color: var(--byok-text); }
+.byok-drawer-notes { display: grid; gap: 6px; }
+.byok-roles-panel .byok-drawer-notes p { color: var(--byok-muted); font-size: 12px; }
+.byok-drawer-steps { margin: 0; padding-left: 18px; color: var(--byok-secondary); }
+.byok-drawer-steps li + li { margin-top: 6px; }
 @media (max-width: 680px) {
   .byok-roles-panel { padding: 18px; gap: 16px; }
   .byok-role-grid { grid-template-columns: minmax(0, 1fr); }
   .byok-role-card { padding: 16px; }
   .byok-role-facts { gap: 8px; }
+  .byok-drawer { width: 100%; padding: 18px; }
 }
 @media (forced-colors: active) {
-  .byok-role-card, .byok-role-state, .byok-role-setup button { border-color: CanvasText; }
+  .byok-role-card, .byok-role-state, .byok-role-setup button,
+  .byok-role-review, .byok-drawer-close, .byok-drawer { border-color: CanvasText; }
+  .byok-drawer-backdrop { background: Canvas; }
 }

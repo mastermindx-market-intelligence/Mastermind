@@ -76,6 +76,8 @@ publication. Failed cleanup makes qualification incomplete.
 
 Same-role-cgroup fixture listeners cannot supply an outside-cgroup positive.
 The two address-denial cases therefore remain UNAVAILABLE in this version.
+The same holds under `--external-address-fixtures` below: the attempt is
+recorded, but no denial is attributed and neither case is qualified.
 A copied peer report is an earlier observation; peer-file denial likewise remains
 UNAVAILABLE without a root-controlled before/after existence bracket. The probe
 does not silently upgrade these observations, even with a matching peer report.
@@ -94,6 +96,66 @@ Do not improvise a fixture daemon, controller, registry or new admission path.
 This utility does not ingest/attest those external observations yet; they are
 separate final acceptance evidence. An INCOMPLETE report must remain INCOMPLETE.
 A report's own-file PASS may still be useful earlier evidence in an A/B/A sequence.
+
+### Operator-supplied outside-cgroup fixture
+
+`--external-address-fixtures` is one closed boolean. It supplies no host, port,
+path, command or authority. It changes the fixture ownership of two cases and
+nothing else. Its normalized boolean is recorded in the existing fingerprinted
+context, so internal and external fixture modes cannot share an evidence identity:
+
+| Case | Default internal listener | Under the flag |
+|---|---|---|
+| tcp.sibling_alias.gateway_port | sibling_gateway | omitted; the target is the sibling role alias on this role's fixed gateway port |
+| tcp.shared_loopback.gateway_port | shared_loopback_gateway | omitted; the target is 127.0.0.1 on this role's fixed gateway port |
+
+The targets, ports and expectations are unchanged: they are still derived only
+from the loaded profile, the role aliases and the documented fixed role ports.
+Every other listener, case, guard, production guard order, profile/role
+validation, Landlock invocation, file check, child ownership and cleanup rule,
+report bound, context/source recheck and exit code is exactly as before, and
+the default invocation is unchanged.
+
+The current root operator may retain its own finite outside-role-cgroup socket
+file descriptors at exactly those two targets — the sibling role alias and
+127.0.0.1, each on this role's fixed gateway port — so that the fixture is
+owned outside the unit cgroup instead of by a same-cgroup child. The operator
+then proves, around ONE actual role-unit invocation:
+
+- a successful connection to each of those two exact targets from outside the
+  role cgroup, before the role's negative attempt and again after it;
+- unchanged listener identity across that bracket: the same socket inode, the
+  same owning process and start time, and the same exact address and port.
+
+Those observations are the outside-cgroup positive. The probe cannot supply
+them: it runs inside the role cgroup, so it can neither join that socket's
+inode nor bracket it. It therefore records the attempt as an observation only.
+
+Per case, the probe records the actual derived target, the observed errno and
+errno name, and the symptom, and then only these outcomes are possible:
+
+- The forbidden target answered the connection: FAIL. A forbidden address that
+  is reachable is a real failure and the report says so.
+- The attempt was refused immediately with EPERM, or timed out with
+  EAGAIN/ETIMEDOUT: the refusal shape is recorded with an unverified
+  attribution, the external witness is marked insufficient, and the case stays
+  UNAVAILABLE. The role report stays INCOMPLETE.
+- Nothing answered at the target (ECONNREFUSED): UNAVAILABLE; a missing
+  listener is never policy proof.
+- An unrelated error, including immediate EACCES, EIO, EMFILE or ENETUNREACH:
+  ERROR/FAIL, preserving the existing probe's classification. It is never
+  counted as policy denial.
+
+The absence of an observed denial is never upgraded into a denial, and a
+missing witness never yields PASS. The operator adjudicates the separate
+outside-cgroup bracket against this recorded attempt and reports it as separate
+final acceptance evidence. The peer-file before/after witnesses described above
+remain separate evidence: this mode neither supplies nor replaces them.
+
+This flag is not an installation, serving, provider or Slack authorization. It
+does not install, start, stop, reload or modify a unit, open a credential, call
+a provider or a model, or send a message. It changes what the probe measures;
+it does not change the hold.
 
 ## Required host preflight
 
@@ -142,6 +204,19 @@ qualified0700 directory; compare an existing fixture's exact facts rather than
 rewriting it. Capture the installed unit/drop-ins and effective ExecStart,
 Restart, User, Group, ControlGroup, IPAddressDeny/Allow, dependencies and paths.
 
+The existing runtime installer can perform a first installation into a role state
+root containing only this qualification directory. It requires both directories
+to be owned by the installing role with0700 mode and every retained member to
+be a role-owned0600, single-link regular file. Only the exact synthetic marker,
+validated role/state/secrets-path profiles named `profile-*.yaml`, and matching
+role reports using the v2 qualification schema named `report-*.json` are accepted.
+Foreign entries, links, changed contents or changed custody refuse installation.
+The installer rechecks the complete retained preimage before publishing `current`.
+A failed attempt preserves qualification bytes and removes only its own unchanged
+allocation artifacts. Installation and upgrades retain those records in place.
+These records are evidence retention, including truthful INCOMPLETE reports;
+they do not satisfy native-runtime, credential, provider or enrollment admission.
+
 Prepare one root-owned0644 drop-in with an operation-specific previously absent
 name, for example `90-isolation-<qid>-a1.conf`. This is a reviewable template;
 substitute paths and executable from the approved effective unit:
@@ -150,8 +225,16 @@ substitute paths and executable from the approved effective unit:
 [Service]
 Restart=no
 ExecStart=
-ExecStart=/usr/bin/python3 -P -m integrations.hermes_runtime.isolation_probe --profile /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/profile.yaml --role mmsecretary --qualification-id q20261105 --own-file /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/synthetic.txt --peer-file /home/mmmeta/.local/state/hermes-runtime-mmmeta/qualification/synthetic.txt --report /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/report-q20261105-mmsecretary-a1.json
+ExecStart=/usr/bin/python3.12 -I -S -B /opt/mastermind-executive/releases/<40-character-commit>/ops/executive_os/release_manifest.py hermes-runtime isolation-probe --profile /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/profile.yaml --role mmsecretary --qualification-id q20261105 --own-file /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/synthetic.txt --peer-file /home/mmmeta/.local/state/hermes-runtime-mmmeta/qualification/synthetic.txt --report /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/qualification/report-q20261105-mmsecretary-a1.json
 ```
+
+Replace `<40-character-commit>` with the protected release selected by the
+approved effective unit; it must match that unit's implementation identity.
+The fixed `isolation-probe` entry uses the same held first-party source and
+qualified pure-Python YAML context as `supervise` and `canary`. It does not
+accept an arbitrary module or executable. `--list-cases` lists the closed
+matrix without starting the probe. Preserve source-refusal exit 78 and the
+probe's own report/exit semantics, including honest INCOMPLETE results.
 
 `Restart=no` is essential: a failed/incomplete probe must not enter the serving
 unit's restart loop. Create the drop-in exclusively, record its exact hash and
@@ -211,8 +294,9 @@ Schema: `mastermind.hermes_role_isolation_qualification.v2`.
 
 Required inputs are `--profile`, `--role`, `--qualification-id`,
 `--own-file` and `--peer-file`. Optional inputs are the three peer-evidence
-arguments above, `--report`, `--denied-port`, `--connect-timeout` and
-`--only`. `--list-cases` is inert and needs no host qualification.
+arguments above, `--report`, `--denied-port`, `--connect-timeout`, `--only` and
+the closed boolean `--external-address-fixtures`. `--list-cases` is inert and
+needs no host qualification.
 
 Timeout must be finite and in(0,30]seconds. A report path must be inside the exact
 state qualification directory, be named `report-*.json` and contain the run ID.
@@ -230,6 +314,9 @@ provenance is compared around profile loading and after the matrix.
 Aggregate PASS requires the entire13-case matrix, all four production guards,
 stable final context and completed cleanup. A subset never qualifies the whole
 role. Current external-witness limitations mean a real full run remains INCOMPLETE.
+Under `--external-address-fixtures` the two address-denial cases can never earn
+PASS. Without a failing observation, their insufficient external witness keeps
+the report INCOMPLETE; any observed FAIL remains FAIL.
 Exit0 means aggregate PASS;2 means FAIL;78 means INCOMPLETE/configuration refusal;
 3 means I/O failure. An early setup refusal can produce only a fixed stderr
 refusal, without a report.

@@ -95,6 +95,9 @@ def get_binding(
 def project_byteplus_plan_readback(
     holdings: Mapping[str, Any],
     usage: Mapping[str, Any],
+    *,
+    subscription_ref: str | None = None,
+    verified_at_unix: int | None = None,
 ) -> dict[str, Any]:
     """Reduce official BytePlus management readbacks to a NON-authoritative fact.
 
@@ -105,6 +108,7 @@ def project_byteplus_plan_readback(
     or permission for an unattended Coding Plan inference backend.
     """
     from datetime import datetime
+    import re
 
     def refuse(message: str) -> None:
         raise HarnessBindingError("BytePlus readback invalid: " + message)
@@ -175,6 +179,35 @@ def project_byteplus_plan_readback(
         seen[label] = {"used_percent_rounded": percent, "reset_at": reset_at}
     if set(seen) != {"session", "weekly", "monthly"}:
         refuse("missing quota window")
+    # Stable opaque subscription identity comes from the existing account
+    # owner, NEVER from a credential hash: rotating/adding keys creates no quota.
+    if subscription_ref is not None and (
+        type(subscription_ref) is not str
+        or re.fullmatch(r"subscription-[0-9a-f]{64}", subscription_ref) is None
+    ):
+        refuse("opaque owner subscription reference required")
+    if verified_at_unix is not None and (
+        type(verified_at_unix) is not int or verified_at_unix <= 0
+    ):
+        refuse("verification timestamp must be a positive integer")
+    exhausted = [key for key, row in seen.items() if row["used_percent_rounded"] == 100]
+    # All three restrictions apply to the SAME subscription. Do not sum their
+    # remaining percentages, derive request counts or reset at guessed UTC dates.
+    constraints = "UNKNOWN"
+    reasons = []
+    if subscription_ref is None:
+        reasons.append("subscription_identity_not_bound")
+    if verified_at_unix is None:
+        reasons.append("freshness_not_evaluated")
+    elif not 0 <= verified_at_unix - timestamp <= 300:
+        reasons.append("measurement_stale_or_future")
+    else:
+        for key in ("weekly", "monthly"):
+            reset = datetime.fromisoformat(seen[key]["reset_at"]).timestamp()
+            if reset <= verified_at_unix:
+                reasons.append(key + "_reset_requires_new_readback")
+    if not reasons:
+        constraints = "EXHAUSTED" if exhausted else "NOT_EXHAUSTED_ROUNDED"
     # Whitelist only non-identifying control-plane fields. Never copy the
     # viewer/user/account/project profile returned by the authenticated CLI.
     return {
@@ -185,6 +218,15 @@ def project_byteplus_plan_readback(
         "status_reported": "Running",
         "usage_observed_at_unix": timestamp,
         "windows": {key: seen[key] for key in ("session", "weekly", "monthly")},
+        "subscription_ref": subscription_ref,
+        "quota_constraint_state": constraints,
+        "quota_constraint_reasons": reasons,
+        "exhausted_windows": exhausted,
+        "minimum_remaining_percent_rounded": min(
+            100 - row["used_percent_rounded"] for row in seen.values()
+        ),
+        "quota_scope": "ONE_SUBSCRIPTION_ALL_MODELS_AND_KEYS",
+        "independent_concurrency_observed": False,
         "account_identity_attested": False,
         "provider_origin_attested": False,
         "measurement_freshness_attested": False,

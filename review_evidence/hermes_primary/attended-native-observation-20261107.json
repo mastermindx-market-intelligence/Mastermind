@@ -1,0 +1,283 @@
+{
+  "backend_sha256": "887a42fd53cc4d510c1ac9dd0a1db8d52937c342da83a5b98eac07f6ebf47075",
+  "checks": [
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-observational-unit-bounded.log",
+      "passed": 16,
+      "sha256": "c82c74d2458fb41935e23e0eca94d5972cfa3f823b18da970c14a1442243fb56"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-observational-cold-bounded.log",
+      "passed": 17,
+      "sha256": "f42068380527985a0f3ee9b39dc1f05373aee129f2076e383217ca8a9ccd70f4"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-owner-passive-mcp.log",
+      "passed": 25,
+      "sha256": "00b3b619080565334a90ea6bad8d830f462a5dd3980ef31653c1172b5956a66e"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/passive-worker-offline.log",
+      "passed": 74,
+      "sha256": "84ebc5df3d4f6f387f0e43a5aeb7ac5627e0b17cdc2e0aa812e0c4fb977d7fa4"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/passive-backend-node.log",
+      "passed": 78,
+      "sha256": "2a581cb684125d4c65df8984c41cc3cb7f49b5e86090798cf606270f4a1f5939"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/passive-preimage-safety.log",
+      "passed": 7,
+      "sha256": "77ecdaf76b0a4f9f157b08dc741287943417847cdfae17660c5fea600de76490"
+    },
+    {
+      "basis": "retained complete test summary",
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/gateway-observational-full-environment.log",
+      "passed": 115,
+      "sha256": "cbe1c294daf832c6d2af90cb38994ea619f9582e140eae8032b13734663c5f18"
+    }
+  ],
+  "cold_checker": {
+    "cases": [
+      {
+        "actual_backend": false,
+        "authorized": true,
+        "case": "cold_current_enrollment",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": true,
+        "authorized": true,
+        "case": "actual_backend_current_enrollment",
+        "effect_audit": false,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "malformed_current_with_real_good_backup",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "managed_disable",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": true,
+        "authorized": false,
+        "case": "actual_backend_preserves_managed_selector",
+        "effect_audit": false,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "malformed_managed_policy",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "unresolved_managed_permission",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "dangling_managed_policy",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "scalar_permission_enabled",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "scalar_permission_disabled",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "scalar_permission_mcp_allowlist",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "remote_process_backend",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": true,
+        "authorized": false,
+        "case": "actual_backend_preserves_backend_selector",
+        "effect_audit": false,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "deployment_dotenv_backend",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": true,
+        "authorized": false,
+        "case": "actual_backend_preserves_deployment_home",
+        "effect_audit": false,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": false,
+        "case": "dangling_deployment_dotenv",
+        "effect_audit": true,
+        "files_unchanged": true
+      },
+      {
+        "actual_backend": false,
+        "authorized": true,
+        "case": "current_enrollment_after_fixture_changes",
+        "effect_audit": true,
+        "files_unchanged": true
+      }
+    ],
+    "dependency_environment": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home/installs/2cbfac626b7e881b/environments/f2c1707df3dc4ee4bcbc94d67faadc28/venv",
+    "dependency_facts_sha256": "7c61f897fd827727807536427f98a1ca7ab11da5b03e2f4b2ff420222472a1be",
+    "execution_engine_fixture": true,
+    "fixture_home": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home/profiles/fabric-observation-8gq3pvuh",
+    "live_worker_start": false,
+    "native_pm_selection_real": true,
+    "native_source": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-patched",
+    "package_sha256": "c3ce3f07017224947ea9ce28ac6744172c1fa08e767210bfbab23277d39205ee",
+    "passed": 17,
+    "schema": "mastermind.hermes_observational_qualification.v1",
+    "worker_installation_record_fixture": true
+  },
+  "gateway": {
+    "blocked_external_connections": 0,
+    "errors": 0,
+    "failures": 0,
+    "live_provider_acceptance": false,
+    "sdk_constructions": [],
+    "skips": 0,
+    "tests_run": 115
+  },
+  "historical_failed_attempts": {
+    "cold_fixture_entrypoint": {
+      "cause": "Node -e fixture argv matched imported backend executable entry; API check succeeded, incidental main refused at its first missing SDK import before engine construction",
+      "corrected_by": "distinct fixture driver argv",
+      "log": "native-observational-cold.log"
+    },
+    "live_dependency_wrappers": {
+      "classification": "terminal qualification failures; no new inspected-owner dependency or launcher publication and no pending recovery record observed",
+      "exact_ambient_home_attribution": "unavailable",
+      "logs": [
+        "composed-worker-native-installed-dependencies.log",
+        "composed-worker-native-owner-venv.log"
+      ],
+      "zero_historical_startup_effects_claimed": false
+    },
+    "missing_application_member": {
+      "correction": "existing native PM built the actual application adapter member and its declared dependencies",
+      "log": "gateway-observational-composed.log"
+    },
+    "missing_native_mcp_feature": {
+      "correction": "existing native PM selected its declared mcp extra in the marked private home",
+      "log": "native-owner-passive-composed.log"
+    },
+    "remote_backend_refusal": {
+      "cause": "native ConfigBackendUnavailable inherits SystemExit; observation now uses a bounded ValueError refusal",
+      "log": "native-observational-cold-final.log"
+    }
+  },
+  "live_installation": false,
+  "live_provider_acceptance": false,
+  "live_worker_start": false,
+  "native_base": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "native_core_files": {
+    "gateway/run.py": "86fb8733e839f66442fc8219ce236ec5123151a855cc88265a7e3c7f1093cd8c",
+    "gateway/run_turn_prepare.py": "804d9c2ab6438594f7f996ab4d2bdc24bbf6b24cdf5441a84bbbb24151eee2ad",
+    "gateway/run_turn_runner.py": "4d775d0cf16e11838710ff87b62153c010f9c67f30932b0d2695acacb1c7103a",
+    "gateway/session_authority.py": "e4b1dcb9e61a94f39ca620c2349d35d4713b1b4d56943186296ce352cb9816be",
+    "gateway/session_provider_context.py": "6b6f20519b940e473cd72827c9ffe6534d8c8bc297f9d84cf4a9b44959b7c833",
+    "hermes_cli/cli_agent_setup_mixin.py": "2aef5fda6f5bd6687bd675027d12ed0a7c867d17c642569fa5f7496d8d133d66",
+    "hermes_cli/config.py": "04b0ec7de32e1176ad3b5d6cefc64045e6b6287664d8a84487d75801745d8b68",
+    "hermes_cli/config_backend.py": "cfd705a149f035608be3fce39b3a2ad76476996869ed6c50e99898d54571a392",
+    "hermes_cli/env_loader.py": "120920ee41470c9b0e4fd9d086861e0909de136256298eee8f88056f165bc416",
+    "hermes_cli/inventory.py": "c3482f95bec4262f89d45b3bf24ac31964a89065c84fac496bc011465fdd5b8d",
+    "hermes_cli/managed_scope.py": "8f1ac561bb24853432c6e546888aa83cf0fa793de5d75e401ce7a5260660b4ec",
+    "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+    "hermes_cli/runtime_provider.py": "b85334ca6ef45a24c7c37a311b66b4ec5f700ed2a3b9b55d097f01dd19fae515",
+    "hermes_cli/runtime_provider_host.py": "39caeb4b4653b3db25b8a237912f6fcc2b3f0529f8f9f3899a41a4fb7fa8f6cc",
+    "pm/workspace.py": "2a92aed9e291860e6bb8a782b34e76f54a0a9f735533f5c1c05c3311e74bdbe5",
+    "providers/base.py": "018fb53d9213b4e3a5fe79522bca60e920569a7ddbbadecf79c55e64328d13fe",
+    "tests/hermes_cli/test_config_observational.py": "d1b7f5e79a94beae4bf85b67510c241bbb34afad980c2c830d81205baded28b1",
+    "tests/pm/test_buildable_multi_home.py": "f5a45eefd277ffaa7f25e483edfa50501d70e87cc98ec0a74dcc61f1561abcd8",
+    "ui-tui/src/__tests__/modelPickerHostBound.test.tsx": "bcaf428f6757f0b9b3a69d48f2dc6815b2337d2dda06c34d969dcbb23a94209c",
+    "ui-tui/src/components/modelPicker.tsx": "e102fcbb23997fc94eb4d984f2cf0f0ed357577b004502c34a3e6244c8fdacce"
+  },
+  "native_owner": {
+    "bootstrap_recovery_and_activation_fenced_in_harness": true,
+    "dependency_environment": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home/installs/2cbfac626b7e881b/environments/64dcbb4141c745deabbb36f3a72b2859/venv",
+    "errors": 0,
+    "execution_engine_fixture": true,
+    "failures": 0,
+    "fixture_home": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home",
+    "live_worker_start": false,
+    "native_pm_selection_real": true,
+    "native_source": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-patched",
+    "network_attempts": [],
+    "schema": "mastermind.hermes_native_owner_qualification.v1",
+    "skips": 0,
+    "tests": 25
+  },
+  "native_patch_sha256": "631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541",
+  "observed_at": "2026-11-07T19:04:24.050398+00:00",
+  "operation": "hermes-native-worker-binding-20261107-c2",
+  "original_j_and_held_reload_untouched": true,
+  "prior_15_native_postimages_unchanged": true,
+  "production_acceptance": false,
+  "production_feature_owner": "hermes pm install --extra mcp",
+  "qualification_pm_application_member": "/Volumes/Mastermind 2/agent-workspaces/web/hermes-native-worker-binding-20261107-c2/integrations/hermes_application_fabric",
+  "qualification_pm_current_environment": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home/installs/2cbfac626b7e881b/environments/083480fc0778415596b16671f0e9d8a9/venv",
+  "qualifier_fixtures": {
+    "final_execution_engine": true,
+    "startup_recovery_launcher_and_activation_fenced": true,
+    "worker_install_record": true
+  },
+  "remaining": [
+    "compose current original carriers without overwriting active writers",
+    "committed-source live preimage/rollback readback and required CI",
+    "protected accepted release and existing native activation",
+    "current original APPLICATION/worker service enrollment and live request/retained-result/parent-consumption acceptance"
+  ],
+  "schema": "mastermind.hermes_native_observation_integration.v1",
+  "source_candidate": "workspace-sha256:2ba04e6e590c87d94ecc027f407de1601eb6133c921041222038c33b952eed01",
+  "source_parent": "0ca1b1ca71d080ca1d10a4574592b83be01369a1",
+  "worker_package_sha256": "c3ce3f07017224947ea9ce28ac6744172c1fa08e767210bfbab23277d39205ee"
+}

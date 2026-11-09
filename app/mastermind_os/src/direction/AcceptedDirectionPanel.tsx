@@ -53,13 +53,40 @@ export function AcceptedDirectionPanel({ selection, read, sourceGeneration, canR
   const [held, setHeld] = useState<Held | null>(null);
   const [inspected, setInspected] = useState<string | null>(null);
   const seq = useRef(0), abort = useRef<AbortController | null>(null);
+  /** Selected inspector heading, focused only by an explicit history gesture. */
+  const inspectorHeading = useRef<HTMLHeadingElement | null>(null);
+  /** One-shot gesture request; consumed or discarded in the commit that follows it. */
+  const focusIntent = useRef<string | null>(null);
   const current = useRef({ read, sourceGeneration, canRead, workRef, generation, permitted });
   current.current = { read, sourceGeneration, canRead, workRef, generation, permitted };
   useLayoutEffect(() => {
-    seq.current += 1; abort.current?.abort(); setHeld(null); setInspected(null);
+    seq.current += 1; abort.current?.abort(); setHeld(null); setInspected(null); focusIntent.current = null;
     return () => { seq.current += 1; abort.current?.abort(); };
   }, [read, sourceGeneration, canRead, workRef, generation, permitted]);
   const visible = permitted && held !== null && held.reader === read && held.workRef === workRef && held.generation === generation ? held : null;
+  /** Publish the pending gesture: recheck the exact visible issued value and its live
+   * owners before focusing; resolve or discard the intent immediately, never revive it.
+   */
+  const publishGestureFocus = (wanted: string) => {
+    focusIntent.current = null;
+    const live = current.current;
+    let liveGeneration = NaN;
+    try {
+      liveGeneration = live.sourceGeneration?.() ?? NaN;
+      if (live.canRead?.() !== true || liveGeneration !== live.generation) return;
+    } catch { return; }
+    if (!live.permitted || visible === null || visible.status !== "ok") return;
+    if (visible.reader !== live.read || visible.workRef !== live.workRef || visible.generation !== liveGeneration) return;
+    if (selectedRevision?.decision_ref !== wanted) return;
+    const heading = inspectorHeading.current;
+    if (!heading || !heading.isConnected) return;
+    heading.focus();
+    if (typeof heading.scrollIntoView === "function") heading.scrollIntoView({ block: "start" });
+  };
+  useLayoutEffect(() => {
+    const wanted = focusIntent.current;
+    if (wanted !== null) publishGestureFocus(wanted);
+  });
   const load = async () => {
     if (!permitted || !read || !workRef) return;
     try {
@@ -121,7 +148,12 @@ export function AcceptedDirectionPanel({ selection, read, sourceGeneration, canR
         <div className="accepted-direction__history-body">
           <ol>{[direction.current, ...direction.history.revisions].map(row => <li key={row.decision_ref}>
             <button type="button" aria-pressed={selectedRevision?.decision_ref === row.decision_ref}
-              onClick={() => setInspected(row.decision_ref === direction.current.decision_ref ? null : row.decision_ref)}>
+              onClick={() => {
+                const wanted = row.decision_ref;
+                if (selectedRevision?.decision_ref === wanted) { publishGestureFocus(wanted); return; }
+                focusIntent.current = wanted;
+                setInspected(wanted === direction.current.decision_ref ? null : wanted);
+              }}>
               <span>{row.decision_ref === direction.current.decision_ref && <strong>{zh ? "当前 · " : "Current · "}</strong>}{row.answer}</span>
               <time dateTime={row.decided_at}>{row.decided_at}</time>
             </button>
@@ -129,10 +161,15 @@ export function AcceptedDirectionPanel({ selection, read, sourceGeneration, canR
           {selectedRevision && <article className="accepted-direction__previous" aria-label={previous
             ? zh ? "历史方向，只读" : "Previous Direction, read only"
             : zh ? "所选当前方向，只读" : "Selected current Direction, read only"}>
-            <h4>{previous ? zh ? "历史修订 · 只读" : "Previous revision · Read only" : zh ? "当前修订 · 只读" : "Current revision · Read only"}</h4>
+            <h4 ref={inspectorHeading} tabIndex={-1}>{previous ? zh ? "历史修订 · 只读" : "Previous revision · Read only" : zh ? "当前修订 · 只读" : "Current revision · Read only"}</h4>
             <p>{selectedRevision.answer}</p><p>{selectedRevision.rationale}</p>
             <RevisionDetails revision={selectedRevision} zh={zh} />
-            {previous && <button type="button" onClick={() => setInspected(null)}>{zh ? "查看当前方向" : "View current Direction"}</button>}
+            {previous && <button type="button" onClick={() => {
+              const wanted = direction.current.decision_ref;
+              if (selectedRevision?.decision_ref === wanted) { publishGestureFocus(wanted); return; }
+              focusIntent.current = wanted;
+              setInspected(null);
+            }}>{zh ? "查看当前方向" : "View current Direction"}</button>}
           </article>}
         </div>
       </div>

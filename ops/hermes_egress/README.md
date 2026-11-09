@@ -10,10 +10,10 @@ any real bot.
 
 ## Fixed contract
 
-| Source unit | Exact proxy socket | Only CONNECT destination |
+| Source unit | Exact proxy socket | Only CONNECT destinations |
 | --- | --- | --- |
-| `hermes-runtime-mmsecretary.service` | `127.0.0.2:18651` | `ark.ap-southeast.bytepluses.com:443` |
-| `hermes-runtime-mmmeta.service` | `127.0.0.3:18652` | `api.z.ai:443` |
+| `hermes-runtime-mmsecretary.service` | `127.0.0.2:18651` | `ark.ap-southeast.bytepluses.com:443`, `mcp.mastermind-x.com:443`, `dev-eo0jf8us5mup7wd5.us.auth0.com:443` |
+| `hermes-runtime-mmmeta.service` | `127.0.0.3:18652` | `api.z.ai:443`, `mcp.mastermind-x.com:443`, `dev-eo0jf8us5mup7wd5.us.auth0.com:443` |
 
 The Squid config defines two `http_port` listeners in one process, gates
 access by `myportname`, exact `dstdomain -n` host (without a leading dot),
@@ -25,6 +25,28 @@ are **no generic allow-lists, wildcard domains, open forward HTTP
 requests, TLS interception, CA injection or bearer token handling** in
 the proxy. The Hermes native client continues verifying HTTPS TLS itself.
 Squid cannot see encrypted HTTP bodies or bearer values inside CONNECT.
+
+Each allowed host is its own exact-hostname ACL with exactly one hostname, so
+no host inherits another one's permission, and each allow line names exactly
+one socket ACL, one host ACL, `CONNECT` and the 443 port. Both roles use
+their own native OS consumer and the two exact OS/issuer hosts. Each listener
+retains its original model vendor and separate host ACLs. Selecting the Meta
+evaluation-input receiver does not activate this host policy or a service.
+The private/loopback deny precedes every
+allow, so a rebinding or misconfigured DNS answer cannot reach an allowed
+hostname through a forbidden address, and the final `deny all` remains the
+fail-closed boundary.
+
+### What a CONNECT ACL can and cannot constrain
+
+A `dstdomain`/`port` pair constrains the **CONNECT target hostname and port
+only**. It cannot see the request paths inside the TLS session, so it does
+**not** constrain which OAuth endpoints are called on
+`dev-eo0jf8us5mup7wd5.us.auth0.com`, and it does not prove that the peer at
+`mcp.mastermind-x.com` is the real origin. The application TLS stack and the
+native OAuth owner still enforce the actual issuer and endpoints. A passing
+Squid parse and a passing static policy test prove neither the host network
+policy nor the issuer identity.
 
 The default proxy is still a **trusted host component** and can make
 remote TCP connections to the approved vendors. A config file, or a
@@ -121,6 +143,17 @@ Ubuntu shell:
    A permitted 127.0.0.1/32 address permits every port on that address; the
    absence of a broad forwarding service is a mandatory host condition,
    not something this address filter or a successful vendor call proves.
+7. Each role's two exact OS/issuer hosts
+   (`mcp.mastermind-x.com`, `dev-eo0jf8us5mup7wd5.us.auth0.com`) must be
+   reachable as a CONNECT tunnel through that role's own proxy socket.
+   From inside the actual role cgroup, reaching the sibling socket must
+   still be denied even though both sockets permit these hostnames. Test
+   each host from each role; a Secretary success is no Meta receipt.
+   A subdomain of either host, an IP
+   literal carrying a matching PTR record, and any port other than 443 must
+   be denied. Such a tunnel proves only the hostname-and-port constraint; the
+   TLS client and the native OAuth owner still have to prove the real issuer
+   and the real endpoint.
 
 **Source tests are not those receipts.** CI runs static ACL tests plus
 the distro Squid parser; it never binds sockets or sends network requests.

@@ -3409,6 +3409,7 @@ def test_claude_broker_uses_common_codex_validation_adapter(tmp_path: Path) -> N
         adapter_id="claude-code",
         validation_adapter=validation_adapter,
         validation_adapter_id="codex-cli",
+        native_realm_guard=lambda: None,  # reviewed-only, no provider work fixture
     )
     # Exact class plus reviewed-construction binding stay active on both sides.
     assert type(broker_obj.adapter) is ClaudeCodeWorkerAdapter

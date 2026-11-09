@@ -138,10 +138,10 @@
   align-items: center;
   gap: var(--sp-3);
   min-height: var(--sp-8);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-ctl);
+  padding: 0;
+  justify-content: space-between;
+  background: transparent;
+  border: 0;
 }
 
 .mm-project-workspace__status-panel,
@@ -150,6 +150,13 @@
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+}
+.mm-project-workspace__status-panel {
+  flex: 1 1 180px;
+  flex-wrap: wrap;
+}
+.mm-project-workspace__pause-slot {
+  flex: 0 0 auto;
 }
 
 /* Conversation and composer stay unboxed: owner content renders directly,
@@ -162,6 +169,16 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* Paper AT03 / AT03M: a short conversation leaves room for the composer near
+   the lower viewport edge. The space belongs to the conversation itself, not
+   flex auto-margin: opening the Files/Details disclosure below the composer
+   must not shift the conversation/composer position. Long content can grow
+   normally; no sticky overlay, fixed positioning, or artificial scroll owner. */
+.mm-project-workspace__conversation {
+  min-height: max(0px, calc(100vh - 505px));
+  min-height: max(0px, calc(100dvh - 505px));
 }
 
 .mm-project-workspace__disclosures {
@@ -228,7 +245,6 @@
 
 /* Light theme: white panel surface, hairline border, modest shadow, all
    derived from existing tokens. */
-.shell[data-theme='light'] .mm-project-workspace__status-strip,
 .shell[data-theme='light'] .mm-project-workspace__disclosure {
   background: var(--panel);
   border-color: var(--border);
@@ -241,6 +257,12 @@
 }
 
 @media (max-width: 640px) {
+  /* Paper AT03M: dynamic viewport height accommodates browser chrome and
+     the keyboard without pinning the composer over the active conversation. */
+  .mm-project-workspace__conversation {
+    min-height: max(0px, calc(100vh - 520px));
+    min-height: max(0px, calc(100dvh - 520px));
+  }
   .mm-project-workspace__header { grid-template-columns: minmax(0,1fr); }
   .mm-project-workspace__controls { grid-column: 1; grid-row: 3; justify-content: flex-start; }
   .mm-project-workspace {
@@ -254,15 +276,29 @@
   }
 
   .mm-project-workspace__status-strip {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .mm-project-workspace__disclosure-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mm-project-workspace__disclosure-head > .mm-project-workspace__section-title {
+    min-width: 0;
   }
 
   .mm-project-workspace__close {
-    width: 100%;
+    width: auto;
+    min-width: var(--sp-8);
   }
 
   .mm-project-workspace__disclosure {
     padding: var(--sp-5);
   }
 }
+
+.mm-project-workspace__launch { min-width: 0; }
+.mm-project-workspace__launch:empty { display: none; }

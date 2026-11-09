@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { openObservedConversation } from "./test-operational-navigation";
+const gesture = {click: async (element: HTMLElement) => {fireEvent.click(element);}};
 import { bindMissionHost, createNativeClient } from "./host";
 import { controlRoomFixture } from "./test-fixtures";
 import programs from "./fixtures/programs-available-workspace-service.json";
@@ -52,7 +54,7 @@ async function prepare({ foreignConversation = false } = {}) {
   window.MastermindMissionHost = host;
   render(<App />);
   if (!foreignConversation) {
-    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+    await openObservedConversation(gesture);
     await screen.findByText(destination.window.view.items.find(item => item.text)!.text!);
     fireEvent.click(screen.getByRole("button", { name: "Unsent notes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Unsent notes" }), { target: { value: originalDraft } });
@@ -60,24 +62,30 @@ async function prepare({ foreignConversation = false } = {}) {
   fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   fireEvent.click(await screen.findByRole("button", { name: "Open project Qualified instruction project" }));
   fireEvent.click(await screen.findByRole("button", { name: "Project details" }));
+  // The details navigator hides each owner until its overview button chooses
+  // it; choosing Standing instructions is presentation-only and reads nothing.
+  fireEvent.click(screen.getByRole("button", { name: "Standing instructions" }));
   fireEvent.click(screen.getByRole("button", { name: "Read instructions" }));
   fireEvent.click(await screen.findByRole("button", { name: /Review instruction:/ }));
   const change = screen.getByRole("button", { name: "Change in conversation" });
   return { host, invoke, change };
 }
-function draftText() {
-  fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+async function draftText() {
+  await openObservedConversation(gesture);
   if (!screen.queryByRole("textbox", { name: "Unsent notes" }))
     fireEvent.click(screen.getByRole("button", { name: "Unsent notes" }));
   return (screen.getByRole("textbox", { name: "Unsent notes" }) as HTMLTextAreaElement).value;
 }
 function noPublication(invoke: ReturnType<typeof vi.fn>) {
-  expect(invoke.mock.calls.some(([name]) => /submit|prepare|send|create|source_operation|pause|resume/.test(String(name)))).toBe(false);
+  // This fixed context command is a READ, independently of the source writer.
+  // Every prepare/submit/send or other source-operation call remains forbidden.
+  expect(invoke.mock.calls.filter(([name]) => name !== "read_source_operation_context" &&
+    /submit|prepare|send|create|source_operation|pause|resume/.test(String(name))).map(([name])=>name)).toEqual([]);
 }
 it("adds only to the genuine current owner/work draft through the existing revision witness", async () => {
   const e = await prepare(); expect((e.change as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(e.change);
-  const text = draftText();
+  const text = await draftText();
   expect(text.startsWith(originalDraft + "\n\n")).toBe(true);
   expect(text).toContain("“Review the project carefully.”");
   expect(text).toContain("INS:DAILY-ONE");
@@ -90,7 +98,7 @@ it("refuses no-render CONTENT revocation while Acquisition and the rendered inst
   fireEvent.click(e.change);
   expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Projects");
   state.mockRestore();
-  expect(draftText()).toBe(originalDraft); noPublication(e.invoke);
+  expect(await draftText()).toBe(originalDraft); noPublication(e.invoke);
 });
 it("refuses same-host generation drift without a notification or replacement destination", async () => {
   const e = await prepare(), previous = e.host.invalidationGeneration!();
@@ -98,7 +106,7 @@ it("refuses same-host generation drift without a notification or replacement des
   fireEvent.click(e.change);
   expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Projects");
   generation.mockRestore();
-  expect(draftText()).toBe(originalDraft); noPublication(e.invoke);
+  expect(await draftText()).toBe(originalDraft); noPublication(e.invoke);
 });
 it("refuses an unwitnessed host-owner replacement even with identical public auth flags and generation", async () => {
   const e = await prepare();
@@ -107,7 +115,7 @@ it("refuses an unwitnessed host-owner replacement even with identical public aut
   fireEvent.click(e.change);
   expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Projects");
   window.MastermindMissionHost = e.host;
-  expect(draftText()).toBe(originalDraft); noPublication(e.invoke);
+  expect(await draftText()).toBe(originalDraft); noPublication(e.invoke);
 });
 it("keeps instruction reading independent but never supplies a draft callback for a foreign Mission/window tuple", async () => {
   const e = await prepare({ foreignConversation: true });
