@@ -23,6 +23,19 @@
       ],
       "run_id": null,
       "thread_id": null
+    },
+    {
+      "author_ref": "github:mastermindxryan",
+      "body": "Source-only MCP lifecycle extension delivered against an isolated public pingdotgg/t3code checkout at exact upstream commit 0770446869d247a8b28c27d7ed93f47f8ff0c1e4 (requested ref 0770446). New t3_thread_lifecycle tool in apps/server/src/mcp/toolkits/thread: guarded archive/unarchive, exact-target-confirmed delete (expectedTitle plus expectedUpdatedAt; native thread.delete tombstone; no files or worktrees removed), and idle model change restricted to the thread's current provider instance (Capacity Fabric here; provider switches refused). Built on McpToolAccess.writesThreads plus native ThreadManagement/Orchestrator commands; no new DB/queue/auth. Checks: focused tests 11/11 (stale snapshot, live/queued run, pending request, active child agent, provider-instance and replay-after-commit refusals); neighbor McpToolAccess suites 83/83; apps/server typecheck clean; vp run check:changed fully green after vp fmt and agentContextBudget.json 48116->49440 for the added tool. Deliverables in the requesting session workspace: candidate.patch (528 lines) and test-report.md beside the isolated checkout t3code/. LIMITS: expected-snapshot preconditions are advisory check-then-act read before dispatch, NOT CAS; the commit boundary is the orchestrator's serialized per-thread dispatch with native commandId receipt dedupe; native delete also cancels work and covers side chats; model change is same-instance only. NOT deployed, NOT pushed, NOT accepted upstream; model-behavior evals over the changed tool description and client surfaces not run. Original ordinal3 lifecycle task preserved; this note records the ordinal4 follow-up run.",
+      "kind": "result",
+      "note_id": "native-t3-lifecycle-result",
+      "recorded_at": "2026-11-09T11:36:04Z",
+      "references": [
+        "https://github.com/pingdotgg/t3code/commit/0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2374#issuecomment-6738728858"
+      ],
+      "run_id": "ordinal4",
+      "thread_id": "mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93"
     }
   ],
   "mission_id": "t3-session-control-v3",
