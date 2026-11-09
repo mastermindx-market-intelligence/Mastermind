@@ -20,7 +20,12 @@ from integrations.hermes_github_native import (
 from integrations.hermes_harness.native_tool_registration import _loading_mode_refusal
 
 PLUGIN_NAME = "mmx_github"
-_SLOT = "_mastermind_github_app_host"
+# One reviewed manager slot attribute, named in the host-port precedent of
+# ``integrations/hermes_harness/native_executive_consumer.py``
+# (``CONSUMER_SLOT_ATTRIBUTE``). It is a Python attribute, not an account or
+# service identity, so it never carries the identity-name prefix the release
+# identity guard reserves for principals.
+GITHUB_APP_HOST_SLOT_ATTRIBUTE = "_mmx_github_app_host"
 
 
 class GitHubPluginHost:
@@ -57,7 +62,7 @@ class GitHubPluginHost:
 
     def is_current(self) -> bool:
         return (not self._closed
-                and getattr(self._manager, _SLOT, None) is self
+                and getattr(self._manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE, None) is self
                 and self._manager.scope_key == self._scope
                 and self._binding.is_current())
 
@@ -98,8 +103,8 @@ class GitHubPluginHost:
                         self.cleanup_error = error
                         raise NativeToolRegistrationError("GITHUB_PLUGIN_UNLOAD_EFFECT_UNKNOWN") from None
                 # A stale unload callback must never remove a later host binding.
-                if getattr(self._manager, _SLOT, None) is self:
-                    delattr(self._manager, _SLOT)
+                if getattr(self._manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE, None) is self:
+                    delattr(self._manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE)
 
 
 def bind_native_host(manager: Any, *, binding: HostHermesGitHubBinding,
@@ -129,7 +134,7 @@ def bind_native_host(manager: Any, *, binding: HostHermesGitHubBinding,
         raise NativeToolRegistrationError("GITHUB_PLUGIN_PACKAGE_INVALID")
     path = path.resolve()
     with replacement_coordinator.transaction():
-        existing = getattr(manager, _SLOT, None)
+        existing = getattr(manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE, None)
         if existing is not None:
             if (type(existing) is GitHubPluginHost
                     and existing._manager is manager
@@ -140,7 +145,7 @@ def bind_native_host(manager: Any, *, binding: HostHermesGitHubBinding,
             raise NativeToolRegistrationError("GITHUB_PLUGIN_HOST_ALREADY_BOUND")
         slot = GitHubPluginHost(manager, binding=binding, issuer=issuer,
                                 app_bot_login=app_bot_login, package_path=path)
-        setattr(manager, _SLOT, slot)
+        setattr(manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE, slot)
         return slot
 
 
@@ -150,7 +155,7 @@ def register_from_host(ctx: Any, *, package_path: Path):
 
     if type(ctx) is not PluginContext:
         raise NativeToolRegistrationError("GITHUB_PLUGIN_CONTEXT_INVALID")
-    slot = getattr(ctx._manager, _SLOT, None)
+    slot = getattr(ctx._manager, GITHUB_APP_HOST_SLOT_ATTRIBUTE, None)
     if slot is None:
         return None  # ordinary unbound discovery is inert
     if type(slot) is not GitHubPluginHost or slot._manager is not ctx._manager:
