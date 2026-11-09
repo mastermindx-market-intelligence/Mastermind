@@ -1303,6 +1303,578 @@ def _r7_glob_head_names_wrapper(text: str) -> bool:
     return False
 
 
+# --- r10: the lexer reading (REVIEW5 N1 MAJOR) -------------------------------
+#
+# Every earlier reading finds construct extents with a quote-UNAWARE bracket
+# matcher (``_r8_construct_spans``) or regex (``_R6_COMPUTED_RE``), so a
+# quoted, escaped or commented bracket inside a construct
+# (``$(: "("; printf p)ool``, ``$(: \(; …)``, ``$(printf p # (⏎)ool``,
+# ``${x:-p${y#"}"}}ool``) throws the extent off and the glued word is never
+# read. r10 adds a reading driven by a quote-aware shell scanner — dedicated
+# to SCOPE and not shared with ``_r7_parse`` (whose refusals must not move):
+# like ``_r6_lex`` it reads quotes, escapes, ``$'…'``/``$"…"`` and every
+# ``$``-construct with real nesting, and it ALSO reads what ``_r6_lex`` cannot
+# (an ``_r6_lex``-only reading measured both an escape and a regression):
+#
+# * comments (a ``#`` at a word start, also inside ``$(…)``);
+# * here-documents at every level, ``<<``/``<<-``, quoted or not, including
+#   inside ``$(…)`` (``git commit -m "$(cat <<'EOF' … don't … EOF)"`` —
+#   ``_r6_lex`` fails on the apostrophe, so "lex failure → in scope" would
+#   refuse every such armed commit); bodies are read as script AND, when the
+#   delimiter is unquoted, for the expansions the shell performs in them;
+# * a ``case`` command inside ``$(…)``/``<(…)`` — its pattern ``)`` does not
+#   close the substitution (zsh runs ``$(case x in x) printf p;; esac)ool``)
+#   — is not modelled: FAIL CLOSED;
+# * ``${…}`` extents the shells disagree on: bash 3.2 ends ``${x:-{}`` at
+#   the first ``}`` (``x=p; ${x:-{}ool`` runs ``pool``), zsh counts braces —
+#   FAIL CLOSED unless the two ends differ only by ``}`` characters
+#   (``${{ github.token }}``, ``${CONFIG:-{}}``: same continuation); and a
+#   ``'`` inside ``"${…}"`` (bash 3.2: a quote; zsh: literal) — FAIL CLOSED.
+#
+# Each word becomes items for the r8 spelling DP: literal text (unquoted,
+# quoted, escaped, decoded ``$'…'``) → ``lit``; ``${…}`` → r8's construct
+# items; ``$name``, ``$(…)``, ``$((…))``, ``$[…]``, backticks, ``<(…)`` →
+# ``any``. Construct bodies are read recursively; so is every literal run of
+# a word that holds ``$`` or a backtick (``bash -c '…'``, ``eval "…"``, a
+# backslash-escaped ``\$(…)``) — that text is a script if a shell gets it.
+#
+# Outcomes: a word that can spell a wrapper → in scope. An unterminated
+# ``$(``/``<(`` (the reviewer's "lex failure → in scope" rule, kept for the
+# constructs), nesting deeper than the cap, a ``case`` in a substitution, a
+# brace/quote disagreement, or more than ``_R10_MAX_RESYNCS`` unterminated
+# quotes → in scope (fail closed). An unterminated QUOTE or backtick is a
+# syntax error the shell refuses too (zsh refuses the whole ``-c`` text; bash
+# has already run the earlier lines, which this reading has already read):
+# the reading resynchronises one character after the opening quote and reads
+# the rest as script — never narrower than the shell. A ``${``/``$[`` with no
+# ``}``/``]`` anywhere after it is read as literal text (both shells refuse
+# it). Text without ``$`` or a backtick cannot compute a word (glob and brace
+# patterns are the partial reader's): the reading returns at once.
+#
+# Cost: one scan per text; a body or literal run is re-read at most once per
+# nesting level (cap ``_R10_MAX_DEPTH``) and each text at most
+# ``_R10_MAX_RESYNCS`` + 1 times; delimiters are found with a C-level regex.
+
+#: Construct nesting the r10 reading descends into (a ``$(…)`` chain of k
+#: constructs reaches depth k); deeper is in scope. Matches r9's boundary:
+#: k ≤ 9 out, k ≥ 10 in (``test_r9_construct_depth_boundary_…``).
+_R10_MAX_DEPTH = 9
+#: Unterminated quotes per text before the reading gives up (fail closed).
+_R10_MAX_RESYNCS = 4
+_R10_PLAIN_RE = re.compile(r"[^ \t\n;&|<>()'\"\\`$]+")
+_R10_BLANKS_RE = re.compile(r"[ \t]+")
+_R10_DQ_PLAIN_RE = re.compile(r'[^"\\`$]+')
+_R10_BRACE_PLAIN_RE = re.compile(r"[^{}'\"\\`$]+")
+_R10_BRACKET_PLAIN_RE = re.compile(r"[^\[\]'\"\\`$]+")
+_R10_EXPAND_RE = re.compile(r"[\\`$]")
+_R10_BACKTICK_BODY_RE = re.compile(r"(?:[^`\\]|\\.)*`", re.S)
+_R10_ANSI_BODY_RE = re.compile(r"(?:[^'\\]|\\.)*'", re.S)
+_R10_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_R10_DELIMITER_RUN_RE = re.compile(r"[^ \t\n;&|<>()'\"\\]+")
+#: Words after which the next word is still in command position.
+_R10_KEEP_COMMAND_POSITION = frozenset({
+    "!", "{", "do", "elif", "else", "if", "then", "time", "until", "while",
+})
+
+
+class _R10Found(Exception):
+    """A word can spell a wrapper: in scope."""
+
+
+class _R10Fail(Exception):
+    """Unreadable or unmodelled text holding a construct: in scope."""
+
+
+class _R10Stop(Exception):
+    """An unterminated quote/backtick opened at ``position`` (lenient)."""
+
+    def __init__(self, position: int) -> None:
+        super().__init__(position)
+        self.position = position
+
+
+class _R10Word:
+    """Items of one shell word, and the literal runs between its computed
+    parts. A run is re-read as script when a QUOTED or escaped piece of it
+    holds ``$`` or a backtick (deferred text: ``bash -c '$(…)'``); an
+    unquoted literal ``$`` (``${`` with no ``}`` after it) was already read
+    as script here and is not re-read."""
+
+    __slots__ = ("items", "runs", "run", "live", "quoted")
+
+    def __init__(self) -> None:
+        self.items: list = []
+        self.runs: list[str] = []
+        self.run: list[str] = []
+        self.live = False
+        self.quoted = False
+
+    def lit(self, text: str, *, deferred: bool = True) -> None:
+        if text:
+            self.items.append(("lit", text.lower()))
+            self.run.append(text)
+            if deferred and ("$" in text or "`" in text):
+                self.live = True
+
+    def flush(self) -> None:
+        if self.run and self.live:
+            self.runs.append("".join(self.run))
+        self.run = []
+        self.live = False
+
+    def computed(self, items: list) -> None:
+        self.items.extend(items)
+        self.flush()
+
+    def plain(self) -> str:
+        """The word's text when it is wholly unquoted literal (else "")."""
+        if self.quoted or any(kind != "lit" for kind, _ in self.items):
+            return ""
+        return "".join(text for _, text in self.items)
+
+
+def _r10_read(text: str, depth: int) -> None:
+    """Read ``text`` as a script (raises ``_R10Found``/``_R10Fail``)."""
+    if "$" not in text and "`" not in text:
+        return  # nothing computed: literal and glob words are read elsewhere
+    if depth > _R10_MAX_DEPTH:
+        raise _R10Fail()
+    reader = _R10Text(text)
+    position = 0
+    for _ in range(_R10_MAX_RESYNCS + 1):
+        try:
+            reader.script(position, depth, None)
+            return
+        except _R10Stop as stop:
+            position = stop.position + 1
+    raise _R10Fail()
+
+
+def _r10_judge(word: _R10Word, depth: int) -> None:
+    word.flush()
+    items = word.items
+    if items:
+        if all(kind == "lit" for kind, _ in items):
+            value = "".join(text for _, text in items)
+            if value.rsplit("/", 1)[-1] in _R6_WRAPPER_BASENAMES:
+                raise _R10Found()
+        else:
+            compact: list = []
+            for item in items:
+                if not (item[0] == "any" and compact and compact[-1][0] == "any"):
+                    compact.append(item)
+            if not all(kind == "any" for kind, _ in compact) and any(
+                _r8_items_spell(compact, name) for name in _R6_WRAPPER_BASENAMES
+            ):
+                raise _R10Found()
+    for run in word.runs:
+        _r10_read(run, depth + 1)
+
+
+class _R10Text:
+    """The r10 scanner over one text (see the block comment above)."""
+
+    __slots__ = ("text", "size", "last_brace", "last_bracket", "last_paren")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.size = len(text)
+        self.last_brace = text.rfind("}")
+        self.last_bracket = text.rfind("]")
+        self.last_paren = text.rfind(")")
+
+    # -- script -----------------------------------------------------------
+    def script(self, index: int, depth: int, closer: str | None) -> int:
+        """Read script text from ``index``; with ``closer`` ``")"`` return the
+        index just past the ``)`` that closes the substitution."""
+        if depth > _R10_MAX_DEPTH:
+            raise _R10Fail()
+        text, size = self.text, self.size
+        word: _R10Word | None = None
+        paren = 0
+        command_position = True
+        target_next = False
+        pending: list[tuple[str, bool, bool]] = []
+
+        def finish() -> None:
+            nonlocal word, command_position, target_next
+            if word is None:
+                return
+            done, word = word, None
+            _r10_judge(done, depth)
+            if target_next:
+                target_next = False
+                return
+            plain = done.plain()
+            if closer and command_position and plain == "case":
+                raise _R10Fail()  # pattern ``)`` would close the substitution
+            if command_position:
+                command_position = (
+                    plain in _R10_KEEP_COMMAND_POSITION
+                    or bool(_R6_ASSIGNMENT_RE.match(plain))
+                )
+
+        while index < size:
+            char = text[index]
+            if char == " " or char == "\t":
+                finish()
+                index = _R10_BLANKS_RE.match(text, index).end()
+                continue
+            if char == "\n":
+                finish()
+                command_position = True
+                index += 1
+                if pending:
+                    index = self.heredoc_bodies(index, depth, pending)
+                    pending = []
+                continue
+            if char == "\\":
+                if text.startswith("\n", index + 1):
+                    index += 2  # line continuation
+                    continue
+                if word is None:
+                    word = _R10Word()
+                word.quoted = True
+                word.lit(text[index + 1:index + 2] or "\\")
+                index += 2
+                continue
+            if char == "#" and word is None:
+                newline = text.find("\n", index)
+                index = size if newline < 0 else newline
+                continue
+            if char in ";&|<>()":
+                finish()
+                if char in "<>" and text.startswith("(", index + 1):
+                    word = _R10Word()  # process substitution: a computed word
+                    index = self.substitution(index + 2, depth)
+                    word.computed([("any", "")])
+                    continue
+                if char == "(":
+                    paren += 1
+                    command_position = True
+                    index += 1
+                    continue
+                if char == ")":
+                    index += 1
+                    if paren:
+                        paren -= 1
+                    elif closer:
+                        return index
+                    continue
+                if text.startswith("<<", index) and not text.startswith("<<<", index):
+                    strip = text.startswith("<<-", index)
+                    index = self.heredoc_word(index + (3 if strip else 2), pending, strip)
+                    continue
+                operator = next(op for op in _R6_OPERATORS if text.startswith(op, index))
+                index += len(operator)
+                if operator in _R6_LIST_OPERATORS or operator in _R6_PIPE_OPERATORS:
+                    command_position = True
+                else:
+                    target_next = True  # a redirection target follows
+                continue
+            if word is None:
+                word = _R10Word()
+            if char == "'":
+                close = text.find("'", index + 1)
+                if close < 0:
+                    raise _R10Stop(index)
+                word.quoted = True
+                word.lit(text[index + 1:close])
+                index = close + 1
+                continue
+            if char == '"':
+                word.quoted = True
+                index = self.double(index + 1, depth, word)
+                continue
+            if char == "`":
+                index = self.backtick(index, depth, word, in_dq=False)
+                continue
+            if char == "$":
+                index = self.dollar(index, depth, word, quoted=False)
+                continue
+            run = _R10_PLAIN_RE.match(text, index)
+            word.lit(run.group(0), deferred=False)
+            index = run.end()
+        finish()
+        if closer:
+            raise _R10Fail()  # unterminated $( / <( (fail closed)
+        return size
+
+    def substitution(self, index: int, depth: int) -> int:
+        if index > self.last_paren:
+            raise _R10Fail()  # no ``)`` anywhere after: unterminated
+        return self.script(index, depth + 1, ")")
+
+    # -- here-documents -----------------------------------------------------
+    def heredoc_word(
+        self, index: int, pending: list[tuple[str, bool, bool]], strip: bool
+    ) -> int:
+        text, size = self.text, self.size
+        blanks = _R10_BLANKS_RE.match(text, index)
+        if blanks:
+            index = blanks.end()
+        parts: list[str] = []
+        quoted = False
+        while index < size and text[index] not in " \t\n;&|<>()":
+            char = text[index]
+            if char == "'":
+                close = text.find("'", index + 1)
+                if close < 0:
+                    raise _R10Stop(index)
+                parts.append(text[index + 1:close])
+                quoted, index = True, close + 1
+            elif char == '"':
+                close = index + 1
+                while close < size and text[close] != '"':
+                    close += 2 if text[close] == "\\" else 1
+                if close >= size:
+                    raise _R10Stop(index)
+                parts.append(re.sub(r"\\(.)", r"\1", text[index + 1:close]))
+                quoted, index = True, close + 1
+            elif char == "\\":
+                parts.append(text[index + 1:index + 2])
+                quoted, index = True, index + 2
+            else:
+                run = _R10_DELIMITER_RUN_RE.match(text, index)
+                parts.append(run.group(0))
+                index = run.end()
+        delimiter = "".join(parts)
+        if delimiter or quoted:
+            pending.append((delimiter, quoted, strip))
+        return index
+
+    def heredoc_bodies(
+        self, index: int, depth: int, pending: list[tuple[str, bool, bool]]
+    ) -> int:
+        """Consume the bodies of ``pending`` from the line at ``index`` (the
+        shell reads them after the newline that ends the operator's line);
+        a missing delimiter line extends the body to the end of the text,
+        as bash and zsh do. Every body is read as script (a shell may be its
+        reader) and, unquoted, for the expansions the shell performs."""
+        text = self.text
+        for delimiter, quoted, strip in pending:
+            pattern = re.compile(
+                r"^" + (r"\t*" if strip else "") + re.escape(delimiter) + r"$", re.M
+            )
+            found = pattern.search(text, index)
+            if found:
+                body, index = text[index:found.start()], min(found.end() + 1, self.size)
+            else:
+                body, index = text[index:], self.size
+            _r10_read(body, depth + 1)
+            if not quoted:
+                _R10Text(body).expand(depth + 1)
+        return index
+
+    def expand(self, depth: int) -> None:
+        """The expansions of an unquoted here-document body: quotes are
+        literal there, ``$``-constructs and backticks run."""
+        if "$" not in self.text and "`" not in self.text:
+            return
+        if depth > _R10_MAX_DEPTH:
+            raise _R10Fail()
+        index, resyncs = 0, 0
+        while True:
+            found = _R10_EXPAND_RE.search(self.text, index)
+            if not found:
+                return
+            index = found.start()
+            try:
+                if found.group(0) == "\\":
+                    index += 2
+                elif found.group(0) == "`":
+                    index = self.backtick(index, depth, _R10Word(), in_dq=False)
+                else:
+                    index = self.dollar(index, depth, _R10Word(), quoted=True)
+            except _R10Stop as stop:
+                resyncs += 1
+                if resyncs > _R10_MAX_RESYNCS:
+                    raise _R10Fail() from None
+                index = stop.position + 1
+
+    # -- quoting and constructs --------------------------------------------
+    def double(self, index: int, depth: int, word: _R10Word) -> int:
+        """Read a double-quoted span starting after its ``"``."""
+        text, size = self.text, self.size
+        opening = index - 1
+        while index < size:
+            char = text[index]
+            if char == '"':
+                return index + 1
+            if char == "\\":
+                escaped = text[index + 1:index + 2]
+                if escaped == "\n":
+                    index += 2
+                elif escaped and escaped in '$`"\\':
+                    word.lit(escaped)
+                    index += 2
+                else:
+                    word.lit("\\")
+                    index += 1
+                continue
+            if char == "$":
+                index = self.dollar(index, depth, word, quoted=True)
+                continue
+            if char == "`":
+                index = self.backtick(index, depth, word, in_dq=True)
+                continue
+            run = _R10_DQ_PLAIN_RE.match(text, index)
+            word.lit(run.group(0))
+            index = run.end()
+        raise _R10Stop(opening)
+
+    def backtick(self, index: int, depth: int, word: _R10Word, *, in_dq: bool) -> int:
+        found = _R10_BACKTICK_BODY_RE.match(self.text, index + 1)
+        if not found:
+            raise _R10Stop(index)
+        body = self.text[index + 1:found.end() - 1]
+        body = re.sub(r'\\([$`\\"])' if in_dq else r"\\([$`\\])", r"\1", body)
+        word.computed([("any", "")])
+        _r10_read(body, depth + 1)
+        return found.end()
+
+    def dollar(self, index: int, depth: int, word: _R10Word, *, quoted: bool) -> int:
+        text = self.text
+        following = text[index + 1:index + 2]
+        if following == "(":
+            end = self.substitution(index + 2, depth)
+            word.computed([("any", "")])
+            return end
+        if following == "{":
+            if index + 2 > self.last_brace:
+                word.lit("${", deferred=False)  # no ``}`` after: both shells refuse it
+                return index + 2
+            end = self.brace(index + 2, depth + 1, in_dq=quoted)
+            word.computed(_r8_construct_items(text[index:end]))
+            return end
+        if following == "[":
+            if index + 2 > self.last_bracket:
+                word.lit("$[", deferred=False)
+                return index + 2
+            end = self.bracket(index + 2, depth + 1)
+            word.computed([("any", "")])
+            return end
+        if following == "'" and not quoted:
+            found = _R10_ANSI_BODY_RE.match(text, index + 2)
+            if not found:
+                raise _R10Stop(index + 1)
+            word.quoted = True
+            word.lit(_r6_decode_ansi_c(text[index + 2:found.end() - 1]))
+            return found.end()
+        if following == '"' and not quoted:
+            word.quoted = True  # bash locale quoting (zsh: ``$`` + "…": wider)
+            return self.double(index + 2, depth, word)
+        name = _R10_NAME_RE.match(text, index + 1)
+        if name:
+            word.computed([("any", "")])
+            return name.end()
+        if following and following in "0123456789@*#?$!-":
+            word.computed([("any", "")])
+            return index + 2
+        word.lit("$", deferred=quoted)
+        return index + 1
+
+    def brace(self, index: int, depth: int, *, in_dq: bool) -> int:
+        """Index just past the ``}`` closing a ``${`` whose body starts at
+        ``index``; nested constructs are read on the way."""
+        if depth > _R10_MAX_DEPTH:
+            raise _R10Fail()
+        text, size = self.text, self.size
+        opening = index - 2
+        scratch = _R10Word()
+        # Bare braces: bash 3.2 ends ``${`` at the FIRST unquoted ``}``, zsh
+        # counts them. Where the two ends differ only by ``}`` characters
+        # (``${{ github.token }}``, ``${CONFIG:-{}}``) the shells continue at
+        # the same place and the zsh extent is read; any other text between
+        # them (``x=p; ${x:-{}ool …`` — bash runs ``pool``) fails closed.
+        bare = 0
+        first_close = -1
+        while index < size:
+            run = _R10_BRACE_PLAIN_RE.match(text, index)
+            if run:
+                index = run.end()
+                continue
+            char = text[index]
+            if char == "}":
+                if not bare:
+                    if first_close >= 0 and text[first_close:index].strip("}"):
+                        raise _R10Fail()
+                    return index + 1
+                if first_close < 0:
+                    first_close = index + 1
+                bare -= 1
+                index += 1
+                continue
+            if char == "{":
+                bare += 1
+                index += 1
+                continue
+            if char == "\\":
+                index += 2
+            elif char == "'":
+                if in_dq:
+                    raise _R10Fail()  # bash 3.2: a quote; zsh: literal
+                close = text.find("'", index + 1)
+                if close < 0:
+                    raise _R10Stop(index)
+                index = close + 1
+            elif char == '"':
+                index = self.double(index + 1, depth, scratch)
+            elif char == "`":
+                index = self.backtick(index, depth, scratch, in_dq=in_dq)
+            else:
+                index = self.dollar(index, depth, scratch, quoted=in_dq)
+        if first_close >= 0:
+            raise _R10Fail()  # bash closed it, zsh never does: they disagree
+        raise _R10Stop(opening)  # resync: the rest is read as script
+
+    def bracket(self, index: int, depth: int) -> int:
+        """Index just past the ``]`` closing a ``$[`` (brackets counted)."""
+        if depth > _R10_MAX_DEPTH:
+            raise _R10Fail()
+        text, size = self.text, self.size
+        opening = index - 2
+        scratch = _R10Word()
+        level = 1
+        while index < size:
+            run = _R10_BRACKET_PLAIN_RE.match(text, index)
+            if run:
+                index = run.end()
+                continue
+            char = text[index]
+            if char == "[":
+                level += 1
+                index += 1
+            elif char == "]":
+                level -= 1
+                index += 1
+                if not level:
+                    return index
+            elif char == "\\":
+                index += 2
+            elif char in "'\"":
+                raise _R10Fail()  # quoting inside arithmetic: not modelled
+            elif char == "`":
+                index = self.backtick(index, depth, scratch, in_dq=False)
+            else:
+                index = self.dollar(index, depth, scratch, quoted=True)
+        raise _R10Stop(opening)
+
+
+def _r10_lexed_reading(raw: str) -> bool:
+    """r10 (REVIEW5 N1): True when the quote-aware scanner finds a word that
+    can spell a wrapper, or fails closed (see the block comment above)."""
+    try:
+        _r10_read(raw, 0)
+    except (_R10Found, _R10Fail):
+        return True
+    except RecursionError:
+        return True  # nested beyond the interpreter: judge it (fail closed)
+    except Exception:  # noqa: BLE001 — an unexpected reader failure
+        return True  # is never an out-of-scope verdict (fail closed)
+    return False
+
+
 def r6_names_wrapper(raw: str) -> bool:
     """True when the command text names a paid-launch wrapper (r6/r7 scope).
 
@@ -1362,7 +1934,12 @@ def r6_names_wrapper(raw: str) -> bool:
     # operator words) — additive: it can only widen scope. r9: read on the
     # raw text (r8) AND on the joined text (``${x:-p}"ool"``, nested bodies
     # included: each view recurses within itself, so the cost is 2× r8).
-    return _r8_computed_glue(text) or _r8_computed_glue(_r9_joined(text))
+    if _r8_computed_glue(text) or _r8_computed_glue(_r9_joined(text)):
+        return True
+    # r10 (REVIEW5 N1): the quote-aware lexer reading of the RAW text —
+    # construct extents that quoted/escaped/commented brackets cannot throw
+    # off, here-documents and ``bash -c`` bodies read (union: never narrower).
+    return _r10_lexed_reading(raw)
 
 
 class _R6Word:
@@ -3483,6 +4060,13 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
             return
         clean = strip_heredocs(command)
     else:
+        # r10 (REVIEW5 N2): before ANY super-linear scan (the heredoc
+        # stripper below is quadratic on ``<<A`` runs), record whether the
+        # RAW text names a wrapper — linear readings only. If the watchdog
+        # then fires, ``main`` denies when it does (the legacy identity
+        # check never got to judge a possible launch) and gives no decision
+        # otherwise (CI-wait text keeps r9's availability gain).
+        _r10_note_unarmed_scope(command)
         clean = strip_heredocs(command)
         guard_fabric_launch(clean, command)
     if "gh " not in clean:
@@ -3654,6 +4238,56 @@ def _r8_disarm_watchdog() -> None:
             pass
 
 
+# --- r10: the unarmed watchdog decision (REVIEW5 N2 MODERATE) ---------------
+#
+# r9 made an unarmed watchdog firing NO DECISION. But the unarmed path runs
+# the heredoc stripper BEFORE the legacy identity check, and the stripper is
+# quadratic: ``pool run grok a /tmp grok-4⏎`` + N × ``<<A⏎`` with no
+# ``POOL_*`` identity was DENIED by r8 ("missing POOL_ORCHESTRATOR_ID", 7.3–
+# 9.5 s, inside the 10 s timeout) and returned NO DECISION in r9 at 7 s —
+# fail open on every CLI. r10 keeps choice (a) and records, before the
+# stripper, whether the raw text names a wrapper:
+#
+#   "unset"   — the unarmed Bash path was not reached (other tool, out of
+#               scope, unreadable payload): firing = no decision;
+#   "pending" — the scope reading itself was still running: firing = DENY
+#               (the reading is linear, ≤ ~1.7 s at 262 144 chars; only a
+#               multi-megabyte command can still be reading at 7 s);
+#   True      — the text names a wrapper: firing = DENY;
+#   False     — it names none: firing = no decision (r9).
+#
+# The reading is the armed scope reading ``r6_names_wrapper`` (every r6–r10
+# reader, so also the N1 lexer reading) after a cheap literal check, on the
+# RAW text (heredoc bodies included: wider than the stripped text).
+_R10_UNARMED_SCOPE: list = ["unset"]
+
+
+def _r10_note_unarmed_scope(command: str) -> None:
+    _R10_UNARMED_SCOPE[0] = "pending"
+    plain = re.sub(r"[\"'\\]", "", command.replace('$"', '"'))
+    if FABRIC_LAUNCH_RE.search(command) or _WRAPPER_NAME_RE.search(plain):
+        _R10_UNARMED_SCOPE[0] = True
+        return
+    _R10_UNARMED_SCOPE[0] = bool(r6_names_wrapper(command))
+
+
+def _r10_unarmed_budget_denial() -> NoReturn:
+    missing = [name for name in _FABRIC_IDENTITY_NAMES if not os.environ.get(name, "").strip()]
+    deny(
+        "Mastermind Fabric root-budget guard: guard budget exceeded while "
+        "judging a command that names a Fabric launch wrapper — fail closed. "
+        f"Judging it took longer than {r8_watchdog_seconds():g} s, so the "
+        "root-identity check could not complete"
+        + (
+            "; this session is also missing " + ", ".join(missing)
+            + ", which every Fabric launch must preserve"
+            if missing else ""
+        )
+        + ". Run the launch as a short, plain command; write long content "
+        "to a file with a non-shell tool."
+    )
+
+
 def _r8_budget_denial() -> NoReturn:
     deny(
         "Mastermind shared-placement guard: guard budget exceeded — fail "
@@ -3672,17 +4306,22 @@ def main() -> None:
     # longer stalls an unarmed hook into the provider's 10 s timeout, which
     # the ``onFailure: "block"`` row turns into a blocked tool call.
     armed = shared_placement_armed()
+    _R10_UNARMED_SCOPE[0] = "unset"
     previous = _r8_arm_watchdog()
     try:
         _main_body()
         # Disarmed inside the try: an alarm landing between the verdict and
         # here is still a budget firing (armed: fail-closed denial; unarmed:
-        # no decision), never a traceback.
+        # see below), never a traceback.
         _r8_disarm_watchdog()
     except _R8BudgetExceeded:
         if armed:
             _r8_budget_denial()
-        # unarmed: no decision — return normally, nothing written.
+        # r10 (REVIEW5 N2): unarmed, a firing on a command that names a
+        # wrapper (or whose scope reading had not finished) is a DENY; any
+        # other unarmed firing is no decision — return normally.
+        if _R10_UNARMED_SCOPE[0] is True or _R10_UNARMED_SCOPE[0] == "pending":
+            _r10_unarmed_budget_denial()
     finally:
         _r8_disarm_watchdog()
         if previous is not None:
