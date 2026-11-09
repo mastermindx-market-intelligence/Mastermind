@@ -332,7 +332,8 @@ def test_combined_plan_rechecks_complete_pointer_before_any_write(
 
 
 @pytest.mark.parametrize("extension", ["application", "quota_application"])
-def test_combined_source_retains_original_application_v3_journeys(combined_builds, extension, tmp_path):
+def test_combined_source_retains_original_application_v3_journeys(
+        combined_builds, extension, tmp_path, *, memory_support=False):
     # Reuse the original owner tests in their asserted layout. A fresh process
     # ensures no previously imported candidate can impersonate the staged bytes.
     fixture = tmp_path / "ops/native_fabric/quota_continuity"
@@ -368,6 +369,30 @@ print(json.dumps(dict(tests=result.testsRun, failures=len(result.failures),
                       errors=len(result.errors), skipped=len(result.skipped))))
 raise SystemExit(not result.wasSuccessful() or bool(result.skipped))
 """
+    if memory_support:
+        # Native42 deliberately refuses unsafe packet objects before the old
+        # generic uncertainty reader. Preserve that stronger privacy contract.
+        privacy = """import test_adapter_continuity as adapter
+from fabric_operator_contract import DelegationRefused
+native42_privacy_refusals = []
+class Native42Adapter(adapter.Adapter):
+    def assert_unverified_original(self, run):
+        if run not in {'orphan-packet-directory', 'orphan-packet-dangling_symlink'}:
+            return super().assert_unverified_original(run)
+        packet = self.path(run, '.request.packet')
+        self.assertTrue(packet.is_dir() or packet.is_symlink())
+        with self.assertRaisesRegex(DelegationRefused, '^participant_view_required$'):
+            adapter.api.inspect_run(run, owner_ext=self.root)
+        self.assertEqual(self.calls, [])
+        native42_privacy_refusals.append(run)
+"""
+        script = privacy + script.replace(
+            "'test_adapter_continuity.Adapter.", "'__main__.Native42Adapter.")
+        script = script.replace(
+            "raise SystemExit(not result.wasSuccessful() or bool(result.skipped))",
+            "assert sorted(native42_privacy_refusals) == "
+            "['orphan-packet-dangling_symlink', 'orphan-packet-directory']\n"
+            "raise SystemExit(not result.wasSuccessful() or bool(result.skipped))")
     env = dict(os.environ, PYTHONPATH=str(tests), PYTHONDONTWRITEBYTECODE="1")
     result = subprocess.run([sys.executable, "-B", "-c", script], cwd=tests, env=env,
                             capture_output=True, text=True, timeout=60)
@@ -1077,3 +1102,505 @@ def test_terminal_transport_hashes_remain_bound_by_original_installer(
     with pytest.raises(ValueError):
         installer._go_component(component_path, stable_ext, manifest)
     assert manifest == saved
+
+
+# Native42 adds memory/support to the exact selected terminal cohort. The
+# fixtures use the original public composer; no installed runtime is read.
+@pytest.fixture(scope="module")
+def memory_support_provider_stage(terminal_provider_stage, tmp_path_factory):
+    repository = ROOT.parents[2]
+    with mock.patch.object(sys, "path", [str(repository), *sys.path]):
+        from ops.native_fabric.provider_plans import compose
+    stage = tmp_path_factory.mktemp("memory-support-provider") / "code"
+    result = compose.compose(terminal_provider_stage.stage, stage,
+                             profile_name="terminal116-protected-memory-support-status")
+    files = json.loads((stage / "FILES.json").read_bytes())
+    assert result["publication_performed"] is result["selection_performed"] is False
+    assert files == builder.provider_memory_support_files() and len(files) == 119
+    return SimpleNamespace(root=stage.parent, stage=stage, files=files)
+
+
+@pytest.fixture(scope="module")
+def memory_support_builds(tmp_path_factory):
+    root = tmp_path_factory.mktemp("memory-support-application-builds").resolve()
+    outputs = {}
+    common = ["--include-provider-plan-application",
+              "--include-provider-plan-remote-placement",
+              "--include-provider-plan-maintenance-guard",
+              "--include-provider-plan-terminal-diagnostics",
+              "--include-provider-plan-memory-support"]
+    for name, flags in (
+        ("base", []), ("application", ["--include-go-application"]),
+        ("http", ["--include-go-application", "--include-application-http"]),
+        ("glm", ["--include-go-application", "--include-application-http",
+                 "--include-application-glm"]),
+    ):
+        output = root / name
+        with mock.patch.object(sys, "argv", [
+                "builder", "--output", str(output), *common, *flags,
+        ]), redirect_stdout(io.StringIO()):
+            builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+@pytest.mark.parametrize("extension,count", [
+    ("base", 119), ("application", 121), ("http", 124), ("glm", 126),
+])
+def test_memory_support_preserves_closed_source_and_actual_dependencies(
+        extension, count, memory_support_builds, terminal_diagnostics_builds,
+        memory_support_provider_stage):
+    output = getattr(memory_support_builds, extension)
+    previous = getattr(terminal_diagnostics_builds, extension)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    prior = json.loads((previous / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    record, predecessor, _ = builder.provider_memory_support_record()
+    assert len(manifest) == count
+    assert set(manifest) - set(prior) == builder.PROVIDER_MEMORY_SUPPORT_ADDITIONS
+    assert {name for name in manifest if manifest[name] != prior.get(name)} == set(record["members"])
+    assert manifest["ext/lease_broker.py"] == (
+        "991aca0c5e902b9fb8fc699524a249957ca686299a3d1448f9f31c2305b84a41")
+    inherited = inventory["files"]["ext/lease_broker.py"]["composition"]["inherited"]
+    assert inherited["successor_composition_sha256"] == builder.PROVIDER_MEMORY_SUPPORT_RECORD_SHA256
+    assert inherited["patch_sha256"] == record["members"]["ext/lease_broker.py"]["patch_sha256"]
+    assert inherited["preimage_sha256"] == record["members"]["ext/lease_broker.py"]["before"]
+    core = builder._application_base(manifest)
+    old_core = builder.before_glm_application_core(builder._application_base(prior))
+    unwrapped = builder.before_glm_application_core(core)
+    assert builder.before_provider_memory_support(unwrapped) == old_core
+    assert builder.before_provider_application(core) == builder.before_provider_application(old_core)
+    for relative, wanted in manifest.items():
+        raw = (output / "native-code-stage" / relative).read_bytes()
+        row = inventory["files"][relative]
+        assert g.digest(raw) == wanted == row["sha256"]
+        assert len(raw) == row["bytes"]
+        if relative not in record["members"]:
+            assert raw == (previous / "native-code-stage" / relative).read_bytes()
+        elif relative not in {"ext/fabric_task.py", "ext/lease_broker.py"}:
+            assert raw == (memory_support_provider_stage.stage / relative).read_bytes()
+    if extension != "base":
+        saved = dict(predecessor), dict(manifest)
+        builder.validate_go_source_transition(predecessor, manifest)
+        assert (predecessor, manifest) == saved
+        component = json.loads((output / "external-go-component/component.json").read_bytes())
+        assert component["dependencies"]["lease_broker.py"]["sha256"] == (
+            "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004")
+        assert component["native_stage_dependencies"]["lease_broker.py"] == manifest["ext/lease_broker.py"]
+        assert installer._go_component(
+            output / "external-go-component", Path(component["stable_ext"]), manifest)
+
+
+def test_memory_support_join_preserves_both_task_and_broker_parents(
+        memory_support_provider_stage, terminal_diagnostics_builds, memory_support_builds):
+    import ast
+    record, _, payloads = builder.provider_memory_support_record()
+    application = terminal_diagnostics_builds.base / "native-code-stage"
+    joined = memory_support_builds.base / "native-code-stage"
+    memory = memory_support_provider_stage.stage
+
+    def functions(raw):
+        nodes = {}
+        for node in ast.parse(raw).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                nodes[node.name] = node
+            elif isinstance(node, ast.ClassDef):
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        nodes[node.name + "." + child.name] = child
+        return nodes
+
+    task = "ext/fabric_task.py"
+    old_nodes = functions((application / task).read_bytes())
+    new_nodes = functions((joined / task).read_bytes())
+    memory_nodes = functions((memory / task).read_bytes())
+    old_nodes["inspect_run"].name = "_inspect_run"
+    assert ast.dump(old_nodes["inspect_run"]) == ast.dump(new_nodes["_inspect_run"])
+    for name in ("inspect_run", "read_result", "main"):
+        assert ast.dump(new_nodes[name]) == ast.dump(memory_nodes[name])
+
+    broker = "ext/lease_broker.py"
+    before = (ROOT / builder.GLM_CORE_SOURCE_DIRECTORY / "lease_broker_provider.py").read_bytes()
+    merged = builder._quota_reset_patch(before, payloads[broker], "lease_broker.py")
+    assert g.digest(merged) == record["members"][broker]["after"]
+    assert merged == (ROOT / builder.GLM_CORE_SOURCE_DIRECTORY / "lease_broker_provider_memory.py").read_bytes()
+    assert builder._glm_broker_forward(ROOT, merged) == (joined / broker).read_bytes()
+    joined_nodes = functions((joined / broker).read_bytes())
+    memory_nodes = functions((memory / broker).read_bytes())
+    for name in ("_connect", "Broker.__init__", "Broker._conn", "Broker._lock",
+                 "Broker._try_acquire_in_transaction"):
+        assert ast.dump(joined_nodes[name]) == ast.dump(memory_nodes[name])
+
+
+@pytest.mark.parametrize("fault", [
+    "native41", "missing-memory", "mixed-task", "mixed-broker", "guard-worker",
+    "retained", "extra",
+])
+def test_memory_support_rejects_partial_or_foreign_predecessor(fault, memory_support_builds):
+    before = builder.provider_memory_support_files()
+    terminal = builder.provider_terminal_diagnostics_files()
+    if fault == "native41":
+        before = terminal
+    elif fault == "missing-memory":
+        del before["ext/fabric_memory_view.py"]
+    elif fault == "mixed-task":
+        before["ext/fabric_task.py"] = terminal["ext/fabric_task.py"]
+    elif fault == "mixed-broker":
+        before["ext/lease_broker.py"] = terminal["ext/lease_broker.py"]
+    elif fault == "guard-worker":
+        before["ext/native_plan_worker.py"] = builder.PROVIDER_TERMINAL_DIAGNOSTICS_WORKER_SHA256
+    elif fault == "retained":
+        before["ext/model_tier.py"] = "0" * 64
+    else:
+        before["ext/foreign.py"] = "0" * 64
+    after = json.loads((memory_support_builds.glm / "native-manifest.json").read_bytes())
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-memory", "missing-go", "native-task", "native-broker",
+    "previous-task", "previous-broker", "retained", "extra",
+])
+def test_memory_support_cannot_hide_invalid_target(
+        fault, memory_support_builds, terminal_diagnostics_builds):
+    before = builder.provider_memory_support_files()
+    after = json.loads((memory_support_builds.glm / "native-manifest.json").read_bytes())
+    previous = json.loads((terminal_diagnostics_builds.glm / "native-manifest.json").read_bytes())
+    if fault == "missing-memory":
+        del after["ext/protected_memory_economic.py"]
+    elif fault == "missing-go":
+        del after[g.GO_HANDLER]
+    elif fault in {"native-task", "previous-task"}:
+        after["ext/fabric_task.py"] = (before if fault == "native-task" else previous)["ext/fabric_task.py"]
+    elif fault in {"native-broker", "previous-broker"}:
+        after["ext/lease_broker.py"] = (before if fault == "native-broker" else previous)["ext/lease_broker.py"]
+    elif fault == "retained":
+        after["ext/model_tier.py"] = "0" * 64
+    else:
+        after["ext/foreign.py"] = "0" * 64
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http", "glm"])
+def test_memory_support_native42_original_transaction_commits_and_recovers(
+        owner_name, extension, request, memory_support_provider_stage, memory_support_builds):
+    test_combined_application_commits_and_recovers_original_transaction(
+        owner_name, extension, request, memory_support_provider_stage, memory_support_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("boundary", ["selection", "receipt"])
+def test_memory_support_native42_postcommit_recovery_does_not_select_again(
+        owner_name, boundary, request, memory_support_provider_stage, memory_support_builds):
+    test_combined_postcommit_interruption_does_not_select_again(
+        owner_name, boundary, "glm", request, memory_support_provider_stage, memory_support_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+def test_memory_support_native42_stale_current_refuses_before_write(
+        owner_name, request, memory_support_provider_stage, memory_support_builds):
+    test_combined_plan_rechecks_complete_pointer_before_any_write(
+        owner_name, "glm", request, memory_support_provider_stage, memory_support_builds)
+
+
+@pytest.mark.parametrize("members", ["HTTP_GENERATION_MEMBERS", "GLM_HTTP_GENERATION_MEMBERS"])
+def test_memory_support_transport_still_binds_actual_bytes(members, memory_support_builds):
+    test_terminal_transport_hashes_remain_bound_by_original_installer(members, memory_support_builds)
+
+
+@pytest.mark.parametrize("stale", [
+    "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+    "5a672d318d49ae0d0be91c4669bdbca23a9e589e576aeed16531197664c8fdd0",
+])
+def test_memory_support_rejects_historical_staged_dependency(
+        stale, memory_support_builds, tmp_path):
+    output = tmp_path / "captured-source"
+    shutil.copytree(memory_support_builds.glm, output)
+    component = output / "external-go-component"
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    record = json.loads((component / "component.json").read_bytes())
+    assert installer._go_component(component, Path(record["stable_ext"]), manifest)
+    record["native_stage_dependencies"]["lease_broker.py"] = stale
+    (component / "component.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError):
+        installer._go_component(component, Path(record["stable_ext"]), manifest)
+
+
+@pytest.mark.parametrize("member", ["ext/fabric_task.py", "ext/support_policy_status.py"])
+def test_memory_support_changed_or_symlinked_source_refuses(member, tmp_path):
+    record, _, _ = builder.provider_memory_support_record()
+    row = record["members"][member]
+    source = ROOT / row.get("patch_source", row.get("source"))
+    replacement = tmp_path / "changed"
+    replacement.write_bytes(source.read_bytes() + b"\n# changed\n")
+    original = builder._provider_source
+
+    def route(path, expected):
+        return original(replacement if Path(path).resolve() == source.resolve() else path, expected)
+
+    with mock.patch.object(builder, "_provider_source", side_effect=route):
+        with pytest.raises(ValueError, match="source commitment differs"):
+            builder.provider_memory_support_record()
+    replacement.unlink()
+    replacement.symlink_to(source)
+    with mock.patch.object(builder, "_provider_source", side_effect=route):
+        with pytest.raises(ValueError, match="regular file"):
+            builder.provider_memory_support_record()
+
+
+@pytest.mark.parametrize("flags", [
+    ["--include-provider-plan-memory-support"],
+    ["--include-provider-plan-application", "--include-provider-plan-remote-placement",
+     "--include-provider-plan-maintenance-guard", "--include-provider-plan-memory-support"],
+])
+def test_memory_support_unqualified_flags_refuse_before_output(tmp_path, flags):
+    output = tmp_path / "must-not-exist"
+    with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *flags]):
+        with pytest.raises(SystemExit) as stopped:
+            builder.main()
+    assert stopped.value.code == 2 and not output.exists()
+
+
+def test_memory_support_staged_application_and_memory_journeys(
+        memory_support_builds, tmp_path):
+    test_combined_source_retains_original_application_v3_journeys(
+        memory_support_builds, "glm", tmp_path, memory_support=True)
+    # Reuse the original memory owner tests in a fresh interpreter. Their imports
+    # must resolve to this exact staged closure, never an earlier candidate.
+    stage = memory_support_builds.glm / "native-code-stage"
+    script = """import json, sys
+from pathlib import Path
+from pytest import MonkeyPatch
+import test_current116_memory118_composition as proof
+joined, scratch = map(Path, sys.argv[1:])
+with MonkeyPatch.context() as mp:
+    proof.test_real_joined_broker_existing_only_reopens_without_creation_or_schema_change(
+        joined, scratch, mp)
+with MonkeyPatch.context() as mp:
+    proof.test_actual_current_task_ordinary_inspection_still_uses_owned_reader(joined, mp)
+for channel in ("inspect", "result", "cli"):
+    with MonkeyPatch.context() as mp:
+        proof.test_actual_current_task_privacy_guard_runs_before_original_channel(
+            joined, mp, channel)
+import fabric_memory_view
+assert Path(fabric_memory_view.__file__).resolve() == (joined / "ext/fabric_memory_view.py").resolve()
+print(json.dumps({"memory_cases": 5, "passed": 5}))
+"""
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+        [str(ROOT.parents[2] / "tests"), str(ROOT.parents[2])]),
+        PYTHONDONTWRITEBYTECODE="1")
+    scratch = tmp_path / "existing-memory-store"
+    scratch.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script, str(stage), str(scratch)],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == {"memory_cases": 5, "passed": 5}
+
+
+@pytest.fixture
+def copied_memory_guard(tmp_path):
+    import runpy
+    # This is the actual copied Control source location. No source record or
+    # fallback checkout is supplied to this isolated builder.
+    target = tmp_path / "control/ops/native_fabric/quota_continuity/rollout/build_review_stage.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes((ROOT / "rollout/build_review_stage.py").read_bytes())
+    return runpy.run_path(str(target), run_name="isolated_control_builder")
+
+
+def test_memory_support_copied_legacy_guard_needs_no_new_record(copied_memory_guard, builds):
+    manifest = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(manifest)
+    assert copied_memory_guard["before_provider_memory_support"](manifest) == manifest
+    copied_memory_guard["validate_go_base_manifest"](
+        manifest, {name: manifest["ext/" + name]
+                   for name in copied_memory_guard["GO_APPLICATION_DEPENDENCIES"]})
+    assert manifest == original
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_MEMORY_SUPPORT_MARKERS))
+def test_memory_support_copied_changed_member_requires_source_record(copied_memory_guard, member):
+    # Even when every addition path is missing, each changed-member digest
+    # must enter authenticated validation instead of taking the legacy path.
+    manifest = {member: copied_memory_guard["PROVIDER_MEMORY_SUPPORT_MARKERS"][member]}
+    with pytest.raises(ValueError, match="regular file"):
+        copied_memory_guard["before_provider_memory_support"](manifest)
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_MEMORY_SUPPORT_ADDITIONS))
+def test_memory_support_copied_addition_requires_source_record(copied_memory_guard, member):
+    with pytest.raises(ValueError, match="regular file"):
+        copied_memory_guard["before_provider_memory_support"]({member: "0" * 64})
+
+
+def test_memory_support_installed_control_reads_exact_retained_transition(
+        retained_go_owner, memory_support_provider_stage, memory_support_builds, tmp_path):
+    """Read the marked 119-to-126 plan using only the sealed installed closure."""
+    import ast
+    import hashlib
+    import importlib.util
+    import stat
+    case = retained_go_owner
+    api, plan, forward = prepare_combined(
+        case, "retained_go_owner", memory_support_provider_stage, memory_support_builds.glm)
+
+    def owner_bytes():
+        result = {}
+        for path in sorted(case.root.rglob("*")):
+            info = path.lstat()
+            value = (os.readlink(path) if path.is_symlink() else
+                     hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else
+                     "directory")
+            result[str(path.relative_to(case.root))] = (stat.S_IMODE(info.st_mode), value)
+        return result
+
+    before = owner_bytes()
+    pointer = g.current(case.store)
+    assert len(g.verify(case.store, pointer["generation"])[1]["files"]) == 119
+    assert len(g.verify(case.store, plan["target_generation"])[1]["files"]) == 126
+    # Close the incumbent fixture's audited mutation phase normally. Registered
+    # cleanup keeps its real retained history alive for the isolated read phase.
+    case.tearDown()
+    source = ROOT.parents[2] / "integrations/studio_direct_mcp"
+    spec = importlib.util.spec_from_file_location(
+        "memory_installed_control_bundle", source / "control_bundle.py")
+    bundle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    repository = tmp_path / "captured-release"
+    copied_source = repository / "integrations/studio_direct_mcp"
+    for name, original in bundle._source_files(source).items():
+        destination = (copied_source / name if len(Path(name).parts) == 1
+                       else repository / name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(original.read_bytes())
+        destination.chmod(0o600)
+    repository.chmod(0o700)
+    for directory in repository.rglob("*"):
+        if directory.is_dir():
+            directory.chmod(0o700)
+    # These are the existing retained-history fixture pins, captured before
+    # sealing the disposable source. No installed byte or reader is mocked.
+    native = repository / "ops/native_fabric/quota_continuity/rollout/native_install.py"
+    raw = native.read_text()
+    lines = raw.splitlines(keepends=True)
+    pins = {"RETAINED_STATUS_PROOF_SHA256": case.pins,
+            "RETAINED_STATUS_PLAN_DIGEST": case.successor_plan["digest"]}
+    nodes = [node for node in ast.parse(raw).body if isinstance(node, ast.Assign)
+             and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+             and node.targets[0].id in pins]
+    assert {node.targets[0].id for node in nodes} == set(pins)
+    for node in sorted(nodes, key=lambda item: item.lineno, reverse=True):
+        name = node.targets[0].id
+        lines[node.lineno - 1:node.end_lineno] = [name + " = " + repr(pins[name]) + "\n"]
+    native.write_text("".join(lines))
+
+    home = tmp_path / "installed-home"
+    home.mkdir(mode=0o700)
+    control = home / ".local/share/studio-direct-mcp/control"
+    control.mkdir(parents=True, mode=0o700)
+    (home / ".local/share/studio-direct-mcp/private").mkdir(mode=0o700)
+    launcher = home / ".local/bin/studio-direct"
+    launcher.parent.mkdir(parents=True, mode=0o700)
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    for directory in home.rglob("*"):
+        if directory.is_dir():
+            directory.chmod(0o700)
+    with mock.patch.object(bundle.Path, "home", return_value=home):
+        installed = bundle.install(source=copied_source, control_root=control,
+                                   launcher=launcher)
+        verified = bundle.verify(control_root=control, launcher=launcher)
+        assert installed["state"] == "CONTROL_BUNDLE_INSTALLED"
+        assert verified == {**installed, "state": "CONTROL_BUNDLE_VERIFIED"}
+    assert len(installed["files"]) == 63
+    assert installed["source"] == str(copied_source)
+    shutil.rmtree(repository)
+    assert not copied_source.exists()
+    code = r"""
+import importlib.util,json,sys
+from pathlib import Path
+from types import SimpleNamespace
+root=Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location("installed_memory_forward_proof",root/"private_service.py")
+svc=importlib.util.module_from_spec(spec);sys.modules[spec.name]=svc
+spec.loader.exec_module(svc)
+assert svc._INSTALLED_CONTROL_CONTEXT["root"]==root
+calls=[]
+actual=svc.subprocess.run
+def record(argv,*args,**kwargs):
+    result=actual(argv,*args,**kwargs)
+    calls.append(argv)
+    if result.returncode:
+        sys.stderr.write(result.stderr.decode(errors="replace"))
+    return result
+svc.subprocess.run=record
+args=SimpleNamespace(forward_go_bundle=Path(sys.argv[2]),operation="preview")
+with svc._pin_forward_native_context(args) as observed:
+    assert observed["phase"]=="PREVIOUS"
+assert len(calls)==2
+for argv in calls:
+    assert argv[1:4]==["-I","-S","-B"]
+    assert Path(argv[6])==root/"ops/native_fabric/quota_continuity/rollout"
+print(json.dumps({"observed":observed,"real_reader_calls":len(calls)},sort_keys=True))
+"""
+
+    def read_installed():
+        return subprocess.run(
+            [sys.executable, "-I", "-S", "-B", "-c", code, str(control), str(forward)],
+            cwd=home, env={"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C"},
+            capture_output=True, text=True, timeout=90)
+
+    result = read_installed()
+    assert result.returncode == 0, result.stdout + result.stderr
+    value = json.loads(result.stdout)
+    assert value["real_reader_calls"] == 2
+    prior = case.successor_plan
+    entry = prior["entries"]["pool"]
+    expected = {
+        "original_successor": {
+            "successor_bundle": str(case.successor), "successor_digest": prior["digest"],
+            "target_generation": prior["target_generation"],
+            "expected_selection": prior["expected_selection"],
+            "pool_target": entry["target"], "pool_previous": entry["previous"],
+            "pool_bridge": entry["bridge"]},
+        "go_digest": plan["digest"], "go_schema": plan["schema"],
+        "go_generation": plan["target_generation"],
+        "go_expected_selection": plan["expected_selection"],
+        "go_bootstrap_digest": plan["bootstrap_digest"],
+        "go_prior_successor_digest": plan["prior_successor_digest"],
+        "go_component_sha256": plan["component_sha256"],
+        "go_manifest_sha256": plan["manifest_sha256"],
+        "pool_target": plan["entries"]["pool"]["target"],
+        "pool_previous": plan["entries"]["pool"]["previous"],
+        "pool_bridge": plan["entries"]["pool"]["bridge"],
+        "store": plan["store"], "phase": "PREVIOUS",
+    }
+    assert value["observed"] == expected
+    assert owner_bytes() == before and g.current(case.store) == pointer
+    api.history(case)
+    captured = control / (
+        "ops/native_fabric/quota_continuity/rollout/provider_application/"
+        "memory_support/composition.json")
+    original = captured.read_bytes()
+    for fault in ("missing", "changed"):
+        try:
+            if fault == "missing":
+                captured.unlink()
+            else:
+                captured.write_bytes(original + b"\n")
+            refused = read_installed()
+            assert refused.returncode != 0
+            assert "CONTROL_BUNDLE_CLOSURE_REFUSED" in refused.stderr
+            assert owner_bytes() == before and g.current(case.store) == pointer
+            api.history(case)
+        finally:
+            captured.write_bytes(original)
+            captured.chmod(0o600)

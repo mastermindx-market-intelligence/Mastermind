@@ -111,6 +111,10 @@ GLM_BROKER_TRANSITIONS = {
     "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173":
         ("lease_broker_provider_h2.py", "470991af25bccc430a6310fb2de5438c6d4f66135f6faf614b405a1ff8c2004c"),
 }
+GLM_BROKER_TRANSITIONS["096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b"] = (
+    "lease_broker_provider_memory.py",
+    "991aca0c5e902b9fb8fc699524a249957ca686299a3d1448f9f31c2305b84a41",
+)
 GLM_CORE_SOURCE_DIRECTORY = "rollout/preimages/glm_application_core_5c3d"
 _GLM_BROKER_NODES = (
     "Broker._ensure_schema", "Broker.begin_application_turn",
@@ -270,8 +274,16 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
 
 
 def _glm_core_inventory_row(row, relative, raw, source, prior):
-    """Retain the existing exact core composition metadata projection."""
-    return dict(row, source=source, sha256=sha(raw), bytes=len(raw), composition={'schema': 'mastermind.glm-native-core-source.v1', 'preimage_sha256': prior, 'candidate_sha256': GLM_CORE_DIGESTS[Path(relative).name]})
+    """Retain original projections and the exact memory/support source chain."""
+    composition = {
+        "schema": "mastermind.glm-native-core-source.v1",
+        "preimage_sha256": prior,
+        "candidate_sha256": GLM_CORE_DIGESTS[Path(relative).name],
+    }
+    inherited = row.get("composition", {})
+    if inherited.get("successor_composition_sha256") == PROVIDER_MEMORY_SUPPORT_RECORD_SHA256:
+        composition["inherited"] = inherited
+    return dict(row, source=source, sha256=sha(raw), bytes=len(raw), composition=composition)
 
 
 def verify_glm_core_release_records(root, originals, generated):
@@ -786,6 +798,7 @@ def _before_provider_application_without_remote_placement(manifest):
 def before_provider_application(manifest):
     if type(manifest) is dict:
         manifest = before_glm_application_core(manifest)
+        manifest = before_provider_memory_support(manifest)
         manifest = before_provider_terminal_diagnostics(manifest)
         manifest = before_provider_maintenance_guard(manifest)
     if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
@@ -821,7 +834,9 @@ def _go_staged_dependency_hashes_before_glm(manifest, candidate_hashes):
         else:
             if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
                 raise ValueError("provider APPLICATION broker preimage differs")
-            result["lease_broker.py"] = broker["sha256"]
+            previous = before_provider_memory_support(parent)
+            result["lease_broker.py"] = (parent["ext/lease_broker.py"] if previous != parent
+                                         else broker["sha256"])
     return result
 
 
@@ -1093,7 +1108,174 @@ def compose_provider_terminal_diagnostics_stage(root, output, manifest, files):
 
 
 
+PROVIDER_MEMORY_SUPPORT_RECORD_SHA256 = "1b9460fdc0ab02a7f5daffae5822d697de727a1003011e42c53d69972659f6e7"
+# Recognize every committed partial cohort without requiring source data for legacy reads.
+PROVIDER_MEMORY_SUPPORT_MARKERS = {
+    "ext/artifact_delivery.py": "ba4db65e0fa0c508e461375e7aa901aa05d5fb6ea865cdfd8c407690c99fd9de",
+    "ext/fabric_memory_view.py": "5cfef82516a599baeb5a59893e7cfffae33d9819918eb0077475c12cb1370202",
+    "ext/fabric_operator_contract.py": "80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116",
+    "ext/fabric_operator_owner.py": "d53932a861fa7126740551ab75920a72c46f87c8a02bd40906c101898a82a2b3",
+    "ext/fabric_task.py": "867b7ff8a450959e5a103e3050b688a5d0c13a56438f3627eaa79e43ee819c83",
+    "ext/lease_broker.py": "096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b",
+    "ext/protected_memory_economic.py": "c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70",
+    "ext/provider_outcome.py": "eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b",
+    "ext/run_observation_delivery.py": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
+    "ext/support_policy_status.py": "463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058"
+}
+PROVIDER_MEMORY_SUPPORT_ADDITIONS = frozenset({
+    "ext/fabric_memory_view.py", "ext/protected_memory_economic.py",
+    "ext/support_policy_status.py",
+})
+
+
+def provider_memory_support_record(root=None):
+    """Bind native42 and its APPLICATION join to the existing protected owner."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
+    record = json.loads(_provider_source(
+        root / "rollout/provider_application/memory_support/composition.json",
+        PROVIDER_MEMORY_SUPPORT_RECORD_SHA256))
+    selected = record["original_profile"]
+    profile = json.loads(_provider_source(root / selected["source"], selected["sha256"]))
+    predecessor = provider_terminal_diagnostics_files(root)
+    current = profile["files"]
+    changed = {key for key in current if predecessor.get(key) != current[key]}
+    if (record["schema"] != "native-provider-memory-support-composition.v1"
+            or profile["base_files"] != predecessor or len(current) != 119
+            or set(current) - set(predecessor) != PROVIDER_MEMORY_SUPPORT_ADDITIONS
+            or set(predecessor) - set(current)
+            or _manifest_digest(predecessor) != selected["native_before_manifest_sha256"]
+            or _manifest_digest(current) != selected["native_after_manifest_sha256"]
+            or changed != set(record["members"])
+            or {name: row["after"] for name, row in record["members"].items()}
+               != PROVIDER_MEMORY_SUPPORT_MARKERS
+            or set(profile["patches"]) | set(profile["source_map"]) != changed
+            or set(profile["patches"]) & set(profile["source_map"])
+            or set(record["original_patches"]) != set(profile["patches"])):
+        raise ValueError("provider memory support source cohort differs")
+    for relative, original in profile["patches"].items():
+        source = record["original_patches"][relative]
+        if (source != {"source": "../provider_plans/" + original["patch"],
+                       "sha256": original["patch_sha256"]}
+                or original["before"] != predecessor[relative]
+                or original["after"] != current[relative]):
+            raise ValueError("provider memory support original patch differs")
+        _provider_source(root / source["source"], source["sha256"])
+    payloads = {}
+    for relative, row in record["members"].items():
+        if relative in profile["source_map"]:
+            source = root.parents[2] / profile["source_map"][relative]
+            if (row.get("patch_source") is not None or row["after"] != current[relative]
+                    or row["before"] != predecessor.get(relative)
+                    or (root / row["source"]).resolve() != source.resolve()):
+                raise ValueError("provider memory support original source differs")
+            payloads[relative] = _provider_source(source, row["after"])
+            if len(payloads[relative]) != row["bytes"]:
+                raise ValueError("provider memory support source length differs")
+        else:
+            payloads[relative] = _provider_source(
+                root / row["patch_source"], row["patch_sha256"])
+    return record, dict(current), payloads
+
+
+def provider_memory_support_files(root=None):
+    """Return the complete authenticated native42 predecessor, without effects."""
+    return provider_memory_support_record(root)[1]
+
+
+def before_provider_memory_support(manifest):
+    """Invert only the exact joined 119-file core, preserving historical guards."""
+    if type(manifest) is not dict:
+        raise ValueError("provider memory support APPLICATION closure differs")
+    marked = bool(PROVIDER_MEMORY_SUPPORT_ADDITIONS & set(manifest)) or any(
+        manifest.get(name) == digest for name, digest in PROVIDER_MEMORY_SUPPORT_MARKERS.items())
+    if not marked:
+        return dict(manifest)
+    record, _, _ = provider_memory_support_record()
+    if (len(manifest) != 119 or
+            _manifest_digest(manifest) != record["application_after_manifest_sha256"]):
+        raise ValueError("provider memory support APPLICATION closure differs")
+    previous = dict(manifest)
+    for name, row in record["members"].items():
+        if row["before"] is None:
+            del previous[name]
+        else:
+            previous[name] = row["before"]
+    if (len(previous) != 116 or
+            _manifest_digest(previous) != record["application_before_manifest_sha256"]):
+        raise ValueError("provider memory support APPLICATION parent differs")
+    return previous
+
+
+def compose_provider_memory_support_stage(root, output, manifest, files):
+    """Compose original memory/support sources without publication or selection."""
+    root, output = Path(root), Path(output)
+    record, _, payloads = provider_memory_support_record(root)
+    if (type(manifest) is not dict or len(manifest) != 116
+            or set(files) != set(manifest)
+            or _manifest_digest(manifest) != record["application_before_manifest_sha256"]):
+        raise ValueError("provider memory support composition parent differs")
+    captured, result = {}, dict(manifest)
+    for relative, row in record["members"].items():
+        target = output / "native-code-stage" / relative
+        previous = files.get(relative)
+        if row["before"] is None:
+            if target.exists() or target.is_symlink() or previous is not None:
+                raise ValueError("provider memory support addition already exists")
+        else:
+            original = _provider_source(target, row["before"])
+            if (previous is None or previous["sha256"] != sha(original)
+                    or previous["bytes"] != len(original)):
+                raise ValueError("provider memory support inventory predecessor differs")
+        raw = (payloads[relative] if "source" in row else
+               _quota_reset_patch(original, payloads[relative], Path(relative).name))
+        if sha(raw) != row["after"] or len(raw) != row["bytes"]:
+            raise ValueError("provider memory support combined source differs")
+        captured[relative] = (raw, dict(previous) if previous is not None else {})
+        result[relative] = row["after"]
+    if (len(result) != 119 or
+            _manifest_digest(result) != record["application_after_manifest_sha256"]):
+        raise ValueError("provider memory support composed whole closure differs")
+    for relative, (raw, previous) in captured.items():
+        row = record["members"][relative]
+        (output / "native-code-stage" / relative).write_bytes(raw)
+        composition = {
+            "schema": ("native-exact-forward-patch.v1" if "patch_source" in row
+                       else "native-exact-source-composition.v1"),
+            "preimage_sha256": row["before"],
+            "successor_composition_sha256": PROVIDER_MEMORY_SUPPORT_RECORD_SHA256,
+            "inherited": previous,
+        }
+        if "patch_source" in row:
+            composition.update({key: row[key] for key in ("patch_source", "patch_sha256")})
+        files[relative] = dict(previous, source=row.get("source", previous.get("source")),
+                               sha256=row["after"], bytes=len(raw), composition=composition)
+        manifest[relative] = row["after"]
+
+
+def _before_memory_support_with_carriers(manifest):
+    """Project the complete joined core while retaining every transport member."""
+    base = _application_base(manifest)
+    unwrapped = before_glm_application_core(base)
+    previous = before_provider_memory_support(unwrapped)
+    if previous == unwrapped:
+        raise ValueError("provider memory support retained transition differs")
+    if unwrapped != base:
+        previous.update({"ext/" + name: digest for name, digest in GLM_CORE_DIGESTS.items()
+                         if name != "lease_broker.py"})
+        previous["ext/lease_broker.py"] = GLM_BROKER_TRANSITIONS[
+            previous["ext/lease_broker.py"]][1]
+    projected = {key: value for key, value in manifest.items() if key not in base}
+    projected.update(previous)
+    return projected
+
+
 def validate_go_source_transition(before, after):
+    if type(before) is dict and (
+            PROVIDER_MEMORY_SUPPORT_ADDITIONS & set(before)):
+        if before != provider_memory_support_files() or type(after) is not dict:
+            raise ValueError("provider memory support predecessor transition differs")
+        projected = _before_memory_support_with_carriers(after)
+        return validate_go_source_transition(provider_terminal_diagnostics_files(), projected)
     if (type(before) is dict and
             before.get("ext/native_plan_worker.py") == PROVIDER_TERMINAL_DIAGNOSTICS_PARENT_SHA256):
         record, predecessor, _ = provider_terminal_diagnostics_record()
@@ -2182,9 +2364,14 @@ def main():
     parser.add_argument("--include-provider-plan-maintenance-guard", action="store_true")
     parser.add_argument("--include-provider-plan-terminal-diagnostics", action="store_true",
                         help="preserve installed native41 diagnostics and the retained guard; requires maintenance guard")
+    parser.add_argument("--include-provider-plan-memory-support", action="store_true",
+                        help="preserve the complete native42 memory/support cohort; requires terminal diagnostics")
     parser.add_argument("--include-application-glm", action="store_true",
                         help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
     args = parser.parse_args()
+    if (args.include_provider_plan_memory_support
+            and not args.include_provider_plan_terminal_diagnostics):
+        parser.error("--include-provider-plan-memory-support requires --include-provider-plan-terminal-diagnostics")
     if (args.include_provider_plan_terminal_diagnostics
             and not args.include_provider_plan_maintenance_guard):
         parser.error("--include-provider-plan-terminal-diagnostics requires --include-provider-plan-maintenance-guard")
@@ -2316,6 +2503,8 @@ def main():
         before_provider_application(before_quota_reset_recovery(manifest)))))
     if args.include_provider_plan_terminal_diagnostics:
         compose_provider_terminal_diagnostics_stage(root, output, manifest, files)
+    if args.include_provider_plan_memory_support:
+        compose_provider_memory_support_stage(root, output, manifest, files)
     compose_glm_application_core(root, output, manifest, files)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
@@ -2323,6 +2512,8 @@ def main():
     extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
     if args.include_provider_plan_application:
         extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
+    if args.include_provider_plan_memory_support:
+        extra |= {Path(name).name for name in PROVIDER_MEMORY_SUPPORT_ADDITIONS}
     if args.include_application_http:
         compose_application_http_stage(root, output, manifest, files, include_glm=args.include_application_glm)
         extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}

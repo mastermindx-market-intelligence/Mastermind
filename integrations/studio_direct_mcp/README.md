@@ -84,8 +84,22 @@ The gateway logs tool names, timings and outcome classes, without arguments, fil
 ## C1 fleet gateway Git-failure correction
 
 The formatter compiler, the native installer's build validator, and its exact
-retained launcher source are part of the existing thirteen-member control bundle. The original bundle owner can migrate the exact prior ten-member bundle
-under its original digest; the previous lock and bytecode restrictions remain.
+retained launcher source remain in the original Control bundle. Its current
+63-file closure contains the previous 13 helpers plus the 50 fixed Go reader
+inputs declared by control_bundle.py. Those inputs include the source records,
+candidate bytes, and exact patches needed to validate native42 memory/support
+through the APPLICATION transition from an installed location.
+
+The original bundle owner accepts the exact prior 3-, 4-, 10-, and 13-file
+cohorts only for verification and migration under the observed original digest.
+The 10-, 13-, and 63-file cohorts retain the existing required lock and strict
+bytecode/layout checks. Runtime admission requires the full current 63-file
+inventory. Every file is sealed and captured; the manifest's source path is
+provenance and cannot supply an absent dependency. The installed-reader test
+removes its temporary source checkout before validating the real retained Go
+plan in a fresh isolated interpreter, and verifies that preview leaves the
+original selection, bridges, and receipts unchanged.
+
 Installed invocation loads the compiler from the authenticated captured bytes.
 An existing `fleet-status-module-successor` record blocks formatter preview and
 apply until that original owner is reconciled; this transition never edits it.
