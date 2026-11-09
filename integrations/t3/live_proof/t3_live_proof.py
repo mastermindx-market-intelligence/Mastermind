@@ -29,6 +29,7 @@ from control_plane.child_execution_contracts import (  # noqa: E402
     ExecutionBinding,
 )
 from control_plane.t3_execution_adapter import (  # noqa: E402
+    InMemoryT3AdapterStateStore,
     T3ExecutionAdapter,
     T3InterruptOutcome,
     T3ThreadLaunchEnvelope,
@@ -471,14 +472,12 @@ async def main() -> None:
         # but stalled in delivery -- catalog visibility is not readiness)
     )
     port = LiveT3McpPort(mcp)
-    intent_store: dict = {}
-    result_ledger: dict = {}
+    state_store = InMemoryT3AdapterStateStore()
     adapter = T3ExecutionAdapter(
         port,
         binding_source=lambda s: binding,
         inspector=ProofInspector(),
-        intent_store=intent_store,
-        result_ledger=result_ledger,
+        state_store=state_store,
     )
 
     # Verify intent-before-native-call ordering LIVE: the port checks the
@@ -486,7 +485,9 @@ async def main() -> None:
     original_launch = port.launch_thread
 
     async def checked_launch(envelope):
-        assert envelope.run_id in intent_store, "intent must be persisted before native call"
+        assert adapter.launch_intent(envelope.run_id) is not None, (
+            "intent must be persisted before native call"
+        )
         return await original_launch(envelope)
 
     port.launch_thread = checked_launch  # type: ignore[method-assign]
@@ -500,7 +501,7 @@ async def main() -> None:
         receipt_before_ack=True,
         elapsed_s=round(time.monotonic() - t0, 2),
     )
-    receipt = adapter._launch_receipts[spec.run_id]
+    receipt = adapter.launch_receipt(spec.run_id)
     _log(
         "launch.receipt",
         threadId=receipt.thread_id,
@@ -537,7 +538,8 @@ async def main() -> None:
         collected = await adapter.collect_result(ref)
     except Exception as exc:
         collect_error = str(exc)
-    ledger_before_receipt = spec.run_id in result_ledger
+    result_ledger_entry = adapter.result_ledger_entry(spec.run_id)
+    ledger_before_receipt = result_ledger_entry is not None
     _log(
         "adapter.collect_result",
         ok=collected is not None,
@@ -585,8 +587,8 @@ async def main() -> None:
             else None,
         },
         "result_excerpt": (
-            result_ledger[spec.run_id].result_ref[:200]
-            if spec.run_id in result_ledger
+            result_ledger_entry.result_ref[:200]
+            if result_ledger_entry is not None
             else None
         ),
         "result_payload_excerpt": None,

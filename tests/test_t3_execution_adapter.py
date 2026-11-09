@@ -23,6 +23,7 @@ from control_plane.child_execution_contracts import (
     ExecutionBinding,
 )
 from control_plane.t3_execution_adapter import (
+    InMemoryT3AdapterStateStore,
     T3_REQUEST_NAMESPACE,
     T3CancelReport,
     T3ExecutionAdapter,
@@ -210,28 +211,20 @@ class FakeT3Port:
         return self.interrupt_outcome
 
 
-class TraceIntentStore(dict):
-    """Intent store that records every persist into a shared trace."""
+class TracingStateStore(InMemoryT3AdapterStateStore):
+    """State store that records ordering-critical writes into a shared trace."""
 
     def __init__(self, trace: list) -> None:
         super().__init__()
         self._trace = trace
 
-    def __setitem__(self, key, value) -> None:
-        self._trace.append(("intent-persisted", key))
-        super().__setitem__(key, value)
+    def put_launch_intent(self, intent, *, binding, spec) -> None:
+        self._trace.append(("intent-persisted", intent.run_id))
+        super().put_launch_intent(intent, binding=binding, spec=spec)
 
-
-class TraceResultLedger(dict):
-    """Result ledger that records every store into a shared trace."""
-
-    def __init__(self, trace: list) -> None:
-        super().__init__()
-        self._trace = trace
-
-    def __setitem__(self, key, value) -> None:
-        self._trace.append(("ledger-store", key))
-        super().__setitem__(key, value)
+    def put_result_reference(self, reference) -> None:
+        self._trace.append(("ledger-store", reference.run_id))
+        super().put_result_reference(reference)
 
 
 def _t3_adapter(
@@ -239,8 +232,7 @@ def _t3_adapter(
     binding: ExecutionBinding | None = None,
     binding_error: Exception | None = None,
     *,
-    intent_store: dict | None = None,
-    result_ledger: dict | None = None,
+    state_store=None,
 ):
     port = port or FakeT3Port()
     current = {"binding": binding, "error": binding_error}
@@ -252,7 +244,7 @@ def _t3_adapter(
 
     adapter = T3ExecutionAdapter(
         port, binding_source, FakeInspector(),
-        clock=_clock, intent_store=intent_store, result_ledger=result_ledger,
+        clock=_clock, state_store=state_store,
     )
     return adapter, port, current
 
@@ -335,15 +327,15 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
                     await adapter.start(_launch_spec())
                 self.assertEqual(port.launch_calls, [])
                 self.assertEqual(port.trace, [])
-                self.assertEqual(len(adapter._launch_intents), 0)
-                self.assertEqual(len(adapter._original_refs), 0)
+                self.assertIsNone(adapter.launch_intent("run-1"))
+                self.assertIsNone(adapter.retained_original_ref("run-1"))
 
     async def test_start_refused_when_binding_source_raises(self) -> None:
         adapter, port, _ = _t3_adapter(binding_error=RuntimeError("broker down"))
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.start(_launch_spec())
         self.assertEqual(port.launch_calls, [])
-        self.assertEqual(len(adapter._launch_intents), 0)
+        self.assertIsNone(adapter.launch_intent("run-1"))
 
     async def test_client_request_id_deterministic_and_stable(self) -> None:
         binding = _binding()
@@ -378,9 +370,9 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
     async def test_intent_persisted_before_native_call(self) -> None:
         trace: list = []
         port = FakeT3Port(trace=trace)
-        store = TraceIntentStore(trace)
+        store = TracingStateStore(trace)
         adapter, _, _ = _t3_adapter(port=port, binding=_binding(),
-                                    intent_store=store)
+                                    state_store=store)
         await adapter.start(_launch_spec())
         self.assertEqual(
             [entry[0] for entry in trace],
@@ -391,9 +383,9 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
         adapter, port, _ = _t3_adapter(binding=_binding())
         spec = _launch_spec()
         ref = await adapter.start(spec)
-        # The ACK returns exactly the retained original ref object.
-        self.assertIs(adapter._original_refs[spec.run_id], ref)
-        receipt = adapter._launch_receipts[spec.run_id]
+        # The ACK returns exactly the retained original ref (durable read).
+        self.assertEqual(adapter.retained_original_ref(spec.run_id), ref)
+        receipt = adapter.launch_receipt(spec.run_id)
         self.assertEqual(receipt.thread_id, ref.provider_session_id)
         self.assertEqual(receipt.run_id, "t3run-" + ref.launch_nonce[:8])
         # The key rides in the neutral ref for every later identity check.
@@ -414,7 +406,7 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
         # Never auto-retried: exactly one native launch call.
         self.assertEqual(len(port.launch_calls), 1)
         # The intent stays persisted; start() is dead for this run.
-        self.assertEqual(len(adapter._launch_intents), 1)
+        self.assertIsNotNone(adapter.launch_intent("run-1"))
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.start(_launch_spec())
         self.assertEqual(len(port.launch_calls), 1)
@@ -425,7 +417,7 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.start(_launch_spec())
         # Clean refusal = no native effect: the intent is rolled back.
-        self.assertEqual(len(adapter._launch_intents), 0)
+        self.assertIsNone(adapter.launch_intent("run-1"))
         first_key = port.launch_calls[0].client_request_id
         port.launch_error = None
         ref = await adapter.start(_launch_spec())
@@ -455,7 +447,7 @@ class T3StatusTests(unittest.IsolatedAsyncioTestCase):
         thread = ref.provider_session_id
         self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
         self.assertEqual(port.reads, [(thread, f"t3run-{ref.launch_nonce[:8]}", "")])
-        self.assertEqual(adapter._cursors[ref.run_id], "1")
+        self.assertEqual(adapter.read_cursor(ref.run_id), "1")
         # The second read uses the PERSISTED advanced cursor.
         await adapter.status(ref)
         self.assertEqual(port.reads[-1], (thread, port.reads[0][1], "1"))
@@ -466,7 +458,7 @@ class T3StatusTests(unittest.IsolatedAsyncioTestCase):
         port.read_error = RuntimeError("native read failed")
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.status(ref)
-        self.assertEqual(adapter._cursors.get(ref.run_id, ""), "")
+        self.assertEqual(adapter.read_cursor(ref.run_id), "")
         port.read_error = None
         await adapter.status(ref)
         self.assertEqual(port.reads[-1][2], "")  # cursor was NOT advanced
@@ -493,7 +485,7 @@ class T3StatusTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.status(ref)
-        self.assertEqual(adapter._cursors.get(ref.run_id, ""), "")
+        self.assertEqual(adapter.read_cursor(ref.run_id), "")
 
     async def test_status_refuses_unknown_or_swapped_refs(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
@@ -516,9 +508,9 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
     async def test_collect_stores_result_reference_before_the_receipt(self) -> None:
         trace: list = []
         port = FakeT3Port(trace=trace)
-        ledger = TraceResultLedger(trace)
+        ledger = TracingStateStore(trace)
         adapter, _, _ = _t3_adapter(port=port, binding=_binding(),
-                                    result_ledger=ledger)
+                                    state_store=ledger)
         ref = await adapter.start(_launch_spec())
         trace.clear()
         port.status_by_thread[ref.provider_session_id] = "succeeded"
@@ -538,7 +530,7 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
         )
         # Reading T3 is NOT company acceptance: the ledger holds the
         # canonical reference as evidence, separately from the neutral floor.
-        entry = ledger[ref.run_id]
+        entry = adapter.result_ledger_entry(ref.run_id)
         self.assertEqual(entry.result_ref, f"t3://thread/{ref.provider_session_id}/result")
         self.assertEqual(receipt.process_ref, ref)
         self.assertEqual(receipt.result.run_id, ref.run_id)
@@ -554,7 +546,7 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
         port.status_by_thread[ref.provider_session_id] = "running"
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.collect_result(ref)
-        self.assertEqual(len(adapter._result_ledger), 0)
+        self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
 
     async def test_collect_refuses_a_different_run_result(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
@@ -567,21 +559,21 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.collect_result(ref)
         # A foreign result is never ledgered — no replacement.
-        self.assertEqual(len(adapter._result_ledger), 0)
+        self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
 
     async def test_collect_refuses_terminal_read_without_canonical_reference(
         self,
     ) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
         ref = await adapter.start(_launch_spec())
-        native_run = adapter._launch_receipts[ref.run_id].run_id
+        native_run = adapter.launch_receipt(ref.run_id).run_id
         port.read_override = T3ThreadReadResult(
             thread_id=ref.provider_session_id, run_id=native_run,
             native_status="succeeded", next_cursor="1", result_ref="",
         )
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.collect_result(ref)
-        self.assertEqual(len(adapter._result_ledger), 0)
+        self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
 
 
 # =============================================================================
@@ -711,7 +703,10 @@ class T3ReattachTests(unittest.IsolatedAsyncioTestCase):
         before = list(port.trace)
         binding = _recovery_binding(spec, ref)
         reattached = await adapter.reattach(spec, binding)
-        self.assertIs(reattached, ref)
+        # The durable retained copy is the authority: recovery returns the
+        # VALUE-equal original ref (a store round-trip reconstructs it).
+        self.assertEqual(reattached, ref)
+        self.assertEqual(adapter.retained_original_ref(spec.run_id), ref)
         # Recovery of a retained execution needs NO native call at all.
         self.assertEqual(len(port.launch_calls), 1)
         self.assertEqual(port.replay_calls, [])
@@ -764,7 +759,7 @@ class T3ReattachTests(unittest.IsolatedAsyncioTestCase):
         # The recovered execution is now retained: the next reattach replays
         # nothing and returns the same object.
         again = await second.reattach(spec, binding)
-        self.assertIs(again, reattached)
+        self.assertEqual(again, reattached)
         self.assertEqual(len(port.replay_calls), 1)
 
     async def test_reattach_refuses_replay_returning_a_different_thread(self) -> None:
@@ -780,8 +775,8 @@ class T3ReattachTests(unittest.IsolatedAsyncioTestCase):
         # Never a replacement launch; nothing was adopted.
         self.assertEqual(len(port.launch_calls), 1)
         self.assertEqual(len(port.replay_calls), 1)
-        self.assertEqual(len(second._original_refs), 0)
-        self.assertEqual(len(second._launch_receipts), 0)
+        self.assertIsNone(second.retained_original_ref(spec.run_id))
+        self.assertIsNone(second.launch_receipt(spec.run_id))
 
     async def test_reattach_replay_lost_reply_carries_the_key(self) -> None:
         spec = _launch_spec(run_dir=_recovery_run_dir())
