@@ -629,3 +629,87 @@ def test_invalid_child_placement_spec_is_refused_at_creation(tmp_path):
                                                logical_child_key="other")
     with pytest.raises(StateConflict, match="child placement"):
         runtime.jobs.create_job("bad", constraints={"child_placement": tampered})
+
+
+# --- WO-17: the canonical decision ledger + correlated Hermes mmx-router JSONL --
+
+from control_plane.child_execution_contracts import DecisionEvent  # noqa: E402
+from control_plane.executive_decision_ledger import (  # noqa: E402
+    JSONL_CORRELATION_KEYS, correlation_report, decision_event_from_claim,
+    decision_for_attempt, decision_id_for_binding, decisions_for_job,
+    hermes_jsonl_line, record_claim_decision,
+)
+
+
+def test_claimed_attempt_yields_one_correlated_decision_pair(tmp_path):
+    """End-to-end: a real claim's JOB_CLAIMED record projects into the one
+    shared decision schema, attaches to the Job/Attempt records, and
+    correlates key-by-key to its mmx-router JSONL line."""
+    runtime, clock = _runtime(tmp_path)
+    _worker(runtime, "worker-a", "ubuntu0")
+    job = _job(runtime, "child-1")
+
+    lease = runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    assert lease is not None
+    attempt = lease.attempt
+    claimed = [e for e in runtime.store.list_events(job_id=job.job_id)
+               if e.event_type == "JOB_CLAIMED"]
+    assert len(claimed) == 1
+    binding = ExecutionBinding.from_dict(claimed[0].payload["execution_binding"])
+
+    # The canonical decision attaches to the existing Job/Attempt records,
+    # idempotent by decision_id, without touching the Job event chain.
+    with runtime.store.transaction() as connection:
+        event = record_claim_decision(
+            runtime.store, connection, job_id=job.job_id,
+            claim_payload=claimed[0].payload, timestamp=clock(),
+            spec=_spec("child-1"))
+    assert event.event_kind == "binding_issued"
+    assert event.decision_id == decision_id_for_binding(binding)
+    assert event.attempt_ref == attempt.attempt_id == binding.attempt_ref
+    assert event.fence_counter == binding.fence_counter == attempt.fence_generation
+    assert (event.root_run_ref, event.immediate_parent_run_ref, event.logical_child_key) == (
+        "hermes-root-1", "hermes-run-7", "child-1")
+    assert event.effective_complexity == binding.effective_complexity == "C1_ROUTINE_BOUNDED"
+    assert event.requested_complexity == "C1_ROUTINE_BOUNDED"
+    # readable back from both record identities
+    assert decision_for_attempt(runtime.store, attempt.attempt_id).decision_id == event.decision_id
+    assert [d.decision_id for d in decisions_for_job(runtime.store, job.job_id)] == [event.decision_id]
+    with runtime.store.transaction() as connection:
+        replay = record_claim_decision(
+            runtime.store, connection, job_id=job.job_id,
+            claim_payload=claimed[0].payload, timestamp=clock(),
+            spec=_spec("child-1"))
+    assert replay.decision_id == event.decision_id
+    assert len(decisions_for_job(runtime.store, job.job_id)) == 1
+    claimed_after = [e for e in runtime.store.list_events(job_id=job.job_id)
+                     if e.event_type == "JOB_CLAIMED"]
+    assert len(claimed_after) == 1  # the Job chain itself is untouched
+
+    # The correlated Hermes mmx-router JSONL line: base router fields verbatim,
+    # correlation keys matching the Executive record on every key.
+    line = hermes_jsonl_line(
+        event, t="2026-11-08T12:00:00-0700", requested="routine", served="routine",
+        task_class="C1", downgraded=False, note=None,
+        capacity="capacity: no-input (no capacity_file configured)",
+        route="byteplus-coding/deepseek-v4-1-flash-261017")
+    report = correlation_report(event, line)
+    assert set(report) == set(JSONL_CORRELATION_KEYS)
+    assert all(entry["match"] for entry in report.values()), report
+    parsed = json.loads(line)
+    assert parsed["schema"] == event.to_dict()["schema"]
+    assert parsed["requested"] == "routine" and parsed["served"] == "routine"
+    assert parsed["route"] == "byteplus-coding/deepseek-v4-1-flash-261017"
+    # A legacy router line with no correlation keys is uncorrelated, never
+    # placement evidence; the Executive record stays the sole authority.
+    legacy = json.dumps({"t": "2026-11-08T12:00:00-0700", "requested": "routine",
+                         "served": "routine", "task_class": "C1", "downgraded": False,
+                         "route": "byteplus-coding/deepseek-v4-1-flash-261017"})
+    report = correlation_report(event, legacy)
+    assert not any(entry["match"] for entry in report.values())
+
+
+def test_decision_projection_refuses_a_claim_without_a_binding(tmp_path):
+    runtime, _ = _runtime(tmp_path)
+    with pytest.raises(ValueError, match="no ExecutionBinding"):
+        decision_event_from_claim(job_id="legacy-job", claim_payload={"status": "RUNNING"})
