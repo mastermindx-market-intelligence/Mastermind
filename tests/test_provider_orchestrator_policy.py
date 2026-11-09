@@ -4738,3 +4738,421 @@ def test_r8_t3_worktree_cwd_is_outside_the_scope_roots_pinned_limit(
     with pytest.raises(SystemExit):
         guard.guard_bash(_payload(t3_cwd, command), {"command": command})
     assert "R6_REDIRECTION" in _emitted(capsys)["permissionDecisionReason"]
+
+
+# --- r9: quote-adjacent glue (REVIEW4 F1 MAJOR) ------------------------------
+#
+# r8's rough word split treated ``"``, ``'`` and ``\`` as SEPARATORS, but the
+# shell's quote removal JOINS adjacent quoted and unquoted segments into one
+# word: ``${x:-p}"ool" run grok …`` RUNS ``pool`` (zsh -f and bash --norc
+# both — test_r9_sealed_shells_run_each_quote_glue_shape) and r8 judged it out
+# of scope (armed, no binding: ALLOWED). r9 adds the joined reading (quotes
+# and backslashes deleted before splitting) to both partial-word readers.
+#
+# (id, template, shells that RUN it (ground truth), needs a case-insensitive FS)
+# ``{a}`` = the arguments: the launch arguments for the verdict tests, a
+# marker tag for the sealed ground-truth runs.
+
+_R9_SCOPE_ESCAPES = [
+    ("dq-suffix", '${x:-p}"ool" {a}', "zsh bash", False),
+    ("sq-suffix", "${x:-p}'ool' {a}", "zsh bash", False),
+    ("dq-construct-then-literal", '"${x:-p}"ool {a}', "zsh bash", False),
+    ("backslash-suffix", "${x:-p}\\ool {a}", "zsh bash", False),
+    ("dq-suffix-two-default-chars", '${x:-po}"ol" {a}', "zsh bash", False),
+    ("cmdsub-dq-suffix", '$(printf p)"ool" {a}', "zsh bash", False),
+    ("sub-sh-dq-suffix", '${x:-s}"ub.sh" {a}', "zsh bash", False),
+    ("slot-py-dq-suffix", '${x:-sl}"ot.py" {a}', "zsh bash", False),
+    ("empty-dq-between", '${x:-p}""ool {a}', "zsh bash", False),
+    ("locale-empty-between", '${x:-p}$""ool {a}', "bash", False),  # zsh: $"" is not locale quoting
+    ("dq-cmdsub-dq", '"p"$(true)"ool" {a}', "zsh bash", False),
+    ("nested-in-echo-cmdsub", 'echo $(${x:-p}"ool" {a})', "zsh bash", False),
+    ("nested-in-bash-c", "bash -c '${x:-p}\"ool\" {a}'", "zsh bash", False),
+    ("zsh-arith-base-bracket-dq", '$[[##36]25]"OOL" {a}', "zsh", True),
+    ("zsh-arith-base-paren-dq", '$(([##36]25))"ool" {a}', "zsh", True),
+    ("zsh-anchored-replace-dq", '${x/#/p}"ool" {a}', "zsh", False),
+]
+
+_R9_LAUNCH_ARGS = {"slot-py-dq-suffix": "glm a /tmp glm-5.3"}
+
+
+def _r9_escape_command(row: tuple, args: str | None = None) -> str:
+    return row[1].replace("{a}", args or _R9_LAUNCH_ARGS.get(row[0], "run grok a /tmp grok-4"))
+
+
+def test_r9_scope_escape_table_covers_every_reviewer_shape() -> None:
+    reviewer = {
+        '${x:-p}"ool"', "${x:-p}'ool'", '"${x:-p}"ool', "${x:-p}\\ool", '${x:-po}"ol"',
+        '$(printf p)"ool"', '${x:-s}"ub.sh"', '${x:-sl}"ot.py"', '${x:-p}""ool',
+        '${x:-p}$""ool', '"p"$(true)"ool"', '$[[##36]25]"OOL"', '$(([##36]25))"ool"',
+        '${x/#/p}"ool"',
+    }
+    words = {row[1].split(" {a}")[0] for row in _R9_SCOPE_ESCAPES}
+    assert reviewer <= words
+    assert any(row[1].startswith("echo $(") for row in _R9_SCOPE_ESCAPES)
+    assert any(row[1].startswith("bash -c '") for row in _R9_SCOPE_ESCAPES)
+
+
+@pytest.mark.parametrize("row", _R9_SCOPE_ESCAPES, ids=[row[0] for row in _R9_SCOPE_ESCAPES])
+def test_r9_quote_glue_escapes_are_judged_and_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    command = _r9_escape_command(row)
+    assert guard.r6_names_wrapper(command), command
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), (bound_reason, nobind_reason)
+    # refused by SHAPE (R6_*), before any binding judgement, in both sessions
+    assert "R6_" in bound_reason and "R6_" in nobind_reason, (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+    assert "guard budget exceeded" not in bound_reason + nobind_reason
+
+
+def test_r9_reviewer_row_through_the_real_hook_command_line(tmp_path: Path) -> None:
+    """REVIEW4 F1 exact reproduction: armed session, NO binding, through
+    ``python3 "<guard>"``. r8 ALLOWED the quote-glued word (0.07 s) while the
+    plain launch was denied 'missing binding'."""
+    elapsed, code, out = _r8_hook_cli(
+        tmp_path, '${x:-p}"ool" run grok a /tmp grok-4', bound=False, owner=False
+    )
+    assert code == 0 and out, out
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "R6_EXPANSION" in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, elapsed
+    _, code, out = _r8_hook_cli(
+        tmp_path, "pool run grok a /tmp grok-4", bound=False, owner=False
+    )
+    assert "missing binding" in json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_r9_sealed_shells_run_each_quote_glue_shape(tmp_path: Path) -> None:
+    """Ground truth for _R9_SCOPE_ESCAPES: in a SEALED zsh (``env -i``,
+    ``zsh -f``) and a sealed bash (``env -i``, ``--norc --noprofile``), PATH =
+    a directory of FAKE wrappers + /usr/bin:/bin — the real wrappers are
+    unreachable — every shape executes a wrapper in each shell its row names
+    (zsh-only: arithmetic base output, ``${x/#/p}``; bash-only: ``$""``)."""
+    import shutil
+    import subprocess
+
+    zsh = shutil.which("zsh")
+    bash = "/bin/bash" if Path("/bin/bash").exists() else shutil.which("bash")
+    if zsh is None or bash is None:
+        pytest.skip("no zsh/bash")
+    bin_dir = tmp_path / "bin"
+    ran = tmp_path / "ran"
+    home = tmp_path / "home"
+    for directory in (bin_dir, ran, home):
+        directory.mkdir()
+    for name in ("pool", "sub.sh", "slot.py"):
+        fake = bin_dir / name
+        fake.write_text(f'#!/bin/sh\ntouch "{ran}/{name}-$1"\n', encoding="utf-8")
+        fake.chmod(0o755)
+    case_insensitive = (bin_dir / "POOL").exists()
+    sealed_env = ["/usr/bin/env", "-i", f"PATH={bin_dir}:/usr/bin:/bin", f"HOME={home}"]
+    checked = 0
+    for row in _R9_SCOPE_ESCAPES:
+        row_id, _, shell_names, needs_case_insensitive = row
+        if needs_case_insensitive and not case_insensitive:
+            continue  # zsh prints uppercase base digits: POOL needs APFS-style lookup
+        argvs = {"zsh": [zsh, "-f", "-c"], "bash": [bash, "--norc", "--noprofile", "-c"]}
+        for shell_name in shell_names.split():
+            argv = argvs[shell_name]
+            tag = "r9" + shell_name + row_id.replace("-", "")
+            command = _r9_escape_command(row, tag)
+            subprocess.run(
+                sealed_env + argv + [command],
+                cwd=home, capture_output=True, text=True, timeout=20, check=False,
+            )
+            markers = sorted(p.name for p in ran.iterdir() if p.name.endswith("-" + tag))
+            assert markers, (row_id, shell_name, command)
+            assert guard.r6_names_wrapper(command), command
+            checked += 1
+    assert checked >= 15 + 13  # 15 rows run in zsh, 13 in bash (12 in both)
+
+
+# Honest forms: NOT newly refused. Out-of-scope words stay out; in-scope data
+# (a literal wrapper name given to a read form) keeps its r8 verdict (allow).
+_R9_STAY_OUT = [
+    "cd ${HOME:-/Users/me}",
+    'cd "${HOME:-/Users/me}"',
+    'cd "${HOME:-/Users/me}"/src',
+    "echo ${name//-/_}",
+    'echo "${name//-/_}"',
+    '"p"',
+    'echo "p"',
+    'echo "${PORT:-8080}"',
+    "$W run grok",
+    '"$W" run grok',
+    "$(([##36]1198389))",
+    '"$(([##36]1198389))" run',
+    "$(printf p)$(printf ool) run",
+    '"$(printf p)$(printf ool)" run',
+    "echo $($(echo hi))",
+    'git log "$(git merge-base a b)"..HEAD',
+    'echo "$HOME" "notes"',
+    "python3 \"$ROOT\"/scripts/run.py",
+    "printf '%s\\n' \"$x\" 'ok'",
+]
+
+
+@pytest.mark.parametrize("command", _R9_STAY_OUT)
+def test_r9_honest_and_wholly_computed_words_stay_out_of_scope(command: str) -> None:
+    assert not guard.r6_names_wrapper(command), command
+
+
+@pytest.mark.parametrize("command", [
+    'echo "pool"',
+    "echo 'pool run is a wrapper'",
+    'grep -n "slot.py" docs/runbook.md',
+    "cd ${HOME:-/Users/me} && echo ok",
+    'echo "${name//-/_}"',
+])
+def test_r9_honest_forms_keep_their_armed_verdict(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+
+
+def test_r9_quoting_never_takes_a_word_out_of_scope() -> None:
+    """Property (the F1 rule): quoting the literal pieces of a word (``"…"``,
+    ``'…'``, backslashes, ``""``/``$""`` between pieces, ``"…"`` around a
+    $-construct) is shell-transparent, so whenever the unquoted spelling is in
+    scope the quoted spelling is too. 6 000 random words."""
+    import random
+
+    rng = random.Random(20261110)
+    # (no bare ``$x``: glued to a literal it names another variable —
+    # ``$x"ol"`` is not ``$xol`` — so quoting is not transparent there)
+    constructs = ["${x:-p}", "${x:-po}", "${x:-s}", "${x:-sl}", "$(printf p)", "${x}",
+                  "$[1]", "$((1))", "${x/#/p}", "${x:+zz}", "`true`"]
+    literals = ["p", "o", "ol", "ool", "pool", "s", "ub", ".sh", "ub.sh", "l", "ot", ".py",
+                "ot.py", "x", "remote_", "sub", "a/", "/"]
+    in_scope = 0
+    for _ in range(6000):
+        pieces = []
+        for _ in range(rng.randint(1, 4)):
+            if rng.random() < 0.45:
+                pieces.append(("c", rng.choice(constructs)))
+            else:
+                pieces.append(("l", rng.choice(literals)))
+        plain = "".join(text for _, text in pieces)
+        quoted_parts = []
+        for kind, text in pieces:
+            style = rng.randrange(6)
+            if kind == "c":
+                quoted_parts.append(f'"{text}"' if style < 2 and not text.startswith("`") else text)
+            elif style == 0:
+                quoted_parts.append(f'"{text}"')
+            elif style == 1:
+                quoted_parts.append(f"'{text}'")
+            elif style == 2:
+                quoted_parts.append("".join("\\" + char for char in text))
+            elif style == 3:
+                quoted_parts.append(text + '""')
+            elif style == 4:
+                quoted_parts.append("$\"\"" + text)
+            else:
+                quoted_parts.append(text)
+        quoted = "".join(quoted_parts)
+        args = rng.choice([" run grok a /tmp grok-4", " glm a", " x", ""])
+        if guard.r6_names_wrapper(plain + args):
+            in_scope += 1
+            assert guard.r6_names_wrapper(quoted + args), (plain, quoted)
+    assert in_scope > 1000
+
+
+def test_r9_construct_depth_boundary_is_ten_nested_constructs() -> None:
+    """REVIEW4 depth note, stated exactly (code comment + C8 ledger): an
+    honest ``echo $(echo $(… echo hi))`` chain stays out of scope up to 9
+    nested constructs and is in scope (fail closed) from 10 on — the C6
+    ledger's "> 8" read as nesting levels was off by one."""
+    def chain(k: int) -> str:
+        return "echo " + "$(echo " * k + "hi" + ")" * k
+
+    for k in range(1, 10):
+        assert not guard.r6_names_wrapper(chain(k)), k
+    for k in (10, 11, 16):
+        assert guard.r6_names_wrapper(chain(k)), k
+    assert not guard._r8_computed_glue(chain(9))
+    assert guard._r8_computed_glue(chain(10))
+
+
+# --- r9: budget rows for the joined reader (real hook command line) ---------
+
+_R9_BUDGET_ROWS = [
+    # (id, prefix, unit, suffix, bound, owner channel, verdict fragment)
+    ("r9-dq-glue-dq-run", '${x:-p}"ool" run grok a /tmp grok-4 ', '"a"', "", False, False, "R6_EXPANSION"),
+    ("r9-dq-glue-sq-run", "${x:-p}'ool' run grok a /tmp grok-4 ", "'a'", "", False, False, "R6_EXPANSION"),
+    ("r9-dq-glue-backslash-run", '${x:-p}"ool" run grok a /tmp grok-4 ', "\\a", "", False, False, "R6_EXPANSION"),
+    ("r9-dq-glue-locale-run", '${x:-p}"ool" run grok a /tmp grok-4 ', '$""', "", False, False, "R6_EXPANSION"),
+    ("r9-dq-glue-quote-only-run", '${x:-p}"ool" run grok a /tmp grok-4 ', '"', "", False, False, "R6_EXPANSION"),
+    ("r9-dq-glue-dash-path-joined", '${x:-p}"ool" run grok a /tmp grok-4 ', '-"a"/', "", False, False, "R6_EXPANSION"),
+    ("r9-joined-glue-one-word-no-wrapper", "", '"${x}"a', "", False, False, "allow"),
+    ("r9-joined-partial-one-word-no-wrapper", "", '$(x)"a"', "", False, False, "allow"),
+    ("r9-joined-construct-quote-run-no-wrapper", "", '"${x}"', "", False, False, "allow"),
+    # joined: ``${x:-p}${x:-p}…`` can spell pool, like r8's unquoted E3
+    ("r9-joined-default-glue-run", "", '"${x:-p}"', "", False, False, "R6_EXPANSION"),
+    ("r9-nested-quote-glue", "echo ", '$(${x:-p}"ool" ', "", False, False, "R6_TOKENIZE_FAILED"),
+    ("r9-bash-c-quote-glue-body", "bash -c '${x:-p}\"ool\" run grok a /tmp grok-4 ", '"a" ', "'", False, False, "R6_"),
+    ("r9-bound-launch-quoted-args", "pool run glm a /tmp glm-5.3 ", '"a"', "", True, True, "allow"),
+    # heaviest quote shape of the C8 sweep (135 shapes, 64 K → 256 K, none super-linear)
+    ("r9-escaped-cmdsub-run-no-wrapper", "", "\\$(", "", False, False, "allow"),
+    ("r9-dq-glue-escaped-cmdsub-run", '${x:-p}"ool" run grok a /tmp grok-4 ', "\\$(", "", False, False, "R6_GROUPING"),
+]
+
+
+@pytest.mark.parametrize("row", _R9_BUDGET_ROWS, ids=[row[0] for row in _R9_BUDGET_ROWS])
+def test_r9_budget_rows_finish_through_the_real_hook_command_line(
+    tmp_path: Path, row: tuple
+) -> None:
+    row_id, prefix, unit, suffix, bound, owner, fragment = row
+    # whole units only (a cut quote would only test the tokenizer failure)
+    prefix += " " * ((_R8_CAP - len(prefix) - len(suffix)) % len(unit))
+    command = _r8_filled(prefix, unit, _R8_CAP, suffix)
+    assert len(command) == _R8_CAP
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=bound, owner=owner)
+    assert code == 0
+    if fragment == "allow":
+        assert out == "", out[:300]
+    else:
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", out[:300]
+        assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
+        assert "guard budget exceeded" not in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, (row_id, elapsed)
+
+
+# --- r9: the watchdog in unarmed sessions = NO DECISION (REVIEW4 F4) --------
+
+#: REVIEW4 F4 reproduction: ``gh`` CI-wait text with a newline run (the
+#: ``do … done`` scan is super-linear on it). Unarmed r8: 10 s stall → the
+#: ``onFailure: "block"`` row blocks the tool call.
+_R9_F4_TEXT = "touch /tmp/r9-never-run; : gh run view 123" + "\n" * 60000 + ": end"
+
+
+def _r9_hook(
+    tmp_path: Path, payload: dict, *, armed: bool, extra_env: dict | None = None
+) -> tuple[float, int, str]:
+    import shutil
+    import subprocess
+    import time
+
+    if shutil.which("python3") is None:
+        pytest.skip("no python3 on PATH for the registered hook command")
+    module_path = os.environ.get("MASTERMIND_R6_GUARD_UNDER_TEST", "").strip() or guard.__file__
+    env, cwd = _r8_hook_env(tmp_path, bound=False)
+    if not armed:
+        env.pop("MASTERMIND_SHARED_PLACEMENT", None)
+    env.update(extra_env or {})
+    payload = dict(payload, cwd=str(cwd))
+    started = time.monotonic()
+    result = subprocess.run(
+        ["/bin/sh", "-c", f'python3 "{module_path}"'], input=json.dumps(payload), env=env,
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    return time.monotonic() - started, result.returncode, result.stdout.strip()
+
+
+def test_r9_unarmed_adversarial_ci_text_is_no_decision_well_inside_the_timeout(
+    tmp_path: Path,
+) -> None:
+    """Default budget (7 s), real hook command line: the unarmed hook now
+    exits 0 with NO output (no allow, no deny) instead of stalling to the
+    10 s provider kill."""
+    elapsed, code, out = _r9_hook(tmp_path, _payload(tmp_path, _R9_F4_TEXT), armed=False)
+    assert (code, out) == (0, "")
+    assert elapsed < 8.5, elapsed  # watchdog 7 s + interpreter start; kill at 10 s
+
+
+@pytest.mark.parametrize("text", [
+    _R9_F4_TEXT,
+    "gh run view 1;" + "do\n" * 40000,
+    "x" + " then gh api x" * 18000,
+    "gh run view 1\n" + "<<A\n" * 40000,
+    "gh run view 1 <<" + "A" * 120000 + "\nB\n",
+], ids=["newline-run", "do-newline-run", "then-gh-api-run", "heredoc-unclosed-run", "heredoc-long-id"])
+def test_r9_unarmed_watchdog_firing_writes_nothing(tmp_path: Path, text: str) -> None:
+    elapsed, code, out = _r9_hook(
+        tmp_path, _payload(tmp_path, text), armed=False,
+        extra_env={"MASTERMIND_GUARD_BUDGET_S": "1.5"},
+    )
+    assert (code, out) == (0, "")
+    assert elapsed < 4.0, elapsed
+
+
+def test_r9_armed_adversarial_ci_text_still_denies_on_budget(tmp_path: Path) -> None:
+    """Armed behaviour is exactly r8: the watchdog firing is a DENY."""
+    elapsed, code, out = _r9_hook(
+        tmp_path, _payload(tmp_path, _R9_F4_TEXT), armed=True,
+        extra_env={"MASTERMIND_GUARD_BUDGET_S": "1.5"},
+    )
+    assert code == 0
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "guard budget exceeded — fail closed" in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, elapsed
+
+
+@pytest.mark.parametrize("command, background, expected", [
+    ("gh run view 9101", False, ""),
+    ("gh pr checks 9102", False, ""),
+    ("gh run watch 9103 --interval 150", False, "foreground GitHub watch"),
+    ("gh pr checks 9104 --watch", False, "cadence must be explicit"),
+    ("gh run watch 9105 --interval 150", True, "CI WATCHER ARMED ASYNC"),
+    ("for i in 1 2; do gh pr checks 9106; sleep 30; done", False, "do not emulate a watcher"),
+    ("gh pr view 9107 --json body --jq '" + "a" * 192_000 + "'", False, ""),
+    ("cat <<EOF\n" + "gh run watch 1\n" * 12_000 + "EOF\ngh pr view 9108", False, ""),
+], ids=["run-view", "pr-checks", "fg-watch", "watch-no-interval", "bg-watch", "poll-loop",
+        "long-jq-192k", "heredoc-body-180k"])
+def test_r9_honest_unarmed_gh_commands_are_unchanged(
+    tmp_path: Path, command: str, background: bool, expected: str
+) -> None:
+    elapsed, code, out = _r9_hook(
+        tmp_path, _payload(tmp_path, command, background=background), armed=False
+    )
+    assert code == 0
+    if expected:
+        assert expected in out, out[:300]
+    else:
+        assert out == "", out[:300]
+    assert elapsed < 2.0, elapsed
+
+
+def test_r9_unarmed_watchdog_in_process_restores_the_handler(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import signal
+    import time
+
+    monkeypatch.setenv(guard.R8_WATCHDOG_ENV, "1")
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT", raising=False)
+    monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+    before = signal.getsignal(signal.SIGALRM)
+
+    def slow_ci_step(*_args, **_kwargs):
+        time.sleep(30)
+        raise AssertionError("the watchdog did not interrupt the slow CI-wait step")
+
+    monkeypatch.setattr(guard, "_poll_key", slow_ci_step)
+    started = time.monotonic()
+    _r8_run_main(monkeypatch, _payload(shared_placement, "gh run view 9201"))  # returns: no SystemExit
+    elapsed = time.monotonic() - started
+    assert capsys.readouterr().out == ""
+    assert 0.9 <= elapsed < 4.0, elapsed
+    assert signal.getitimer(signal.ITIMER_REAL)[0] == 0
+    assert signal.getsignal(signal.SIGALRM) is before
