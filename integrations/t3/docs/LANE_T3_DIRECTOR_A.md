@@ -408,7 +408,10 @@ Live observations (recorded, not inferred):
 
 ### Evidence scope — still SOURCE_ONLY / NOT PROVEN
 
-- Upstream admission patch: SOURCE_ONLY (never booted in a live T3).
+- Upstream admission patch: **PROVEN_LIVE as of the A5 boot below** (boot + passthrough +
+  fences + interrupts-free + built-exactly-once singletons; honest exceptions: the hang case
+  has no client-side timeout, and the typed admission cause is NOT surfaced over MCP — see
+  "A5 live boot").
 - Audit #14: no runtime composes the adapter or produces the pre-ACK `WorkerRecoveryBinding`;
   `t3-native` stays UNSELECTED (selection is a deployment act).
 - N6 adoption, N9 exact-run lookup (no live thread exceeded 50 runs), N3/N4 refusals, D1's
@@ -425,3 +428,96 @@ tests/test_rev5_contracts_v1_1.py tests/test_executive_claim_job_placement_autho
 tests/test_t3_durable_canary_receipt.py tests/test_t3_durable_canary_receipt_r2.py
 tests/test_t3_attempt_fleet_projection.py tests/test_workspace_t3_attempt_fleet_read.py
 tests/test_mmos_negative_matrix.py` → **315 passed, 1 xfailed** (xfail pre-existing at base).
+
+### A5 live boot (2026-11-09): admission patch booted in a REAL T3 server
+
+Closes the "never booted live" SOURCE_ONLY gap (three Opus audits; re-audit 3 read invariant 11
+as PROVEN_BY_TEST only). Driver `integrations/t3/live_proof/t3_admission_patch_boot.py`;
+receipt `integrations/t3/live_proof/t3_admission_patch_boot_receipt.json`
+(`mastermind.t3_admission_patch_boot_receipt/v1`, recorded 2026-11-09T15:55:34Z, bytes sha256
+`a72abb5263f62235422951af9dc9b62d605e5c10367d8f525dad215811de850c`, pinned by
+`tests/test_t3_admission_patch_boot_receipt.py`). Outcome **DONE_WITH_FINDINGS**: five hard
+scenarios PASS, the hang scenario honestly UNKNOWN.
+
+**Build.** Fresh `git clone --shared` of the pinned donor clone (`0770446…`, HEAD + clean tree
+verified before and after) into two scratch trees: `patched` (committed patch `5785ac95…`
+applied with `git apply` + A5 scratch-only singleton counters) and `base` (counters, no
+patch). Both installed with the repo-pinned `pnpm@12.14.0` and typechecked with the donor's
+own script (`effect-tsgo tsrs --noEmit`): exit 0, ZERO error-level diagnostics in both trees
+(donor-baseline suggestions recorded: 490 patched / 488 base — the committed patch itself adds
+exactly 2, inside its own adapter file).
+
+**Boot — headless, no desktop app, no paid model.** Per scenario:
+`node src/bin.ts serve --base-dir <isolated> --no-browser` with `T3CODE_PORT` (3977–3982,
+NEVER 3773), `T3CODE_HOST=127.0.0.1`, `T3CODE_HOME` + `--base-dir` (isolated
+`/tmp/a5-admission-boot/data-*`), and `VITE_DEV_SERVER_URL=http://127.0.0.1:5199` (its
+presence marks the dev variant, which seeds the donor's free `devReplay` ACP instance —
+recorded turns, no paid model; the URL itself is never contacted). The server prints its own
+headless startup pairing credential on stdout; the driver runs the same OAuth PKCE flow as
+`t3_live_proof.py` (`/oauth/mcp/register` → `/oauth/mcp/decision` → `/oauth/mcp/token`) and
+speaks streamable-HTTP MCP at `/mcp` with the bearer (server "T3 Code" 0.1.7 in every boot).
+The desktop T3 on 3773, `~/.t3`, and the pinned clone were never touched (`real_desktop_touched=false`).
+
+**Scratch-only instrumentation.** `A5ScratchCounts.ts` (module sha256 `12688e4b…` in the
+receipt; NEVER committed into the donor tree) wraps the four shared singletons with the
+patch's own composition rule — `Layer.effect(tag, …).pipe(Layer.provide(incumbent))`, never a
+nested `Layer.build` — and every textual `ProjectionStore.layer` (16×) /
+`CommandOutputHub.layer` (1×) / `Orchestrator.layer` (1×) / `TextGeneration.layer` (1×)
+reference in `runtimeLayer.ts` AND `ProjectionStoreV2.layer` (9×) / `TextGeneration.layer`
+(1×) in `server.ts` goes through the wrapper, so every composition path is counted. Each
+construction emits one `A5_COUNT` line on the server's stderr (no `node:fs` — the donor's
+effect rules ban it in Effect modules; the value of `A5_SINGLETON_COUNTS_FILE` is only the
+on-switch). Counts are harvested per boot from that server's own log.
+
+| Scenario | Setup | Live result | Verdict |
+|---|---|---|---|
+| A1 endpoint unset (patched) | `MASTERMIND_ADMISSION_ENDPOINT` unset | real `t3_thread_launch` / `t3_thread_read` / `t3_thread_send` / `t3_thread_interrupt` over isolated MCP with the devReplay instance; reply shapes IDENTICAL to the unpatched base boot; run reached terminal status; interrupt never mentioned admission | PASS |
+| A0 base unpatched | no patch, counters only | same flow; shapes AND singleton counts equal A1 | PASS |
+| singletons (every one of the 6 boots, both trees) | — | ProjectionStore / CommandOutputHub / Orchestrator / TextGeneration each constructed EXACTLY ONCE per process | PASS |
+| B1 endpoint admits | fake admission server answers `admitted` rootRef `a5-fake-root-1` | observed chain: launch consult (kind=launch, creationSource "mcp" — donor-derived) → thread minted → run terminal; later runs' `revalidate` consults carry `hasLocalBinding:true` + `binding.rootRef=a5-fake-root-1` (authority chain endpoint→ledger→revalidate; `MASTERMIND_ADMISSION_ROOT_REF` was never set, so nothing but the endpoint could mint that ref); interrupt = 0 consults | PASS |
+| B2 endpoint refuses | fake answers `blocked_with_reason` | consult → blocked reply → launch `isError` → NO threadId anywhere (`t3_thread_list` allProjects total 0; the incumbent never ran). Smuggle launch with `creationSource:"ui"`, `admission:{…}`, `rootRef`, `admitted:true` → also refused; the gate's consult body shows creationSource "mcp" and NONE of the smuggled fields; interrupt = 0 consults, upstream `thread_not_found` | PASS |
+| B3 endpoint unreachable | bound-never-listening socket (guaranteed ECONNREFUSED, no listener race) | launch fails CLOSED: `isError`, no threadId, `t3_thread_list` total 0; interrupt unaffected | PASS |
+| B4 endpoint hangs | fake accepts, never answers | launch consult pending for the whole bounded 75 s window → `STILL_PENDING_PAST_WINDOW` → **UNKNOWN (honest)**; interrupt probe DURING the hang answered immediately (upstream `thread_not_found`), 0 consults, never blocked | UNKNOWN |
+
+**PROVEN_LIVE now:** headless boot of the patched server; the OAuth/MCP wire path with the
+server-printed credential; passthrough equivalence with the endpoint unset (reply shapes +
+built-exactly-once singletons); the admit fence and the ledger binding reaching revalidate
+consults; the refusal fence (no thread, no partial state, incumbent never ran); fail-closed on
+an unreachable endpoint; interrupts never gated in ANY mode; request-field smuggling carries
+no authority.
+
+**Honest findings (reported, NOT patched around):**
+
+1. **No client-side timeout in the patch — LIVE-confirmed.** With the endpoint hanging, the
+   launch consult stayed pending past the entire 75 s observation window; the patch uses a
+   plain `fetch` with no `AbortSignal`, so a hung admission endpoint hangs `t3_thread_launch`
+   indefinitely. The MANIFEST had documented this as untested-by-doubles; it is now observed
+   live. Interrupts stay free during the hang.
+2. **The typed admission cause is NOT surfaced over MCP (donor behavior).** The donor's
+   `t3_thread_launch` handler whitelists which `ThreadLaunchError` causes may surface
+   (`AttachmentClaimError`, `ThreadManagementProviderInstanceDisabledError`, above-ceiling)
+   and maps everything else to `unavailable()` — the generic `orchestration_error` "The
+   operation could not be completed." (`apps/server/src/mcp/toolkits/project/handlers.ts`).
+   The patch's `ThreadLaunchError(cause: MastermindAdmissionBlockedError |
+   MastermindAdmissionEndpointError)` falls through, so an MCP client cannot distinguish an
+   admission refusal or a fail-closed endpoint error from any other launch failure. The fence
+   itself is proven by the observed chain (consult → decision → no thread); the typed cause is
+   proven at the SERVICE seam by the patch's own vitest suite only. The upstream PR should
+   surface admission causes the way ceiling causes are surfaced today.
+3. **Donor typecheck baseline.** The pristine donor at this pin emits hundreds of
+   suggestion-level `TS377141 effect(schemaClassMissingBrand)` diagnostics under its own
+   `typecheck` script; suggestions do not affect the exit code (0 error-level → exit 0). The
+   committed patch adds exactly 2 (same class, donor-baseline style, inside its own adapter
+   file). Recorded in the receipt, not gated.
+4. Scope limits: fake admission server only (wire shapes per the MANIFEST — a real Mastermind
+   admission deployment was not exercised); server-only boot (the desktop/Tauri path was not
+   exercised); Node v26.5.0 vs the repo's engines 26.12.1 produced a warning only.
+
+Commands (exact):
+
+```
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 integrations/t3/live_proof/t3_admission_patch_boot.py --keep
+# fast re-run after a driver edit: add --reuse-install --skip-install
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
+  tests/test_t3_admission_patch_boot_receipt.py tests/test_t3_upstream_patch.py   # 26 passed
+```
