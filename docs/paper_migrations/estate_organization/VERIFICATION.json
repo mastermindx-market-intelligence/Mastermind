@@ -319,6 +319,16 @@
           "href": "https://github.com/mastermindx-market-intelligence/Mastermind/rules/22852988"
         }
       }
+    },
+    "pr": 2364,
+    "initial_fast_check": {
+      "run_id": 42570978291,
+      "job_id": 129008082673,
+      "head": "0e1e70350af343daf036cfed6647390867326444",
+      "conclusion": "FAILURE",
+      "cause": "one new blank line at EOF in PAGES.md",
+      "repair": "normalize PAGES.md to exactly one final newline; content and Paper effects unchanged",
+      "repair_qualification": "no trailing whitespace and no blank line at EOF; hosted current-head result still required"
     }
   }
 }
