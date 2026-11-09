@@ -541,9 +541,16 @@ class Fleet:
         run_id = f"{agent}-{int(time.time())}-{uuid.uuid4().hex[:12]}"
         placeholder = None
         if not thread_ts:  # slash invocation: our own placeholder becomes the thread root
-            if dconf.get("placeholder", True):
-                placeholder = self.say(agent, channel, ":hourglass_flowing_sand: _working on it…_", None, run_id)
-                thread_ts = placeholder or ""
+            if not dconf.get("placeholder", True):
+                log("slash_root_unavailable", agent=agent, channel=channel, run_id=run_id)
+                return
+            placeholder = self.say(agent, channel, ":hourglass_flowing_sand: _working on it…_", None, run_id)
+            if not placeholder:
+                # The POST may have committed before its response was lost.
+                # No root means no safe native conversation or second post.
+                log("placeholder_post_unresolved", agent=agent, channel=channel, run_id=run_id)
+                return
+            thread_ts = placeholder
         conv_key = f"{channel}:{thread_ts}"
         # Every independent role has its own native Hermes session for this
         # shared Slack thread. A role switch must never pass Secretary's
@@ -564,6 +571,9 @@ class Fleet:
         self._react(channel, ts, conf.get("ack_reaction"))
         if thread_ts and dconf.get("placeholder", True) and placeholder is None:
             placeholder = self.say(agent, channel, ":hourglass_flowing_sand: _working on it…_", thread_ts, run_id)
+            if not placeholder:
+                log("placeholder_post_unresolved", agent=agent, channel=channel, run_id=run_id)
+                return
         started = time.time()
         ok, reply, new_sid = dispatch(agent_identity(conf, agent)["profile"], prompt, sid,
                                       int(dconf.get("timeout_s", 420)), str(dconf.get("model") or ""))
@@ -575,23 +585,28 @@ class Fleet:
                 save_state(self.state)
         self._unreact(channel, ts, conf.get("ack_reaction"))
         out_ts = None
-        if ok:
-            if placeholder and self.sender.update(agent, channel, placeholder, reply):
+        final_text = reply if ok else (
+            f":warning: {agent_identity(conf, agent)['display_name']} could not answer: {reply}"
+        )
+        if placeholder:
+            if self.sender.update(agent, channel, placeholder, final_text):
                 out_ts = placeholder
             else:
-                out_ts = self.say(agent, channel, reply, thread_ts, run_id)
-            self._react(channel, ts, conf.get("done_reaction"))
+                # Failed/uncertain update of an accepted Slack placeholder is
+                # NOT permission to emit a second chat.postMessage. Preserve
+                # the original message for owner-side same-carrier repair.
+                log("reply_update_unresolved", agent=agent, channel=channel,
+                    msg_ts=placeholder, run_id=run_id)
         else:
-            msg = f":warning: {agent_identity(conf, agent)['display_name']} could not answer: {reply}"
-            if placeholder and self.sender.update(agent, channel, placeholder, msg):
-                out_ts = placeholder
-            else:
-                out_ts = self.say(agent, channel, msg, thread_ts, run_id)
+            out_ts = self.say(agent, channel, final_text, thread_ts, run_id)
+        if ok and out_ts:
+            self._react(channel, ts, conf.get("done_reaction"))
         elapsed = round(time.time() - started, 1)
         audit(conf, agent=agent, profile=agent_identity(conf, agent)["profile"], run_id=run_id,
               requester=event.get("user", ""), channel=channel, root_ts=thread_ts, out_ts=out_ts or "",
-              ok=ok, seconds=elapsed, reason=reason, chars=len(reply or ""))
-        log("dispatch_done", agent=agent, ok=ok, seconds=elapsed, run_id=run_id)
+              ok=ok, slack_delivery_ok=bool(out_ts), seconds=elapsed, reason=reason, chars=len(reply or ""))
+        log("dispatch_done", agent=agent, ok=ok, slack_delivery_ok=bool(out_ts),
+            seconds=elapsed, run_id=run_id)
 
     def _react(self, channel: str, ts: str, name: str | None) -> None:
         if not name:
