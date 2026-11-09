@@ -18670,6 +18670,122 @@ def _record_placement_deferral(store, connection, job_id: str, refusal, timestam
     )
 
 
+# --- Rev5 D6 (Fable Wave 3 R5 §3D) parent-as-placement policy seams -------------
+# Pure policy lives in control_plane.fabric_placement_policy; these helpers only
+# read the claim transaction's own SQLite state and render its verdicts as
+# PlacementRefusal. No scheduler, no service, no network I/O.
+
+def _fabric_descendant_admission(
+    connection, *, intent, job_id: str, root_job_id: str
+) -> Any | None:
+    """(i) The descendant concurrency CAP for a fabric_per_child child.
+
+    Counts the root's other active attempts (sibling placements) read in
+    the same claim transaction. Over the declared limit the claim is
+    refused with a precise reason and the Job stays QUEUED — the cap is
+    never evaded. bounded_native_fanout children skip the count: their
+    capacity was reserved in the parent's envelope at the parent's claim
+    (never double-reserve envelope + children).
+    """
+    from control_plane.fabric_placement_policy import (
+        ActorRole, DescendantPolicy, descendant_admission, descendant_policy,
+    )
+    from control_plane.executive_placement_authority import PlacementRefusal
+
+    if intent.actor_role is not ActorRole.CHILD:
+        return None
+    if descendant_policy(intent) is DescendantPolicy.BOUNDED_NATIVE_FANOUT:
+        return None
+    statuses = [status.value for status in _LEASE_ACTIVE_ATTEMPT_STATUSES]
+    marks = ",".join("?" for _ in statuses)
+    row = connection.execute(
+        "SELECT COUNT(*) FROM attempts a JOIN jobs j ON j.job_id=a.job_id "
+        "WHERE j.root_job_id=? AND j.parent_job_id IS NOT NULL AND j.job_id<>? "
+        f"AND a.status IN ({marks})",
+        (root_job_id, job_id, *statuses),
+    ).fetchone()
+    verdict = descendant_admission(intent, int(row[0]))
+    if verdict.ok:
+        return None
+    return PlacementRefusal(
+        verdict.reason,
+        f"{verdict.detail} under root {root_job_id}",
+        resource_ref=root_job_id,
+    )
+
+
+def _fabric_host_placement_counts(connection, host_id: str) -> tuple[int, int]:
+    """Active placements on one host, split by claim role (parent queries).
+
+    A claim's actor_role is read from its JOB_CLAIMED payload; a WO-14
+    placement claimed without a fabric intent counts as a child
+    placement (its ChildExecutionRequest is a child execution).
+    """
+    from control_plane.executive_placement_authority import PLACEMENT_OWNER
+
+    row = connection.execute(
+        "SELECT COUNT(*) AS placed, COALESCE(SUM(CASE WHEN "
+        "json_extract(e.payload_json,'$.fabric_placement_intent.actor_role')='parent' "
+        "THEN 1 ELSE 0 END),0) AS parents "
+        "FROM physical_resource_commitments c "
+        "JOIN attempts a ON a.attempt_id=c.carrier_id "
+        "JOIN jobs j ON j.job_id=a.job_id "
+        "JOIN events e ON e.aggregate_type='job' AND e.aggregate_id=j.job_id "
+        "AND e.attempt_id=a.attempt_id AND e.event_type='JOB_CLAIMED' "
+        "WHERE c.owner_id=? AND c.host_id=? "
+        "AND c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED')",
+        (PLACEMENT_OWNER, host_id),
+    ).fetchone()
+    placed = int(row["placed"] or 0)
+    parents = int(row["parents"] or 0)
+    return placed, parents
+
+
+def _fabric_host_admission(
+    connection, *, intent, host_id: str, observations, pool_charges
+) -> Any | None:
+    """(ii)+(iii) Headroom for parent-role claims and the fan-out envelope.
+
+    Runs on a candidate host after the existing placement predicate
+    admitted it. A parent-role placement may not consume the host's
+    reserved child headroom (PARENT_HEADROOM_EXHAUSTED; children
+    unaffected); a bounded_native_fanout parent must be able to hold its
+    envelope at this host from its own commitment (else the queued work
+    waits — never a cap evasion). Returns None when admitted.
+    """
+    from control_plane.fabric_placement_policy import (
+        ActorRole, ChildHeadroomPolicy, fanout_envelope_slots,
+    )
+    from control_plane.executive_placement_authority import (
+        PlacementRefusal, host_slot_pool,
+    )
+
+    if host_id and intent.actor_role is ActorRole.PARENT:
+        placed, parents = _fabric_host_placement_counts(connection, host_id)
+        host = observations.hosts.get(host_id) if hasattr(observations, "hosts") else None
+        total = int(host.eligible_slots) if host is not None else 0
+        verdict = ChildHeadroomPolicy.from_env().admit_against_headroom(
+            total, parents, placed - parents, is_parent=True
+        )
+        if not verdict.ok:
+            return PlacementRefusal(
+                verdict.reason, verdict.detail, resource_ref=host_id
+            )
+    envelope = fanout_envelope_slots(intent)
+    if host_id and envelope:
+        host = observations.hosts.get(host_id) if hasattr(observations, "hosts") else None
+        total = int(host.eligible_slots) if host is not None else 0
+        used = int(pool_charges.get(host_slot_pool(host_id), 0))
+        if total and used + 1 + envelope > total:
+            return PlacementRefusal(
+                "HOST_CAPACITY_EXHAUSTED",
+                f"{used + envelope}/{total} slots held incl. the "
+                f"{envelope}-child fan-out envelope",
+                resource_ref=host_id,
+            )
+    return None
+
+
 def _recheck_placement_lineage(connection, job_row, spec, authority) -> None:
     """Root/parent/grant recheck inside the claim transaction."""
     from control_plane.executive_placement_authority import PlacementRefusal
@@ -18816,6 +18932,7 @@ class AttemptRegistry:
         exact_target: ExactWorkerClaimTarget | None = None,
         _initial_capacity_evidence: Mapping[str, Any] | None = None,
         _placement: tuple[Mapping[str, Any], Any, Any] | None = None,
+        fabric_intent: object | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
         from control_plane.fresh_conversation_admission import require_initial_native_claim
@@ -19090,11 +19207,32 @@ class AttemptRegistry:
                 build_placement_request, issue_execution_binding,
             )
             spec, decision, _observations = _placement
+            # Rev5 D6 (§3D, §5 l.269–271): a declared bounded_native_fanout
+            # parent reserves its fan-out envelope AT ITS OWN HOST from this
+            # same commitment; fabric_per_child reserves nothing. The
+            # conservative turn holds the slot + root concurrency to
+            # settlement and records the reservation in the claim payload.
+            envelope = 0
+            if fabric_intent is not None:
+                from control_plane.fabric_placement_policy import (
+                    fanout_envelope_slots,
+                )
+                envelope = fanout_envelope_slots(fabric_intent)
             request = build_placement_request(
                 decision, spec=spec, job_id=job_id, attempt_id=attempt_id,
                 attempt_number=attempt_number, lease_owner=owner,
                 duration_ms=duration * 1000, timestamp=timestamp,
             )
+            if envelope:
+                from control_plane.fabric_placement_policy import (
+                    inflate_host_slot_demand,
+                )
+                from control_plane.executive_placement_authority import host_slot_pool
+                request = inflate_host_slot_demand(
+                    request,
+                    host_slot_pool_id=host_slot_pool(decision.host_id),
+                    envelope=envelope,
+                )
             commitment = ResourceBroker(self.store)._reserve_placement_in_transaction(
                 connection, request, timestamp=timestamp
             )
@@ -19114,6 +19252,21 @@ class AttemptRegistry:
                 observations_digest=decision.observations_digest,
                 registry_revision=decision.registry_revision,
             )
+            if fabric_intent is not None:
+                from control_plane.fabric_placement_policy import (
+                    PLACEMENT_INTENT_SCHEMA, classify_locality, intent_digest,
+                    reserve_turn_for_intent,
+                )
+                claim_payload["fabric_placement_intent"] = {
+                    "schema_version": PLACEMENT_INTENT_SCHEMA,
+                    "digest": intent_digest(fabric_intent),
+                    "locality": classify_locality(fabric_intent).value,
+                    "envelope_slots": envelope,
+                    "intent": fabric_intent.to_dict(),
+                    "turn_reservation": (
+                        reserve_turn_for_intent(fabric_intent).to_dict()
+                    ),
+                }
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -19150,6 +19303,7 @@ class AttemptRegistry:
         observations: object,
         authority: Any,
         timestamp: int,
+        fabric_intent: object | None = None,
     ) -> tuple[sqlite3.Row, Any] | None:
         """Recheck and pick the first rank-ordered candidate that admits.
 
@@ -19174,8 +19328,14 @@ class AttemptRegistry:
         except PlacementRefusal as refusal:
             _record_placement_deferral(self.store, connection, job_id, refusal, timestamp)
             return None
-        broker = ResourceBroker(self.store)
-        first: PlacementRefusal | None = None
+        # Rev5 D6 (§3D): the claimed placement intent, already validated by
+        # claim_job, classifies this claim's locality and its descendant cap
+        # inside this same transaction. The loop below resolves each
+        # candidate's host once so soft preference reorders candidates and
+        # hard affinity narrows them to declaring hosts — without a second
+        # scheduler and without excluding on preference.
+        fabric_declares: dict[str, frozenset[str]] = {}
+        enriched: list[tuple[sqlite3.Row, Mapping[str, Any], Mapping[str, Any], str]] = []
         for row in candidates:
             metadata = _json_loads(row["metadata_json"], fallback={})
             worker = connection.execute(
@@ -19185,6 +19345,57 @@ class AttemptRegistry:
                 _json_loads(worker["metadata_json"], fallback={}) if worker is not None else {}
             )
             host_id = str(metadata.get("host_id") or worker_metadata.get("host_id") or "")
+            enriched.append((row, metadata, worker_metadata, host_id))
+            if fabric_intent is not None and host_id and host_id not in fabric_declares:
+                fabric_declares[host_id] = frozenset(
+                    str(ref) for ref in list(metadata.get("local_dependency_refs") or [])
+                    + list(worker_metadata.get("local_dependency_refs") or [])
+                )
+        if fabric_intent is not None:
+            defer = _fabric_descendant_admission(
+                connection, intent=fabric_intent, job_id=job_id, root_job_id=root_job_id
+            )
+            if defer is not None:
+                _record_placement_deferral(self.store, connection, job_id, defer, timestamp)
+                return None
+            from control_plane.fabric_placement_policy import (
+                LocalityClass, classify_locality,
+            )
+            if classify_locality(fabric_intent) is LocalityClass.HARD_AFFINITY:
+                from control_plane.fabric_placement_policy import filter_hard_affinity_hosts
+                required = fabric_intent.required_local_dependency_refs
+                kept, blocking = filter_hard_affinity_hosts(
+                    [host_id for _, _, _, host_id in enriched],
+                    fabric_intent,
+                    declare=lambda host_id, required=required: (
+                        set(required) <= set(fabric_declares.get(host_id, frozenset()))
+                    ),
+                )
+                if blocking is not None:
+                    _record_placement_deferral(
+                        self.store, connection, job_id,
+                        PlacementRefusal(
+                            blocking,
+                            "no qualifying host's capability snapshot declares the "
+                            "required local dependencies: "
+                            + ", ".join(required),
+                        ),
+                        timestamp,
+                    )
+                    return None
+                kept_set = set(kept)
+                enriched = [item for item in enriched if item[3] in kept_set]
+            else:
+                # Soft preference: reorder candidates by score only — the
+                # preferred (warm deps / repo cache / cheaper transfer) host
+                # first; every candidate is kept, stable in input order.
+                preferred = fabric_intent.preferred_host
+                enriched.sort(
+                    key=lambda item: 0 if preferred and item[3] == preferred else 1
+                )
+        broker = ResourceBroker(self.store)
+        first: PlacementRefusal | None = None
+        for row, metadata, worker_metadata, host_id in enriched:
             pools = [root_concurrency_pool(root_job_id)]
             pools += [shared_quota_pool(ref) for ref in spec["shared_quota_resource_refs"]]
             if host_id:
@@ -19194,14 +19405,23 @@ class AttemptRegistry:
                     spec, provider=str(row["provider"]), model=str(row["model"] or ""),
                     adapter_id=str(metadata.get("adapter_id") or ""),
                 )
+                charges = broker._placement_pool_charges(connection, pools)
                 decision = evaluate_placement(
                     spec=spec, observations=observations, host_id=host_id or None,
                     root_job_id=root_job_id, now_ms=timestamp,
-                    pool_charges=broker._placement_pool_charges(connection, pools),
+                    pool_charges=charges,
                 )
             except PlacementRefusal as refusal:
                 first = first or refusal
                 continue
+            if fabric_intent is not None:
+                fabric_refusal = _fabric_host_admission(
+                    connection, intent=fabric_intent, host_id=host_id,
+                    observations=observations, pool_charges=charges,
+                )
+                if fabric_refusal is not None:
+                    first = first or fabric_refusal
+                    continue
             return row, decision
         assert first is not None
         _record_placement_deferral(self.store, connection, job_id, first, timestamp)
@@ -19328,6 +19548,7 @@ class AttemptRegistry:
         _initial_prepared: object | None = None,
         _direct_native_access: direct_native.DirectNativeExecutionAccess | None = None,
         placement_observations: object | None = None,
+        fabric_placement_intent: Mapping[str, Any] | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -19674,6 +19895,23 @@ class AttemptRegistry:
                     continue
                 candidates.append(row)
             placement_spec = constraints.get("child_placement")
+            # Rev5 D6 (§3D): each parent actor and each executable child is a
+            # SEPARATE placement request. The intent rides this claim, is
+            # validated and locality-classified at the placement snapshot
+            # seam, and composes only with a child placement Job.
+            fabric_intent = None
+            if fabric_placement_intent is not None:
+                if placement_spec is None:
+                    raise StateConflict(
+                        "fabric placement intent requires a child placement Job"
+                    )
+                from control_plane.fabric_placement_policy import PlacementIntent
+                try:
+                    fabric_intent = PlacementIntent.from_dict(fabric_placement_intent)
+                except (TypeError, ValueError) as exc:
+                    raise StateConflict(
+                        f"fabric placement intent is invalid: {exc}"
+                    ) from exc
             if placement_spec is None and placement_observations is not None:
                 raise StateConflict("placement observations require a child placement Job")
             if placement_spec is not None and (
@@ -19706,6 +19944,7 @@ class AttemptRegistry:
                     observations=placement_observations,
                     authority=authority,
                     timestamp=timestamp,
+                    fabric_intent=fabric_intent,
                 )
                 if selected is None:
                     return None
@@ -19764,6 +20003,7 @@ class AttemptRegistry:
                 exact_target=exact_target,
                 _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
                 _placement=placement,
+                fabric_intent=fabric_intent if placement is not None else None,
             )
             if direct_provenance is not None:
                 _direct_native_access.check()
