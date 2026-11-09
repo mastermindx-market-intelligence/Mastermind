@@ -4083,7 +4083,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </div>
           <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
+        {native && authState?.acquisition && authState.content ? <TransportDiagnosticFields
+          connectionDetails
+          onConnectionDetailsOpen={() => setDiagnosticTick((n) => n + 1)}
+          refreshNativeDiagnostics={refreshNativeDiagnostics}
+          snapshot={missionDiagnostics()}
+          programsPhase={programsReadPhase}
+          programsReason={programsReadReason}
+          locale={locale}
+        ><code>{COMMAND_ROUTE_UNAVAILABLE}</code></TransportDiagnosticFields> : <><p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
         <details
           className="reason-details"
           onToggle={(event) => {
@@ -4099,7 +4107,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             programsReason={programsReadReason}
             locale={locale}
           />
-        </details>
+        </details></>}
         {heldKind === "launch" ? checkStatusControl : null}
       </section>
     );
