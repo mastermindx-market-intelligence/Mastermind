@@ -497,9 +497,83 @@ All8 operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. Explic
 
 At the preceding report head `a5a44643ea803ac8e57671d63159239475bba0e1`, normal CI run42543262455 completed successfully. That is exact-head repository evidence only, not production acceptance and not evidence for a later report head.
 
+## Verified D06 first reading and exact chart-data parity — 2026-11-09
+
+This subsequent phase mirrors existing held candidate behavior in two new native companions. It preserves the earlier schematic Market/Stage boards and their original financial fixtures.
+
+| Board | Native bounds | Purpose |
+| --- | --- | --- |
+| `X8-0` — 05 · D06 SOURCE STATE · 1M exact observations · Light EN · 6 Nov example | 1440×1580, x3025/y−901 | Desktop first reading, source-derived dealer chart, expanded exact-values table, missing-value key and source/interaction binding. |
+| `18K-0` — 06 · D06 来源状态 · 1月精确观测值 · Dark ZH ·390 ·11月6日示例 | 390×1965, x−1425/y981 | Chinese phone parity, including all five exact-table fields, explicit horizontal-scroll access and the same dated values/window. |
+
+The companions remain states of the existing Market Structure page. No new route, market reader, calendar, data store or product control plane was created.
+
+### Exact input proof
+
+Root fetched these sources at candidate #10734 head `4690c9e9e3bd32943f4d551318210165147a4eb9`:
+
+| Artifact | Blob |
+| --- | --- |
+| [data/market_structure/latest.json](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/data/market_structure/latest.json) | `3b0ade4ceffe0e427b1da9e28f72be168bd45f72` |
+| [site/market_structure.html](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/site/market_structure.html) | `4f7697ba514a4c7c0929f61ff7a7eef8b58e43a3` |
+| [templates/market_structure.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/templates/market_structure.html.j2) | `c2f3a4f2d2bd58d5fb2bedd4b4d5ef87d968480d` |
+| [scripts/build_market_structure_page.py](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/scripts/build_market_structure_page.py) | `a37edfdf600dd8238f59bf113b5ac7eb5319dde3` |
+
+Root parsed the committed embedded MSP_GAMMA_HIST as JSON without executing the page. Its78 supplied date/GEX/SPX/switch/regime records match all78 raw source rows exactly. The rendered geometry contains102 NYSE session slots, including24 explicit missing sessions. The selected1M state takes the final21 projected slots:13 supplied observations and8 missing sessions,2026-10-09 through2026-11-06. Source default remains6M; this is a deliberately selected interaction state.
+
+The source snapshot is display_only/is_context_only, asof2026-11-06, built2026-11-08T06:28:20.894983+00:00, with incomplete history. No present-market, production-freshness or source-admission conclusion is inferred from that dated artifact.
+
+### First reading and linked chart/table window
+
+Desktop hero `112-0` and phone hero `1CO-0` show the source-rounded supplied SPX7,376.9 and modeled switch7,616.6, with **Hedging may amplify swings** / **对冲可能放大波动** and the source explanation that hedging can reinforce both rises and falls. Both retain the6Nov observation and incomplete-history qualification. The earlier7,513.1 weekly lock close was not reused as SPX.
+
+Desktop chart `11F-0` / SVG `11V-0` and phone chart `1D0-0` / SVG `1DE-0` were generated from the same21 source slots. Bars use dealer exposure in $bn; SPX and switch lines use the separately labelled points axis. Supplied points remain in order, missing slots are shaded, lines break across gaps and absent bars are omitted. No source record, classification or model value was recalculated.
+
+Desktop exact disclosure `141-0` and phone `1FE-0` preserve all21 rows and five fields: Date, Dealer exposure ($bn), SPX (points), Switch level (points), Record. The native design shows a simulated bottom viewport containing the final10 rows; both boards explicitly describe that viewport. Phone table width636 within its308px viewport preserves all five columns and shows the horizontal-scroll cue and instruction. Native scrolling itself is not claimed implemented by Paper.
+
+The table retains raw source precision, while the hero retains source one-decimal formatting. For example, the final row remains `2026-11-06 / -86.252961 / 7376.8599 / 7616.595015 / Supplied`; the27–29Oct slots retain unavailable numeric fields and Missing session labels. No true zero exists in the supplied gamma history. The undated reading key explains zero semantics without attaching a fabricated zero to a historical date.
+
+Source CSV behavior is documented accurately: same selected window, all21 slots, five columns, unavailable numeric fields blank and genuine zero as0; English headings remain in the Chinese export. The design shows the existing candidate's Download CSV affordance, but no browser download was executed or claimed.
+
+### Discoverability and original-board preservation
+
+Original desktop footer `K4-0` now points to board05 as a **6Nov SPX/switch and exact-values example**. Original Chinese footer `O3-0` points to06 with the same dated qualification. These are Paper design references, not proof of clickable runtime navigation. Original source/method links and all older observations/values remain intact, so an unqualified data control does not falsely bind the old schematic to the newer snapshot.
+
+Readback confirms original GG/K5 remain1440×1723 and390×1802; footer heights stay18/36px. The new phone begins80px below the original phone. Existing Stage boards and incomplete-migration references remain untouched.
+
+### Visual and data verification
+
+Root inspected complete native desktop and390px phone screenshots, the chart component and final trees. All captions, selected-window counts, missing states, source dates and final footers fit. Disclosure/download and range controls are44px.
+
+Root then read back data-only native JSX from desktop `14F-0` and phone `1FS-0`. Each contained exactly105 cells (21×5). Every cell matched its pinned expected source/locale value:105/105 for English and105/105 for Chinese, with zero mismatches. This is native design data-fidelity proof, not an implementation unit test or a deployed-browser result.
+
+All19 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only new companions X8/18K and the two original Market boards whose reference footers changed.
+
+- `paper-d06-source-data-companion-copy-20261109-c4-sd`
+- `paper-d06-source-data-companion-header-20261109-c4-sd`
+- `paper-d06-source-data-first-reading-20261109-c4-sd`
+- `paper-d06-source-data-selected-chart-20261109-c4-sd`
+- `paper-d06-source-data-exact-table-20261109-c4-sd`
+- `paper-d06-source-data-missing-value-key-20261109-c4-sd`
+- `paper-d06-source-data-candidate-binding-20261109-c4-sd`
+- `paper-d06-source-data-footer-20261109-c4-sd`
+- `paper-d06-source-data-desktop-names-20261109-c4-sd`
+- `paper-d06-source-data-phone-copy-20261109-c4-sd`
+- `paper-d06-source-data-phone-header-20261109-c4-sd`
+- `paper-d06-source-data-phone-first-reading-20261109-c4-sd`
+- `paper-d06-source-data-phone-chart-20261109-c4-sd`
+- `paper-d06-source-data-phone-exact-table-20261109-c4-sd`
+- `paper-d06-source-data-phone-missing-value-key-20261109-c4-sd`
+- `paper-d06-source-data-phone-source-binding-20261109-c4-sd`
+- `paper-d06-source-data-qualified-reference-entry-20261109-c4-sd`
+- `paper-d06-source-data-phone-names-20261109-c4-sd`
+- `paper-d06-source-data-companions-finish-20261109-c4-sd`
+
+Candidate #10734 remains governed by its existing Draft/unarmed, release, security, full-proof and F01/F02 boundaries. No source code, production deployment, runtime reader or approval was changed by this Paper parity work.
+
 ## Active continuation
 
-Eight current Paper files now have verified additions/corrections in this successor: Portfolio, Bonds, Government Revenue, Forex, Breadth, Catalyst, Market Structure/Stages and Confluence. Preserve those accepted static designs. Continue the remaining D06 first-reading and exact-values/CSV Paper parity using its held source candidate, with no fabricated values or duplicate reader. Retain native PR controls, existing source/production holds and all prior uncertainty boundaries.
+The eight-file successor now also includes the D06 first-reading and exact-values source parity companions. Preserve accepted designs and current holds. The next bounded finding is the canonical Terminal Returns early-close specimen: its historical20:00 after-hours end is superseded by candidate#814's server-supplied17:00 boundary. Inspect current source and exact Paper targets before adding a clearly qualified companion; preserve the held desktop import and historical values, and do not relabel old aggregates as readings for the shortened interval.
 
 ## Acceptance boundary
 
