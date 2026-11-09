@@ -7,6 +7,13 @@ catalog composition adds three exact HTTP response Constants in the existing
 ingress method. Each method's full AST, owning class, literal values and spelling
 remain pinned; all other identity tokens stay visible to the generic D8 guard.
 No runtime authority is added.
+
+2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route): the
+per-attempt frame admission adds one import and one elif branch inside the
+existing ingress method. The same three reviewed ingress denial operands are
+byte-identical; their AST site paths shift at one index (body 59 to
+60) and the method/whole-file digests move with the postimage. The
+Company-consultation method and its permission-mode literals are untouched.
 """
 
 REVIEWED_PATH = "control_plane/executive_service.py"
@@ -50,12 +57,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '21754f04ff0d5571ace5be199e23e20c9b91c2ca5ddc493c6821109cf4546646',
-                                    'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
+                                    'source_sha256': 'af0a97de9bfc503db756626d0eacf65876848473cfb2230d8fbe478c9bb5c1cc',
+                                    'ast_sha256': '8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912',
                                     'sites': ((('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -73,7 +80,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -95,7 +102,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',

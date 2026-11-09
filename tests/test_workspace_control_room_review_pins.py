@@ -16,9 +16,13 @@ HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
 # 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
 # fabric OS read) added one route-constant line above the handler; the same
 # eight reviewed response operands are byte-identical, shifted by one line.
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the per-attempt route adds one further route-constant line above the
+# handler; the same eight reviewed response operands are byte-identical,
+# shifted by one more line.
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
-    HTTP_PATH: ((927, 71, 74, 'int'), (938, 71, 74, 'int'), (946, 71, 74, 'int'), (952, 79, 82, 'int'), (961, 71, 74, 'int'), (971, 71, 74, 'int'), (976, 76, 79, 'int'), (982, 71, 74, 'int')),
+    HTTP_PATH: ((928, 71, 74, 'int'), (939, 71, 74, 'int'), (947, 71, 74, 'int'), (953, 79, 82, 'int'), (962, 71, 74, 'int'), (972, 71, 74, 'int'), (977, 76, 79, 'int'), (983, 71, 74, 'int')),
 }
 
 

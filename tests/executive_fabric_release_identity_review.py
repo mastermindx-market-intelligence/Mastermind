@@ -648,7 +648,11 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
 # fabric OS read) adds one route constant line above the handler; the eight
 # reviewed action-refusal operands are byte-identical and shift by one line.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '78985a75fb22a41c1261a82399b44ef884b3b5ba0b0cfb6f35adc9406c815b9b', 'sites': ((927, 71, 74, 'int', '400'), (938, 71, 74, 'int', '403'), (946, 71, 74, 'int', '400'), (952, 79, 82, 'int', '400'), (961, 71, 74, 'int', '400'), (971, 71, 74, 'int', '403'), (976, 76, 79, 'int', '503'), (982, 71, 74, 'int', '403'))}
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the per-attempt route adds one further route-constant line above the
+# handler; the same eight reviewed action-refusal operands are byte-identical
+# and shift by one more line.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95', 'sites': ((928, 71, 74, 'int', '400'), (939, 71, 74, 'int', '403'), (947, 71, 74, 'int', '400'), (953, 79, 82, 'int', '400'), (962, 71, 74, 'int', '400'), (972, 71, 74, 'int', '403'), (977, 76, 79, 'int', '503'), (983, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -716,7 +720,11 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # fabric OS read) adds the trusted capacity_fabric_source constructor guard
 # four lines above the handler; the four reviewed 403 operands are
 # byte-identical and shift by four lines.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'ecac40b3e1bc54ad965a2dfa900378bc24a363c134bcbc9723d8d393870ef724', 'sites': ((719, 93, 96, 'int', '403'), (721, 56, 59, 'int', '403'), (728, 46, 49, 'int', '403'), (729, 56, 59, 'int', '403'))}
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the trusted t3_attempt_fleet_source constructor guard adds four further
+# lines above the handler; the same four reviewed denial operands are
+# byte-identical and shift by four more lines.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.

@@ -26,7 +26,11 @@ FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 # 2026-11-09 MMOS composition pin move: the capacity fabric frame branch and
 # WO-13 selected_child_admit action (feat/mmos-v1-integration) shift the same
 # three reviewed operands to 6048/6061/6063; columns and values are unchanged.
-STATUS_SITES = ((6048, 66, 69, 'int'), (6061, 74, 77, 'int'), (6063, 75, 78, 'int'))
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route): the
+# per-attempt frame admission adds one import and one elif branch in the same
+# method; the same three reviewed operands shift to 6056/6069/6071, columns
+# and values unchanged.
+STATUS_SITES = ((6056, 66, 69, 'int'), (6069, 74, 77, 'int'), (6071, 75, 78, 'int'))
 
 # 2026-11-09 MMOS composition pin move: commit a751d78cc (PR #2316 WO-05)
 # shifts the same three reviewed backend operands to 226/416/511.
