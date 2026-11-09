@@ -27,8 +27,9 @@ files, open issues.
 - `control_plane/executive_runtime.py` (C3) — `_join_native_runtime_binding`
   module function + one call site inside `AttemptRegistry.claim_job`'s
   transaction. **PR #2177 hunk protection verified**: none of the 62
-  protected `executive_runtime.py` hunks (saved in
-  `integrations/mmos/_pr2177_protected_hunks.diff`) overlap the edited
+  protected `executive_runtime.py` hunks (PR #2177's diff was fetched from
+  GitHub for the check; the integrator did not retain the 2k-line copy in the
+  branch — re-fetch `gh pr diff 2177` to reproduce) overlap the edited
   old-file region (~18550-19350); the protected hunks are byte-identical to
   the imported state.
 - `control_plane/workspace_lease.py` (C3) — added `attach_workspace_lease`
