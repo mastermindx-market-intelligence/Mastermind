@@ -253,5 +253,102 @@ class PerThreadTurnSerializationTests(unittest.TestCase):
         self.assertEqual(self.fleet._turn_gates, {})
 
 
+
+class InThreadRoleSwitchTests(unittest.TestCase):
+    def setUp(self):
+        import copy
+        import threading
+        self.conf = copy.deepcopy(gateway.DEFAULT_CONF)
+        self.conf["dispatch"]["placeholder"] = False
+        self.fleet = gateway.Fleet.__new__(gateway.Fleet)
+        self.fleet.conf = self.conf
+        self.fleet.state = {"sessions": {}, "bindings": {}, "recent": {}, "outbound": {}}
+        self.fleet.lock = threading.Lock()
+        self.fleet._turn_gates = {}
+        self.fleet.say = lambda agent, channel, text, thread_ts=None, run_id="": "1794180009.123456"
+        self.fleet._react = lambda *args: None
+        self.fleet._unreact = lambda *args: None
+        self.logging = patch.object(gateway, "log", return_value=None)
+        self.logging.start()
+        self.addCleanup(self.logging.stop)
+        self.audit = patch.object(gateway, "audit", return_value=None)
+        self.audit.start()
+        self.addCleanup(self.audit.stop)
+        self.persistence = patch.object(gateway, "save_state", return_value=None)
+        self.persistence.start()
+        self.addCleanup(self.persistence.stop)
+
+    def test_shared_bot_role_selector_changes_binding_not_other_role_session(self):
+        conf = self.conf
+        text = "<@U0BT71H4FQE> engineering: please review this"
+        result = gateway.route(
+            conf, text=text, channel="C0CBC6AEAQZ", user="U0BRET6191C",
+            is_dm=False, binding="secretary")
+        self.assertEqual(result, ("engineering", "explicit-role-switch"))
+        self.assertEqual(
+            gateway.route(conf, text="engineering please review",
+                          channel="C0CBC6AEAQZ", user="U0BRET6191C",
+                          is_dm=False, binding="secretary"),
+            ("secretary", "thread-binding"),
+        )
+        self.assertEqual(
+            gateway.route(conf, text="<@U0UNRELATE9> engineering: review",
+                          channel="C0CBC6AEAQZ", user="U0BRET6191C",
+                          is_dm=False, binding="secretary"),
+            ("secretary", "thread-binding"),
+        )
+
+    def test_each_role_resumes_only_its_own_session_in_same_thread(self):
+        root = "1794180000.123456"
+        channel = "C0CBC6AEAQZ"
+        ids = {
+            "engineering": "engineer-uuid-123456789",
+            "secretary": "secretary-uuid-123456789",
+        }
+        calls = []
+        def run(profile, prompt, sid, timeout, model):
+            calls.append((profile, sid))
+            return True, "model response", ids[profile]
+
+        with patch.object(gateway, "dispatch", side_effect=run):
+            self.fleet.work({"channel": channel, "ts": root, "text": "first"},
+                            "engineering", "mention", [])
+            self.fleet.work({"channel": channel, "thread_ts": root,
+                             "ts": "1794180001.123456", "text": "switch"},
+                            "secretary", "explicit-role-switch", [])
+            self.fleet.work({"channel": channel, "thread_ts": root,
+                             "ts": "1794180002.123456", "text": "back"},
+                            "engineering", "explicit-role-switch", [])
+        self.assertEqual(calls, [
+            ("engineering", None),
+            ("secretary", None),
+            ("engineering", "engineer-uuid-123456789"),
+        ])
+        self.assertEqual(self.fleet.state["sessions"], {
+            f"{channel}:{root}:engineering": ids["engineering"],
+            f"{channel}:{root}:secretary": ids["secretary"],
+        })
+        self.assertEqual(self.fleet.state["bindings"][f"{channel}:{root}"], "engineering")
+
+    def test_legacy_single_role_session_migrates_only_to_its_bound_role(self):
+        root = "1794180000.123456"
+        channel = "C0CBC6AEAQZ"
+        self.fleet.state["bindings"][f"{channel}:{root}"] = "secretary"
+        self.fleet.state["sessions"][f"{channel}:{root}"] = "old-secretary-session"
+        calls = []
+        def run(profile, prompt, sid, timeout, model):
+            calls.append((profile, sid))
+            return True, "ok", "native-" + profile
+        with patch.object(gateway, "dispatch", side_effect=run):
+            self.fleet.work({"channel": channel, "thread_ts": root,
+                             "ts": "1794180001.123456", "text": "more"},
+                            "secretary", "thread-binding", [])
+            self.fleet.work({"channel": channel, "thread_ts": root,
+                             "ts": "1794180002.123456", "text": "new role"},
+                            "engineering", "explicit-role-switch", [])
+        self.assertEqual(calls, [("secretary", "old-secretary-session"),
+                                 ("engineering", None)])
+
+
 if __name__ == "__main__":
     unittest.main()
