@@ -533,3 +533,29 @@ The final source update stays in PR #2345 on sol/t3-hermes-os-team-design-202611
 
 **DO_NOT_REDO:** the six added boards, refined primary journey, retained references and accepted visual fixes. Reopen them only for a material source/product change or concrete feedback. The current design-only DONE_WHEN is met. Broader application, installed Teamlink return, consumer qualification, performance measurements and release acceptance remain with the incumbent implementation programme and its original proof requirements.
 
+## 16. Expanded T3 donor integration — active Paper commission
+
+Chairman continuation, 9 November 2026 (America/Vancouver): study T3's actual UI, backend, settings and open-source implementation, then design the complete T3 workspace living inside Mastermind OS. This combines Mastermind OS, Hermes and T3 into one product. The earlier Section 15 design result is accepted prior work, not completion of this newly expanded scope.
+
+**Allowed surfaces:** the existing Mastermind OS Paper file and this existing source design guide/PR. Read-only donor/source and installed-version inspection are included. No app/runtime integration, installation, service changes, execution, merge or deployment is assigned in this continuation.
+
+**Source pins:** T3 upstream pingdotgg/t3code c6ca6056309904f89b90b6055d797973be0a0939; Hermes upstream NousResearch/hermes-agent 109fd8161a509db5a00942152ba48882e446e8b0. Protected procedure remains ff6d5ab67c3535056d69f603fac0d95c058baad8; product doctrine remains Macro 315efde9307bf8a3d241a7683432dfff92cd4a9e. The supplied twelve screenshots are product observations. A read-only Info.plist inspection reports installed T3 Code (Beta) 0.1.7; the clean engineering research clone is separately pinned at 0770446869d247a8b28c27d7ed93f47f8ff0c1e4. Neither is silently equated to the current upstream source.
+
+### Expanded completion ruler
+
+- A source-backed inventory covers all visible T3 settings families and the material workspace/engine capabilities, including donor distinctions absent from the screenshots.
+- Native Paper shows a first-class Code inbox/workbench/new-thread flow, all eight surface families (Browser, Terminal, Files, Diff, Pull request, Linked pull requests, Device, Side chat), source/review/context/recovery work, and deliberate tablet/mobile composition.
+- Unified settings preserve device, environment, project and teammate/profile scope, inheritance, exact credentials ownership, supported/unsupported controls and real donor feature distinctions.
+- Hermes persistent Bot Chat, T3 coding threads, DSH/other ACP engines, Capacity Fabric model/account routing and Executive placement remain joined but distinct owners. No duplicate runtime, settings database, scheduler, credential store or router is proposed.
+- Builder documentation maps donor source to the editable frames and existing Mastermind seams, with capability gates, adoption/licence boundaries, interaction/performance constraints and concrete future real-path acceptance.
+- Every authored board is visually inspected and natively read back, current working indicators are released, and this existing guide is saved/read back. Research alone and a provider selector alone are not DONE_WHEN.
+
+### Current design decisions grounded in source
+
+The complete embedded workspace should reuse/adapt T3 client-runtime and its authenticated RPC/subscription boundary. MCP remains the agent/control interface; it is insufficient as the whole UI data layer. One Mastermind shell owns product navigation while T3 retains environment-scoped threads/runs/provider effects and Hermes retains profile/gateway conversation ownership.
+
+Settings need a visible concrete scope, not a universal global form. Preserve T3 client preferences versus environment defaults/project overrides and Hermes connection/profile pinning. SnapShots means screen/window capture; code checkpoints/rewind are a different workflow. T3 environment load balancing is placement, not Capacity Fabric model/account routing. Company placement stays with the incumbent Executive/Fabric owner.
+
+**Research roles:** principal retains all Paper/source mutation. Three bounded native reasoning advisors inspect T3 backend, Hermes ownership and T3 settings taxonomy. WHY NOT FABLE: source/architecture critique and design judgment only; no implementation labor or new runtime assignment. Findings are advisory evidence, not GitHub approval.
+
+**Next safe phase:** complete the donor feature/settings map, author the Code and unified Settings pages, verify each meaningful design group, persist the exact native frame map here, and continue through final coverage audit.
