@@ -563,15 +563,7 @@ class Fleet:
                 return None
         if etype == "message" and event.get("channel_type") not in ("im", "channel", "group", "mpim"):
             return None
-        now = time.time()
         channel = event.get("channel", "")
-        with self.lock:
-            hits = [t for t in (self.state.setdefault("recent", {}).get(channel) or []) if now - t < 60]
-            if len(hits) >= int(conf.get("max_dispatches_per_minute", 6)):
-                log("rate_limited", channel=channel)
-                return None
-            hits.append(now)
-            self.state["recent"][channel] = hits
         allowed = conf.get("allowed_users") or []
         if allowed and user not in allowed and not event.get("bot_id"):
             log("rejected_user", user=user)
@@ -580,13 +572,31 @@ class Fleet:
         thread_root = event.get("thread_ts") or event.get("ts") or ""
         with self.lock:
             bound = (self.state.get("bindings") or {}).get(f"{channel}:{thread_root}")
-        # a bound thread is an addressed conversation: follow-ups need no mention and no channel map
+        # Unbound channel events must address this app or an enrolled role,
+        # not an unrelated Slack user. A bound thread may follow up without
+        # another mention. Explicit channel enrollment retains its route.
+        addressed_ids = set(mentioned_user_ids(event.get("text", "")))
+        our_addresses = set(self.our_bot_users)
+        our_addresses.update(rec.get("slack_user_id") for rec in routable(conf).values()
+                             if rec.get("slack_user_id"))
         if (etype == "message" and event.get("channel_type") in ("channel", "group")
                 and not bound
-                and not mentioned_user_ids(event.get("text", ""))
+                and not (addressed_ids & our_addresses)
                 and channel not in (conf.get("channels") or {})
-                and not any(channel in (r.get("channels") or []) for r in routable(conf).values())):
+                and not any(channel in (rec.get("channels") or [])
+                            for rec in routable(conf).values())):
             return None
+        # Non-addressed chatter and unauthorized senders must never consume
+        # an authorized channel's dispatch capacity.
+        now = time.time()
+        with self.lock:
+            hits = [t for t in (self.state.setdefault("recent", {}).get(channel) or [])
+                    if now - t < 60]
+            if len(hits) >= int(conf.get("max_dispatches_per_minute", 6)):
+                log("rate_limited", channel=channel)
+                return None
+            hits.append(now)
+            self.state["recent"][channel] = hits
         return route(conf, text=event.get("text", ""), channel=channel, user=user,
                      is_dm=is_dm, authorizations=authorizations, binding=bound)
 
