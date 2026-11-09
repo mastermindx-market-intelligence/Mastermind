@@ -612,9 +612,13 @@ class CrashHookStore:
         original_ref: WorkerProcessRef,
         cursor: str = "",
         spec: WorkerLaunchSpec | None = None,
+        claim_token: str | None = None,
     ) -> None:
+        # A3 rework: the receipt write is conditional on the launch claim
+        # token; the wrapper forwards it unchanged (crash point unchanged).
         self._inner.put_launch_receipt(
-            run_id, receipt=receipt, original_ref=original_ref, cursor=cursor, spec=spec
+            run_id, receipt=receipt, original_ref=original_ref, cursor=cursor,
+            spec=spec, claim_token=claim_token,
         )
         if os.environ.get("T3_CANARY_CRASH_MODE") == "after_receipt":
             _write_side(

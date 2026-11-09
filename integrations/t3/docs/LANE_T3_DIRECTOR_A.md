@@ -227,3 +227,74 @@ never deletes or archives its threads (T3 owns lifecycle).
 5. `MASTERMIND_ADMISSION_ENDPOINT` wire protocol is intentionally minimal
    (`POST /v1/admit`); schema validation was avoided to keep upstream's
    layer graph dependency-free — revisit if the endpoint grows.
+
+## A3 audit rework (Director A3, 2026-11-09) — finding → fix → test
+
+Source of findings: `integrations/t3/docs/AUDIT_T3_DURABLE_ADAPTER_OPUS_20261109.md`
+(distinct Opus audit, verdict NEEDS_REWORK). Base: `t3/t3-hermes-restart-recovery`
+@ `70dabba15`. Branch: `t3/a3-adapter-audit-rework-r2` (the planned name
+`t3/a3-adapter-audit-rework` is still checked out — clean, no commits — in a dead first
+attempt's worktree, which this lane did not touch).
+
+**Fail-before method.** No stash, no extra worktree: `git archive 70dabba15 -- control_plane
+tests integrations config common scripts | tar -x -C /tmp/a3-prefix/tree`, copy the NEW
+test files over, run them against the pre-fix adapter (byte-identical to `70dabba15`, verified
+with `cmp`). Result: **38 failed / 42 passed** pre-fix; **80 passed** post-fix (same two
+files). The upstream-patch regression was proven by swapping the pre-fix
+`MastermindAdmissionAdapter.ts` back into a private scratch clone and running the new vitest
+block (`expected 2 to be 1`). "API absent" means the pre-fix code had no such surface at all;
+the "behavior" column is the observed pre-fix failure.
+
+| # | Sev | Fix (file:symbol) | Regression test(s) | Fail-before (pre-fix) | After |
+|---|---|---|---|---|---|
+| 1 | BLOCKER | `t3_execution_adapter.py` `SQLiteT3AdapterStateStore.claim_launch_intent` (INSERT … ON CONFLICT DO NOTHING in BEGIN IMMEDIATE, `changes()`), `T3ExecutionAdapter.start` (claim before native call, loser → `T3LaunchClaimConflictError`), `put_launch_intent` (never upserts), `clear_launch_attempt(claim_token=)`, write-once `put_launch_receipt(claim_token=)` | `test_t3_adapter_durability.py::AuditReworkStartRaceTests::test_nm01_two_connections_race_start_exactly_one_launch` (2 threads, 2 connections, 0.3 s binding_source), `::test_nm01_two_processes_race_start_exactly_one_launch` (2 OS processes), `::test_nm02_loser_during_in_flight_launch_replays_the_winner`; `AuditReworkStoreTests::test_launch_intents_are_never_upserted`, `::test_clear_launch_attempt_is_claimant_conditional` | `2 != 1` launches (both ACKed); `['started','started']`; upsert not refused; claimant clear: API absent. (NM-02 in-flight test also passes pre-fix: extra coverage, not the fail-before proof) | pass: 1 launch, loser reattaches to winner with 0 native calls, 1 ledger row |
+| 2 | BLOCKER | upstream patch `MastermindAdmissionAdapter.ts` `decorateServiceLayer`: no `Layer.build`; incumbent wired via `Layer.provide` (same memo map). Patch sha256 `5785ac95…4e922f` | colocated vitest `MastermindAdmissionAdapter composition` (4 cases: disabled/enforce × both `mergeAll` orders); `test_t3_upstream_patch.py::test_decorators_never_nest_layer_build`, `::test_colocated_suite_pins_built_exactly_once_composition`, `::test_patch_bytes_are_the_pinned_a3_rework` | vitest `expected 2 to be 1` (shared dep built twice, decorated-first, both modes); static: `Layer.build(incumbent)` found | vitest 13/13 + ThreadLaunchService 46/46; `effect-tsgo` exit 0 (0 errors, 491 suggestions = baseline); `git apply --check` clean on the pinned clone (left clean) |
+| 3 | MAJOR | `T3ExecutionAdapter._require_attested_principal` (launch needs attestation), `_require_namespace_continuity(native_call=)` (unattested/different principal → `T3NamespaceAttestationError`, code `T3_REAUTH_REQUIRED`; legacy unqualified rows never replay), `_verify_replayed_thread` (crash-zone adoption needs upstream-derived echo), pre-durability replay needs a known thread; live port `T3McpToolPort.from_access_token` (namespace `client:<sid>` from the token claims = upstream `requestNamespace`), echoes only when `threadId == t3_expected_launch_thread_id(ns,key)` | `AuditReworkAdapterTests::test_nm08_unattested_port_cannot_reattach_a_principal_scoped_run`, `::test_nm08_unattested_port_cannot_replay_a_crash_zone_intent`, `::test_nm08_unattested_port_cannot_launch`, `::test_crash_zone_replay_without_upstream_echo_is_not_adopted`; `test_t3_execution_adapter.py::T3LivePortReworkTests::test_port_attests_the_upstream_session_from_the_token_claims`, `::test_receipt_echoes_come_only_from_the_upstream_thread_id`, `::test_expected_thread_id_matches_the_donor_json_stringify_derivation` (node-computed vectors), `::test_port_refuses_an_envelope_for_another_namespace_before_sending` | reattach/replay/launch NOT refused (fail-open skip); echo-free receipt adopted; live port: API absent | pass |
+| 4 | MAJOR | `T3McpTransportError` + `t3_mcp_failure_is_definitive_refusal` + `T3McpToolPort._invoke`: pre-send, 4xx (≠408), JSON-RPC −32700/−32600/−32601/−32602, tool `isError` = clean refusal; timeout/reset/5xx/408/other JSON-RPC/garbled/unclassified-after-send = `T3UnknownOutcomeError` | `T3LivePortReworkTests::test_lost_replies_keep_the_intent_and_clean_refusals_roll_back` (12 subtests), `::test_unparsable_launch_reply_is_an_unknown_outcome` | API absent; pre-fix live port (`t3_live_proof.py` `LiveT3McpPort.launch_thread`) wrapped every exception in `RuntimeError` → adapter clean refusal → intent rolled back (by reading) | pass: unknown keeps the intent, clean rolls back |
+| 5 | MAJOR | `_t3_spec_from_json`/`_decode_typed` (per-field declared type via `typing.get_type_hints`; scalars keep JSON type) + persisted `spec_sha256` of the caller's ORIGINAL spec (authoritative in `reattach`) | `AuditReworkAdapterTests::test_spec_with_non_normalized_paths_round_trips_and_reattaches` | loaded `allowed_artifact_paths` = `PosixPath('out/result.json')…` ≠ `'out/./result.json'` → reattach "launch spec drifted" | pass: exact round-trip, reattach with 0 native calls |
+| 6 | MAJOR | `_refuse_executive_runtime_file` (casefolded given+resolved names, resolved-path casefold compare, `samefile` + `(st_dev,st_ino)`), `_ensure_schema` refuses foreign schema objects BEFORE DDL inside the same IMMEDIATE tx | `AuditReworkStoreTests::test_executive_guard_refuses_a_case_variant_name`, `::test_executive_guard_refuses_a_symlink_alias`, `::test_executive_guard_refuses_a_hardlink_alias_by_inode`; `StateStoreTests::test_store_refuses_an_existing_file_with_foreign_tables_before_ddl` (replaces the refuted coexistence test) | all four opened the file and ran DDL (not raised) | pass; Executive stand-in's tables unchanged |
+| 7 | MAJOR | `T3McpToolPort.interrupt_run` sends `{threadId, runId, reason}` from `t3_native_run_coordinates(ref)` (suffix after the known thread id; never a naive split) and refuses a reply echoing another thread/run (unknown outcome) | `T3LivePortReworkTests::test_interrupt_payload_carries_thread_and_native_run_id`, `::test_interrupt_echoing_another_run_is_an_unknown_outcome` | API absent; pre-fix live port sent `t3_thread_interrupt({})` (`hasattr(ref,"thread_id")` always false) → newest turn (by reading) | pass |
+| 8 | MINOR | `_merge_cursor` in both stores (`""` = no advance; decimal positions forward-only; kind change refused); compare-and-set UPDATE | `AuditReworkStoreTests::test_nm03_cursor_never_moves_backwards_across_writers`; `AuditReworkAdapterTests::test_nm03_status_read_with_empty_or_lower_cursor_never_rewinds` | `'4' != '7'` (stale writer rewound); `'' != '5'` (empty reset) | pass |
+| 9 | MINOR | `_merge_cancel` (settled is final; first request kept) + `cancel()` returns the settled ledger without a second interrupt | `AuditReworkAdapterTests::test_second_cancel_never_downgrades_a_settled_record` | settled → `False` after 2nd cancel | pass: still settled, 1 interrupt |
+| 10 | MINOR | `_merge_result` (identical re-record = no-op keeping the first `recorded_at`; different → `T3ResultLedgerConflictError`) | `AuditReworkStoreTests::test_result_ledger_is_write_once` | overwrite not refused | pass |
+| 11 | MINOR | `SQLiteT3AdapterStateStore._transaction` (BEGIN IMMEDIATE; statement or COMMIT failure → ROLLBACK, tx closed, `T3StateStoreError`); every existence check / CAS / rowcount (`_expect_one`, `changes()`) inside the tx | `AuditReworkStoreTests::test_commit_failure_rolls_back_closes_tx_and_is_typed`, `::test_existence_check_and_rowcount_are_inside_the_transaction` | raw `sqlite3.OperationalError: injected failure on COMMIT`; 0-row UPDATE passed silently | pass; next write succeeds |
+| 12 | MINOR | `start()`/`_replay_and_adopt`: receipt-persist failure after a successful native call → `T3LaunchEffectUnknownError` (intent kept) | `AuditReworkAdapterTests::test_store_failure_after_successful_launch_is_effect_unknown` | raw `sqlite3.OperationalError: disk I/O error` | pass |
+| 13 | MINOR | `collect_result` → `_read_terminal` (port `read_result` if present, else head read; never the status cursor, never moves it); refuses `result_ref` equal to the thread/run id; `T3McpToolPort.read_result` names the exact run's final `assistant_message` item | `AuditReworkAdapterTests::test_collect_uses_a_terminal_read_not_the_status_cursor`, `::test_collect_refuses_a_bare_thread_id_as_result_reference`; `T3LivePortReworkTests::test_collect_reads_the_exact_runs_final_assistant_item`, `::test_collect_refuses_when_the_exact_run_has_no_final_reply` | "carries no canonical result reference" after a terminal poll; bare thread id accepted; live port: API absent | pass |
+| 14 | NOTE | not changed: no runtime composes the adapter / produces the pre-ACK `WorkerRecoveryBinding` (selection is a deployment act) | — | — | open (unchanged) |
+| 15 | NOTE | reads now take the store lock; `updated_ms` is wall-clock (`time.time_ns`); `creationSource`/ledger cap / per-checkout default path unchanged | covered by the suites above | — | partial |
+| G | API | `SQLiteT3AdapterStateStore.open_read_only(path)` (`mode=ro` URI, `PRAGMA query_only`, no DDL, Executive guard + foreign-object refusal, writes refused typed). Director G's projection NOT switched (per assignment) | `AuditReworkStoreTests::test_open_read_only_reads_without_ddl_and_refuses_writes` | API absent | pass; file bytes unchanged |
+| C-P1 | API | `T3ExecutionAdapter._verify_binding_join`: a v1.1 binding with `runtime_kind="t3-native"` (or any `operation_key`/`caller_namespace`) must carry `operation_key == derive_t3_client_request_id(binding)` and `caller_namespace ∈ {T3_REQUEST_NAMESPACE, t3_request_namespace(attested principal)}` → else `T3BindingJoinDriftError` before any claim | `AuditReworkAdapterTests::test_cp1_drifted_operation_key_is_refused`, `::test_cp1_foreign_caller_namespace_is_refused`, `::test_cp1_claim_seam_binding_launches_under_the_joined_key` (real `AttemptRegistry.claim_job` binding launches under its `operation_key`; corrupted copy refused) | drifted bindings launched (not raised) | pass |
+
+**C-P2 / C-P3 — documented, not implemented.** C-P2 (launch containment of
+`spec.workspace_path` inside `binding.workspace_ref`) needs a defined mapping from the
+lease's opaque `workspace_ref` to a filesystem path, which the binding does not carry;
+guessing containment from a string prefix would be wrong. C-P3 (persist
+`t3_workspace_id`) belongs to the lease/workspace lifecycle on Director C's path, not this
+adapter. Both stay proposals.
+
+**Store schema.** `t3_adapter_runs` gains two NULLABLE columns, `spec_sha256` and
+`claim_token` (added in place by `ALTER TABLE` on older files; the original columns and the
+fleet projection's read slice are unchanged).
+
+**Behavior changes callers must know.** (1) every launch needs a port with
+`authenticated_namespace()`; (2) `clear_launch_attempt` requires `claim_token=`; (3) a second
+`start()` for a run raises `T3LaunchClaimConflictError` (a `T3ExecutionAdapterError`);
+(4) `collect_result` uses a terminal read; (5) opening an existing file that holds any foreign
+table is refused.
+
+**A2 harness (one separate final commit, receipts untouched).** Forced by (1)–(2):
+`t3_durable_canary.py` `CrashHookStore.put_launch_receipt` forwards `claim_token`
+(otherwise S1's receipt write would raise `TypeError` → EFFECT_UNKNOWN), and
+`t3_live_proof.py` now binds the adapter's reference `T3McpToolPort` (token-attested
+namespace, typed transport errors from `McpHttp`, exact-run interrupt, terminal read) and
+imports THIS repo instead of the old lane worktree path. `CanaryLivePort` was NOT changed:
+it still attests a token-hash principal and copies envelope echoes (audit #3 residue in the
+proven canary harness; migrating it to `T3McpToolPort` is a follow-up that needs a live
+re-run). No live T3 thread was launched by A3; the rework is PROVEN_BY_TEST.
+
+**Verification (this lane, 2026-11-09).** `env -u PYTHONPATH /opt/homebrew/bin/python3.12
+-m pytest -q tests/test_t3_adapter_durability.py tests/test_t3_execution_adapter.py
+tests/test_t3_upstream_patch.py tests/test_session_bridge_t3.py tests/test_worker_adapter.py
+tests/test_rev5_contracts_v1_1.py tests/test_t3_attempt_fleet_projection.py
+tests/test_mmos_negative_matrix.py tests/test_executive_claim_job_placement_authority.py
+tests/test_t3_durable_canary_receipt.py` → see the final commit message for the exact count.

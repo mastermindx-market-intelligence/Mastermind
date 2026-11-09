@@ -6,6 +6,15 @@ Proves: adapter.start -> real t3_thread_launch (clientRequestId idempotency
 key persisted BEFORE the native call), adapter.status -> real t3_thread_read
 with incremental cursor, adapter.collect_result -> result ledgered before
 the CollectionReceipt. Records a secret-free receipt JSON.
+
+A3 audit rework (2026-11-09): the port is the adapter's reference
+``T3McpToolPort`` bound to this file's ``McpHttp`` — the namespace is
+attested from the bearer token's session claim (``client:<sid>``, never a
+guess), ``McpHttp`` raises typed ``T3McpTransportError`` so lost replies are
+UNKNOWN outcomes (not clean refusals), interrupts carry ``threadId`` + the
+native ``runId``, and the result is read by a dedicated terminal read.  The
+recorded receipt (``t3_live_proof_receipt.json``) predates this rework and
+is left untouched.
 """
 from __future__ import annotations
 
@@ -15,14 +24,19 @@ import datetime as dt
 import hashlib
 import json
 import os
+import socket
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-WT = "/Users/chriswong/.hermes/profiles/engineering/mmos/wt-lane-t3"
-sys.path.insert(0, WT)
+# Import THIS repository's adapter (the old lane worktree path predates the
+# A3 rework and would shadow the reworked port/transport API).
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)
+))))
+sys.path.insert(0, REPO)
 
 from control_plane.child_execution_contracts import (  # noqa: E402
     C1_ROUTINE_BOUNDED,
@@ -31,12 +45,12 @@ from control_plane.child_execution_contracts import (  # noqa: E402
 from control_plane.t3_execution_adapter import (  # noqa: E402
     InMemoryT3AdapterStateStore,
     T3ExecutionAdapter,
-    T3InterruptOutcome,
+    T3McpToolPort,
+    T3McpTransportError,
     T3ThreadLaunchEnvelope,
     T3ThreadLaunchReceipt,
-    T3ThreadReadResult,
-    T3UnknownOutcomeError,
     derive_t3_client_request_id,
+    t3_mcp_upstream_namespace,
 )
 from control_plane.worker_execution_contract import (  # noqa: E402
     ProcessInspector,
@@ -204,6 +218,7 @@ class McpHttp:
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         req = urllib.request.Request(MCP, data=body, headers=headers, method="POST")
+        after = T3McpTransportError.AFTER_SEND
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 sid = resp.headers.get("Mcp-Session-Id") or resp.headers.get(
@@ -215,21 +230,43 @@ class McpHttp:
                 raw = resp.read().decode("utf-8", "replace")
                 status = resp.status
         except urllib.error.HTTPError as exc:
+            # An explicit upstream HTTP answer: the port classifies 4xx as a
+            # refusal and 408/5xx as an unknown outcome.
             detail = exc.read().decode("utf-8", "replace")[:500]
-            raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+            raise T3McpTransportError(
+                f"HTTP {exc.code}: {detail}", phase=after, http_status=exc.code
+            ) from exc
+        except urllib.error.URLError as exc:
+            # Connection refused / name resolution: nothing was delivered.
+            # Anything else (timeout, reset) may have been delivered.
+            pre = isinstance(exc.reason, (ConnectionRefusedError, socket.gaierror))
+            raise T3McpTransportError(
+                f"transport failure: {exc.reason}",
+                phase=T3McpTransportError.PRE_SEND if pre else after,
+            ) from exc
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            # Timeout or reset while sending/reading: the reply was lost.
+            raise T3McpTransportError(f"transport failure: {exc}", phase=after) from exc
         if not expect_reply:
             return None
         if status != 200:
-            raise RuntimeError(f"HTTP {status} {ctype}: {raw[:300]}")
-        if "text/event-stream" in ctype:
-            data = None
-            for line in raw.splitlines():
-                if line.startswith("data:"):
-                    data = line[5:].strip()
-            if data is None:
-                raise RuntimeError("SSE response carried no data frame")
-            return json.loads(data)
-        return json.loads(raw)
+            raise T3McpTransportError(
+                f"HTTP {status} {ctype}: {raw[:300]}", phase=after, http_status=status
+            )
+        try:
+            if "text/event-stream" in ctype:
+                data = None
+                for line in raw.splitlines():
+                    if line.startswith("data:"):
+                        data = line[5:].strip()
+                if data is None:
+                    raise ValueError("SSE response carried no data frame")
+                return json.loads(data)
+            return json.loads(raw)
+        except ValueError as exc:
+            raise T3McpTransportError(
+                f"unparsable reply: {exc}", phase=after
+            ) from exc
 
     def initialize(self) -> dict:
         resp = self._post(
@@ -272,15 +309,26 @@ class McpHttp:
                 "params": {"name": name, "arguments": arguments},
             }
         )
+        after = T3McpTransportError.AFTER_SEND
         if resp.get("error"):
-            raise RuntimeError(f"tools/call {name} JSON-RPC error: {resp['error']}")
+            error = resp["error"] if isinstance(resp["error"], dict) else {}
+            code = error.get("code")
+            raise T3McpTransportError(
+                f"tools/call {name} JSON-RPC error: {resp['error']}",
+                phase=after, rpc_code=code if isinstance(code, int) else None,
+            )
         result = resp.get("result") or {}
         if result.get("isError"):
             text = ""
             for item in result.get("content") or []:
                 if item.get("type") == "text":
                     text = item.get("text", "")
-            raise RuntimeError(f"tool {name} returned failure: {text[:400]}")
+            if not text and isinstance(result.get("structuredContent"), dict):
+                text = json.dumps(result["structuredContent"].get("error"))
+            raise T3McpTransportError(
+                f"tool {name} returned failure: {text[:400]}",
+                phase=after, tool_error=True,
+            )
         structured = result.get("structuredContent")
         if isinstance(structured, dict):
             return structured
@@ -292,120 +340,43 @@ class McpHttp:
                     continue
                 if isinstance(parsed, dict):
                     return parsed
-        raise RuntimeError(f"tool {name} returned no parsable payload")
-
-
-class LiveT3McpPort:
-    """Real T3NativeClientPort over the authenticated MCP HTTP transport."""
-
-    def __init__(self, mcp: McpHttp) -> None:
-        self._mcp = mcp
-        self.calls: list[dict] = []
-
-    async def launch_thread(self, envelope: T3ThreadLaunchEnvelope) -> T3ThreadLaunchReceipt:
-        args = {
-            "title": envelope.title,
-            "message": envelope.message,
-            "scratch": True,
-            "clientRequestId": envelope.client_request_id,
-        }
-        if envelope.model_selection:
-            if envelope.model_selection.strip().startswith("{"):
-                args["modelSelection"] = json.loads(envelope.model_selection)
-            else:
-                args["modelSelection"] = {"instanceId": envelope.model_selection}
-        self.calls.append({"op": "launch", "clientRequestId": envelope.client_request_id})
-        _log("port.launch_thread", clientRequestId=envelope.client_request_id)
-        try:
-            payload = self._mcp.call_tool("t3_thread_launch", args)
-        except Exception as exc:
-            # Distinguish clean refusal (tool-level failure => no effect)
-            # from transport loss (effect unknown). urllib already raised
-            # HTTPError into RuntimeError for tool failures; timeouts below.
-            raise RuntimeError(str(exc)) from exc
-        receipt = T3ThreadLaunchReceipt(
-            thread_id=str(payload.get("threadId") or ""),
-            run_id=str(payload.get("runId") or ""),
-            project_id=str(payload.get("projectId") or ""),
-            status=str(payload.get("status") or ""),
-            link=str(payload.get("link") or ""),
-            request_namespace=envelope.request_namespace,
-            client_request_id=envelope.client_request_id,
-            created_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        raise T3McpTransportError(
+            f"tool {name} returned no parsable payload", phase=after
         )
+
+
+class LiveT3McpPort(T3McpToolPort):
+    """Real T3NativeClientPort over the authenticated MCP HTTP transport.
+
+    The adapter's reference :class:`T3McpToolPort` bound to ``McpHttp``: the
+    upstream namespace is attested from the bearer token's session claim
+    (``client:<sid>`` — the identity T3 scopes launch idempotency by), the
+    receipt echoes come only from the upstream thread id, every lost reply
+    is an unknown outcome, interrupts are exact-run, and the result is read
+    by a dedicated terminal read.  The token is used for attestation only
+    and is not stored on the port.
+    """
+
+    def __init__(self, mcp: McpHttp, token: str) -> None:
+        super().__init__(
+            mcp.call_tool,
+            upstream_namespace=t3_mcp_upstream_namespace(token),
+            launch_arguments={"scratch": True},
+        )
+        self._mcp = mcp
+
+    def _launch(self, envelope: T3ThreadLaunchEnvelope, op: str) -> T3ThreadLaunchReceipt:
+        _log(f"port.{op}", clientRequestId=envelope.client_request_id)
+        receipt = super()._launch(envelope, op)
         _log(
-            "port.launch_thread.ok",
+            f"port.{op}.ok",
             threadId=receipt.thread_id,
             runId=receipt.run_id,
             status=receipt.status,
             link=receipt.link,
+            upstream_echo_proven=bool(receipt.client_request_id),
         )
         return receipt
-
-    async def read_thread(
-        self, thread_id: str, run_id: str, cursor: str
-    ) -> T3ThreadReadResult:
-        args = {
-            "threadId": thread_id,
-            "view": "messages",
-            "limit": 20,
-            "maxCharsPerItem": 4000,
-        }
-        if cursor:
-            args["afterPosition"] = int(cursor)
-        self.calls.append({"op": "read", "threadId": thread_id, "cursor": cursor})
-        payload = self._mcp.call_tool("t3_thread_read", args)
-        thread = payload.get("thread") if isinstance(payload.get("thread"), dict) else payload
-        native_status = str(
-            thread.get("status") or payload.get("status") or ""
-        )
-        items = payload.get("items") or []
-        next_pos = payload.get("nextPosition")
-        last_text = ""
-        for item in items:
-            if item.get("text"):
-                last_text = str(item["text"])
-            for part in item.get("parts") or []:
-                if isinstance(part, dict) and part.get("text"):
-                    last_text = str(part["text"])
-        result = T3ThreadReadResult(
-            thread_id=thread_id,
-            run_id=str(thread.get("latestRunId") or run_id or ""),
-            native_status=native_status,
-            cursor=cursor,
-            next_cursor=str(next_pos) if next_pos is not None else cursor,
-            result_ref=str(payload.get("link") or thread.get("link") or thread_id),
-            result_payload={"last_text": last_text[-1000:], "item_count": len(items)},
-        )
-        _log(
-            "port.read_thread.ok",
-            nativeStatus=native_status,
-            nextPosition=next_pos,
-            items=len(items),
-        )
-        return result
-
-    async def interrupt_run(self, ref, reason: str) -> T3InterruptOutcome:
-        self.calls.append({"op": "interrupt", "run_id": ref.run_id})
-        payload = self._mcp.call_tool(
-            "t3_thread_interrupt", {"threadId": ref.thread_id}
-        ) if hasattr(ref, "thread_id") else self._mcp.call_tool(
-            "t3_thread_interrupt", {}
-        )
-        return T3InterruptOutcome(
-            requested=True,
-            settled=False,
-            observed_native_status=str(payload.get("status") or ""),
-            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
-        )
-
-    async def replay_launch(
-        self, envelope: T3ThreadLaunchEnvelope
-    ) -> T3ThreadLaunchReceipt:
-        # Same command, same key, same namespace -> upstream idempotent replay.
-        self.calls.append({"op": "replay", "clientRequestId": envelope.client_request_id})
-        _log("port.replay_launch", clientRequestId=envelope.client_request_id)
-        return await self.launch_thread(envelope)
 
 
 class ProofInspector(ProcessInspector):
@@ -471,7 +442,7 @@ async def main() -> None:
         # its cheapest model (the free OpenCode lane was listed in the catalog
         # but stalled in delivery -- catalog visibility is not readiness)
     )
-    port = LiveT3McpPort(mcp)
+    port = LiveT3McpPort(mcp, token)
     state_store = InMemoryT3AdapterStateStore()
     adapter = T3ExecutionAdapter(
         port,
@@ -594,11 +565,11 @@ async def main() -> None:
         "result_payload_excerpt": None,
         "events": PROOF_LOG["events"],
     }
-    # Try to capture the actual final text from the last read payload.
+    # Capture the exact run's final text through the dedicated terminal read.
     try:
-        last = await port.read_thread(receipt.thread_id, receipt.run_id, "")
+        last = await port.read_result(receipt.thread_id, receipt.run_id)
         proof["result_payload_excerpt"] = (
-            last.result_payload.get("last_text", "")[-300:] or None
+            str(last.result_payload.get("text", ""))[-300:] or None
         )
     except Exception as exc:  # non-fatal for the receipt
         proof["result_payload_excerpt"] = f"read-back skipped: {exc}"

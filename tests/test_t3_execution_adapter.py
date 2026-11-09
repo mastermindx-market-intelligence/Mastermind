@@ -34,6 +34,7 @@ from control_plane.t3_execution_adapter import (
     T3ThreadLaunchReceipt,
     T3ThreadReadResult,
     derive_t3_client_request_id,
+    t3_request_namespace,
 )
 from control_plane.worker_adapter import (
     ADAPTER_DESCRIPTORS,
@@ -117,7 +118,12 @@ class FakeT3Port:
     (same principal + namespace + key => ORIGINAL thread).
     """
 
-    def __init__(self, trace: list | None = None) -> None:
+    def __init__(
+        self, trace: list | None = None, principal: str | None = "oauth-client-test"
+    ) -> None:
+        # The attested authenticated principal (``None`` models a port that
+        # cannot attest: launches and principal-scoped recovery are refused).
+        self.principal = principal
         self.trace = trace if trace is not None else []
         self.launch_calls: list = []
         self.replay_calls: list = []
@@ -137,6 +143,9 @@ class FakeT3Port:
             observed_native_status="running",
         )
         self.replay_thread_override: tuple[str, str] | None = None
+
+    def authenticated_namespace(self) -> str | None:
+        return self.principal
 
     async def launch_thread(self, envelope) -> T3ThreadLaunchReceipt:
         key = envelope.client_request_id
@@ -218,13 +227,15 @@ class TracingStateStore(InMemoryT3AdapterStateStore):
         super().__init__()
         self._trace = trace
 
-    def put_launch_intent(self, intent, *, binding, spec) -> None:
+    def claim_launch_intent(self, intent, *, binding, spec, claim_token) -> bool:
         self._trace.append(("intent-persisted", intent.run_id))
-        super().put_launch_intent(intent, binding=binding, spec=spec)
+        return super().claim_launch_intent(
+            intent, binding=binding, spec=spec, claim_token=claim_token
+        )
 
-    def put_result_reference(self, reference) -> None:
+    def put_result_reference(self, reference):
         self._trace.append(("ledger-store", reference.run_id))
-        super().put_result_reference(reference)
+        return super().put_result_reference(reference)
 
 
 def _t3_adapter(
@@ -754,7 +765,10 @@ class T3ReattachTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(port.replay_calls), 1)
         replayed = port.replay_calls[0]
         self.assertEqual(replayed.client_request_id, original_key)
-        self.assertEqual(replayed.request_namespace, T3_REQUEST_NAMESPACE)
+        # The principal-qualified namespace of the attested port.
+        self.assertEqual(
+            replayed.request_namespace, t3_request_namespace("oauth-client-test")
+        )
         self.assertEqual(("replay", original_key), port.trace[-1])
         # The recovered execution is now retained: the next reattach replays
         # nothing and returns the same object.
@@ -801,6 +815,324 @@ class T3ReattachTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.reattach(spec, binding)
         self.assertEqual(port.replay_calls, [])
+
+
+# =============================================================================
+# A3 audit rework — reference live port (findings #3 live attestation, #4, #7,
+# #13).  New names are resolved through the module INSIDE each test so this
+# file still imports against the pre-rework adapter (fail-before per test).
+# =============================================================================
+
+import base64 as _b64  # noqa: E402
+import json as _json  # noqa: E402
+
+import control_plane.t3_execution_adapter as _t3m  # noqa: E402
+
+_SID = "3f2a6c1e-0d4b-4a8e-9b1f-2c7d5e6a8b90"
+
+
+def _session_token(sid: str = _SID, sub: str = "mcp-client", kind: str = "session") -> str:
+    claims = {
+        "v": 1, "kind": kind, "sid": sid, "sub": sub,
+        "scopes": ["orchestration:operate"], "method": "bearer-access-token",
+        "iat": 1, "exp": 2,
+    }
+    body = _b64.urlsafe_b64encode(_json.dumps(claims).encode()).rstrip(b"=").decode()
+    return body + ".signature-not-checked-here"
+
+
+class FakeMcpTransport:
+    """Models the donor's MCP thread tools at the pin for one client session.
+
+    ``failures`` maps a tool name to an exception raised INSTEAD of answering
+    (after recording the call — i.e. the request was sent).
+    """
+
+    def __init__(self, namespace: str = f"client:{_SID}") -> None:
+        self.namespace = namespace
+        self.calls: list[tuple[str, dict]] = []
+        self.failures: dict[str, BaseException] = {}
+        self.runs: dict[str, str] = {}  # threadId -> native runId
+        self.run_status: dict[str, str] = {}
+        self.items: dict[str, list[dict]] = {}
+        self.thread_override: str | None = None
+        self.interrupt_echo_run: str | None = None
+
+    def __call__(self, tool: str, arguments):
+        self.calls.append((tool, dict(arguments)))
+        if tool in self.failures:
+            raise self.failures[tool]
+        if tool == "t3_thread_launch":
+            thread_id = self.thread_override or _t3m.t3_expected_launch_thread_id(
+                self.namespace, arguments["clientRequestId"]
+            )
+            run_id = self.runs.setdefault(thread_id, f"run-{len(self.runs) + 1}")
+            self.run_status.setdefault(run_id, "running")
+            return {"threadId": thread_id, "runId": run_id, "projectId": "p-1",
+                    "status": "running", "link": f"https://app.t3/{thread_id}"}
+        if tool == "t3_thread_read":
+            thread_id = arguments["threadId"]
+            runs = [
+                {"runId": run, "status": self.run_status.get(run, "running")}
+                for tid, run in self.runs.items() if tid == thread_id
+            ]
+            items = self.items.get(thread_id, [])
+            after = arguments.get("afterPosition")
+            page = [i for i in items if after is None or i["position"] > after]
+            return {"thread": {"threadId": thread_id, "status": "idle"},
+                    "recentRuns": runs, "items": page,
+                    "nextPosition": (page[-1]["position"] if page else after),
+                    "hasMore": False}
+        if tool == "t3_thread_interrupt":
+            return {"threadId": arguments["threadId"],
+                    "runId": self.interrupt_echo_run or arguments.get("runId"),
+                    "status": "interrupt_requested"}
+        raise AssertionError(f"unexpected tool {tool}")
+
+
+def _live_adapter(transport, *, binding=None, state_store=None):
+    port = _t3m.T3McpToolPort.from_access_token(
+        transport, _session_token(), launch_arguments={"scratch": True}
+    )
+    adapter = T3ExecutionAdapter(
+        port, lambda spec: binding or _binding(), FakeInspector(),
+        clock=_clock, state_store=state_store,
+    )
+    return adapter, port
+
+
+class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
+    # --- #3: the live port attests the OAuth client session ----------------
+
+    def test_port_attests_the_upstream_session_from_the_token_claims(self) -> None:
+        port = _t3m.T3McpToolPort.from_access_token(FakeMcpTransport(), _session_token())
+        self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
+        for bad in (
+            _session_token(sub="browser"), _session_token(kind="websocket"),
+            _session_token(sid=""), "not-a-token", "a.b.c",
+        ):
+            with self.subTest(bad=bad[:16]):
+                with self.assertRaises(_t3m.T3NamespaceAttestationError):
+                    _t3m.T3McpToolPort.from_access_token(FakeMcpTransport(), bad)
+
+    def test_expected_thread_id_matches_the_donor_json_stringify_derivation(self) -> None:
+        # Vectors computed with node: "mcp:launch:" +
+        # sha256(JSON.stringify([namespace, key])) (donor launchCommandId).
+        self.assertEqual(
+            _t3m.t3_expected_launch_thread_id(
+                f"client:{_SID}",
+                "7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b",
+            ),
+            "mcp:launch:a27cfb88f5b919561560799fb12a142a0929645101d128e23cd0b15e5e1c9314",
+        )
+        self.assertEqual(
+            _t3m.t3_expected_launch_thread_id("client:é-ünïcode", 'k"ey\\x'),
+            "mcp:launch:687d3153f67224acec9e4e8749f6aa648a04b67b289d465d6ed91a23ae09a646",
+        )
+
+    async def test_receipt_echoes_come_only_from_the_upstream_thread_id(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, port = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        self.assertEqual(receipt.client_request_id, ref.launch_nonce)
+        self.assertEqual(
+            receipt.request_namespace, _t3m.t3_request_namespace(f"client:{_SID}")
+        )
+        self.assertEqual(receipt.created_at, "")  # never a local clock
+        # An upstream thread id that does NOT prove (namespace, key): no echo.
+        foreign = FakeMcpTransport()
+        foreign.thread_override = "mcp:launch:" + "0" * 64
+        other_port = _t3m.T3McpToolPort.from_access_token(foreign, _session_token())
+        unproven = await other_port.launch_thread(
+            adapter.launch_intent("run-1").envelope
+        )
+        self.assertEqual((unproven.client_request_id, unproven.request_namespace), ("", ""))
+
+    async def test_port_refuses_an_envelope_for_another_namespace_before_sending(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, port = _live_adapter(transport)
+        envelope = adapter._launch_envelope(
+            _launch_spec(), "k" * 64, _t3m.t3_request_namespace("client:someone-else")
+        )
+        with self.assertRaises(T3ExecutionAdapterError):
+            await port.launch_thread(envelope)
+        self.assertEqual(transport.calls, [])
+
+    # --- #4: lost replies are unknown outcomes, never clean refusals --------
+
+    async def test_lost_replies_keep_the_intent_and_clean_refusals_roll_back(self) -> None:
+        err = _t3m.T3McpTransportError
+        unknown = {
+            "timeout after send": err("timed out", phase="after_send"),
+            "connection reset": err("reset by peer", phase="after_send"),
+            "HTTP 502 after send": err("bad gateway", phase="after_send", http_status=502),
+            "HTTP 408": err("request timeout", phase="after_send", http_status=408),
+            "JSON-RPC internal error": err("internal", phase="after_send", rpc_code=-32603),
+            "unclassified exception": OSError("socket closed mid-read"),
+        }
+        clean = {
+            "pre-send connection refused": err("refused", phase="pre_send"),
+            "HTTP 400": err("bad request", phase="after_send", http_status=400),
+            "HTTP 403": err("forbidden", phase="after_send", http_status=403),
+            "HTTP 429": err("rate limited", phase="after_send", http_status=429),
+            "JSON-RPC invalid params": err("invalid", phase="after_send", rpc_code=-32602),
+            "tool isError": err("invalid_request", phase="after_send", tool_error=True),
+        }
+        for label, failure in unknown.items():
+            with self.subTest(unknown=label):
+                transport = FakeMcpTransport()
+                transport.failures["t3_thread_launch"] = failure
+                adapter, _ = _live_adapter(transport)
+                with self.assertRaises(T3LaunchEffectUnknownError):
+                    await adapter.start(_launch_spec())
+                self.assertIsNotNone(adapter.launch_intent("run-1"))
+        for label, failure in clean.items():
+            with self.subTest(clean=label):
+                transport = FakeMcpTransport()
+                transport.failures["t3_thread_launch"] = failure
+                adapter, _ = _live_adapter(transport)
+                with self.assertRaises(T3ExecutionAdapterError) as ctx:
+                    await adapter.start(_launch_spec())
+                self.assertNotIsInstance(ctx.exception, T3LaunchEffectUnknownError)
+                self.assertIsNone(adapter.launch_intent("run-1"))
+
+    async def test_unparsable_launch_reply_is_an_unknown_outcome(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, port = _live_adapter(transport)
+        port._call_tool = lambda tool, arguments: "<html>gateway</html>"
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await adapter.start(_launch_spec())
+        self.assertIsNotNone(adapter.launch_intent("run-1"))
+
+    # --- #7: exact-run interrupt carries threadId AND the native runId -------
+
+    async def test_interrupt_payload_carries_thread_and_native_run_id(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        await adapter.cancel(ref, "superseded")
+        tool, arguments = transport.calls[-1]
+        self.assertEqual(tool, "t3_thread_interrupt")
+        self.assertEqual(arguments["threadId"], ref.provider_session_id)
+        self.assertEqual(arguments["runId"], native_run)
+        self.assertEqual(
+            _t3m.t3_native_run_coordinates(ref), (ref.provider_session_id, native_run)
+        )
+
+    async def test_interrupt_echoing_another_run_is_an_unknown_outcome(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        transport.interrupt_echo_run = "run-newest"
+        with self.assertRaises(T3ExecutionAdapterError):
+            await adapter.cancel(ref, "superseded")
+        report = adapter.cancel_report("run-1")
+        self.assertTrue(report.requested)
+        self.assertFalse(report.settled)
+
+    # --- #13: dedicated terminal read of the exact run's final reply --------
+
+    async def test_collect_reads_the_exact_runs_final_assistant_item(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        thread = ref.provider_session_id
+        transport.items[thread] = [
+            {"position": 1, "itemId": "i-1", "runId": native_run,
+             "type": "user_message", "text": "do the work"},
+            {"position": 2, "itemId": "i-2", "runId": native_run,
+             "type": "assistant_message", "text": "FINAL-ANSWER"},
+            {"position": 3, "itemId": "i-3", "runId": "run-appended-by-human",
+             "type": "assistant_message", "text": "later chatter"},
+        ]
+        transport.run_status[native_run] = "completed"
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.SUCCEEDED)
+        self.assertEqual(adapter.read_cursor("run-1"), "3")
+        receipt = await adapter.collect_result(ref)
+        entry = adapter.result_ledger_entry("run-1")
+        self.assertEqual(entry.result_ref, f"t3://thread/{thread}/run/{native_run}/item/i-2")
+        self.assertEqual(receipt.result.structured_output["text"], "FINAL-ANSWER")
+
+    async def test_collect_refuses_when_the_exact_run_has_no_final_reply(self) -> None:
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        transport.run_status[native_run] = "completed"
+        with self.assertRaises(T3ExecutionAdapterError):
+            await adapter.collect_result(ref)
+        self.assertIsNone(adapter.result_ledger_entry("run-1"))
+
+
+def _import_live_proof_harness(name: str):
+    """Import one A2/A3 live-proof harness module from its directory."""
+    import importlib
+    import sys
+
+    harness_dir = str(
+        Path(__file__).resolve().parent.parent / "integrations" / "t3" / "live_proof"
+    )
+    added = harness_dir not in sys.path
+    if added:
+        sys.path.insert(0, harness_dir)
+    try:
+        return importlib.import_module(name)
+    finally:
+        if added:
+            sys.path.remove(harness_dir)
+
+
+class T3LiveProofHarnessTests(unittest.IsolatedAsyncioTestCase):
+    """The harness edits forced by the A3 API change (no live call made)."""
+
+    def test_live_proof_port_is_the_reference_port_with_typed_transport(self) -> None:
+        import socket
+        import urllib.error
+        from unittest import mock
+
+        harness = _import_live_proof_harness("t3_live_proof")
+        self.assertTrue(issubclass(harness.LiveT3McpPort, _t3m.T3McpToolPort))
+        self.assertEqual(
+            Path(harness.REPO).resolve(), Path(__file__).resolve().parent.parent
+        )
+        mcp = harness.McpHttp("unused-token")
+        port = harness.LiveT3McpPort(mcp, _session_token())
+        self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
+        cases = [
+            (urllib.error.URLError(ConnectionRefusedError()), "pre_send", None),
+            (urllib.error.URLError(socket.gaierror()), "pre_send", None),
+            (urllib.error.URLError(TimeoutError()), "after_send", None),
+            (TimeoutError("read timed out"), "after_send", None),
+            (ConnectionResetError("reset"), "after_send", None),
+        ]
+        for raised, phase, status in cases:
+            with self.subTest(raised=type(raised).__name__):
+                with mock.patch.object(harness.urllib.request, "urlopen", side_effect=raised):
+                    with self.assertRaises(_t3m.T3McpTransportError) as ctx:
+                        mcp.call_tool("t3_thread_launch", {})
+                self.assertEqual(ctx.exception.phase, phase)
+                self.assertEqual(ctx.exception.http_status, status)
+
+    async def test_canary_crash_hook_store_forwards_the_launch_claim(self) -> None:
+        canary = _import_live_proof_harness("t3_durable_canary")
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("T3_CANARY_CRASH_MODE", None)
+            store = canary.CrashHookStore(
+                _t3m.SQLiteT3AdapterStateStore(Path(tmp) / "state.sqlite3"),
+                Path(tmp) / "side.json", [],
+            )
+            adapter = T3ExecutionAdapter(
+                FakeT3Port(), lambda spec: _binding(), FakeInspector(),
+                clock=_clock, state_store=store,
+            )
+            ref = await adapter.start(_launch_spec())
+            self.assertEqual(adapter.retained_original_ref("run-1"), ref)
 
 
 def _neutral_ref_for(run_id: str) -> WorkerProcessRef:

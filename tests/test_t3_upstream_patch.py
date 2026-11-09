@@ -10,6 +10,9 @@ Covers:
      subprocess `git apply --check` succeeds there and the clone HEAD is the pin.
      Otherwise this test is skipped ("pinned T3 clone not present").
   5. The manifest states the pin 0770446869d247a8b28c27d7ed93f47f8ff0c1e4.
+  6. Audit finding #2 (A3 rework): no decorator runs ``Layer.build`` (a nested
+     build forks the effect 4.1.2 memo map and rebuilds shared singletons), and
+     the colocated vitest suite pins the built-exactly-once composition.
 """
 
 import hashlib
@@ -26,6 +29,11 @@ PATCH_PATH = PATCH_DIR / "mastermind_admission_0770446.patch"
 MANIFEST_PATH = PATCH_DIR / "MANIFEST.md"
 
 PIN = "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
+#: sha256 of the A3-reworked patch bytes (audit finding #2 fix).  The
+#: pre-rework bytes were f78413fb5364be4b7a382276d9207fc429cf235e9c3c477b2e627a82aa5caa87.
+PATCH_SHA256 = "5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f"
+ADAPTER_FILE = "apps/server/src/mastermind/MastermindAdmissionAdapter.ts"
+ADAPTER_TEST_FILE = "apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts"
 DEFAULT_PINNED_SOURCE = "/Users/chriswong/.hermes/profiles/engineering/mmos/t3code-src"
 
 
@@ -173,3 +181,58 @@ def test_patch_carries_donor_attribution() -> None:
     patch_text = _patch_bytes().decode()
     assert "github.com/pingdotgg/t3code" in patch_text, "patch must name the donor repo"
     assert PIN in patch_text, "patch must carry the pin SHA in its attribution line"
+
+
+# ---------------------------------------------------------------------------
+# 6. Audit finding #2: decorators never nest Layer.build; composition pinned
+# ---------------------------------------------------------------------------
+
+
+def _added_file_lines(patch_text: str, path: str) -> list[str]:
+    """The ``+`` lines the patch adds to one file (without the ``+``)."""
+    lines: list[str] = []
+    current = None
+    for raw in patch_text.splitlines():
+        if raw.startswith("diff --git "):
+            current = raw.split(" b/", 1)[-1]
+            continue
+        if current == path and raw.startswith("+") and not raw.startswith("+++"):
+            lines.append(raw[1:])
+    return lines
+
+
+def _code_only(lines: list[str]) -> list[str]:
+    """Drop comment-only lines (``//``, ``/*``, `` * ``) — prose may name APIs."""
+    code: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(("//", "/*", "*")):
+            continue
+        code.append(line)
+    return code
+
+
+def test_patch_bytes_are_the_pinned_a3_rework() -> None:
+    assert hashlib.sha256(_patch_bytes()).hexdigest() == PATCH_SHA256
+    assert PATCH_SHA256 in _manifest_text()
+
+
+def test_decorators_never_nest_layer_build() -> None:
+    """A nested ``Layer.build`` inside a decorator forks the memo map (effect
+    4.1.2) and rebuilds shared singletons — refuted passthrough (audit #2)."""
+    code = _code_only(_added_file_lines(_patch_bytes().decode(), ADAPTER_FILE))
+    assert code, "the adapter module must be part of the patch"
+    offenders = [line for line in code if "Layer.build" in line]
+    assert offenders == [], f"decorator code still builds layers: {offenders}"
+    joined = "\n".join(code)
+    # The incumbent is wired by Layer.provide through the SAME memo map.
+    assert "Layer.provide(incumbent)" in joined
+
+
+def test_colocated_suite_pins_built_exactly_once_composition() -> None:
+    test_lines = _added_file_lines(_patch_bytes().decode(), ADAPTER_TEST_FILE)
+    joined = "\n".join(test_lines)
+    assert "shared dependency is built exactly once" in joined
+    assert "Layer.mergeAll(decorated, siblingLayer)" in joined
+    assert "Layer.mergeAll(siblingLayer, decorated)" in joined
+    assert "expect(counts.sharedStore).toBe(1)" in joined
