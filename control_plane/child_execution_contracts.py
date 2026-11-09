@@ -57,7 +57,8 @@ Options shape: ``options`` maps option name -> route dict with keys
 ``name``, ``task_complexity`` (canonical long name; the plugin-era
 ``task_class`` key with ``C0``..``C3``/``reviewer`` shorthand is still
 read and normalized, so the Hermes plugin's config shape passes through
-with identical behaviour), ``description`` and optional
+with identical behaviour for the established well-formed WO-00 cases),
+``description`` and optional
 ``requires_witness``, ``downgrade_to``, ``fallback_providers``.  Only
 the classification keys (``task_complexity``/``task_class``,
 ``requires_witness``, ``downgrade_to``) are read; provider/model fields
@@ -158,9 +159,9 @@ def canonical_task_complexity(value: Any) -> str:
     return _LOOKUP_CANONICAL.get(text.upper(), text)
 
 
-#: --- the shared routing law (ported verbatim from the WO-00 extraction) -------
-#: Bumped only when the law itself changes (gates, word lists, join
-#: semantics).  Both sides of the share must agree on it before trusting
+#: --- the shared routing law (WO-00 port with configuration validation) --------
+#: Bumped only when the normative law changes (gates, word lists, join
+#: semantics); refusing configurations that violate those gates is a bug fix.  Both sides of the share must agree on it before trusting
 #: a decision.  (Plugin-era name: ``POLICY_VERSION``.)
 POLICY_REVISION = "1.0.0"
 
@@ -329,13 +330,20 @@ class ChildRoutingPolicy:
 
     Stateless apart from ``witness_min_chars``; safe to share, fork per call,
     or vendor.  ``evaluate`` performs no I/O and never mutates ``options``.
-    This is a faithful port of the Hermes ``mmx-router`` plugin's policy:
-    identical gate order, word lists, message strings and newline-join
-    semantics, with complexities reported in canonical long names.
+    The established well-formed WO-00 cases preserve the Hermes policy's
+    gate order, word lists, messages and newline join, with canonical long
+    complexity names. Invalid configurations cannot disable the C3 witness
+    gate, lower its 24-character floor, or supply an unlawful downgrade.
+    Enforcing those existing invariants does not change POLICY_REVISION.
     """
 
     def __init__(self, witness_min_chars: int = DEFAULT_WITNESS_MIN) -> None:
-        self.witness_min_chars = int(witness_min_chars)
+        if (isinstance(witness_min_chars, bool)
+                or not isinstance(witness_min_chars, int)
+                or witness_min_chars < DEFAULT_WITNESS_MIN):
+            raise ValueError(
+                f"witness_min_chars must be an integer >= {DEFAULT_WITNESS_MIN}")
+        self.witness_min_chars = witness_min_chars
 
     def evaluate(self, requested_option: str, goal: str, context: str,
                  options: Mapping[str, Any] | None = None) -> RoutingDecision:
@@ -360,7 +368,10 @@ class ChildRoutingPolicy:
                 witness="", policy_revision=POLICY_REVISION)
 
         entry = options[requested]
-        requires_witness = bool(entry.get("requires_witness"))
+        task_complexity = _entry_task_complexity(entry)
+        requires_witness = (
+            task_complexity == C3_FRONTIER_JUDGMENT
+            or bool(entry.get("requires_witness")))
         downgrade_to = entry.get("downgrade_to") or ""
         # newline-joined so a witness line stays a line (a space join would hide it from ^)
         text = "\n".join((str(goal or ""), str(context or "")))
@@ -372,13 +383,21 @@ class ChildRoutingPolicy:
             if witness_problem:
                 target = downgrade_to
                 if target and target in options:
-                    return RoutingDecision(
-                        requested=requested, resolved=target,
-                        task_complexity=_entry_task_complexity(options[target]),
-                        downgraded=target != requested,
-                        witness_problem=witness_problem,
-                        reason=f"downgraded {requested}->{target}: {witness_problem}",
-                        witness=witness, policy_revision=POLICY_REVISION)
+                    target_complexity = _entry_task_complexity(options[target])
+                    # A failed witness can never enter C3 through a fallback.
+                    # Failed C3 requests have one explicit lawful lane: C2.
+                    lawful_target = (
+                        target_complexity == FRONTIER_DOWNGRADE_COMPLEXITY
+                        if task_complexity == C3_FRONTIER_JUDGMENT
+                        else target_complexity != C3_FRONTIER_JUDGMENT)
+                    if lawful_target:
+                        return RoutingDecision(
+                            requested=requested, resolved=target,
+                            task_complexity=target_complexity,
+                            downgraded=target != requested,
+                            witness_problem=witness_problem,
+                            reason=f"downgraded {requested}->{target}: {witness_problem}",
+                            witness=witness, policy_revision=POLICY_REVISION)
                 return RoutingDecision(
                     requested=requested, resolved="", task_complexity="", downgraded=False,
                     witness_problem=witness_problem,
@@ -390,7 +409,7 @@ class ChildRoutingPolicy:
 
         return RoutingDecision(
             requested=requested, resolved=requested,
-            task_complexity=_entry_task_complexity(entry),
+            task_complexity=task_complexity,
             downgraded=False, witness_problem=witness_problem, reason="",
             witness=witness, policy_revision=POLICY_REVISION)
 

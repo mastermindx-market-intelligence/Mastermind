@@ -188,9 +188,9 @@ def test_byteplus_eligibility_is_typed_and_keeps_ineligible_routes_ineligible() 
     """The projection's BytePlus gate enforces the capacity law, not preview text.
 
     Law anchor: "No amount of expiring quota makes an ineligible route
-    eligible." The historical substring gate is gone; refusals now carry
-    typed provider/auth-route/pool reason codes, and only the independently
-    reviewed commercial owner path can be eligible.
+    eligible." The legacy boolean helper is replaced by typed diagnostics;
+    conservative family matching still selects refusals. BytePlus eligibility
+    requires the reviewed commercial path, independently of quota pressure.
     """
     assert (
         "No amount of expiring quota makes an ineligible route eligible"

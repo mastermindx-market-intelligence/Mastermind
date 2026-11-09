@@ -237,6 +237,55 @@ def test_malformed_identity_is_refused_fail_closed():
     assert verdict.reason_code == BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED
 
 
+@pytest.mark.parametrize("field", ["provider", "model_alias"])
+@pytest.mark.parametrize(
+    "value",
+    ["", " \t", "bad/name", "bad\nname", "a" * 129, "býtéplus"],
+    ids=["empty", "whitespace", "path", "newline", "overlong", "non_ascii"],
+)
+def test_typed_verdict_rejects_malformed_string_identity(field, value, monkeypatch):
+    identity = {
+        "provider": "byteplus-modelark" if field == "model_alias" else "xai",
+        "model_alias": "fast.engineering",
+    }
+    identity[field] = value
+
+    def unexpected_preflight(_candidate):
+        raise AssertionError("malformed identity must be refused before router preflight")
+
+    monkeypatch.setattr(
+        capacity_economics_projection,
+        "_canonical_model_router_matches",
+        unexpected_preflight,
+    )
+    verdict = evaluate_byteplus_route_eligibility(
+        **identity,
+        first_tier_id="implementation.routine.primary",
+        first_tier_aliases=("fast.engineering",),
+        reviewed_router=None,
+    )
+    assert verdict.gate_applies is True
+    assert verdict.eligible is False
+    assert verdict.reason_code == BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED
+    assert verdict.provider == verdict.model_alias == ""
+    assert verdict.auth_route == "unrecognized"
+    assert verdict.pool_id == ""
+
+
+def test_typed_verdict_preserves_maximum_length_non_byteplus_identity():
+    provider, alias = "p" * 128, "m" * 128
+    verdict = evaluate_byteplus_route_eligibility(
+        provider, alias,
+        first_tier_id="implementation.routine.primary",
+        first_tier_aliases=(alias,),
+        reviewed_router=None,
+    )
+    assert verdict.gate_applies is False
+    assert verdict.eligible is True
+    assert verdict.reason_code == BYTEPLUS_ROUTE_NOT_APPLICABLE
+    assert (verdict.provider, verdict.model_alias) == (provider, alias)
+
+
 def test_unreviewed_commercial_selection_is_refused_with_typed_reason():
     doc = preview()
     doc["suggested_option"] = "bp.candidate"
@@ -254,9 +303,9 @@ def test_unreviewed_commercial_selection_is_refused_with_typed_reason():
     assert "unreviewed commercial" in message
 
 
-def test_byteplus_gate_is_typed_and_not_a_substring_gate():
-    # Readback pinned as a regression test: the substring gate no longer
-    # gates eligibility anywhere in this module; the typed evaluator does.
+def test_byteplus_gate_exposes_typed_reason_codes():
+    # The old boolean helper is replaced by typed diagnostics. Conservative
+    # family matching remains solely to refuse unrecognized BytePlus labels.
     source = inspect.getsource(capacity_economics_projection)
     assert "_mentions_byteplus" not in source
     assert "evaluate_byteplus_route_eligibility(" in source
