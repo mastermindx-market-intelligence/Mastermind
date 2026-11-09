@@ -238,7 +238,7 @@ class OmhSourceQualificationTests(unittest.TestCase):
         self.home = Path(self.directory.name).resolve() / "user/.hermes"
         self.runtime = object.__new__(self.b.NativeRuntime)
         self.runtime.home = self.home
-        self.runtime.observed_code = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+        self.runtime.observed_code = sorted(self.b.GATEWAY_CODE_PINS)[0]
         self.paths = self.fixture()
 
     def fixture(self):
@@ -652,12 +652,16 @@ class RecoveryTests(unittest.TestCase):
         import tempfile
         runtime = object.__new__(self.b.NativeRuntime)
         runtime.home = Path("/nonexistent/native-fixture")
-        runtime.observed_code = "f" * 40
-        with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_SOURCE_CHANGED"):
-            runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
+        # The imported mechanism bytes refuse first, whatever the gateway claims.
+        for code, version in [("f" * 40, None), (sorted(self.b.GATEWAY_CODE_PINS)[0], None),
+                              ("9" * 40, self.b.GATEWAY_CODE_VERSION)]:
+            with self.subTest(code=code[:8]):
+                runtime.observed_code, runtime.observed_version = code, version
+                with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_SOURCE_CHANGED"):
+                    runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
         with tempfile.TemporaryDirectory(prefix="native-hermes-source-") as directory:
             runtime.home = Path(directory)
-            runtime.observed_code = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+            runtime.observed_code = sorted(self.b.GATEWAY_CODE_PINS)[0]
             (runtime.home / "hermes-agent").mkdir()
             (runtime.home / "hermes-agent/hermes_state_keys.py").write_text("changed upstream source")
             with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_SOURCE_CHANGED"):
