@@ -1,4 +1,4 @@
-"""Real nine-job regression and adversarial auxiliary-proof cases.
+"""Real nine-job and scoped four-job regression plus adversarial proof cases.
 
 The fixture projects values captured from GitHub; the API reader is replaced,
 not the public verifier. These checks do not qualify a live protected push.
