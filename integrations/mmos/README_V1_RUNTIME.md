@@ -45,12 +45,12 @@ The closed, reviewed adapter registry is `ADAPTER_DESCRIPTORS` (`control_plane/w
 | `codex-cli` | `control_plane.codex_worker.CodexWorkerAdapter` | **implemented**; descendant fan-out fail-closed (`native_fanout_disabled`) until a shared-admission hook exists. |
 | `canonical-paid-fabric` | `CanonicalPaidFabricWorkerAdapter` | **implemented** (`fabric_per_child`); paid launches re-validate the fresh claim with no awaited preparation between validation and start (`ExecutionSupervisor._start_claimed_job`). |
 | `opencode-free-cli` | `control_plane.opencode_worker.OpenCodeWorkerAdapter` (outside reviewed binding path) | **registered, deliberately not implemented** — naming the route launches nothing (no confinement profile / broker composition yet). |
-| `t3-native` | — (Rev 5 D3 lane owns the flip) | **registered seam**: NAMED-but-NOT-IMPLEMENTED, all capabilities UNKNOWN. Upstream source capability is not installed-fleet proof. |
-| `dsh-acp` | — (Rev 5 D5 lane owns the flip) | **registered seam**: `native_fanout_disabled` until a real native descendant-admission hook is proven; `bounded_native_fanout` requires a named enforcement ref. |
+| `t3-native` | `control_plane.t3_execution_adapter.T3ExecutionAdapter` | **implemented, PROVEN_LIVE for the adapter path** (one real `t3_thread_launch` + cursor read through the native seam; receipt `integrations/t3/live_proof/t3_live_proof_receipt.json`, pinned in `tests/test_worker_adapter.py`). Launch intents, receipts, cursors, cancel records and result references are durable across coordinator restart (`T3AdapterStateStore`; SQLite namespaced table in the Executive file — Rev 5 Director A, `tests/test_t3_adapter_durability.py`), and idempotency identity is (authenticated namespace, clientRequestId): a replay under a different OAuth client is refused. **Built but unselected** — selection is a deployment act by the incumbent runtime, not a code fact; upstream source capability is not installed-fleet proof. |
+| `dsh-acp` | — (deliberately not implemented) | **named-not-implemented**: descriptor stays `implemented=False` (`native_fanout_disabled`) until the full T3→DSH composition and a real native descendant-admission hook are proven. ACP boot args are settled empirically — TWO argument rows (`--profile`, `<name>`); the three-row shape is refused by `dsh`'s grammar (receipts in `LANE_DSH.md` §1). `bounded_native_fanout` requires a named enforcement ref. |
 
 Launch preconditions on the supervisor side: `ExecutionSupervisor._start_claimed_job` validates profile/worktree/commission, builds the spec, and only then reaches `adapter.start`; host-side, `HostExecutor.start_claimed` rechecks local pressure and releases unstarted claims through `release_unstarted_claim` (one transaction, quota freed, Job back to QUEUED).
 
-Status: hermes-native/codex/paid-fabric **source-complete**; t3-native/dsh-acp **registered seams — pending lane ledger** (Rev 5 lanes in flight); opencode-free-cli **registered seam by design**.
+Status: hermes-native/codex/paid-fabric **source-complete**; t3-native **implemented (adapter path PROVEN_LIVE by recorded receipt) and unselected**; dsh-acp **named-not-implemented** (two-row ACP boot args settled; flip needs the full composition + descendant-admission hook); opencode-free-cli **registered seam by design**.
 
 ## 4. Read and control
 
@@ -86,9 +86,9 @@ Status: **source-complete.**
 
 | Stage | hermes lane | t3 lane | dsh lane | fabric lane |
 |---|---|---|---|---|
-| Admit/classify/place/claim | source-complete (this tree) | pending lane ledger | pending lane ledger | pending lane ledger |
-| Launch (`t3-native` / `dsh-acp` adapters) | n/a (plugin mirror per `mmos/CONTRACT_REV5.md` §4) | pending lane ledger | pending lane ledger | n/a |
-| Native identity / workspace / fan-out binding (v1.1) | contract landed (`feat/mmos-rev5-contracts`) | pending lane ledger | pending lane ledger | pending lane ledger |
+| Admit/classify/place/claim | source-complete (this tree) | adapter-side revalidation landed (start/restart/steer/session-open decorators, pinned upstream patch — SOURCE_ONLY, typecheck+unit-proven, NOT installed upstream) | pending lane ledger | pending lane ledger |
+| Launch (`t3-native` / `dsh-acp` adapters) | n/a (plugin mirror per `mmos/CONTRACT_REV5.md` §4) | `t3-native` **PROVEN_LIVE for the adapter path** (receipt `integrations/t3/live_proof/t3_live_proof_receipt.json`); durable state + namespace idempotency pinned by `tests/test_t3_adapter_durability.py`; **unselected as a worker route** | `dsh-acp` named-not-implemented (two-row ACP boot args settled empirically) | n/a |
+| Native identity / workspace / fan-out binding (v1.1) | contract landed (`feat/mmos-rev5-contracts`) | adapter honors `ExecutionBinding` v1.1 incl. `caller_namespace` continuity across restart (pinned in `tests/test_t3_adapter_durability.py`); `native_fanout_disabled` | pending lane ledger | pending lane ledger |
 
 As the Rev 5 lanes land, each lane's `LANE_*.md` ledger upgrades its column from *pending* to **proven-live** with the exact receipts; until then this document claims source-completeness only, never installed-fleet proof (unknown is unknown).
 

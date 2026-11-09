@@ -45,10 +45,12 @@ t3 auth pairing create          # pairing code; complete OAuth at
 #    Create a NON-managed dsh profile first (shipped `desktop`/`web` profiles
 #    refuse CLI/ACP boot; `dsh --help` grammar requires a profile NAME):
 dsh plugin --profile <name> add <package>
-#    Then add the Local ACP provider with THREE argument rows
-#    (the two-row doc example omits the required profile name):
+#    Then add the Local ACP provider with TWO argument rows (settled
+#    empirically in the DSH lane, receipts in ~/.hermes/profiles/engineering/
+#    mmos/LANE_DSH.md §1: `--profile <name>` boots ACP; a third `acp` row is
+#    REFUSED by dsh's grammar with "error: too many arguments"):
 #      executable: dsh
-#      rows: --profile | <name> | acp
+#      rows: --profile | <name>
 ```
 
 ## Honest operating conditions (do not paper over these)
