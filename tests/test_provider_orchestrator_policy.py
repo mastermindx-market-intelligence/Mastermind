@@ -2330,6 +2330,14 @@ def test_n3_computed_launch_refusal_stays_scoped_to_wrapper_tokens(
         "TOOL=ls; $TOOL -la /tmp",
         "python3 /opt/mastermind/ext/slot.py glm -- run",
     ):
+        if command in _R12_ARMED_FLIPS:
+            # r12 (re-check #7): a shell construct in an ARMED session is
+            # judged by the ADMIT grammar — this computed command word is
+            # refused now (C11 ledger, "armed flips").
+            with pytest.raises(SystemExit):
+                guard.guard_bash(_payload(shared_placement, command), {"command": command})
+            assert guard._R12_HEADLINE in _emitted(capsys)["permissionDecisionReason"], command
+            continue
         guard.guard_bash(
             _payload(shared_placement, command), {"command": command}
         )
@@ -2645,6 +2653,13 @@ def test_r5_b1_structural_refusals_stay_scoped(
         "python3 -m pytest tests/test_provider_orchestrator_policy.py",
         "jq -r '.models[]' config.json",
     ):
+        if command in _R12_ARMED_FLIPS:
+            # r12 (re-check #7): armed, a shell construct (quoted or not)
+            # puts the command in scope; these are not admitted forms.
+            with pytest.raises(SystemExit):
+                _guard_launch(shared_placement, command)
+            assert guard._R12_HEADLINE in _emitted(capsys)["permissionDecisionReason"], command
+            continue
         _guard_launch(shared_placement, command)
         assert capsys.readouterr().out == "", command
     # r6 ledger T-7: a here-document in a command that names a wrapper is
@@ -2987,12 +3002,15 @@ _R6_TABLE = [
      "deny", "doc-limit", "R6_COMPOUND_LIST"),
     ("param-glue", "p=po; ${p}ol run glm a /tmp glm-5.3",
      "deny", "doc-limit", "R6_EXPANSION"),
-    # Still out of scope (r2 arbitrary-process limit, pinned on purpose): a
-    # WHOLLY computed command word carries no wrapper name at all.
+    # Out of scope through r11 (r2 arbitrary-process limit, pinned on
+    # purpose): a WHOLLY computed command word carries no wrapper name at
+    # all. r12 (re-check #7): in an ARMED session the substitution itself is
+    # a shell construct, so both are judged — and refused — structurally
+    # (C11 ledger, "armed flips"; the ids keep their r6 names).
     ("computed-word-out-of-scope", "$(printf '\\160\\157\\157\\154') run glm a /tmp glm-5.3",
-     "allow", "doc-limit", ""),
+     "deny", "doc-limit", "R12_SHELL_CONSTRUCT"),
     ("env-word-out-of-scope", "$LAUNCHER run glm a /tmp glm-5.3",
-     "allow", "doc-limit", ""),
+     "deny", "doc-limit", "R12_SHELL_CONSTRUCT"),
     # --- honest controls ---
     ("control-plain-launch", _R6_L, "allow", "control", ""),
     ("control-slot-py", _R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run",
@@ -4042,7 +4060,7 @@ _R7_BUDGET_ROWS = [
     ("quoted-env-u-text", _R6_L + " '" + _r7_fill("env -u ") + "'", "deny"),
     ("quoted-do-text", _R6_L + " '" + _r7_fill("do ") + "'", "allow"),
     ("quoted-launch-text", _R6_L + " '" + _r7_fill("pool run glm ") + "'", "deny"),
-    ("glob-head", _r7_fill("*?") + " run glm", "allow"),
+    ("glob-head", _r7_fill("*?") + " run glm", "deny"),  # r12: a glob head, armed
     ("glob-arg", "ls " + _r7_fill("*?") + " pool", "allow"),
     ("nested-substitutions", "pool " + "$(" * 60_000 + "x" + ")" * 60_000, "deny"),
     ("dq-substitution-recursion", 'pool "' + '$("' * 60_000, "deny"),
@@ -4624,8 +4642,8 @@ _R8_BUDGET_ROWS = [
     ("rv-computed-glue-double-dash", "p${x}ool run grok a /tmp grok-4 ", "--a", "", False, False, "R6_EXPANSION"),
     ("rv-arith-padding-quoted", "p${x}ool run grok a /tmp grok-4 '", "$[", "'", False, False, "R6_EXPANSION"),
     ("rv-subscript-run", "pool </dev/null run grok a /tmp grok-4 ", "${x[", "", False, False, "R6_TOKENIZE_FAILED"),
-    ("rv-bracket-run-no-wrapper", "", "[", "", False, False, "allow"),
-    ("rv-subscript-run-no-wrapper", "", "${x[", "", False, False, "allow"),
+    ("rv-bracket-run-no-wrapper", "", "[", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("rv-subscript-run-no-wrapper", "", "${x[", "", False, False, "R12_SHELL_CONSTRUCT"),
     ("c5-option-path", "pool run grok a /tmp grok-4 -O", "/a", "", False, False, "missing binding"),
     # REVIEW3 A3 BLOCKER 3 — bound identity runs (every binding check reached):
     ("rv-bound-identity-run", "pool run grok a /tmp grok-4 a=", "POOL_ORCHESTRATOR_ID=", "", True, True, "POOL_ORCHESTRATOR_ID"),
@@ -4922,7 +4940,8 @@ def test_r9_honest_forms_keep_their_armed_verdict(
     (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
         guard, shared_placement, monkeypatch, tmp_path, capsys, command
     )
-    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    expected = _r12_armed_expectation(command, "allow")
+    assert (bound, nobind) == (expected, expected), (bound_reason, nobind_reason)
     assert (bound_gate, nobind_gate) == (False, False)
 
 
@@ -5000,16 +5019,16 @@ _R9_BUDGET_ROWS = [
     ("r9-dq-glue-locale-run", '${x:-p}"ool" run grok a /tmp grok-4 ', '$""', "", False, False, "R6_EXPANSION"),
     ("r9-dq-glue-quote-only-run", '${x:-p}"ool" run grok a /tmp grok-4 ', '"', "", False, False, "R6_EXPANSION"),
     ("r9-dq-glue-dash-path-joined", '${x:-p}"ool" run grok a /tmp grok-4 ', '-"a"/', "", False, False, "R6_EXPANSION"),
-    ("r9-joined-glue-one-word-no-wrapper", "", '"${x}"a', "", False, False, "allow"),
-    ("r9-joined-partial-one-word-no-wrapper", "", '$(x)"a"', "", False, False, "allow"),
-    ("r9-joined-construct-quote-run-no-wrapper", "", '"${x}"', "", False, False, "allow"),
+    ("r9-joined-glue-one-word-no-wrapper", "", '"${x}"a', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r9-joined-partial-one-word-no-wrapper", "", '$(x)"a"', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r9-joined-construct-quote-run-no-wrapper", "", '"${x}"', "", False, False, "R12_SHELL_CONSTRUCT"),
     # joined: ``${x:-p}${x:-p}…`` can spell pool, like r8's unquoted E3
     ("r9-joined-default-glue-run", "", '"${x:-p}"', "", False, False, "R6_EXPANSION"),
     ("r9-nested-quote-glue", "echo ", '$(${x:-p}"ool" ', "", False, False, "R6_TOKENIZE_FAILED"),
     ("r9-bash-c-quote-glue-body", "bash -c '${x:-p}\"ool\" run grok a /tmp grok-4 ", '"a" ', "'", False, False, "R6_"),
     ("r9-bound-launch-quoted-args", "pool run glm a /tmp glm-5.3 ", '"a"', "", True, True, "allow"),
     # heaviest quote shape of the C8 sweep (135 shapes, 64 K → 256 K, none super-linear)
-    ("r9-escaped-cmdsub-run-no-wrapper", "", "\\$(", "", False, False, "allow"),
+    ("r9-escaped-cmdsub-run-no-wrapper", "", "\\$(", "", False, False, "R12_SHELL_CONSTRUCT"),
     ("r9-dq-glue-escaped-cmdsub-run", '${x:-p}"ool" run grok a /tmp grok-4 ', "\\$(", "", False, False, "R6_GROUPING"),
 ]
 
@@ -5340,7 +5359,8 @@ def test_r10_honest_forms_keep_their_armed_verdict(
     (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
         guard, shared_placement, monkeypatch, tmp_path, capsys, command
     )
-    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    expected = _r12_armed_expectation(command, "allow")
+    assert (bound, nobind) == (expected, expected), (bound_reason, nobind_reason)
     assert (bound_gate, nobind_gate) == (False, False)
 
 
@@ -5419,15 +5439,15 @@ _R10_BUDGET_ROWS = [
     ("r10-param-nested-default-run", "", "${x:-${y}}", "", False, False, "R6_EXPANSION"),
     ("r10-param-default-p-run", "", "${x:-p}", "", False, False, "R6_EXPANSION"),
     ("r10-quoted-heredoc-unclosed-cmdsub-run", "", "cat <<'E'\nit's $(x\nE\n", "", False, False, "R6_HEREDOC"),
-    ("r10-param-sq-default-run-no-wrapper", "echo ", "${x:-'a'}", "", False, False, "allow"),
-    ("r10-assign-cmdsub-run-no-wrapper", "", "x=$(a) ", "", False, False, "allow"),
-    ("r10-quoted-paren-cmdsub-run-no-wrapper", "", '$(: "(") ', "", False, False, "allow"),
-    ("r10-deferred-sq-cmdsub-run-no-wrapper", "", "'$(a)' ", "", False, False, "allow"),
-    ("r10-closed-heredoc-run-no-wrapper", "", "cat <<E\n$x (\nE\n", "", False, False, "allow"),
-    ("r10-quoted-heredoc-prose-run-no-wrapper", "", "cat <<'E'\nit's (x) $y\nE\n", "", False, False, "allow"),
-    ("r10-backtick-run-no-wrapper", "", "`a` ", "", False, False, "allow"),
-    ("r10-escaped-dq-cmdsub-run-no-wrapper", "", '"\\$(a)" ', "", False, False, "allow"),
-    ("r10-unclosed-sq-tail-no-wrapper", "echo $x '", "a(", "", False, False, "allow"),
+    ("r10-param-sq-default-run-no-wrapper", "echo ", "${x:-'a'}", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-assign-cmdsub-run-no-wrapper", "", "x=$(a) ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-quoted-paren-cmdsub-run-no-wrapper", "", '$(: "(") ', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-deferred-sq-cmdsub-run-no-wrapper", "", "'$(a)' ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-closed-heredoc-run-no-wrapper", "", "cat <<E\n$x (\nE\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-quoted-heredoc-prose-run-no-wrapper", "", "cat <<'E'\nit's (x) $y\nE\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-backtick-run-no-wrapper", "", "`a` ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-escaped-dq-cmdsub-run-no-wrapper", "", '"\\$(a)" ', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r10-unclosed-sq-tail-no-wrapper", "echo $x '", "a(", "", False, False, "R12_SHELL_CONSTRUCT"),
     ("r10-bound-launch-quoted-paren-args", "pool run glm a /tmp glm-5.3 ", '"(" ', "", True, True, "allow"),
 ]
 
@@ -5843,7 +5863,8 @@ def test_r11_escaped_cmdsub_with_a_local_brace_is_admitted_armed(
     (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
         guard, shared_placement, monkeypatch, tmp_path, capsys, command
     )
-    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    expected = _r12_armed_expectation(command, "allow")
+    assert (bound, nobind) == (expected, expected), (bound_reason, nobind_reason)
     assert (bound_gate, nobind_gate) == (False, False)
 
 
@@ -5918,6 +5939,12 @@ _R11_FUZZ_GLUE = [
     ("$(printf {h}; : (a # )\n){t}", False), ('$(printf {h}; : "("; : (a # )\n){t}', False),
     ('$\\\n(: "("; printf {h}){t}', False), ('$\\\n{{x:-{h}${{y#"}}"}}}}{t}', False),
     ('$(<<:a( "("; printf {h}){t}', False),
+    # r12 (re-check #7 F1/F2): ``case`` inside ``$(…)`` after an fd
+    # redirection, ``repeat N``; ``case`` inside zsh ``=(…)``
+    ("$(2>/dev/null case x in x) printf {h};; esac){t}", False),
+    ("$(2>&1 case x in x) printf {h};; esac){t}", False),
+    ("$(repeat 1 case x in x) printf {h};; esac){t}", False),
+    ("$(: =(case x in x) :;; esac); printf {h}){t}", False),
 ]
 _R11_FUZZ_CONTEXTS = [
     "{P}", "echo $({P})", "echo `{P}`", "eval '{P}'", 'eval "{P}"', "bash -c '{P}'",
@@ -5950,11 +5977,23 @@ _R11_FUZZ_CONTEXTS = [
     "echo a(b # (\n)\n( c # $({P}))", "{P}; : (b # (\n))", "echo (a # '\n) \n x '; {P}",
     "echo (1 # #$({P}))", "case x in a) :;; ; (x # $({P})) :;; esac", "case x in a) :;;\n(x # $({P})) :;; esac",
     "case x in\n(x # $({P})) :;; esac", "[[ a =~ \n(a # $({P})) ]]", "echo (1 # $({P}))",
+    # r12 (re-check #7 F1/F2): reserved words / compound commands where r11's
+    # command-position model did not look; ``=(…)`` holding a ``case``
+    "case x {{\n(x # $({P})) :;; }}", "case x in (x) [[ a =~ \n(a # $({P})) ]];; esac",
+    ": =(case x in x) :;; esac) (x # $({P}))", "cat =(case x in x) :;; esac) (x # $({P}))",
+    "repeat 1 case x in\n(x # $({P})) :;; esac", "coproc [[ a =~ \n(a # $({P})) ]]\nwait",
+    "for x (a) case x in\n(x # $({P})) :;; esac", "if [[ a ]] [[ a =~ \n(a # $({P})) ]]",
+    "2>/dev/null case x in\n(x # $({P})) :;; esac", "2>&1 [[ a =~ \n(a # $({P})) ]] && echo m",
+    "3</dev/null case x in\n(x # $({P})) :;; esac",
 ]
 _R11_FUZZ_PRE = [
     "", "x={h}; ", "x={h}\n", ": \"${{q:-'}}\"; ", ": ${{q:-{{}}}}; ", "cat <<E >/dev/null\nE\n",
     "(( y = 1 << 2 ))\n", ": $(( 2 #\n)); ", 'echo "${{q:-{{a}}b}}" >/dev/null; ',
     "x={h}; : \\\n; ", "echo $(( 1 << 2 )) >/dev/null; ",
+    # r12 (re-check #7 F1/F2): the prefix contexts r11's generator lacked
+    "2>/dev/null ", "2>&1 ", "3</dev/null ", "{{fd}}>/dev/null ", "repeat 1 ", "coproc ",
+    "for x (a) ", "if [[ a ]] ", "x=1 2>/dev/null ", "case x in (x) ", "true && 2>/dev/null ",
+    "! 2>/dev/null ", ": =(case x in x) :;; esac) ",
 ]
 _R11_FUZZ_POST = [
     "", "\n", ' #"', " # '", " # `", '\n: "', "\n: '", " ))", ")", '"', "'", "`", " }", ";; esac",
@@ -6071,20 +6110,20 @@ _R11_BUDGET_ROWS = [
      False, False, "R6_"),
     ("r11-argument-group-glue-lines", 'echo (1 # $($(: "("; printf p)ool run grok a /tmp grok-4))\n',
      "echo (a # $x)\n", "", False, False, "R6_"),
-    ("r11-arith-long-no-wrapper", "echo $(( ", "1 + ", "1 ))", False, False, "allow"),
-    ("r11-dparen-shift-lines-no-wrapper", "", "(( n = 1 << 2 ))\n", "", False, False, "allow"),
-    ("r11-dollar-arith-cmdsub-no-wrapper", "", "$(( $(a) + 1 )) ", "", False, False, "allow"),
-    ("r11-for-arith-no-wrapper", "", "for (( i=0; i<1; i++ )); do :; done\n", "", False, False, "allow"),
-    ("r11-dq-brace-no-wrapper", "", '"${x:-{}}" ', "", False, False, "allow"),
-    ("r11-dq-word-fragments-no-wrapper", 'echo "', "$(a) b ", '"', False, False, "allow"),
-    ("r11-deferred-joined-no-wrapper", 'bash -c "', "x=\\$(cat ${F}); ", '"', False, False, "allow"),
-    ("r11-argument-group-comment-lines-no-wrapper", "", "echo (a # $x)\n", "", False, False, "allow"),
-    ("r11-case-pattern-groups-no-wrapper", "case $x in ", "(a|b) :;; ", "esac", False, False, "allow"),
-    ("r11-case-terminators-no-wrapper", "case $x in ", "a) :;; (b) :;& (c) :;| ", "esac", False, False, "allow"),
-    ("r11-arith-base-no-wrapper", "", "$((16#ff + 10#$m)) ", "", False, False, "allow"),
-    ("r11-uncertain-dparen-no-wrapper", "echo $x ", "((a)) ", "", False, False, "allow"),
-    ("r11-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" ', "", False, False, "allow"),
-    ("r11-continuation-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" \\\n', "", False, False, "allow"),
+    ("r11-arith-long-no-wrapper", "echo $(( ", "1 + ", "1 ))", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-dparen-shift-lines-no-wrapper", "", "(( n = 1 << 2 ))\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-dollar-arith-cmdsub-no-wrapper", "", "$(( $(a) + 1 )) ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-for-arith-no-wrapper", "", "for (( i=0; i<1; i++ )); do :; done\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-dq-brace-no-wrapper", "", '"${x:-{}}" ', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-dq-word-fragments-no-wrapper", 'echo "', "$(a) b ", '"', False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-deferred-joined-no-wrapper", 'bash -c "', "x=\\$(cat ${F}); ", '"', False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-argument-group-comment-lines-no-wrapper", "", "echo (a # $x)\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-case-pattern-groups-no-wrapper", "case $x in ", "(a|b) :;; ", "esac", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-case-terminators-no-wrapper", "case $x in ", "a) :;; (b) :;& (c) :;| ", "esac", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-arith-base-no-wrapper", "", "$((16#ff + 10#$m)) ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-uncertain-dparen-no-wrapper", "echo $x ", "((a)) ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" ', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r11-continuation-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" \\\n', "", False, False, "R12_SHELL_CONSTRUCT"),
     ("r11-bound-launch-quoted-arith-args", "pool run glm a /tmp glm-5.3 ", '"(( 1 << 2 ))" ', "", True, True, "allow"),
 ]
 
@@ -6124,3 +6163,859 @@ def test_r11_armed_budget_denial_stdout_is_byte_identical_to_r8(tmp_path: Path) 
         "9c651f8f3ce0b6fff6e10c458de8bd2de55ef509558b635cb62b3fe1f307ac11"
     )
     assert elapsed < 4.0, elapsed
+
+
+# --- r12: the STRUCTURAL scope rule for armed sessions (re-check #7) --------
+#
+# Re-check #7 (distinct Opus, at r11; REVIEW7_GUARD_R11_OPUS_20261110.md):
+# F1 — r11's "command position" model is too narrow for zsh (a reserved word
+# after ``2>…``/``2>&1``/``3<…``, ``repeat N``, ``coproc``, ``for x (…)``,
+# ``if [[ … ]]``, a ``(pattern)`` arm; ``[[`` and ``case`` not recognised
+# there, a ``case`` in ``$(…)`` missed); F2 — zsh ``=(…)`` read as a glob
+# group, and an unmatched top-level ``)`` restored command position.
+# The principal's decision: in an ARMED session the security decision must not
+# depend on finding hidden wrapper names. A command is OUT of scope only when
+# its raw text holds no shell construct (quoted or not) and names no wrapper
+# literally; everything else must be exactly an admitted ADMIT form. The
+# r6–r11 scanner stays a secondary, widening-only reading (and the unarmed
+# mechanism); the F1/F2 fixes are applied to it too.
+#
+# (id, template, shells that RUN it (ground truth), origin). ``{a}`` = the
+# arguments. The brief carried the families of re-check #7, not its verbatim
+# rows: the 12 REVIEW7 rows are RECONSTRUCTED from those descriptions (each
+# verified: r11 armed ALLOW bound and unbound through the real hook command
+# line, a sealed zsh runs the fake wrapper — C11 ledger); C11 adds 6.
+
+_R12_N = '$($(: "("; printf p)ool {a})'
+_R12_ESCAPES = [
+    ("r7-f1-fd-case-in-newline", "2>/dev/null case x in\n(x # " + _R12_N + ") :;; esac", "zsh", "REVIEW7 F1"),
+    ("r7-f1-fd-dup-condition-newline", "2>&1 [[ a =~ \n(a # " + _R12_N + ") ]] && echo m", "zsh", "REVIEW7 F1"),
+    ("r7-f1-fd-read-case-in-newline", "3</dev/null case x in\n(x # " + _R12_N + ") :;; esac", "zsh", "REVIEW7 F1"),
+    ("r7-f1-repeat-case", "repeat 1 case x in\n(x # " + _R12_N + ") :;; esac", "zsh", "REVIEW7 F1"),
+    ("r7-f1-repeat-condition", "repeat 1 [[ a =~ \n(a # " + _R12_N + ") ]]", "zsh", "REVIEW7 F1"),
+    ("r7-f1-coproc-condition", "coproc [[ a =~ \n(a # " + _R12_N + ") ]]\nwait", "zsh", "REVIEW7 F1"),
+    ("r7-f1-for-short-case", "for x (a) case x in\n(x # " + _R12_N + ") :;; esac", "zsh", "REVIEW7 F1"),
+    ("r7-f1-if-short-condition", "if [[ a ]] [[ a =~ \n(a # " + _R12_N + ") ]]", "zsh", "REVIEW7 F1"),
+    ("r7-f1-arm-after-pattern-condition", "case x in (x) [[ a =~ \n(a # " + _R12_N + ") ]];; esac", "zsh",
+     "REVIEW7 F1"),
+    ("r7-f1-cmdsub-fd-case", "$(2>/dev/null case x in x) printf p;; esac)ool {a}", "zsh", "REVIEW7 F1"),
+    ("r7-f1-cmdsub-repeat-case", "$(repeat 1 case x in x) printf p;; esac)ool {a}", "zsh", "REVIEW7 F1"),
+    ("r7-f2-eqparen-case", ": =(case x in x) :;; esac) (x # " + _R12_N + ")", "zsh", "REVIEW7 F2"),
+    # found by Director C11 (r11 out of scope; a sealed zsh runs them):
+    ("c11-case-brace-form", "case x {\n(x # " + _R12_N + ") :;; }", "zsh", "C11 F1"),
+    ("c11-coproc-case", "coproc case x in\n(x # " + _R12_N + ") :;; esac\nwait", "zsh", "C11 F1"),
+    ("c11-if-short-case", "if [[ a ]] case x in\n(x # " + _R12_N + ") :;; esac", "zsh", "C11 F1"),
+    ("c11-arm-after-pattern-case", "case x in (x) case y in\n(y # " + _R12_N + ") :;; esac;; esac", "zsh",
+     "C11 F1"),
+    ("c11-fd-case-sub-sh", '2>/dev/null case x in\n(x # $($(: "("; printf s)ub.sh {a})) :;; esac', "zsh",
+     "C11 F1"),
+    ("c11-eqparen-case-slot-py", ': =(case x in x) :;; esac) (x # $($(: "("; printf sl)ot.py {a}))', "zsh",
+     "C11 F2"),
+]
+
+
+def _r12_escape_command(row: tuple, args: str | None = None) -> str:
+    return row[1].replace("{a}", args or _r11_launch_args(row))
+
+
+#: Every r11 ARMED allow expectation r12 turns into a DENY — in-process rows
+#: (by command) and budget/table rows (by id). All hold a shell construct and
+#: are not an admitted form; the C11 ledger lists them ("armed flips").
+_R12_ARMED_FLIPS = frozenset({
+    "TOOL=ls; $TOOL -la /tmp",
+    "jq -r '.models[]' config.json",
+    "cd ${HOME:-/Users/me} && echo ok",
+    'echo "${name//-/_}"',
+    "git commit -m \"$(cat <<'EOF'\nr10: don't (see $(x))\nEOF\n)\"",
+    'ssh h "x=\\$(cat ${F}); echo \\$x"',
+    'bash -c "n=\\$(wc -l < ${F}); echo \\$n"',
+})
+_R12_ARMED_FLIP_ROW_IDS = (
+    "computed-word-out-of-scope", "env-word-out-of-scope", "glob-head",
+    "rv-bracket-run-no-wrapper", "rv-subscript-run-no-wrapper",
+    "r9-joined-glue-one-word-no-wrapper", "r9-joined-partial-one-word-no-wrapper",
+    "r9-joined-construct-quote-run-no-wrapper", "r9-escaped-cmdsub-run-no-wrapper",
+    "r10-param-sq-default-run-no-wrapper", "r10-assign-cmdsub-run-no-wrapper",
+    "r10-quoted-paren-cmdsub-run-no-wrapper", "r10-deferred-sq-cmdsub-run-no-wrapper",
+    "r10-closed-heredoc-run-no-wrapper", "r10-quoted-heredoc-prose-run-no-wrapper",
+    "r10-backtick-run-no-wrapper", "r10-escaped-dq-cmdsub-run-no-wrapper",
+    "r10-unclosed-sq-tail-no-wrapper",
+    "r11-arith-long-no-wrapper", "r11-dparen-shift-lines-no-wrapper",
+    "r11-dollar-arith-cmdsub-no-wrapper", "r11-for-arith-no-wrapper", "r11-dq-brace-no-wrapper",
+    "r11-dq-word-fragments-no-wrapper", "r11-deferred-joined-no-wrapper",
+    "r11-argument-group-comment-lines-no-wrapper", "r11-case-pattern-groups-no-wrapper",
+    "r11-case-terminators-no-wrapper", "r11-arith-base-no-wrapper",
+    "r11-uncertain-dparen-no-wrapper", "r11-dq-param-cmdsub-no-wrapper",
+    "r11-continuation-dq-param-cmdsub-no-wrapper",
+)
+
+
+def _r12_armed_expectation(command: str, r11_expected: str) -> str:
+    """The armed verdict r12 expects where r11 expected ``r11_expected``."""
+    return "deny" if command in _R12_ARMED_FLIPS else r11_expected
+
+
+def test_r12_armed_flips_are_exactly_construct_bearing_refusals() -> None:
+    """Every flipped expectation holds a shell construct, and every flipped
+    row now carries the structural expectation (none silently dropped)."""
+    assert all(guard.r12_constructs(command) for command in _R12_ARMED_FLIPS)
+    rows = {row[0]: row for table in (
+        _R6_TABLE, _R7_BUDGET_ROWS, _R8_BUDGET_ROWS, _R9_BUDGET_ROWS, _R10_BUDGET_ROWS,
+        _R11_BUDGET_ROWS,
+    ) for row in table}
+    assert len(_R12_ARMED_FLIP_ROW_IDS) == len(set(_R12_ARMED_FLIP_ROW_IDS)) == 32
+    for row_id in _R12_ARMED_FLIP_ROW_IDS:
+        row = rows[row_id]
+        assert row[-1] in ("R12_SHELL_CONSTRUCT", "deny"), row_id
+    assert len(_R12_ARMED_FLIPS) + len(_R12_ARMED_FLIP_ROW_IDS) == 39
+
+
+def _r12_scanner_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The r6–r11 scanner answers "names no wrapper" for every text."""
+    monkeypatch.setattr(guard, "r6_names_wrapper", lambda _raw: False)
+    monkeypatch.setattr(guard, "_r10_lexed_reading", lambda _raw: False)
+
+
+def test_r12_sealed_zsh_runs_each_escape(tmp_path: Path) -> None:
+    """Ground truth for _R12_ESCAPES: each shape EXECUTES a fake wrapper in a
+    sealed zsh (``env -i``, ``zsh -f``; PATH = fake wrappers + /usr/bin:/bin)."""
+    run = _r11_sealed_shells(tmp_path)
+    checked = 0
+    for row in _R12_ESCAPES:
+        for shell_name in row[2].split():
+            tag = "r12" + shell_name + row[0].replace("-", "")
+            command = _r12_escape_command(row, tag)
+            markers = [name for name in run(command, shell_name) if name.endswith("-" + tag)]
+            assert markers, (row[0], shell_name, command)
+            checked += 1
+    assert checked == len(_R12_ESCAPES) == 18
+    origins = [row[3] for row in _R12_ESCAPES]
+    assert origins.count("REVIEW7 F1") == 11 and origins.count("REVIEW7 F2") == 1
+
+
+@pytest.mark.parametrize("row", _R12_ESCAPES, ids=[row[0] for row in _R12_ESCAPES])
+def test_r12_escapes_are_refused_armed_by_structure_alone(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    """Armed, bound and unbound: DENY with the structural code, the gate
+    never reached — and the same verdict and reason with the scanner off."""
+    command = _r12_escape_command(row)
+    assert guard.r12_constructs(command) and guard.r12_armed_in_scope(command)
+    with_scanner = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+    _r12_scanner_off(monkeypatch)
+    without = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+    assert with_scanner == without
+    for verdict, reason, gate in without:
+        assert (verdict, gate) == ("deny", False), reason
+        assert "R12_SHELL_CONSTRUCT" in reason and guard._R12_HEADLINE in reason, reason
+        assert "guard budget exceeded" not in reason
+
+
+@pytest.mark.parametrize("row", _R12_ESCAPES, ids=[row[0] for row in _R12_ESCAPES])
+def test_r12_f1_f2_scanner_fixes_name_each_escape(row: tuple) -> None:
+    """The secondary (and unarmed) reading now names every F1/F2 row too —
+    r11's scanner named none of them (C11 ledger, fail-before)."""
+    command = _r12_escape_command(row)
+    assert guard._r10_lexed_reading(command), command
+    assert guard.r6_names_wrapper(command), command
+
+
+@pytest.mark.parametrize("row_id", [
+    "r7-f1-fd-case-in-newline", "r7-f1-cmdsub-fd-case", "r7-f2-eqparen-case", "c11-case-brace-form",
+])
+@pytest.mark.parametrize("bound", [True, False], ids=["bound", "unbound"])
+def test_r12_rows_through_the_real_hook_command_line(tmp_path: Path, row_id: str, bound: bool) -> None:
+    row = next(row for row in _R12_ESCAPES if row[0] == row_id)
+    elapsed, code, out = _r8_hook_cli(tmp_path, _r12_escape_command(row), bound=bound, owner=bound)
+    assert code == 0 and out, out
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    reason = decision["permissionDecisionReason"]
+    assert reason.startswith("Mastermind shared-placement guard: unobservable launch — " + guard._R12_HEADLINE)
+    assert "R12_SHELL_CONSTRUCT" in reason and "missing binding" not in reason, reason
+    assert elapsed < 4.0, elapsed
+
+
+# --- r12 (1): every escape row of REVIEW2–REVIEW7 / C5–C11 — structure alone --
+
+def _r12_escape_corpus() -> list[tuple[str, str]]:
+    """``(origin, command)`` for every escape row this module encodes from
+    REVIEW2–REVIEW7 and the C5–C11 ledgers: each table's refused-by-shape rows
+    (identity rows that reach the gate are not shape escapes)."""
+    rows: list[tuple[str, str]] = []
+    rows += [("r6:" + row[0], row[1]) for row in _R6_TABLE if row[2] == "deny"]
+    rows += [("r7-review2:" + row[0], row[1]) for row in _R7_REVIEW2_TABLE
+             if row[2] == "deny" and not row[4]]
+    rows += [("r7-read-refused", command) for command in _R7_READ_FORMS_REFUSED]
+    rows += [("r7-hook:" + row[0], row[1]) for row in _R7_HOOK_ROWS if row[2].startswith("R6_")]
+    rows += [("r8-scope:" + row[0], _r8_escape_command(row[1], args))
+             for row in _R8_SCOPE_ESCAPES
+             for args in ("run grok a /tmp grok-4", "glm-memory a", "glm a /tmp glm-5.3")]
+    rows += [("r8-git", command) for command in _R8_GIT_REFUSED]
+    rows += [("r9:" + row[0], _r9_escape_command(row)) for row in _R9_SCOPE_ESCAPES]
+    rows += [("r10:" + row[0], _r10_escape_command(row)) for row in _R10_N1_ESCAPES]
+    rows += [("r11:" + row[0], _r11_escape_command(row)) for row in _R11_ESCAPES]
+    rows += [("r12:" + row[0], _r12_escape_command(row)) for row in _R12_ESCAPES]
+    return rows
+
+
+def test_r12_structural_table_every_escape_row_denies_without_the_scanner(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """(1) Every escape row DENIES armed, bound and unbound, never reaching
+    the gate; with the scanner answering "names no wrapper" the verdicts AND
+    reasons are unchanged; a row holding a construct carries the structural
+    code R12_SHELL_CONSTRUCT (the others are in scope by the literal check
+    and refused with their R6 codes)."""
+    corpus = _r12_escape_corpus()
+    assert len(corpus) >= 335, len(corpus)
+    real = [_r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+            for _, command in corpus]
+    _r12_scanner_off(monkeypatch)
+    blind = [_r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+             for _, command in corpus]
+    constructs = 0
+    for (origin, command), with_scanner, without in zip(corpus, real, blind):
+        assert with_scanner == without, (origin, command)
+        for verdict, reason, gate in without:
+            assert (verdict, gate) == ("deny", False), (origin, command, reason[:300])
+            assert "R6_" in reason or "R12_" in reason, (origin, reason[:300])
+        if guard.r12_constructs(command):
+            constructs += 1
+            assert "R12_SHELL_CONSTRUCT" in without[0][1], (origin, command)
+        else:
+            assert guard.r12_literal_names_wrapper(command), (origin, command)
+    assert constructs >= 200, constructs
+
+
+#: The ledgers and review records whose code spans are harvested.
+_R12_HARVEST_DOCS = (
+    *(f"REVIEW{n}_" for n in range(2, 8)),
+    *(f"LANE_EXECUTIVE_DIRECTOR_C{n}.md" for n in range(5, 12)),
+)
+_R12_HARVEST_SKIP_RE = _r8_re.compile(
+    r"\b(?:rm|curl|wget|ssh|scp|sudo|kill|launchctl|osascript|open|defaults|security|mv|dd"
+    r"|chmod|chown|reboot|shutdown)\b|git\s+push"
+)
+
+
+def _r12_doc_spans() -> list[tuple[str, str]]:
+    """Every inline code span of the REVIEW2–REVIEW7 records and the C5–C11
+    ledgers that mentions a wrapper (``⏎`` read as a newline; the records'
+    ``A`` / ``…N1…`` abbreviations also expanded), minus spans naming a
+    network/destructive program (never run, even sealed)."""
+    directory = Path(__file__).resolve().parents[1] / "integrations" / "mmos"
+    spans: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    args = "run grok a /tmp grok-4"
+    for path in sorted(directory.glob("*.md")):
+        if not path.name.startswith(_R12_HARVEST_DOCS):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in _r8_re.finditer(r"(?<!`)(``?)(?!`)(.+?)(?<!`)\1(?!`)", text):
+            body = match.group(2).strip() if match.group(1) == "``" else match.group(2)
+            body = body.replace("⏎", "\n")
+            for variant in (body, body.replace(" A", " " + args).replace(
+                    "…N1…", '$(: "("; printf p)ool ' + args)):
+                if (variant in seen or len(variant) > 3000
+                        or not _r8_re.search(r"ool|ub\.sh|ot\.py|slot|pool", variant)
+                        or _R12_HARVEST_SKIP_RE.search(variant)):
+                    continue
+                seen.add(variant)
+                spans.append((path.name, variant))
+    return spans
+
+
+def test_r12_every_documented_wrapper_running_span_is_refused_or_gated(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """(1) The records themselves: every documented code span that RUNS a
+    fake wrapper in a sealed zsh or bash is, armed and with the scanner off,
+    either DENIED or a launch that reaches the binding gate (bound and
+    unbound) — none is allowed unjudged. (Measured at C11: 188 such spans,
+    150 denied, 38 plain launches gated; r11 allowed 2 unjudged.)"""
+    (tmp_path / "sealed").mkdir()
+    run = _r11_sealed_shells(tmp_path / "sealed")
+    spans = [(doc, command) for doc, command in _r12_doc_spans()
+             if command not in _R12_KNOWN_LIMIT_SPANS]
+    running = [(doc, command) for doc, command in spans
+               if run(command, "zsh") or run(command, "bash")]
+    assert len(running) >= 188, len(running)
+    _r12_scanner_off(monkeypatch)
+    denied = gated = 0
+    for doc, command in running:
+        bound, nobind = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+        if bound[0] == "deny" and not bound[2]:
+            assert nobind[0] == "deny" and not nobind[2], (doc, command)
+            denied += 1
+            continue
+        assert bound[2] and nobind[2], (doc, command, bound[1][:200])  # the gate judged it
+        gated += 1
+    assert denied >= 150 and denied + gated == len(running)
+
+
+#: KNOWN LIMIT (the arbitrary-process class, REVIEW_2329 r2; C11 ledger
+#: limit 2): construct-free text in which a PROGRAM computes the name and
+#: another program executes it. r12 decides shell structure, not what
+#: printf/base64/an interpreter computes. Documented in the C11 ledger, so
+#: excluded from the harvest above and pinned here instead.
+_R12_KNOWN_LIMIT_SPANS = frozenset({
+    "printf '\\160ool run grok a /tmp grok-4' | sh",
+    "echo cG9vbCBydW4gZ3JvayBhIC90bXAgZ3Jvay00 | base64 -d | sh",
+})
+
+
+def test_r12_known_limits_are_pinned(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """PINS A KNOWN LIMIT, not a desired property: these run the (fake)
+    wrapper in a sealed shell and an armed session allows them unjudged."""
+    (tmp_path / "sealed").mkdir()
+    run = _r11_sealed_shells(tmp_path / "sealed")
+    for command in sorted(_R12_KNOWN_LIMIT_SPANS):
+        assert run(command, "zsh") and run(command, "bash"), command
+        assert guard.r12_constructs(command) == [] and not guard.r12_armed_in_scope(command)
+        (bound, _, gate), (nobind, _, _) = _r7_both(
+            guard, shared_placement, monkeypatch, tmp_path, capsys, command
+        )
+        assert (bound, nobind, gate) == ("allow", "allow", False)
+
+
+# --- r12 (3): honest armed controls -----------------------------------------
+
+#: (command, kind): ``launch`` → bound ALLOW through the gate, unbound
+#: "missing binding"; ``allow`` → ALLOW both, gate unreached.
+_R12_HONEST_CONTROLS = [
+    (_R6_L, "launch"),
+    (_R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run", "launch"),
+    ("bash -c '" + _R6_L + "'", "launch"),
+    (_R6_B, "launch"),
+    ("cat /opt/mastermind/ext/sub.sh", "allow"),
+    ("python3 -m pytest tests/test_provider_orchestrator_policy.py", "allow"),
+    ("gh pr view 2329", "allow"),
+    ('git commit -m "fix pool"', "allow"),
+    ("git commit -F msg.txt", "allow"),
+    ("git log --oneline -5", "allow"),
+    ("rg -n foo src", "allow"),
+    ("sed -n 1,5p f", "allow"),
+    ("ls -la", "allow"),
+    # literal-only commands with quotes and redirections (out of scope)
+    ("echo 'a b; c' > /dev/null", "allow"),
+    ('git status --short 2>/dev/null', "allow"),
+    ("printf 'x\\n' > out.txt", "allow"),
+    ("wc -l < README.md", "allow"),
+    ('npm test -- --runInBand "a b"', "allow"),
+    ("{ echo grouped; }", "allow"),
+    ("git log -1 --format='%H %s'", "allow"),
+    ("make -C build test 2>&1 | tail -n 20", "allow"),
+    # constructs inside an ADMITTED read form (in scope, admitted)
+    ("git diff --stat HEAD~1", "allow"),
+    ("git log --oneline HEAD^..HEAD", "allow"),
+    ("ls ~/notes", "allow"),
+    ("cat docs/*.md", "allow"),
+    ("grep -rn 'TODO(' src", "allow"),
+    ("rg -n 'foo$' src", "allow"),
+    ("echo hi # a comment", "allow"),
+]
+
+
+@pytest.mark.parametrize("command, kind", _R12_HONEST_CONTROLS)
+def test_r12_honest_armed_controls_still_pass(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    kind: str,
+) -> None:
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    if kind == "launch":
+        assert (bound, bound_gate) == ("allow", True), bound_reason
+        assert (nobind, nobind_gate) == ("deny", True) and "missing binding" in nobind_reason
+    else:
+        assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+        assert (bound_gate, nobind_gate) == (False, False)
+
+
+def test_r12_pytest_k_pool_is_still_refused_by_the_name_rule(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``pytest -k pool`` holds no construct; it is refused by the r7 NAME
+    rule (the literal wrapper name in a command that is not an admitted
+    form), unchanged since r7 — not by r12."""
+    command = "pytest -k pool"
+    assert guard.r12_constructs(command) == [] and guard.r12_literal_names_wrapper(command)
+    (bound, reason, gate), (nobind, _, _) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind, gate) == ("deny", "deny", False)
+    assert "mentions a paid-launch wrapper name" in reason and "R12_" not in reason
+
+
+# --- r12 (4): the new over-refusal class, stated ----------------------------
+
+#: Realistic commands armed sessions now REFUSE (the principal's fail-closed
+#: trade); each has a literal form or a tool: write the value literally, pass
+#: a file (``git commit -F``), or use Read/Grep/Glob.
+_R12_OVER_REFUSALS = [
+    'cd "$(git rev-parse --show-toplevel)"',
+    "git commit -m \"$(cat <<'EOF'\nfix: guard r12\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nEOF\n)\"",
+    'echo "${HOME}/notes"',
+    'export PATH="$HOME/.local/bin:$PATH"',
+    'for f in *.py; do wc -l "$f"; done',
+    "ls $(git rev-parse --show-toplevel)",
+    'git log "$(git merge-base origin/master HEAD)"..HEAD',
+    "DATE=$(date +%Y%m%d); echo $DATE",
+    'cat "${TMPDIR:-/tmp}/out.log"',
+    "pytest -q $(git diff --name-only | grep test_)",
+    "wc -l $(rg -l foo src)",
+    'test -n "${CI:-}" && echo ci',
+    "out=$((cd a && make) 2>&1)",
+    'python3 -c "import sys; print(sys.version)"',
+    "gh pr view 2329 --json statusCheckRollup --jq '.statusCheckRollup[].conclusion'",
+    "jq -r '.models[]' config.json",
+    "awk '{print $1}' results.txt",
+    "find . -name '*.py' -newer setup.cfg",
+    "(cd sub && make)",
+    "source .venv/bin/activate",
+]
+
+
+@pytest.mark.parametrize("command", _R12_OVER_REFUSALS)
+def test_r12_over_refusal_class_is_refused_with_the_r12_reason(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    """KNOWN, INTENDED over-refusal (armed only): the exact reason tells the
+    worker to use a literal command, a file argument or the Read/Grep tools."""
+    assert guard.r12_constructs(command)
+    (bound, reason, gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind, gate, nobind_gate) == ("deny", "deny", False, False)
+    assert reason == nobind_reason
+    assert reason.startswith(
+        "Mastermind shared-placement guard: unobservable launch — armed session: shell "
+        "expansion is not admitted; use a literal command or a file argument."
+    ), reason
+    assert "R12_SHELL_CONSTRUCT" in reason and "Read/Grep/Glob" in reason
+    assert "git commit -F FILE" in reason
+
+
+def test_r12_over_refusals_have_admitted_alternatives(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    for command in ("git commit -F msg.txt", "git log --oneline origin/master..HEAD",
+                    "wc -l src/a.py src/b.py", "cat /tmp/out.log"):
+        (bound, reason, _), (nobind, _, _) = _r7_both(
+            guard, shared_placement, monkeypatch, tmp_path, capsys, command
+        )
+        assert (bound, nobind) == ("allow", "allow"), (command, reason)
+    # the unarmed session keeps every one of them (r12 is armed-only)
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT", raising=False)
+    monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+    for command in _R12_OVER_REFUSALS:
+        assert _r6_verdict(guard, shared_placement, command, capsys)[0] == "allow", command
+
+
+# --- r12: the rule itself, token by token -----------------------------------
+
+@pytest.mark.parametrize("text, kind", [
+    ("$(x)", "$( "), ("$((1))", "$(( "), ("${x}", "${ "), ("$[1]", "$[ "), ("$'a'", "$' "),
+    ('$"a"', '$" '), ("$x", "$ (parameter"), ("`x`", "` "), ("a\\\nb", "line continuation"),
+    ("cat <<E", "<< "), ("cat <<<x", "<< "), ("ls <1-5>", "numeric glob"), ("a*", "* "),
+    ("a?", "? "), ("a[b]", "[ "), ("a{b,c}", "{ "), ("p{},ool}", "{ "), ("(a)", "( ) "),
+    ("a)", "( ) "), ("~/x", "~ "), ("HEAD~1", "~ "), ("a # c", "# "), ("a#b", "# "),
+    ("^x", "^ "), ("a!b", "! "), ("x\x01", "control character"), ("x\r", "control character"),
+    ("'$(x)'", "$( "), ("'p*l'", "* "), ('"(x)"', "( ) "), ("eval x", "eval"),
+    ("e\\val x", "eval"), ("'ev'al x", "eval"), ("source f", "source"), ("alias x=y", "alias"),
+    ("trap x EXIT", "trap"), ("coproc x", "coproc"), ("repeat 3 x", "repeat"),
+])
+def test_r12_construct_detection_reads_every_kind_quoted_or_not(text: str, kind: str) -> None:
+    found = guard.r12_constructs(text)
+    assert found and any(kind in item for item in found), (text, found)
+    assert guard.r12_armed_in_scope(text)
+
+
+@pytest.mark.parametrize("text", [
+    "ls -la", "git log --oneline -5", "a 'b c' \"d e\" f\\ g", "a; b && c || d | e & f",
+    "a > /dev/null 2>&1 < in", "{ a; }", "{\na\n}", "a {", "a !", "if ! a; then b; fi",
+    'git commit -m "fix!"', "x=1 y=2 cmd", "printf '%s\\n' a", "a\tb\nc", "a=b,c:d@e+f%g",
+    "echo evaluate sourced aliases traps repeats", "echo .", ". ./x.sh",
+])
+def test_r12_literal_text_is_construct_free(text: str) -> None:
+    assert guard.r12_constructs(text) == [], text
+
+
+def test_r12_literal_check_joins_quotes_and_reads_the_slot_module() -> None:
+    for text in ("p'o'ol run", 'p"oo"l run', "p\\ool run", "-O'pool run'", "/x/'sub'.sh a",
+                 "python3 -m slot glm -- run", "python3 -mslot glm", "python3 -m pkg.slot x",
+                 "bash -c 'po\"o\"l run'", "env pool run", "x/remote_sub.sh h m"):
+        assert guard.r12_literal_names_wrapper(text), text
+    for text in ("spool run", "pooled", "timeslot", "slots", "slot_id", "subsh", "python3 -m pytest"):
+        assert not guard.r12_literal_names_wrapper(text), text
+
+
+def test_r12_out_of_scope_needs_every_condition(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Out of scope = construct-free AND literally unnamed AND lexable AND not
+    named by the (secondary) scanner; each condition alone puts it in scope."""
+    assert not guard.r12_armed_in_scope("ls -la")
+    assert guard.r12_armed_in_scope("ls -la $x")  # construct
+    assert guard.r12_armed_in_scope("ls -la pool")  # literal name
+    assert guard.r12_armed_in_scope("ls 'unterminated")  # tokenizer fails
+    monkeypatch.setattr(guard, "r6_names_wrapper", lambda _raw: True)
+    assert guard.r12_armed_in_scope("ls -la")  # the scanner may widen …
+    monkeypatch.setattr(guard, "r6_names_wrapper", lambda _raw: False)
+    assert guard.r12_armed_in_scope("ls -la $x")  # … but never narrows
+
+
+def test_r12_scanner_is_not_consulted_for_construct_bearing_commands(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def spy(raw: str) -> bool:
+        calls.append(raw)
+        return False
+
+    monkeypatch.setattr(guard, "r6_names_wrapper", spy)
+    _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, '$(: "("; printf p)ool run grok a /tmp grok-4')
+    _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, "pytest -k pool")
+    assert calls == []
+    _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, "ls -la")
+    assert calls == ["ls -la", "ls -la"]
+
+
+def test_r12_construct_scan_is_linear() -> None:
+    import time
+
+    for unit in ("a ", "'a b' ", '"a" ', "a\\ b ", "e\\val ", "$", "{ ", "!!", "pool ", "-a/"):
+        timings = []
+        for size in (65_536, 262_144):
+            text = (unit * (size // len(unit) + 1))[:size]
+            started = time.perf_counter()
+            guard.r12_constructs(text)
+            guard.r12_literal_names_wrapper(text)
+            timings.append(time.perf_counter() - started)
+        assert timings[1] < 0.5, (unit, timings)
+        assert timings[1] < 8 * timings[0] + 0.02, (unit, timings)
+
+
+# --- r12 (5): unarmed byte-identity (N2 shapes, gh CI-wait text) ------------
+
+#: sha256 of the unarmed hook stdout measured on r11 (13177c94a) through the
+#: real hook command line; r12 must reproduce each byte for byte. The one
+#: intended difference is the F1 row under N2: r11 gave no decision (its
+#: scanner missed the name), r12 denies like every other N2 shape.
+_R12_UNARMED_ROWS = [
+    # (id, command, budget, background, sha256 of stdout)
+    ("n2-literal-launch", "pool run grok a /tmp grok-4\n" + "<<A\n" * 24_000, "1.5", False,
+     "878ec4b96e82ec46c223b50065435ede1b83237b09d6daa25c68f2ad17d8f3dc"),
+    ("n2-n1-launch", '$(: "("; printf p)ool run grok a /tmp grok-4\n' + "<<A\n" * 24_000, "1.5", False,
+     "878ec4b96e82ec46c223b50065435ede1b83237b09d6daa25c68f2ad17d8f3dc"),
+    ("n2-sub-sh", "sub.sh glm-memory a\n" + "<<A\n" * 24_000, "1.5", False,
+     "878ec4b96e82ec46c223b50065435ede1b83237b09d6daa25c68f2ad17d8f3dc"),
+    ("ci-f4-newline-run", _R9_F4_TEXT, "1.5", False,
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    ("ci-gh-heredoc-unclosed", "gh run view 1\n" + "<<A\n" * 40000, "1.5", False,
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    ("ci-gh-run-watch-foreground", "gh run watch 123 --interval 150", None, False,
+     "b5f09e5cc521a8269431960ba9678864181ae785bfb0b7a37280d904801b7e0b"),
+    ("ci-gh-run-watch-no-interval-bg", "gh run watch 123", None, True,
+     "b6fed84ef4c8fa2c76cd7aa6124b1a8571664a70d65e77d1179c260cebdfca17"),
+    ("ci-gh-pr-checks-watch-fast", "gh pr checks 9 --watch --interval 5", None, True,
+     "b6fed84ef4c8fa2c76cd7aa6124b1a8571664a70d65e77d1179c260cebdfca17"),
+    ("ci-gh-loop-poll", "for i in 1 2 3; do gh run view 123; sleep 30; done", None, False,
+     "274a7fd529f1eda81892563a48d528cc1571fb94e62628a6a2fba2f520718497"),
+    ("ci-gh-delayed-poll", "sleep 60 && gh pr checks 9", None, False,
+     "274a7fd529f1eda81892563a48d528cc1571fb94e62628a6a2fba2f520718497"),
+    ("ci-gh-watch-bg-ok", "gh run watch 123 --interval 150", None, True,
+     "ec1aa5b26f48f3c08e1ccb246389fbde2c2ae51aedbde1701fd5493e7a47d7e4"),
+    ("ci-gh-read-once", "gh run view 9101", None, False,
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    ("unarmed-launch-missing-identity", "pool run grok a /tmp grok-4", None, False,
+     "9decb765ee27e12257df1806d9160f4e2e72c71a752e5424f77f6c58576026a9"),
+    ("unarmed-cmdsub-text", 'cd "$(git rev-parse --show-toplevel)"', None, False,
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    ("unarmed-f1-row-no-watchdog",
+     '2>/dev/null case x in\n(x # $($(: "("; printf p)ool run grok a /tmp grok-4)) :;; esac', None, False,
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    # intended change: r11 e3b0c442… (no decision), r12 the N2 denial
+    ("n2-f1-row", '2>/dev/null case x in\n(x # $($(: "("; printf p)ool run grok a /tmp grok-4)) :;; esac\n'
+     + "<<A\n" * 24_000, "1.5", False,
+     "878ec4b96e82ec46c223b50065435ede1b83237b09d6daa25c68f2ad17d8f3dc"),
+]
+
+
+@pytest.mark.parametrize("row", _R12_UNARMED_ROWS, ids=[row[0] for row in _R12_UNARMED_ROWS])
+def test_r12_unarmed_output_is_byte_identical_to_r11(tmp_path: Path, row: tuple) -> None:
+    import hashlib
+    import shutil
+    import subprocess
+    import time
+
+    if shutil.which("python3") is None:
+        pytest.skip("no python3 on PATH for the registered hook command")
+    _, command, budget, background, digest = row
+    module_path = os.environ.get("MASTERMIND_R6_GUARD_UNDER_TEST", "").strip() or guard.__file__
+    env, cwd = _r8_hook_env(tmp_path, bound=False)
+    env.pop("MASTERMIND_SHARED_PLACEMENT", None)
+    env.update({name: "" for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS")})
+    if budget:
+        env["MASTERMIND_GUARD_BUDGET_S"] = budget
+    payload = _payload(cwd, command, background=background)
+    started = time.monotonic()
+    result = subprocess.run(
+        ["/bin/sh", "-c", f'python3 "{module_path}"'], input=json.dumps(payload), env=env,
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert hashlib.sha256(result.stdout.encode()).hexdigest() == digest, result.stdout[:300]
+    assert time.monotonic() - started < 4.0
+
+
+# --- r12 (6): fuzz -----------------------------------------------------------
+
+def _r12_armed_outcome(command: str) -> str:
+    """The armed decision class without the binding gate's own checks:
+    ``out`` (out of scope), ``deny`` (refused by shape), ``read`` (admitted,
+    no launch), ``launch`` (admitted; the binding gate judges it)."""
+    if not guard.r12_armed_in_scope(command):
+        return "out"
+    parse = guard._r7_parse(command, nested=False)
+    if parse.refused:
+        return "deny"
+    return "launch" if parse.launches else "read"
+
+
+def test_r12_armed_structured_fuzz_is_structural(tmp_path: Path) -> None:
+    """(6) The committed generator, now with the F1/F2 prefixes, contexts and
+    glue, judged ARMED: every out-of-scope candidate is construct-free (here:
+    none — every candidate computes a word), every in-scope candidate the
+    grammar does not admit is denied, and no admitted non-launch candidate
+    runs a wrapper in sealed zsh or bash."""
+    count = int(os.environ.get("MASTERMIND_GUARD_FUZZ_N", "3000"))
+    seed = int(os.environ.get("MASTERMIND_GUARD_FUZZ_SEED", "20261113"))
+    run = _r11_sealed_shells(tmp_path)
+    outcomes: dict[str, list[str]] = {"out": [], "deny": [], "read": [], "launch": []}
+    for command in _r11_fuzz_candidates(seed, count):
+        outcomes[_r12_armed_outcome(command)].append(command)
+    assert all(guard.r12_constructs(command) == [] for command in outcomes["out"])
+    escapes = [
+        (command, shell) for command in outcomes["out"] + outcomes["read"]
+        for shell in ("zsh", "bash") if run(command, shell)
+    ]
+    assert escapes == [], escapes[:5]
+    assert len(outcomes["deny"]) >= count * 9 // 10, {k: len(v) for k, v in outcomes.items()}
+
+
+#: Construct-free pieces: quotes, backslashes, operators, wrapper fragments
+#: and the programs that hand text to another shell.
+_R12_LITERAL_PIECES = [
+    "p", "o", "ol", "ool", "s", "ub", ".sh", "sl", "ot", ".py", "remote_", "/", "./", "x/",
+    "'", '"', "\\", " ", "\t", "\n", ";", "&", "|", "&&", "||", ">", "<", ">/dev/null", "2>&1",
+    " run grok a /tmp grok-4", " glm-memory a", " glm a /tmp glm-5.3", "bash -c ", "sh -c ",
+    "zsh -fc ", "env ", "command ", "exec ", "nohup ", "x=", "python3 ", "-m ", "-O", "-c",
+    "echo ", "printf ", "xargs ", ": ", "if true; then ", "; fi", "while false; do :; done; ",
+    "{ ", "; }", "a", "-", ".", ",", ":", "@", "%", "+", "=",
+]
+
+
+def _r12_literal_candidates(seed: int, count: int) -> list[str]:
+    import random
+
+    rng = random.Random(seed)
+    seen: set[str] = set()
+    out: list[str] = []
+    while len(out) < count:
+        command = "".join(rng.choice(_R12_LITERAL_PIECES) for _ in range(rng.randint(2, 14)))
+        if command not in seen:
+            seen.add(command)
+            out.append(command)
+    return out
+
+
+def test_r12_literal_fuzz_out_of_scope_runs_nothing(tmp_path: Path) -> None:
+    """(6) Construct-free text with wrapper fragments, quotes, backslashes,
+    operators and nested ``-c`` bodies: every candidate the ARMED rule leaves
+    out of scope is construct-free and runs NO wrapper in sealed zsh or bash."""
+    count = int(os.environ.get("MASTERMIND_GUARD_LITERAL_FUZZ_N", "1500"))
+    seed = int(os.environ.get("MASTERMIND_GUARD_LITERAL_FUZZ_SEED", "20261116"))
+    run = _r11_sealed_shells(tmp_path)
+    candidates = _r12_literal_candidates(seed, count)
+    out_of_scope = [command for command in candidates if not guard.r12_armed_in_scope(command)]
+    assert all(guard.r12_constructs(command) == [] for command in out_of_scope)
+    assert all(not guard.r12_literal_names_wrapper(command) for command in out_of_scope)
+    escapes = [
+        (command, shell) for command in out_of_scope for shell in ("zsh", "bash")
+        if run(command, shell)
+    ]
+    assert escapes == [], escapes[:5]
+    assert len(out_of_scope) >= count // 4  # the generator reaches the out-of-scope side
+
+
+@pytest.mark.parametrize("command", [
+    "p'o'ol run {a}", 'p"oo"l run {a}', "p\\ool run {a}", "'pool' run {a}", "\\pool run {a}",
+    "bash -c 'po\"o\"l run {a}'", "sh -c \"p'o'ol run {a}\"", "env p''ool run {a}",
+    "command 'po'ol run {a}", "x=1 po\"\"ol run {a}", "'s'ub.sh {a}",
+])
+def test_r12_literal_joined_names_run_and_are_in_scope(tmp_path: Path, command: str) -> None:
+    """Liveness of the literal check: quote/backslash-joined wrapper names DO
+    run in a sealed shell, and the armed rule puts each in scope."""
+    run = _r11_sealed_shells(tmp_path)
+    tag = "r12lit"
+    assert run(command.replace("{a}", tag), "zsh") or run(command.replace("{a}", tag), "bash")
+    live = command.replace("{a}", "run grok a /tmp grok-4" if "ub.sh" not in command else "glm-memory a")
+    assert guard.r12_constructs(live) == [] and guard.r12_literal_names_wrapper(live), live
+    assert guard.r12_armed_in_scope(live)
+
+
+def test_r12_mutation_fuzz_has_no_armed_or_scanner_escape(tmp_path: Path) -> None:
+    """Mutations of every r10/r11/r12 escape row: ARMED, every out-of-scope
+    mutation is construct-free and runs nothing; the (unarmed) scanner leaves
+    none out of scope that runs a wrapper."""
+    import random
+
+    count = int(os.environ.get("MASTERMIND_GUARD_MUTATIONS_N", "800"))
+    seed = int(os.environ.get("MASTERMIND_GUARD_MUTATIONS_SEED", "20261117"))
+    run = _r11_sealed_shells(tmp_path)
+    rng = random.Random(seed)
+    bases = [_r12_escape_command(row) for row in _R12_ESCAPES]
+    bases += [_r11_escape_command(row) for row in _R11_ESCAPES]
+    tokens = _R11_MUTATION_TOKENS + ["2>/dev/null ", "repeat 1 ", "coproc ", "=(", "case x {\n",
+                                     "for x (a) ", "if [[ a ]] ", "(x) ", " in\n", "{fd}>f "]
+    seen: set[str] = set()
+    mutations: list[str] = []
+    while len(mutations) < count:
+        command = rng.choice(bases)
+        for _ in range(rng.randint(1, 3)):
+            at = rng.randint(0, len(command))
+            if rng.random() < 0.7:
+                command = command[:at] + rng.choice(tokens) + command[at:]
+            else:
+                command = command[:at] + command[min(len(command), at + rng.randint(1, 4)):]
+        if command not in seen:
+            seen.add(command)
+            mutations.append(command)
+    armed_out = [command for command in mutations if not guard.r12_armed_in_scope(command)]
+    assert all(guard.r12_constructs(command) == [] for command in armed_out)
+    scanner_out = [command for command in mutations if not guard.r6_names_wrapper(command)]
+    escapes = [
+        (command, shell) for command in set(armed_out) | set(scanner_out)
+        for shell in ("zsh", "bash") if run(command, shell)
+    ]
+    assert escapes == [], escapes[:5]
+
+
+# --- r12 (7): budgets at 262 144 through the real hook command line ----------
+
+_R12_BUDGET_ROWS = [
+    # (id, prefix, unit, suffix, bound, owner channel, verdict fragment)
+    # re-check #7 / C11 rows, padded with their own structure
+    ("r12-fd-case-glue", "2>/dev/null case x in\n(x # " + _R12_N.format(a=_R7_G) + ") :;; esac\n",
+     "2>/dev/null case x in\n(x) :;; esac\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-eqparen-case-glue", ": =(case x in x) :;; esac) (x # " + _R12_N.format(a=_R7_G) + ")\n",
+     ": =(case x in x) :;; esac)\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-repeat-case", "", "repeat 1 case x in\n(x) :;; esac\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-coproc-condition", "", "coproc [[ a =~ \n(a) ]]\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-for-short-case", "", "for x (a) case x in\n(x) :;; esac\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-if-short-condition", "", "if [[ a ]] [[ a =~ \n(a) ]]\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-case-brace-form", "", "case x {\n(x) :;; }\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-cmdsub-fd-case", "", "$(2>/dev/null case x in x) printf p;; esac)ool ", "", False, False,
+     "R12_SHELL_CONSTRUCT"),
+    ("r12-fd-prefix-run", "", "2>/dev/null ", "", False, False, "allow"),
+    ("r12-repeat-run", "", "repeat 1 ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    # construct-bearing fill: refused by structure
+    ("r12-cmdsub-run", "", "$(a) ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-param-run", "", "${HOME}/x ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-sq-dollar-run", "", "'$x' ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-quoted-parens-run", "", '"(a)" ', "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-glob-run", "", "*.py ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-comment-lines", "", "# c\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-heredoc-run", "", "cat <<E\nx\nE\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-continuation-run", "", "a \\\n", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-dollar-run", "", "$", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-bang-run", "", "!a", "", False, False, "R12_SHELL_CONSTRUCT"),
+    ("r12-eval-words-run", "", "e\\val ", "", False, False, "R12_SHELL_CONSTRUCT"),
+    # constructs inside admitted read forms / launches: admitted
+    ("r12-ls-tilde-args", "ls ", "~/x ", "", False, False, "allow"),
+    ("r12-git-log-carets", "git log --oneline ", "HEAD^ ", "", False, False, "allow"),
+    ("r12-grep-quoted-regex", "grep -n ", "'a(b)*' ", "", False, False, "allow"),
+    ("r12-bound-launch-sq-construct-args", "pool run glm a /tmp glm-5.3 ", "'$x' ", "", True, True, "allow"),
+    # construct-free: the secondary scanner reads them (allowed)
+    ("r12-literal-words", "", "abc ", "", False, False, "allow"),
+    ("r12-literal-sq-words", "", "'a b' ", "", False, False, "allow"),
+    ("r12-literal-dq-words", "", '"a b" ', "", False, False, "allow"),
+    ("r12-literal-escapes", "", "a\\ b ", "", False, False, "allow"),
+    ("r12-literal-semicolons", "", "a; ", "", False, False, "allow"),
+    ("r12-literal-newlines", "", "a\n", "", False, False, "allow"),
+    ("r12-literal-redirections", "", ">/dev/null ", "", False, False, "allow"),
+    ("r12-literal-groups", "", "{ a; } ", "", False, False, "allow"),
+    ("r12-literal-bash-c-body", "bash -c '", "a b; ", "'", False, False, "allow"),
+    ("r12-literal-quote-mix", "", "\"'\"'\"' ", "", False, False, "allow"),
+    # literal names: in scope by the literal check
+    ("r12-literal-named-echo", "echo ", "pool ", "", False, False, "allow"),
+    ("r12-literal-named-joined-soup", "echo ", "p'o'o\"l\" ", "", False, False, "allow"),
+    ("r12-literal-named-launch-args", "pool run glm a /tmp glm-5.3 ", "a ", "", True, True, "allow"),
+]
+
+
+@pytest.mark.parametrize("row", _R12_BUDGET_ROWS, ids=[row[0] for row in _R12_BUDGET_ROWS])
+def test_r12_budget_rows_finish_through_the_real_hook_command_line(tmp_path: Path, row: tuple) -> None:
+    row_id, prefix, unit, suffix, bound, owner, fragment = row
+    prefix += " " * ((_R8_CAP - len(prefix) - len(suffix)) % len(unit))  # whole units
+    command = _r8_filled(prefix, unit, _R8_CAP, suffix)
+    assert len(command) == _R8_CAP
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=bound, owner=owner)
+    assert code == 0
+    if fragment == "allow":
+        assert out == "", out[:300]
+    else:
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", out[:300]
+        assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
+        assert "guard budget exceeded" not in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, (row_id, elapsed)
+
+
+@pytest.mark.parametrize("unit", [
+    "2>/dev/null ", "2>/dev/null case x in\n(x) :;; esac\n", "case x in ", "[[ a =~ \n(a) ]] ",
+    "repeat 1 ", "coproc ", "for x (a) ", "=(x) ", ": =(case x in x) :;; esac)\n", "(x) ",
+    "case x {\n(x) :;; }\n", "if [[ a ]] $(a) ", "{fd}>f ", "3<f $x ",
+])
+def test_r12_scanner_stays_fast_on_the_f1_f2_shapes(unit: str) -> None:
+    """The unarmed (and secondary) reading after the F1/F2 fixes, at the
+    armed cap, in process: well inside the budget."""
+    import time
+
+    text = (unit * (_R8_CAP // len(unit) + 1))[:_R8_CAP]
+    started = time.perf_counter()
+    guard.r6_names_wrapper(text)
+    assert time.perf_counter() - started < 3.0, unit
