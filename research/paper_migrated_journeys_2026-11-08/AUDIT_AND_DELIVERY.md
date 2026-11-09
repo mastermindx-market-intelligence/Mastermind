@@ -8,6 +8,27 @@ Fresh native Paper inventory contains 82 resources. The migration directory says
 
 Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter for new actions after the documented read-only transport failure. Observed catalog: paper-desktop 0.5.18, hash `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb`; tool-scoped bounded writes accepted. Schema-held create_artboard/update_styles/token tools were not used. Root is the only canvas writer. Bounded native children supplied read-only design judgment.
 
+## Delivered design map
+
+Direct entry points for the fourteen files amended in this successor. Each file retains its existing current, Draft or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+
+| Area | Delivered design change |
+| --- | --- |
+| [Portfolio](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0) | Separated selected receipts, history availability and unresolved requests; added four phone outcomes. |
+| [Bonds](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0) | Added publication recovery and EN/ZH source-aware return, cancel and reset references. |
+| [Government Revenue](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0) | Restored the two 320px result-state return actions. |
+| [Forex](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0) | Separated local preparation, account saving and uncertain outcomes; updated My watches entry paths. |
+| [Breadth](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0) | Completed selected-session inspectors and accessible data/recovery references. |
+| [Catalyst](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0) | Aligned four review-level entry actions with the existing local-save behavior. |
+| [Market Structure / Stages](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) | Qualified dated context and added EN/ZH exact-value companions, with 105 cells verified in each. |
+| [Confluence](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0) | Added protected-list read-failure states that retain permitted public context. |
+| [Returns Calendar](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Q-0) | Added current-source early-close and evidence-state references; qualified historical fixtures. |
+| [T47 ranked search](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) | Made Clear restore the previous disclosure choice and focus in paired EN/ZH draft states. |
+| [Market Memory](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0) | Named the inspected saved case and selected row across four comparison treatments. |
+| [Intraday Flow](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) | Separated nominal price-feed delay from build time and actual source availability. |
+| [BioCatalyst](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0) | Clarified that dialog dismissal preserves the parent research/comparison draft. |
+| [MedTech](https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0) | Distinguished narrower guidance from a source conflict or an earlier launch. |
+
 ## Verified mobile meaning corrections
 
 ### Breadth illustrative-data parity
@@ -783,9 +804,42 @@ A separate bounded read-only audit found the inspected Government Revenue workfl
 
 The initial missing-baseline hypothesis came from an extraction that omitted inline line-break content; exact JSX resolved it. No design edit was warranted. The reviewed Funding Bridge and R13 integration contract remain unchanged, and their runtime/source integrations were not recertified. The completed7A/7J mobile return actions remain accepted.
 
+
+## MedTech — separate timing precision from conflict and acceleration
+
+The [MedTech R13 Design References / R14 boards](https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0) remain a design specification. The evidence-state card `1GN-0` on `1F0-0` labeled October versus Q4 as SOURCES DISAGREE. The file's own watchdesk and change review treat Q4 → October as a narrowed guidance window. Those two window labels alone do not establish a contradiction, nor do they establish an accelerated launch.
+
+Root read the exact native binding:
+
+- Watchdesk `12O-0` / `12P-0`: Launch window narrowed / October replaces Q4.
+- Change review `GP-0`: guidance narrowed from Q4; first commercial use remains unconfirmed. Its previous/current records remain29Sep/Q4 2026 and1Oct/October 2026.
+- Build contract `XF-0` / `XG-0`: distinguish dates, guided windows and no announced date; preserve publication, first-observed, event/effective dates and knowledge cutoff.
+- `Y5-0` expressly identifies all issuers, devices, dates and source records as fictional sample data. This work does not authenticate those examples or change the reference file's status.
+
+Three text edits resolve the inconsistency without inventing a contradictory source record:
+
+| Node | New text |
+| --- | --- |
+| `1GO-0` | TIMING EVIDENCE TO REVIEW |
+| `1GX-0` | These windows may be compatible. Keep both sources; compare dates and scope. |
+| `HW-0` | What does the narrower launch window change in your thesis? |
+
+The existing clarification heading, October/Q4 values, both source labels, Compare sources action and all other examples remain. This is an honest review state, not a claim that a genuine conflict has been established or a conflict-state implementation has been proved.
+
+Root inspected complete native screenshots of both amended boards. The revised card copy fits, and the research-note prompt remains legible. Exact native JSX comparison preserved30 unaffected leaves on the state board and47 on the change-review board: **all77 matched**. Both operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1F0-0` and `DU-0`.
+
+- `paper-medtech-window-precision-meaning-20261109-c4-sd`
+- `paper-medtech-window-precision-finish-20261109-c4-sd`
+
+No medical or market conclusion, source record, research save, alert delivery, runtime implementation or release permission was changed.
+
+### Policy Monitor — preserve later completed work
+
+The bounded read-only Policy audit found no justified new amendment in the inspected navigation, evidence/date semantics, source-note counts, missing-data treatment or responsive disclosures. It identified later documented changes beyond the accepted PR2302 work, including the [saved design/build packet](https://github.com/mastermindx-market-intelligence/macro/blob/0e9ccf41a0bb62ba0c0b28fd716b39017afd468e/research/design_candidates/production_design_20261108/CONTINUED_IMPROVEMENTS.md), mobile control sizing and narrow chart reflow. Those later writers' work and the existing release/source/unknown-effect boundaries remain intact. This successor made no Policy mutation and does not recertify its runtime integrations.
+
 ## Active continuation
 
-The successor now covers thirteen design files. Preserve all accepted work and existing holds. Bounded read-only audits are checking the current Macro Policy Monitor and the MedTech R13 reference authority for one material remaining gap beyond prior accepted work. Do not promote reference/draft surfaces or duplicate already complete contracts; use any real source-supported gap for the next safe phase.
+The successor now covers fourteen design files, with a direct entry map near the top of this report. Preserve accepted work and existing holds. Bounded read-only audits are checking current MarketOntology and News Intelligence for a material remaining gap beyond prior accepted or later live work. Continue with an evidence-supported improvement only; preserve coherent surfaces and their existing owners.
 
 
 ## Acceptance boundary
