@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-13T22:28:15.629979+00:00",
+  "source_sha256": "07090756a77743367d67cc042c9c4251f4bedd1ee6e69d65b5d21ea2c9a4e7b3",
+  "test_sha256": "1f4b46f4621fb69960fdbbe857b856b40cb25d22563e2e51e40f7c7c52240217",
+  "baseline": {
+    "failed": 8,
+    "pass": 2,
+    "receipt": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/PLACEMENT_BASE.xml",
+    "sha256": "87fcf49c92ad2da80d3148ac9fafa18b8607c44005012261be1c20199a190a9e"
+  },
+  "candidate": {
+    "pass": 94,
+    "receipt": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/PLACEMENT_CANDIDATE.xml",
+    "sha256": "ddc5152dd74e35430e32ea7df747ff59125779cd9acc44241887dcdb73745bf8"
+  },
+  "independent_review": "Prior native_acceptance_adjudication scoped architecture review approved these exact source/test hashes; prior agent disappeared on Desktop restart; no current author/reviewer identity substitution.",
+  "scope": "Python-only typed existing factory seam; exact tuple <=6, FabricBindingSource and admitted probe required; placement_member validates current router definition before constructing client; no JSON selection or production activation",
+  "installed": false
+}

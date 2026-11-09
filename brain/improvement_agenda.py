@@ -1,7 +1,9 @@
-"""The Improvement Agenda — the system critiques itself (W-L / L3; design §2).
+"""The Improvement Agenda — the portfolio/intelligence stack critiques itself (W-L / L3; design §2).
 
-The weekly self-audit that answers the user's standing question: *"what should we tell the AI to
-fix?"* It is the fusion engine over EVERY accountability artifact the stack already produces —
+The weekly self-audit answers the bounded question: *"what should we tell the portfolio/intelligence
+system to fix?"* It ranks evidence-backed self-improvement candidates inside that domain; current
+Strategic State owns the company-level portfolio and resource orientation. It is the fusion engine
+over the accountability artifacts this stack already produces —
 
     · per-seat calibration deltas (brain/calibration.py, via cio.review)
     · journal lesson clusters — ≥2 seats logging the same `why_wrong` taxonomy = a SYSTEMIC item
@@ -52,8 +54,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 _OUT = _ROOT / "data" / "agenda"
 _VALIDATION_DIR = _ROOT / "research" / "eyes" / "validation_runs"
 
-# Agent OS contributes dependency/readiness only.  The Improvement Agenda remains
-# the sole priority engine: this payload is joined after rank/age have been frozen.
+# Agent OS contributes dependency/readiness only. The Improvement Agenda remains
+# the sole priority engine inside its portfolio/intelligence self-improvement domain;
+# it is not the company-wide portfolio. This payload is joined after rank/age freeze.
 READINESS_SCHEMA = "agentos.readiness.v1"
 _READINESS_STATES = {"ready", "blocked", "in_progress", "done", "unknown"}
 
@@ -383,8 +386,13 @@ def _from_shadow(asof: date, leaderboard: dict | None) -> list[dict]:
 
 def _from_benchmark(asof: date) -> list[dict]:
     """The benchmark ledger's leaderboard ranks every bogey + book by window return. If a Brain book
-    trails BOTH SPY and the defensive basket over the window, that's a benchmark gap the CIO already
-    watches — surfaced here as an item. Lazy-imports brain.benchmark_ledger; degrades absent."""
+    trails a bogey over ONE SHARED window, that's a benchmark gap the CIO already watches — surfaced
+    here as an item. The gap is recomputed at READ time over the cohort's actual common dates
+    (brain.benchmark_ledger.compare_book_to_ledger): the stored per-inception ``return_pct`` values
+    are each measured from a different inception, so the old subtract-across-windows comparison was
+    wrong whenever the curves started on different dates (#1433) — those stored returns are no
+    longer used at all. A book row with no readable curve produces no item. Lazy-imports
+    brain.benchmark_ledger; degrades absent."""
     out: list[dict] = []
     try:
         from brain import benchmark_ledger
@@ -394,48 +402,54 @@ def _from_benchmark(asof: date) -> list[dict]:
     rows = (led or {}).get("leaderboard") or []
     if not rows:
         return out
-    # bogey returns for the two named yardsticks
-    def _ret(kind_id: str) -> float | None:
-        for r in rows:
-            if r.get("id") == kind_id:
-                v = r.get("return_pct")
-                try:
-                    return float(v) if v is not None else None
-                except (TypeError, ValueError):
-                    return None
-        return None
-    spy = _ret("spy")
-    defensive = _ret("defensive")
-    if spy is None and defensive is None:
-        return out
-    bogey = max([x for x in (spy, defensive) if x is not None], default=None)
-    if bogey is None:
-        return out
     for r in rows:
         if r.get("kind") != "book":
             continue
-        v = r.get("return_pct")
+        bid = r.get("id")
         try:
-            v = float(v) if v is not None else None
-        except (TypeError, ValueError):
-            v = None
-        if v is None:
+            if bid == "self_directed":
+                from portfolio import self_directed
+                nav_path = self_directed._NAV_PATH
+            else:
+                from portfolio import registry
+                nav_path = registry.data_dir(bid) / "nav_history.jsonl"
+            hist = benchmark_ledger.read_nav_history(nav_path)
+        except Exception:  # noqa: BLE001
             continue
-        gap = bogey - v
+        if not hist.get("curve"):
+            continue
+        try:
+            cmp = benchmark_ledger.compare_book_to_ledger(bid, hist, led)
+        except Exception:  # noqa: BLE001
+            continue
+        if cmp.get("status") != "descriptive":            # unsupported window → no item (withheld)
+            continue
+        deltas = [d for d in (cmp.get("deltas_pp") or [])
+                  if isinstance(d.get("delta_pp"), (int, float))]
+        if not deltas:
+            continue
+        worst = max(deltas, key=lambda d: -d["delta_pp"])  # the bogey the book trails hardest
+        gap = -worst["delta_pp"]                           # best bogey minus the book, shared window
         if gap <= _SHADOW_LEAD_PCT:                       # trails the best bogey by a material margin
             continue
-        which = "the defensive basket" if defensive is not None and defensive >= (spy or -1e9) else "SPY"
+        which = worst["right_id"]
         out.append(_item(
-            f"benchmark:{r.get('id')}", CLASS_BENCHMARK,
-            f"Book '{r.get('label')}' trails {which} by {gap:.2f} pts (renormed)",
-            evidence=[f"{r.get('id')}: {v:+.2f}% vs SPY {spy}%, defensive {defensive}% "
-                      f"(common-inception renorm, n={r.get('n_points')})"],
-            suggested_fix=(f"'{r.get('label')}' is below the defensive floor — check whether its "
-                           f"posture is too offensive for the tape; consider a defensive-tilt review."),
+            f"benchmark:{bid}", CLASS_BENCHMARK,
+            f"Book '{r.get('label')}' trails {which} by {gap:.2f} pts (shared window)",
+            evidence=[f"{bid}: window {cmp.get('start')}..{cmp.get('end')}, "
+                      f"n={cmp.get('common_point_count')}, "
+                      f"endpoint_status={cmp.get('endpoint_status')} — "
+                      + ", ".join(f"{d['right_id']} leads by {-d['delta_pp']:+.2f} pts"
+                                  for d in deltas)],
+            suggested_fix=(f"'{r.get('label')}' trails its {which} bogey on the shared window — "
+                           f"check whether its posture is too offensive for the tape; consider a "
+                           f"defensive-tilt review."),
             fix_type=FIX_EXPERIMENT, owner=OWNER_FABLE,
             expected_impact="the book at least matches its regime-conditional bogey",
             severity=min(1.0, gap / 8.0),
-            extra={"book": r.get("id"), "gap_pct": round(gap, 3)}))
+            extra={"book": bid, "gap_pct": round(gap, 3),
+                   "window_start": cmp.get("start"), "window_end": cmp.get("end"),
+                   "endpoint_status": cmp.get("endpoint_status")}))
     return out
 
 
@@ -903,6 +917,8 @@ def _from_nw_reflection(asof: date) -> list[dict]:
         for n in (rep.get("nudges") or []):
             if not isinstance(n, dict) or n.get("severity") not in ("high", "medium"):
                 continue
+            if not nw_reflection.nudge_is_evaluable(rep, n, asof=asof):
+                continue
             code = str(n.get("code", "other"))
             kind = str(n.get("kind", "other"))
             sev = 0.8 if n.get("severity") == "high" else 0.4
@@ -1272,12 +1288,16 @@ def _annotate_readiness(
 # build + write
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
+def build(asof: date | None = None, *, cio_rep: dict | None = None,
+          discovery_bundle: object | None = None, discovery_now: str | None = None) -> dict:
     """Fuse every accountability artifact into a RANKED agenda dict. Deterministic and READ-ONLY,
     never raises. Every source degrades to [] on missing data (charter P2). Items with empty evidence
     are dropped (charter P3 — no evidence, no item). `cio_rep` may be injected (tests / to avoid a
     second cio.review); when None it is computed once here. Agent OS readiness is read through the
-    existing CEO-brief bridge and attached only after rank, score, and age are final."""
+    existing CEO-brief bridge and attached only after rank, score, and age are final.
+    Optional discovery is a public-safe unranked count projection. Without an injected
+    bundle it reads the existing NW reflection owner; explicit bundles require a clock.
+    Unavailable evidence is never represented as zero gaps."""
     asof = asof or date.today()
 
     if cio_rep is None:
@@ -1408,6 +1428,9 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
     else:
         items = annotated_items
 
+    discovery = _discovery_projection(discovery_bundle, discovery_now, asof=asof)
+    from brain.improvement_discovery import public_note
+
     counts: dict[str, int] = {}
     for it in items:
         counts[it["class"]] = counts.get(it["class"], 0) + 1
@@ -1421,10 +1444,21 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
                    for o in (OWNER_SELF, OWNER_OPUS, OWNER_FABLE)},
         "items": items,
         "readiness_input": readiness_input,
+        "discovery": discovery,
         "note": ("Advisory only. This agenda RANKS and WRITES — it never trades, flips a flag, or "
                  "mutates a seat. self-tunable items are actionable only by self_tune (L4) through the "
-                 "Lab harness gates; opus-session/fable-review items need a session."),
+                 "Lab harness gates; opus-session/fable-review items need a session." + public_note(discovery)),
     }
+
+
+def _discovery_projection(bundle: object, now: str | None, *, asof: date | None = None) -> dict:
+    # This join is deliberately AFTER frozen ranking/readiness. It cannot create
+    # ranked items, self-tune actions, or Executive jobs. Private prose stays out.
+    from brain.improvement_discovery import optional_agenda_projection
+    if bundle is None:
+        from brain.improvement_discovery_nw import latest_agenda_projection
+        return latest_agenda_projection(root=_ROOT, asof=asof or date.today(), now=now)
+    return optional_agenda_projection(bundle, now=now)
 
 
 def _md(agenda: dict) -> str:
@@ -1465,6 +1499,8 @@ def _md(agenda: dict) -> str:
         L += ["", "**Degraded warnings.**"]
         L.extend(f"- {warning}" for warning in degraded)
     L.append("")
+    from brain.improvement_discovery import render_public_summary
+    L.extend(render_public_summary(agenda.get("discovery")))
     if not agenda.get("items"):
         L += ["_No items — every accountability source is clean or absent (P2 no-op)._"]
         return "\n".join(L)
@@ -1544,10 +1580,41 @@ def write(asof: date | None = None, *, prebuilt: dict | None = None) -> dict:
             "json_path": str(json_path), "md_path": str(md_path)}
 
 
-def latest() -> dict:
-    """The most recent agenda JSON on disk (for the web page / a maintenance session). {} if none."""
+def latest(*, strict: bool = False) -> dict:
+    """Most recent agenda JSON; optional strict reads distinguish absence from failure.
+
+    Default callers retain the historical tolerant empty result. Display callers can
+    require a complete directory listing and a readable selected artifact.
+    """
     try:
-        files = sorted(_OUT.glob("20*.json"))
-        return json.loads(files[-1].read_text()) if files else {}
+        if strict:
+            import stat
+
+            try:
+                files = sorted(p for p in _OUT.iterdir()
+                               if p.name.startswith("20") and p.name.endswith(".json"))
+            except FileNotFoundError as missing:
+                candidate = _OUT
+                while True:
+                    try:
+                        info = candidate.lstat()
+                    except FileNotFoundError:
+                        if candidate.parent == candidate:
+                            raise missing
+                        candidate = candidate.parent
+                        continue
+                    if candidate != _OUT and stat.S_ISDIR(info.st_mode):
+                        return {}
+                    raise missing
+        else:
+            files = sorted(_OUT.glob("20*.json"))
+        if not files:
+            return {}
+        agenda = json.loads(files[-1].read_text())
+        if strict and (not isinstance(agenda, dict) or not agenda):
+            raise ValueError("agenda artifact is not a nonempty JSON object")
+        return agenda
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         return {}

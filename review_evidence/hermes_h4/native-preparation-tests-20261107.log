@@ -1,0 +1,12 @@
+test_live_output_is_refused_before_qualification (__main__.NativePreflightSafetyTests.test_live_output_is_refused_before_qualification) ... ok
+test_native_symlink_is_not_followed (__main__.NativePreflightSafetyTests.test_native_symlink_is_not_followed) ... ok
+test_owner_timeout_is_not_retried_or_exposed (__main__.RefusalContractTests.test_owner_timeout_is_not_retried_or_exposed) ... ok
+test_reason_is_not_inferred_from_another_exit_status (__main__.RefusalContractTests.test_reason_is_not_inferred_from_another_exit_status) ... ok
+test_recorded_owner_reason_survives_real_mcp_response (__main__.RefusalContractTests.test_recorded_owner_reason_survives_real_mcp_response) ... ok
+test_successful_preview_contract_is_preserved (__main__.RefusalContractTests.test_successful_preview_contract_is_preserved) ... ok
+test_unknown_untrusted_and_truncated_diagnostics_stay_closed (__main__.RefusalContractTests.test_unknown_untrusted_and_truncated_diagnostics_stay_closed) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.050s
+
+OK

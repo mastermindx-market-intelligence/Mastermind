@@ -149,13 +149,14 @@ def _latest_lifecycle() -> dict[str, Any]:
 
 
 def _latest_benchmark() -> dict[str, Any]:
-    """Read the most recent benchmark ledger artifact.  Returns {} on any failure."""
+    """Read the most recent benchmark ledger artifact.  Returns {} on any failure.
+
+    Delegates to brain.benchmark_ledger.latest() — the ledger module owns the on-disk selection
+    contract (dated-LEDGER filenames only, never the co-located _series*.json sidecars)."""
     try:
-        bench_dir = _ROOT / "data" / "benchmark"
-        files = sorted(bench_dir.glob("*.json")) if bench_dir.exists() else []
-        if not files:
-            return {}
-        return json.loads(files[-1].read_text())
+        from brain import benchmark_ledger
+        out = benchmark_ledger.latest()
+        return out if isinstance(out, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
 
@@ -497,7 +498,15 @@ def build_latest(
 def latest_artifact_checked() -> tuple[str, dict | None]:
     """Read the newest persisted artifact with an explicit absent/unavailable distinction."""
     try:
-        files = sorted(_OUT_DIR.glob("*.json")) if _OUT_DIR.exists() else []
+        files = sorted(path for path in _OUT_DIR.iterdir() if path.name.endswith(".json"))
+    except FileNotFoundError:
+        try:
+            _OUT_DIR.lstat()
+        except FileNotFoundError:
+            return "absent", None
+        except Exception:  # noqa: BLE001
+            return "unavailable", None
+        return "unavailable", None
     except Exception:  # noqa: BLE001
         return "unavailable", None
     if not files:
@@ -522,7 +531,7 @@ def latest_artifact() -> dict | None:
 # ---------------------------------------------------------------------------
 
 def _persist(artifact: dict) -> bool:
-    """Write artifact to data/allocator/<asof>.json and report durability."""
+    """Write artifact to data/allocator/<asof>.json and report write completion."""
     try:
         _OUT_DIR.mkdir(parents=True, exist_ok=True)
         asof = artifact.get("asof") or date.today().isoformat()

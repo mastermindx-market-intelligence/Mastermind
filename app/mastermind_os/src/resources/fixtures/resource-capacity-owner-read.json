@@ -1,0 +1,78 @@
+{
+  "availability": "AVAILABLE",
+  "provider_capacity": {
+    "age_ms": 0,
+    "attempt_id": "ATT-d231080293a94c7a8013c6a063f9f28a",
+    "begin_event_id": 27,
+    "boot_ref": "boot-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "can_place_work": false,
+    "claim_event_id": 28,
+    "claim_recorded_at_ms": 1793775150000,
+    "cooling": {
+      "active": false,
+      "kind": null,
+      "reset_at": null
+    },
+    "current_eligibility": "NOT_EVALUATED",
+    "host_ref": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "job_id": "JOB-003",
+    "observation_kind": "RETAINED_CLAIM",
+    "observed_at_ms": 1793775150541,
+    "provider": "minimax",
+    "provider_enabled": true,
+    "provider_health": {
+      "error_class": null,
+      "state": "healthy"
+    },
+    "quota_horizons": [
+      {
+        "limit": 10,
+        "name": "subscription",
+        "remaining": 1,
+        "reset_at": "2026-11-04T06:53:30.541Z"
+      }
+    ],
+    "realm_auth": {
+      "source_quality": "native_provider",
+      "state": "authenticated"
+    },
+    "root_job_id": "JOB-001",
+    "schema": "mastermind.retained_provider_capacity.v1",
+    "source_release_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_snapshot_sha256": "1fd374759aa01ff4c2edbfbae70a01b4a6fadf80a53af47c9fd516245d8ac42e"
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_resource_capacity_result.v1",
+  "selection": {
+    "attempt_id": "ATT-d231080293a94c7a8013c6a063f9f28a",
+    "job_id": "JOB-003",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:ONE"
+  },
+  "source_observation": {
+    "control_room": {
+      "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+      "document_digest": "af62bba128587438e3aae57629da3b304d80b4da328654844896c3ceaa82f057",
+      "instance_after": "b12c78e659190252a7d4667350e55d334829690d66f0f9f13c7a67651985bec1",
+      "instance_before": "b12c78e659190252a7d4667350e55d334829690d66f0f9f13c7a67651985bec1",
+      "publication_after": 1,
+      "publication_before": 1,
+      "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+    },
+    "runtime": {
+      "after": 2,
+      "before": 2,
+      "schema": "mastermind.runtime_read_observation.v1",
+      "source_identity": "7a856515b34547505ecac616445650d2",
+      "state": "SAME"
+    },
+    "schema": "mastermind.workspace_resource_capacity_observation.v1",
+    "selection": {
+      "attempt_id": "ATT-d231080293a94c7a8013c6a063f9f28a",
+      "job_id": "JOB-003",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "SAME"
+  }
+}

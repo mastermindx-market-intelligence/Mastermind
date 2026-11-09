@@ -1,0 +1,817 @@
+{
+  "schema": "mastermind.design-tokens.portable.v1",
+  "meta": {
+    "paper_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+    "paper_page_id": "p-5-0",
+    "paper_token_content_hash": "cfd3d65c",
+    "macro_source_commit": "a136a9e67f0e435a495e1b86a63eaa924e23b683",
+    "authority_note": "Portable projection for Claude. Production theme.css remains token authority."
+  },
+  "tokens": [
+    {
+      "name": "--mx-dark-bg",
+      "type": "color",
+      "value": "#0F1115",
+      "source": "paper",
+      "description": "Dark command-center canvas; production role --bg."
+    },
+    {
+      "name": "--mx-dark-panel",
+      "type": "color",
+      "value": "#181B21",
+      "source": "paper",
+      "description": "Dark E1 panel."
+    },
+    {
+      "name": "--mx-dark-panel2",
+      "type": "color",
+      "value": "#1E222A",
+      "source": "paper",
+      "description": "Dark E2 raised/nested surface."
+    },
+    {
+      "name": "--mx-dark-text",
+      "type": "color",
+      "value": "#D7DCE3",
+      "source": "paper",
+      "description": "Dark primary text."
+    },
+    {
+      "name": "--mx-dark-muted",
+      "type": "color",
+      "value": "#8B93A1",
+      "source": "paper",
+      "description": "Dark muted text."
+    },
+    {
+      "name": "--mx-dark-line",
+      "type": "color",
+      "value": "#3A4150",
+      "source": "paper",
+      "description": "Dark hairline/boundary."
+    },
+    {
+      "name": "--mx-dark-up",
+      "type": "color",
+      "value": "#45B873",
+      "source": "paper",
+      "description": "EN market up/direction fill-grade."
+    },
+    {
+      "name": "--mx-dark-down",
+      "type": "color",
+      "value": "#E06464",
+      "source": "paper",
+      "description": "EN market down/direction fill-grade."
+    },
+    {
+      "name": "--mx-dark-warn",
+      "type": "color",
+      "value": "#E0A030",
+      "source": "paper",
+      "description": "Warning/severity; language-invariant."
+    },
+    {
+      "name": "--mx-dark-act",
+      "type": "color",
+      "value": "#E05555",
+      "source": "paper",
+      "description": "Action/danger severity; language-invariant."
+    },
+    {
+      "name": "--mx-dark-ok",
+      "type": "color",
+      "value": "#3DA564",
+      "source": "paper",
+      "description": "Healthy/success severity; language-invariant."
+    },
+    {
+      "name": "--mx-dark-info",
+      "type": "color",
+      "value": "#5B9BF0",
+      "source": "paper",
+      "description": "Information/wayfinding."
+    },
+    {
+      "name": "--mx-dark-link",
+      "type": "color",
+      "value": "#7AA7E0",
+      "source": "paper",
+      "description": "Wayfinding/action link."
+    },
+    {
+      "name": "--mx-dark-orange",
+      "type": "color",
+      "value": "#E08B45",
+      "source": "paper",
+      "description": "Orange semantic support."
+    },
+    {
+      "name": "--mx-light-bg",
+      "type": "color",
+      "value": "#F7F8FA",
+      "source": "paper",
+      "description": "Light research-workspace canvas; production role --bg."
+    },
+    {
+      "name": "--mx-light-panel",
+      "type": "color",
+      "value": "#FFFFFF",
+      "source": "paper",
+      "description": "Light E1 panel."
+    },
+    {
+      "name": "--mx-light-panel2",
+      "type": "color",
+      "value": "#EEF1F6",
+      "source": "paper",
+      "description": "Light E2 raised/nested surface."
+    },
+    {
+      "name": "--mx-light-text",
+      "type": "color",
+      "value": "#1C2430",
+      "source": "paper",
+      "description": "Light primary text."
+    },
+    {
+      "name": "--mx-light-muted",
+      "type": "color",
+      "value": "#5D6B7E",
+      "source": "paper",
+      "description": "Light muted text."
+    },
+    {
+      "name": "--mx-light-line",
+      "type": "color",
+      "value": "#C9CCD1",
+      "source": "paper",
+      "description": "Paper projection of light hairline."
+    },
+    {
+      "name": "--mx-light-up",
+      "type": "color",
+      "value": "#1F9A55",
+      "source": "paper",
+      "description": "EN market up/direction fill-grade."
+    },
+    {
+      "name": "--mx-light-down",
+      "type": "color",
+      "value": "#CF4040",
+      "source": "paper",
+      "description": "EN market down/direction fill-grade."
+    },
+    {
+      "name": "--mx-light-warn",
+      "type": "color",
+      "value": "#B9791A",
+      "source": "paper",
+      "description": "Warning/severity."
+    },
+    {
+      "name": "--mx-light-act",
+      "type": "color",
+      "value": "#C43D3D",
+      "source": "paper",
+      "description": "Action/danger severity."
+    },
+    {
+      "name": "--mx-light-ok",
+      "type": "color",
+      "value": "#2F8A52",
+      "source": "paper",
+      "description": "Healthy/success severity."
+    },
+    {
+      "name": "--mx-light-info",
+      "type": "color",
+      "value": "#285FFF",
+      "source": "paper",
+      "description": "Information/wayfinding."
+    },
+    {
+      "name": "--mx-light-link",
+      "type": "color",
+      "value": "#285FFF",
+      "source": "paper",
+      "description": "Wayfinding/action link."
+    },
+    {
+      "name": "--mx-light-orange",
+      "type": "color",
+      "value": "#C4781F",
+      "source": "paper",
+      "description": "Orange semantic support."
+    },
+    {
+      "name": "--mx-dark-prov",
+      "type": "color",
+      "value": "#62A0E8",
+      "source": "paper",
+      "description": "Provisional/epistemic, direction-neutral."
+    },
+    {
+      "name": "--mx-dark-prov-ink",
+      "type": "color",
+      "value": "#62A0E8",
+      "source": "paper",
+      "description": "Dark provisional text ink."
+    },
+    {
+      "name": "--mx-light-prov",
+      "type": "color",
+      "value": "#2F6FD0",
+      "source": "paper",
+      "description": "Light provisional fill."
+    },
+    {
+      "name": "--mx-light-prov-ink",
+      "type": "color",
+      "value": "#2C62B3",
+      "source": "paper",
+      "description": "Light provisional text ink."
+    },
+    {
+      "name": "--mx-dark-tier-accent",
+      "type": "color",
+      "value": "#7C5CFF",
+      "source": "paper",
+      "description": "Locked-content accent only."
+    },
+    {
+      "name": "--mx-dark-tier-fill",
+      "type": "color",
+      "value": "#6340D8",
+      "source": "paper",
+      "description": "Locked-content fill only."
+    },
+    {
+      "name": "--mx-dark-tier-ink",
+      "type": "color",
+      "value": "#9B86FF",
+      "source": "paper",
+      "description": "Measured dark locked-content text ink."
+    },
+    {
+      "name": "--mx-light-tier-accent",
+      "type": "color",
+      "value": "#7C5CFF",
+      "source": "paper",
+      "description": "Locked-content accent only."
+    },
+    {
+      "name": "--mx-light-tier-fill",
+      "type": "color",
+      "value": "#6340D8",
+      "source": "paper",
+      "description": "Locked-content fill only."
+    },
+    {
+      "name": "--mx-light-tier-ink",
+      "type": "color",
+      "value": "#5B3FC4",
+      "source": "paper",
+      "description": "Measured light locked-content text ink."
+    },
+    {
+      "name": "--mx-dark-ser-1",
+      "type": "color",
+      "value": "#5B9BF0",
+      "source": "paper",
+      "description": "Chart subject."
+    },
+    {
+      "name": "--mx-dark-ser-2",
+      "type": "color",
+      "value": "#D4A017",
+      "source": "paper",
+      "description": "Chart comparison."
+    },
+    {
+      "name": "--mx-dark-ser-3",
+      "type": "color",
+      "value": "#0EA5E9",
+      "source": "paper",
+      "description": "Chart second comparison."
+    },
+    {
+      "name": "--mx-dark-ser-4",
+      "type": "color",
+      "value": "#E08B45",
+      "source": "paper",
+      "description": "Chart fourth/last-resort generic series."
+    },
+    {
+      "name": "--mx-light-ser-1",
+      "type": "color",
+      "value": "#2F63C4",
+      "source": "paper",
+      "description": "Chart subject light twin."
+    },
+    {
+      "name": "--mx-light-ser-2",
+      "type": "color",
+      "value": "#8F6A04",
+      "source": "paper",
+      "description": "Chart comparison light twin."
+    },
+    {
+      "name": "--mx-light-ser-3",
+      "type": "color",
+      "value": "#0284C7",
+      "source": "paper",
+      "description": "Chart second comparison light twin."
+    },
+    {
+      "name": "--mx-light-ser-4",
+      "type": "color",
+      "value": "#B06A25",
+      "source": "paper",
+      "description": "Chart fourth/last-resort generic series."
+    },
+    {
+      "name": "--mx-light-ink-up",
+      "type": "color",
+      "value": "#1E6D47",
+      "source": "paper",
+      "description": "Text-grade light EN up ink."
+    },
+    {
+      "name": "--mx-light-ink-down",
+      "type": "color",
+      "value": "#B23C3D",
+      "source": "paper",
+      "description": "Text-grade light EN down ink."
+    },
+    {
+      "name": "--mx-light-ink-warn",
+      "type": "color",
+      "value": "#7D5922",
+      "source": "paper",
+      "description": "Text-grade light warning ink."
+    },
+    {
+      "name": "--mx-light-ink-link",
+      "type": "color",
+      "value": "#2758E6",
+      "source": "paper",
+      "description": "Text-grade light link/info ink."
+    },
+    {
+      "name": "--mx-dark-up-soft",
+      "type": "color",
+      "value": "rgb(69 184 115 / 12%)",
+      "source": "paper",
+      "description": "Subdued positive surface."
+    },
+    {
+      "name": "--mx-dark-down-soft",
+      "type": "color",
+      "value": "rgb(224 100 100 / 12%)",
+      "source": "paper",
+      "description": "Subdued negative surface."
+    },
+    {
+      "name": "--mx-dark-warn-soft",
+      "type": "color",
+      "value": "rgb(224 160 48 / 12%)",
+      "source": "paper",
+      "description": "Subdued warning surface."
+    },
+    {
+      "name": "--mx-dark-info-soft",
+      "type": "color",
+      "value": "rgb(91 155 240 / 12%)",
+      "source": "paper",
+      "description": "Subdued informational surface."
+    },
+    {
+      "name": "--mx-light-up-soft",
+      "type": "color",
+      "value": "#EAF7EF",
+      "source": "paper",
+      "description": "Light positive chip surface."
+    },
+    {
+      "name": "--mx-light-down-soft",
+      "type": "color",
+      "value": "#FCECED",
+      "source": "paper",
+      "description": "Light negative chip surface."
+    },
+    {
+      "name": "--mx-light-warn-soft",
+      "type": "color",
+      "value": "#FFF4E2",
+      "source": "paper",
+      "description": "Light warning chip surface."
+    },
+    {
+      "name": "--mx-light-info-soft",
+      "type": "color",
+      "value": "#EAF2FC",
+      "source": "paper",
+      "description": "Light information chip surface."
+    },
+    {
+      "name": "--mx-light-scrim",
+      "type": "color",
+      "value": "#1C243029",
+      "source": "paper",
+      "description": "Light overlay scrim."
+    },
+    {
+      "name": "--noir-canvas",
+      "type": "color",
+      "value": "#080808",
+      "source": "paper",
+      "description": "NOIR command foundation."
+    },
+    {
+      "name": "--noir-sidebar",
+      "type": "color",
+      "value": "#0C0C0C",
+      "source": "paper",
+      "description": "NOIR sidebar."
+    },
+    {
+      "name": "--noir-panel",
+      "type": "color",
+      "value": "#121212",
+      "source": "paper",
+      "description": "NOIR panel."
+    },
+    {
+      "name": "--noir-raised",
+      "type": "color",
+      "value": "#191919",
+      "source": "paper",
+      "description": "NOIR raised."
+    },
+    {
+      "name": "--noir-hover",
+      "type": "color",
+      "value": "#222222",
+      "source": "paper",
+      "description": "NOIR hover."
+    },
+    {
+      "name": "--noir-selected",
+      "type": "color",
+      "value": "#292929",
+      "source": "paper",
+      "description": "NOIR selected."
+    },
+    {
+      "name": "--noir-text-primary",
+      "type": "color",
+      "value": "#F3F3F3",
+      "source": "paper",
+      "description": "NOIR primary text."
+    },
+    {
+      "name": "--noir-text-secondary",
+      "type": "color",
+      "value": "#B8B8B8",
+      "source": "paper",
+      "description": "NOIR secondary text."
+    },
+    {
+      "name": "--noir-text-tertiary",
+      "type": "color",
+      "value": "#949494",
+      "source": "paper",
+      "description": "NOIR tertiary text."
+    },
+    {
+      "name": "--noir-champagne",
+      "type": "color",
+      "value": "#C9B99B",
+      "source": "paper",
+      "description": "NOIR semantic accent family member; not free decoration."
+    },
+    {
+      "name": "--noir-sage",
+      "type": "color",
+      "value": "#A8C2AD",
+      "source": "paper",
+      "description": "NOIR semantic accent family member; not free decoration."
+    },
+    {
+      "name": "--noir-rose",
+      "type": "color",
+      "value": "#DEA4A5",
+      "source": "paper",
+      "description": "NOIR semantic accent family member; not free decoration."
+    },
+    {
+      "name": "--noir-steel",
+      "type": "color",
+      "value": "#A7B4C2",
+      "source": "paper",
+      "description": "NOIR semantic accent family member; not free decoration."
+    },
+    {
+      "name": "--noir-lilac",
+      "type": "color",
+      "value": "#BDB2CE",
+      "source": "paper",
+      "description": "NOIR semantic accent family member; not free decoration."
+    },
+    {
+      "name": "--market-canvas",
+      "type": "color",
+      "value": "#0A0B0D",
+      "source": "paper",
+      "description": "Market consumer foundation canvas."
+    },
+    {
+      "name": "--market-panel",
+      "type": "color",
+      "value": "#111318",
+      "source": "paper",
+      "description": "Market consumer panel."
+    },
+    {
+      "name": "--market-raised",
+      "type": "color",
+      "value": "#181B20",
+      "source": "paper",
+      "description": "Market consumer raised surface."
+    },
+    {
+      "name": "--market-line",
+      "type": "color",
+      "value": "#2B3038",
+      "source": "paper",
+      "description": "Market consumer hairline."
+    },
+    {
+      "name": "--font-ui",
+      "type": "fontFamily",
+      "value": "Inter",
+      "source": "paper",
+      "description": "Paper projection; production font stack is broader."
+    },
+    {
+      "name": "--fs-micro",
+      "type": "fontSize",
+      "value": "10px",
+      "source": "paper",
+      "description": "Dense ticks/table heads."
+    },
+    {
+      "name": "--fs-label",
+      "type": "fontSize",
+      "value": "11px",
+      "source": "paper",
+      "description": "Eyebrow/caps."
+    },
+    {
+      "name": "--fs-sm",
+      "type": "fontSize",
+      "value": "12.5px",
+      "source": "paper",
+      "description": "Secondary/table copy."
+    },
+    {
+      "name": "--fs-body",
+      "type": "fontSize",
+      "value": "14px",
+      "source": "paper",
+      "description": "Dashboard base copy."
+    },
+    {
+      "name": "--fs-h3",
+      "type": "fontSize",
+      "value": "14px",
+      "source": "paper",
+      "description": "Subsection title."
+    },
+    {
+      "name": "--fs-md",
+      "type": "fontSize",
+      "value": "15px",
+      "source": "paper",
+      "description": "Lead/strong figure."
+    },
+    {
+      "name": "--fs-h2",
+      "type": "fontSize",
+      "value": "17px",
+      "source": "paper",
+      "description": "Panel title."
+    },
+    {
+      "name": "--fs-num-lg",
+      "type": "fontSize",
+      "value": "22px",
+      "source": "paper",
+      "description": "Secondary numeral."
+    },
+    {
+      "name": "--fs-h1",
+      "type": "fontSize",
+      "value": "28px",
+      "source": "paper",
+      "description": "Page title."
+    },
+    {
+      "name": "--fs-num-xl",
+      "type": "fontSize",
+      "value": "38px",
+      "source": "paper",
+      "description": "Large score."
+    },
+    {
+      "name": "--fs-display",
+      "type": "fontSize",
+      "value": "46px",
+      "source": "paper",
+      "description": "Hero verdict word."
+    },
+    {
+      "name": "--fw-regular",
+      "type": "fontWeight",
+      "value": 400,
+      "source": "paper",
+      "description": "Regular."
+    },
+    {
+      "name": "--fw-medium",
+      "type": "fontWeight",
+      "value": 500,
+      "source": "paper",
+      "description": "Medium."
+    },
+    {
+      "name": "--fw-semibold",
+      "type": "fontWeight",
+      "value": 600,
+      "source": "paper",
+      "description": "Semibold."
+    },
+    {
+      "name": "--fw-bold",
+      "type": "fontWeight",
+      "value": 700,
+      "source": "paper",
+      "description": "Bold."
+    },
+    {
+      "name": "--fw-extrabold",
+      "type": "fontWeight",
+      "value": 800,
+      "source": "paper",
+      "description": "Extra bold."
+    },
+    {
+      "name": "--bp-mobile",
+      "type": "breakpoint",
+      "value": "390px",
+      "source": "paper",
+      "description": "Design floor."
+    },
+    {
+      "name": "--bp-tablet",
+      "type": "breakpoint",
+      "value": "768px",
+      "source": "paper",
+      "description": "Tablet reference."
+    },
+    {
+      "name": "--bp-desktop",
+      "type": "breakpoint",
+      "value": "1440px",
+      "source": "paper",
+      "description": "Desktop reference."
+    },
+    {
+      "name": "--sp-1",
+      "type": "spacing",
+      "value": "4px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-2",
+      "type": "spacing",
+      "value": "8px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-3",
+      "type": "spacing",
+      "value": "12px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-4",
+      "type": "spacing",
+      "value": "16px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-5",
+      "type": "spacing",
+      "value": "20px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-6",
+      "type": "spacing",
+      "value": "24px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-7",
+      "type": "spacing",
+      "value": "32px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--sp-8",
+      "type": "spacing",
+      "value": "44px",
+      "source": "paper",
+      "description": "Spacing scale."
+    },
+    {
+      "name": "--r-ctl",
+      "type": "radius",
+      "value": "8px",
+      "source": "paper",
+      "description": "Controls/chips court."
+    },
+    {
+      "name": "--r-btn",
+      "type": "radius",
+      "value": "10px",
+      "source": "paper",
+      "description": "Buttons/tiles court."
+    },
+    {
+      "name": "--r-card",
+      "type": "radius",
+      "value": "12px",
+      "source": "paper",
+      "description": "Cards court."
+    },
+    {
+      "name": "--r-panel",
+      "type": "radius",
+      "value": "14px",
+      "source": "paper",
+      "description": "Top-level panels court."
+    },
+    {
+      "name": "--r-pill",
+      "type": "radius",
+      "value": "999px",
+      "source": "paper",
+      "description": "Pills."
+    },
+    {
+      "name": "--t-fast",
+      "type": "duration",
+      "value": ".16s",
+      "source": "repository",
+      "description": "Fast color/border state."
+    },
+    {
+      "name": "--t-med",
+      "type": "duration",
+      "value": ".2s",
+      "source": "repository",
+      "description": "Lift/reveal."
+    },
+    {
+      "name": "--t-slow",
+      "type": "duration",
+      "value": ".55s",
+      "source": "repository",
+      "description": "Slow sweep where warranted."
+    },
+    {
+      "name": "--ease-std",
+      "type": "easing",
+      "value": "ease",
+      "source": "repository",
+      "description": "Standard easing."
+    },
+    {
+      "name": "--ease-lift",
+      "type": "easing",
+      "value": "cubic-bezier(.2,.7,.3,1)",
+      "source": "repository",
+      "description": "Lift easing."
+    }
+  ]
+}

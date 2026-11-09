@@ -1,0 +1,153 @@
+{
+  "builds": [
+    {
+      "files": 107,
+      "flags": [],
+      "installer_component_validated": false,
+      "inventory_sha256": "f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40",
+      "manifest_sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+      "name": "default",
+      "native_entry_sha256": null
+    },
+    {
+      "files": 109,
+      "flags": [
+        "--include-go-application"
+      ],
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "installer_component_validated": true,
+      "inventory_sha256": "47cdcc123d7ab23ee41179330237192b1d83da59e368a1a49b9dc759fa039814",
+      "manifest_sha256": "77109d8b3b0ee41fa892bd4fff38afb2ed918a4d89dff64c32bb85e8dfceb6bf",
+      "name": "application",
+      "native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0"
+    },
+    {
+      "files": 112,
+      "flags": [
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "installer_component_validated": true,
+      "inventory_sha256": "65f1b27589902544dc49df4b06232f0c697937cf95b4ce9f0ca0e91fbae7b1e3",
+      "manifest_sha256": "9f9bc52afa583813176b965a61c69aeb0fb92ce8c931814a16d550abf7082bfd",
+      "name": "http",
+      "native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0"
+    },
+    {
+      "files": 107,
+      "flags": [
+        "--include-quota-reset-recovery"
+      ],
+      "installer_component_validated": false,
+      "inventory_sha256": "2bd6bea8b1c0ef1d7959c887b291b2aa0d1487b1036b9f9d8a6983ab45d6126d",
+      "manifest_sha256": "58b3982f47a0edb8024199be871c9da64194c9bee88f3f1e1b05ece250c5a8fa",
+      "name": "h2-base",
+      "native_entry_sha256": null
+    },
+    {
+      "files": 109,
+      "flags": [
+        "--include-quota-reset-recovery",
+        "--include-go-application"
+      ],
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "installer_component_validated": true,
+      "inventory_sha256": "eba8036ac252b8001282390d7ceed7368f4ce8bebafe943e229a999647df082f",
+      "manifest_sha256": "4fc68001653b57fedd9527a700169049618e74669c07894ab99239291a1885b7",
+      "name": "h2-application",
+      "native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0"
+    },
+    {
+      "files": 112,
+      "flags": [
+        "--include-quota-reset-recovery",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "installer_component_validated": true,
+      "inventory_sha256": "eea586c9f5c2e72b7390bd8569d6e0bb2f89221be4a33b58f037c1d73d94a937",
+      "manifest_sha256": "5857bee1719b2254c7840a4b5ce6cda299dc579ac2cb05e5eb8b95210f2d4485",
+      "name": "h2-http",
+      "native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0"
+    }
+  ],
+  "installed": false,
+  "native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0",
+  "observed_at": "2026-11-07T15:13:52.004091+00:00",
+  "output": "/private/tmp/h6-current-native-composition-ibbnj1po",
+  "parents": [
+    "0435cd6929249c600889aeab71215347ea3970ef",
+    "552375cd288ebe3c417d10afa17f47114c6319db"
+  ],
+  "provider_calls": false,
+  "qualification": {
+    "command": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "-m",
+      "pytest",
+      "-q",
+      "--tb=short",
+      "--basetemp=/private/tmp/h6-current-native-composition-ibbnj1po/pytest-temp",
+      "--junitxml=/private/tmp/h6-current-native-composition-ibbnj1po/native-current.xml",
+      "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_entry.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_release.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_startup.py",
+      "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+      "tests/test_executive_fabric_release_identity_review.py"
+    ],
+    "errors": 0,
+    "failures": 0,
+    "log_sha256": "e1faaee11277967f5ff8d86a2d2f026939e151940305d5456f32b69c1e4d1869",
+    "returncode": 0,
+    "seconds": 144.385,
+    "skipped": 0,
+    "suite_counters": [
+      {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "542",
+        "time": "143.590",
+        "timestamp": "2026-11-07T08:13:52.916484-07:00"
+      }
+    ],
+    "testcase_records": 533
+  },
+  "schema": "mastermind.h6-current-native-composition.v1",
+  "selected": false,
+  "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
+  "whitespace_review": {
+    "byte_identical_input_paths_with_whitespace": [
+      "integrations/hermes_qualification/workspace_oauth_privacy/fixtures/hermes_constants.py.source",
+      "integrations/hermes_qualification/workspace_oauth_privacy/guard.patch",
+      "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch",
+      "tests/test_hermes_workspace_oauth.py",
+      "ops/native_fabric/grok47/quota_billing/lease_broker.py.patch",
+      "ops/native_fabric/grok47/quota_billing/quota_circuit.py"
+    ],
+    "novel_delta_result": "PASS",
+    "novel_or_resolved_paths": [
+      "docs/superpowers/plans/2026-11-04-fabric-application-integration.md",
+      "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+      "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+      "ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md",
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "ops/native_fabric/quota_continuity/rollout/native_install.py",
+      "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.json",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.log",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.xml",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/current-source-composition.json",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/installation-map.md",
+      "tests/executive_fabric_release_identity_review.py"
+    ],
+    "whole_merge_diff": "Reports inherited fixture and unified-patch whitespace; exact source bytes retained. Not represented as a clean whole-merge whitespace check."
+  }
+}

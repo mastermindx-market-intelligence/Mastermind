@@ -226,6 +226,7 @@ def _receipt_sha256(
     principal: PrincipalIdentity,
     checks: Mapping[str, str],
     observed_at: str,
+    attended_realm: Mapping[str, str] | None = None,
 ) -> str:
     """Commit to exact probe inputs without returning their path or name content."""
 
@@ -263,6 +264,13 @@ def _receipt_sha256(
             "dedicated_codex_auth": [_sha256_path(config.codex_home / "auth.json")],
         },
     }
+    if attended_realm is not None:
+        material["schema_version"] = "mastermind.executive_secret_canary/v2"
+        material["worker_auth_exception"] = "ASSIGNED_CLAUDE_PROVIDER_REALM_ONLY"
+        material["realm_binding"] = dict(attended_realm)
+        material["target_path_sha256"].pop("dedicated_codex_auth")
+        material["target_path_sha256"]["assigned_provider_credential"] = [
+            _sha256_path(config.codex_home / "provider-credential")]
     encoded = json.dumps(
         material,
         sort_keys=True,
@@ -271,6 +279,26 @@ def _receipt_sha256(
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _probe_protected_paths(config, *, opener, closer):
+    _open_must_be_denied(
+        config.administrative_checkout_sentinel,
+        opener=opener,
+        closer=closer,
+    )
+    for path in _database_paths(config.executive_database):
+        _open_must_be_denied(path, opener=opener, closer=closer)
+    _open_must_be_denied(
+        config.other_worker_home_sentinel,
+        opener=opener,
+        closer=closer,
+    )
+    _open_must_be_denied(
+        config.forbidden_production_sentinel,
+        opener=opener,
+        closer=closer,
+    )
 
 
 def run_secret_canary(
@@ -291,23 +319,7 @@ def run_secret_canary(
     if config.control_environment_sentinel in visible_environment:
         raise SecretCanaryError("CANARY_CONTROL_ENVIRONMENT_VISIBLE")
 
-    _open_must_be_denied(
-        config.administrative_checkout_sentinel,
-        opener=opener,
-        closer=closer,
-    )
-    for path in _database_paths(config.executive_database):
-        _open_must_be_denied(path, opener=opener, closer=closer)
-    _open_must_be_denied(
-        config.other_worker_home_sentinel,
-        opener=opener,
-        closer=closer,
-    )
-    _open_must_be_denied(
-        config.forbidden_production_sentinel,
-        opener=opener,
-        closer=closer,
-    )
+    _probe_protected_paths(config, opener=opener, closer=closer)
     _open_dedicated_auth(
         config.codex_home / "auth.json",
         opener=opener,
@@ -366,6 +378,16 @@ def validate_secret_canary_binding(
     return document
 
 
+def validate_initial_secret_canary_verdict(verdict: Mapping[str, Any]) -> dict[str, Any]:
+    """Use the incumbent worker canary validator through its owning canary module.
+
+    Control composes the attested initial receipt but must not import a worker
+    or provider execution module to validate it. This creates no new admission.
+    """
+    from control_plane.codex_worker import validate_secret_canary_verdict
+    return validate_secret_canary_verdict(verdict, require_passed=True)
+
+
 __all__ = [
     "REQUIRED_CHECKS",
     "WORKER_AUTH_EXCEPTION",
@@ -374,4 +396,145 @@ __all__ = [
     "SecretCanaryError",
     "run_secret_canary",
     "validate_secret_canary_binding",
+    "validate_initial_secret_canary_verdict",
 ]
+
+
+@dataclasses.dataclass(frozen=True)
+class AttendedCanaryBinding:
+    """One immutable assignment coordinate set; evidence input, never a grant."""
+    spec: Any
+    execution_profile_id: str
+    harness_binding_id: str
+    physical_binding_sha256: str
+    provider_home: Path
+
+    def validator_arguments(self):
+        return dict(spec=self.spec, execution_profile_id=self.execution_profile_id,
+                    harness_binding_id=self.harness_binding_id,
+                    physical_binding_sha256=self.physical_binding_sha256,
+                    provider_home=str(self.provider_home))
+
+
+def _attended_document(config, binding, principal, observed_at):
+    from control_plane.codex_worker import validate_attended_claude_secret_canary, LaunchValidationError
+    from control_plane.worker_execution_contract import WorkerLaunchSpec, OrchestrationLaunchSpec
+    from control_plane.subscription_harness_bindings import get_binding
+    _validate_config(config)
+    _validate_principal(config, principal)
+    if (type(binding) is not AttendedCanaryBinding
+            or type(binding.spec) not in (WorkerLaunchSpec, OrchestrationLaunchSpec)
+            or not isinstance(binding.provider_home, Path)
+            or binding.provider_home != config.codex_home):
+        raise SecretCanaryError("CANARY_ASSIGNED_REALM_INVALID")
+    catalog = get_binding(binding.harness_binding_id)
+    if catalog.implementation_state == "SPEC_ONLY" or catalog.autonomous_allowed:
+        raise SecretCanaryError("CANARY_ASSIGNED_REALM_INVALID")
+    realm = {k:v for k,v in binding.validator_arguments().items() if k != "spec"}
+    realm.update(run_id=binding.spec.run_id, job_id=binding.spec.job_id,
+                 worker_id=binding.spec.worker_id)
+    # Validate exact canonical scope before any probe, then compute a new
+    # commitment only from this invocation's observed principal and checks.
+    document = dict(schema_version="mastermind.executive_secret_canary/v2", passed=True,
+        checks=dict.fromkeys(REQUIRED_CHECKS,"DENIED"), observed_at=observed_at,
+        receipt_sha256="0"*64,
+        control_environment_probe_sha256=config.control_environment_probe_sha256,
+        worker_auth_exception="ASSIGNED_CLAUDE_PROVIDER_REALM_ONLY", realm_binding=realm)
+    try:
+        validate_attended_claude_secret_canary(document, **binding.validator_arguments())
+    except (LaunchValidationError, ValueError, TypeError):
+        raise SecretCanaryError("CANARY_ASSIGNED_REALM_INVALID") from None
+    protected = (config.administrative_checkout_sentinel, *_database_paths(config.executive_database),
+                 config.other_worker_home_sentinel, config.forbidden_production_sentinel)
+    if config.codex_home / "provider-credential" in protected:
+        raise SecretCanaryError("CANARY_CONFIGURATION_INVALID")
+    document["receipt_sha256"] = _receipt_sha256(config=config, principal=principal,
+        checks=document["checks"], observed_at=observed_at, attended_realm=realm)
+    return document
+
+
+def _require_attended_realm(config, binding, realm_owner):
+    from control_plane.codex_provider_realm import SubscriptionRealmOwner, _native_read_config
+    if type(realm_owner) is not SubscriptionRealmOwner:
+        raise SecretCanaryError("CANARY_REALM_OWNER_REQUIRED")
+    observed = realm_owner.observe()
+    original = _native_read_config(realm_owner._config_path, realm_owner._config_sha256)
+    if (observed["worker_id"] != binding.spec.worker_id
+            or observed["binding_id"] != binding.harness_binding_id
+            or observed["control_uid"] != config.control_uid
+            or original.get("worker_uid") != config.expected_worker_uid
+            or original.get("worker_gid") != config.expected_worker_gid
+            or original.get("control_gid") != config.control_gid
+            or original.get("provider_home") != str(binding.provider_home)):
+        raise SecretCanaryError("CANARY_ASSIGNED_REALM_INVALID")
+    return observed
+
+
+def _run_attended_secret_canary(config: SecretCanaryConfig, binding: AttendedCanaryBinding,
+                               *, realm_owner, clock: ClockFunction | None = None):
+    """New real V2 probe under the actual worker principal. No public fake opener.
+
+    The installed original probe owner supplies protected targets and its typed
+    realm. This produces evidence only; Runtime/Control retain task authority.
+    """
+    from control_plane.codex_provider_realm import (
+        _require_provider_home, _open_regular_credential, _has_macos_acl,
+        _native_stat_identity, PROVIDER_CREDENTIAL_FILENAME,
+    )
+    principal = PrincipalIdentity.current()
+    document = _attended_document(config, binding, principal, _observed_at(clock))
+    before = _require_attended_realm(config, binding, realm_owner)
+    if config.control_environment_sentinel in os.environ:
+        raise SecretCanaryError("CANARY_CONTROL_ENVIRONMENT_VISIBLE")
+    home = binding.provider_home
+    _require_provider_home(home, expected_uid=config.expected_worker_uid, expected_gid=config.expected_worker_gid)
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    fd = None
+    try:
+        home_info = os.fstat(home_fd)
+        path = home / PROVIDER_CREDENTIAL_FILENAME
+        fd, info = _open_regular_credential(path, path.lstat(),
+            expected_uid=config.expected_worker_uid, expected_gid=config.expected_worker_gid)
+        if (_has_macos_acl(path, expected_identity=info, descriptor=fd)
+                or _native_stat_identity(info) != _native_stat_identity(path.lstat())
+                or _native_stat_identity(home_info) != _native_stat_identity(home.lstat())):
+            raise SecretCanaryError("CANARY_DEDICATED_AUTH_NOT_OPENABLE")
+        # Hold the original inodes across every probe and the final owner read.
+        # No credential byte is read; valid replacement is still replacement.
+        _probe_protected_paths(config, opener=os.open, closer=os.close)
+        _require_provider_home(home, expected_uid=config.expected_worker_uid, expected_gid=config.expected_worker_gid)
+        if before != _require_attended_realm(config, binding, realm_owner):
+            raise SecretCanaryError("CANARY_REALM_CHANGED_DURING_PROBE")
+        for held, original, named in ((home_fd, home_info, home), (fd, info, path)):
+            if (_native_stat_identity(original) != _native_stat_identity(os.fstat(held))
+                    or _native_stat_identity(original) != _native_stat_identity(named.lstat())):
+                raise SecretCanaryError("CANARY_REALM_CHANGED_DURING_PROBE")
+        if principal != PrincipalIdentity.current():
+            raise SecretCanaryError("CANARY_PRINCIPAL_MISMATCH")
+    finally:
+        if fd is not None: os.close(fd)
+        os.close(home_fd)
+    return document
+
+
+def validate_attended_secret_canary_binding(config: SecretCanaryConfig,
+        binding: AttendedCanaryBinding, principal: PrincipalIdentity, verdict: Mapping[str, Any]):
+    """Original owner checks exact V2 commitment. This cannot issue a new probe."""
+    from control_plane.codex_worker import validate_attended_claude_secret_canary, LaunchValidationError
+    try:
+        document = validate_attended_claude_secret_canary(verdict, **binding.validator_arguments())
+    except (LaunchValidationError, ValueError, TypeError, AttributeError):
+        raise SecretCanaryError("CANARY_RECEIPT_SHAPE_INVALID") from None
+    expected = _attended_document(config, binding, principal, document["observed_at"])
+    if document != expected:
+        raise SecretCanaryError("CANARY_RECEIPT_BINDING_MISMATCH")
+    return document
+
+
+def run_attended_secret_canary(config: SecretCanaryConfig, binding: AttendedCanaryBinding,
+                               *, realm_owner, clock: ClockFunction | None = None):
+    from control_plane.codex_provider_realm import ProviderRealmError
+    try:
+        return _run_attended_secret_canary(config, binding, realm_owner=realm_owner, clock=clock)
+    except (OSError, ProviderRealmError, ValueError, TypeError, KeyError):
+        raise SecretCanaryError("CANARY_ASSIGNED_REALM_UNAVAILABLE") from None

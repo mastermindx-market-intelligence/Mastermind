@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mastermind Quant Validation"
+  short_description: "Falsify leakage and evaluate out-of-sample robustness"

@@ -1,0 +1,72 @@
+{
+  "fixture_scope": "Actual sealed canonical owner/real temporary Git/parser46e3/helper020942. Synthetic repositories, not installed/live proof.",
+  "cases": {
+    "supplied": {
+      "availability": "AVAILABLE",
+      "declaration": "SUPPLIED",
+      "instructions": [
+        {
+          "instruction_ref": "INS:DAILY-ONE",
+          "revision": "760e1ee67cfaaf72cc9cc1fae0ab53b7f10254fdcdcf61e9257e7f9627138f05",
+          "text": "复查项目 🎯"
+        }
+      ],
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_instructions.v1",
+      "selection": {
+        "work_ref": "WS:ONE"
+      },
+      "source": {
+        "commit": "8e923a18fcb9420214c10fced178fc40294aa710",
+        "content_sha256": "fdf9da5ce558d9b7c0a48e62c730dd3645b5c00e890f4d37667f56a2194c5a57",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      }
+    },
+    "empty": {
+      "availability": "AVAILABLE",
+      "declaration": "SUPPLIED",
+      "instructions": [],
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_instructions.v1",
+      "selection": {
+        "work_ref": "WS:ONE"
+      },
+      "source": {
+        "commit": "3d2a42ed86d98f2719678d182b1c693d3276adab",
+        "content_sha256": "ab59a173c4a67683bbe391fe733c204cabd28aba0b07ca1ff3765f53073e2d0f",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      }
+    },
+    "absent": {
+      "availability": "AVAILABLE",
+      "declaration": "NOT_DECLARED",
+      "instructions": [],
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_instructions.v1",
+      "selection": {
+        "work_ref": "WS:ONE"
+      },
+      "source": {
+        "commit": "749df66ae7cf0d3c1d551a1dc241ddea749b22e5",
+        "content_sha256": "dc584d715fc0cc3691295cb8a58e4464abe241ad67329abd52a9c3d1c05df04e",
+        "path": "agentos/workstreams/WS-ONE.md",
+        "repository": "mastermindx-market-intelligence/macro"
+      }
+    },
+    "unavailable": {
+      "availability": "UNAVAILABLE",
+      "declaration": null,
+      "instructions": null,
+      "reason_codes": [
+        "SOURCE_UNAVAILABLE"
+      ],
+      "schema": "mastermind.workspace_project_instructions.v1",
+      "selection": {
+        "work_ref": "WS:ONE"
+      },
+      "source": null
+    }
+  }
+}
