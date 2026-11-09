@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mastermind Long Horizon"
+  short_description: "Preserve scope, focus one task, verify and continue"
+  default_prompt: "Use $mastermind-long-horizon to advance the assigned project without losing scope across steering or compaction."

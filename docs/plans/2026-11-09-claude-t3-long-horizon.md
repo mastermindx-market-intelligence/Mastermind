@@ -22,12 +22,12 @@ Completion requires primary-source research, an exact-version incumbent/donor co
 
 | ID | Dependencies | Editorial state | Outcome and acceptance |
 | --- | --- | --- | --- |
-| R1 | none | in_progress | Separate documented Claude task tools, goals, planning, hooks, compaction, memory, subagents and empirical harness patterns from inferred/private internals. Preserve primary references and limitations. |
-| R2 | R1 | in_progress | Inspect exact T3 upstream and installed surfaces; identify capabilities already present, actual gaps, integration seams and active writers. |
-| I1 | R2 | proposed | Implement the smallest missing long-horizon composition through existing owners, with stable task/dependency/evidence identity, steering/recovery semantics and no shadow lifecycle. |
-| I2 | I1 | proposed | Add a narrowly scoped reusable execution skill/instructions and exact native integration path. Prove loading/behavior only when actually observed; retain any provider or rollout gate. |
-| D1 | R2 | proposed | Extend existing Mastermind OS Code/Project experience with task focus, plan/evidence, steering/resume and degraded states; inspect editable Paper readback/screenshots. |
-| V1 | I1,I2,D1 | proposed | Run negative/positive checks for scope preservation, dependency ordering, stale plans, interrupted effects, bounded completion and exact owner integration. Publish one qualified PR and consume allowed release; distinguish remaining installed/consumer proof. |
+| R1 | none | verified | Separate documented Claude task tools, goals, planning, hooks, compaction, memory, subagents and empirical harness patterns from inferred/private internals. Preserve primary references and limitations. |
+| R2 | R1 | verified | Inspect exact T3 upstream and installed surfaces; identify capabilities already present, actual gaps, integration seams and active writers. |
+| I1 | R2 | source verified | Implement the smallest missing long-horizon composition through existing owners, with stable task/dependency/evidence identity, steering/recovery semantics and no shadow lifecycle. |
+| I2 | I1 | source verified; native loading unproven | Add a narrowly scoped reusable execution skill/instructions and exact native integration path. Prove loading/behavior only when actually observed; retain any provider or rollout gate. |
+| D1 | R2 | verified | Extend existing Mastermind OS Code/Project experience with task focus, plan/evidence, steering/resume and degraded states; inspect editable Paper readback/screenshots. |
+| V1 | I1,I2,D1 | delivery in progress; native consumer pending | Run negative/positive checks for scope preservation, dependency ordering, stale plans, interrupted effects, bounded completion and exact owner integration. Publish one qualified PR and consume allowed release; distinguish remaining installed/consumer proof. |
 
 ## Acceptance scenarios
 
@@ -42,6 +42,18 @@ Completion requires primary-source research, an exact-version incumbent/donor co
 
 ## Current evidence and next action
 
-Protected procedure and relevant continuity/delivery/Paper source have been read at the pinned revision. Managed source workspace acquisition returned APPLIED with the exact base/branch above; initial source status is clean. Existing T3 source already contains native continuation services, proposed-plan components and provider orchestration instructions; inspect these before choosing implementation. Native launch availability is not inferred from the installed app or adjacent PR claims.
+Research, exact donor/incumbent comparison, implementation, activation/rollback boundaries and the OS build contract are recorded in [the research and implementation report](../research/2026-11-09-claude-t3-long-horizon.md).
 
-Next: finish exact donor/installed capability mapping, choose the smallest load-bearing addition, and implement/test it while separately advancing the grounded Paper journey. Save material results here, read back committed bytes, and continue rather than treating this plan save as completion.
+Implemented the read-only source-plan projection, optional plan binding in the incumbent SessionStart hook, canonical long-horizon skill plus Claude/Codex repository wrappers, and the single documented Claude task-tool opt-in. No provider/account/permission setting, global hook, task registry or native continuation service was changed.
+
+Final focused checks: `python3 -m pytest -o addopts='' -q tests/test_project_task_context.py tests/test_agentos_session_start.py` returned **102 passed in 2.61s** (Studio process 54770, exit 0). `git diff --check` passed. The final regression preserves healthy Agent OS context when the optional plan cannot be read. Earlier byte compilation passed; source tests exercise the final hook after that regression.
+
+Paper file `01M3NRCX55B452A12819WNE1RH` now contains four editable, screenshot-reviewed boards: LH01 `1MO8-0` and LH02 `1N1Y-0` on Product `p-U-0`; LH03 `1N5Q-0` on States `p-W-0`; LH06 `1N9I-0` on Build `p-X-0`. The final header was read back, and `claude-t3-long-horizon-20261109-release-owned-boards` released only these four working indicators with `APPLIED_RESPONSE_OBSERVED`. Existing accepted boards are preserved. These boards are design/build contracts, not live runtime proof.
+
+The installed T3 0.1.7 native CLI successfully reads the existing Mastermind project `bc18d268-d100-484a-8952-3ce2b0b0a66b`, environment `5f4cd5f0-e3df-407d-af02-1aa833637937`. Its source checkout is separate from this managed worktree. Its inherited default GLM2 and fallback providers are disabled, while enabled Capacity Fabric instances and another user-owned running engineering thread are present. This is configuration drift, not a blanket T3 outage or security denial. No provider launch or default-route mutation was attempted. The exposed Executive native continuation target list for kind `claude` is empty; no addressable target or native dispatch receipt was invented.
+
+Protected master advanced to `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09`; its observed delta from the retained pin is disjoint T3-web-client, Terminal Paper migration and experiment work. Applicable source law and this lane's changed files did not change. Do not ancestry-rebase solely for that delta.
+
+Next: publish this one owned diff, open a Ready PR and use permitted native merge-on-green. Then consume the accepted source in an owned T3 worktree and prove actual skill loading, source restoration, steering retention and bounded native progression through the existing provider/admission owner. Preserve the active engineering program and its settings. Source tests, repository discovery files and editable design are not a live-model or fleet-rollout acceptance claim.
+
+DO_NOT_REDO: accepted research, existing T3 native task/goal/continuation services, four completed Paper boards, and the passing source checks absent an affected change. No uncertain source or Paper effect remains outstanding.
