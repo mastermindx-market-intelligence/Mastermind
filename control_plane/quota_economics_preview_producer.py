@@ -178,6 +178,8 @@ def read_broker_observation(broker_db_path: object) -> dict[str, Any]:
         _refuse("QUOTA_PREVIEW_BROKER_UNAVAILABLE", str(error))
     try:
         cursor = connection.cursor()
+        # Pin all counters and cooldowns to one read-only WAL snapshot.
+        cursor.execute("BEGIN")
         generation = int(
             cursor.execute("SELECT COUNT(*) FROM leases").fetchone()[0]
         )
@@ -208,8 +210,8 @@ def read_broker_observation(broker_db_path: object) -> dict[str, Any]:
             cursor.execute("SELECT COUNT(*) FROM waiters").fetchone()[0]
         )
         cooldowns = []
-        for scope, observed_at, until_ts, failures, kind, mode in cursor.execute(
-            "SELECT scope, observed_at, until_ts, failures, kind, mode "
+        for scope, observed_at, until_ts, failures, kind, mode, soft_cap in cursor.execute(
+            "SELECT scope, observed_at, until_ts, failures, kind, mode, soft_cap "
             "FROM quota_cooldowns"
         ):
             cooldowns.append(
@@ -220,6 +222,7 @@ def read_broker_observation(broker_db_path: object) -> dict[str, Any]:
                     "failures": failures if type(failures) is int else None,
                     "kind": str(kind) if kind is not None else None,
                     "mode": str(mode) if mode is not None else None,
+                    "soft_cap": soft_cap if type(soft_cap) is int else None,
                 }
             )
     except sqlite3.Error as error:
@@ -264,7 +267,12 @@ def _load_projection(projection_path: object) -> tuple[dict[str, Any], str]:
             "QUOTA_PREVIEW_PROJECTION_INVALID",
             "pools and shared_quota_resources must be non-empty sequences",
         )
-    return dict(projection), _sha256_file(path)
+    return dict(projection), hashlib.sha256(raw).hexdigest()
+
+
+def _bounded_percentage(value: object) -> float | int | None:
+    number = _bounded_number(value)
+    return number if number is not None and 0 <= number <= 100 else None
 
 
 def _pool_windows_usage(pool: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -281,7 +289,7 @@ def _pool_windows_usage(pool: Mapping[str, Any]) -> dict[str, Any] | None:
     for window in windows.values():
         if not isinstance(window, Mapping):
             continue
-        remaining = _bounded_number(window.get("remaining_pct"))
+        remaining = _bounded_percentage(window.get("remaining_pct"))
         observed_at = _iso_z(window.get("observed_at"))
         if remaining is not None and observed_at is not None:
             return {
@@ -333,9 +341,11 @@ def _merge_resources(
             },
         )
         if row.get("kind") == "inline_key_bucket":
+            if resource["inline"] is not None:
+                _refuse("QUOTA_PREVIEW_PROJECTION_INVALID", "duplicate inline quota resource")
             resource["sources"].append("inline_key_bucket")
             # Usage observation only; caps and readiness stay canonical.
-            resource["inline"] = {"pct_7d": _bounded_number(row.get("pct_7d"))}
+            resource["inline"] = {"pct_7d": _bounded_percentage(row.get("pct_7d"))}
             continue
         resource["sources"].append("canonical")
         if resource["sources"].count("canonical") > 1:
@@ -359,7 +369,7 @@ def _merge_resources(
 def _attribute_cooldowns(
     broker: Mapping[str, Any],
     merged: Mapping[tuple[str, str], Mapping[str, Any]],
-) -> tuple[dict[tuple[str, str], Mapping[str, Any]], list[str]]:
+) -> tuple[dict[tuple[str, str], list[Mapping[str, Any]]], list[str]]:
     """Attribute broker cooldown scopes to (provider, account) resources.
 
     A scope like ``bailian-adaptive429:Kris`` is attributed only when the
@@ -367,7 +377,7 @@ def _attribute_cooldowns(
     known resource; anything else (e.g. ``declared:<provider>:<sha>``) stays
     unassigned and is reported, never guessed.
     """
-    attributed: dict[tuple[str, str], Mapping[str, Any]] = {}
+    attributed: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     unassigned: list[str] = []
     for cooldown in broker.get("cooldowns", ()):
         scope = cooldown.get("scope")
@@ -386,7 +396,10 @@ def _attribute_cooldowns(
         if match is None:
             unassigned.append(scope)
         else:
-            attributed[match] = cooldown
+            attributed.setdefault(match, []).append(cooldown)
+    for rows in attributed.values():
+        rows.sort(key=lambda item: (str(item.get("scope")), str(item.get("mode")),
+                                   str(item.get("until")), str(item.get("soft_cap"))))
     return attributed, unassigned
 
 
@@ -432,6 +445,10 @@ def produce_quota_economics_preview(
     broker = read_broker_observation(broker_db_path)
     broker_path = Path(broker_db_path)
     broker_sha256 = _sha256_file(broker_path)
+    # The database file omits uncheckpointed WAL data. Bind preview identity
+    # to the actual single-transaction observation while retaining file provenance.
+    broker_snapshot = {**broker, "cooldowns": sorted(broker["cooldowns"], key=_canonical_bytes)}
+    broker_snapshot_sha256 = hashlib.sha256(_canonical_bytes(broker_snapshot)).hexdigest()
 
     merged, pools = _merge_resources(projection)
     cooldowns, unassigned_scopes = _attribute_cooldowns(broker, merged)
@@ -524,6 +541,9 @@ def produce_quota_economics_preview(
         "broker": {
             "path": str(broker_path),
             "sha256": broker_sha256,
+            "sha256_basis": "main_database_file_bytes_excludes_uncheckpointed_wal",
+            "snapshot_sha256": broker_snapshot_sha256,
+            "snapshot_basis": "single_read_only_sqlite_transaction",
             "opened_mode": "ro",
             "generation": broker["generation"],
             "leases_by_state": broker["leases_by_state"],
@@ -545,6 +565,7 @@ def produce_quota_economics_preview(
                 "observed_at": observed_at,
                 "projection_sha256": projection_sha256,
                 "broker_sha256": broker_sha256,
+                "broker_snapshot_sha256": broker_snapshot_sha256,
             }
         )
     ).hexdigest()
@@ -574,7 +595,7 @@ def _build_resource_row(
     observed_at: datetime,
     expires_at: str,
     broker: Mapping[str, Any],
-    cooldown: Mapping[str, Any] | None,
+    cooldown: Sequence[Mapping[str, Any]] | None,
     pool_usage: Mapping[str, Any] | None,
     projection_produced_at: str | None,
 ) -> dict[str, Any]:
@@ -614,6 +635,9 @@ def _build_resource_row(
     elif enabled_flag == "auto" or pool_enabled == "auto":
         readiness = "auto_unresolved"
         reasons.append("enabled_flag_auto_unresolved")
+    elif enabled_flag is not True or pool_enabled is not True:
+        readiness = "unavailable"
+        reasons.append("enabled_configuration_unqualified")
     elif owner_parked:
         readiness = "parked"
     else:
@@ -672,36 +696,54 @@ def _build_resource_row(
         # unobserved bucket stays unavailable for autonomous placement.
         reasons.append("quota_unknown_no_bounded_unknown_mode_authorized")
 
-    # Cooldowns: broker-observed cooldown wins; a park deadline is carried
-    # only when no broker cooldown exists for the same resource.
+    # Preserve every attributed observation. The incumbent account_cap uses
+    # an exact default scope as HARD; qualified adaptive Bailian SOFT feedback
+    # only lowers its concurrency ceiling and must not become a HARD denial.
     cooldown_until: str | None = None
-    cooldown_source: str | None = None
-    if cooldown is not None:
-        cooldown_until = cooldown.get("until")
-        cooldown_source = "lease_broker_quota_cooldown"
-        until_dt = (
-            datetime.strptime(cooldown_until, "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=timezone.utc
-            )
-            if cooldown_until is not None
-            else None
-        )
-        if until_dt is not None and until_dt > observed_at:
-            reasons.append("cooldown_active")
-        elif until_dt is not None:
-            reasons.append("cooldown_elapsed")
-    elif owner_parked and parked_until_raw is not None:
+    cooldown_source = "lease_broker_quota_cooldown" if cooldown else None
+    effective_cap = configured_cap
+    hard_blocked = False
+    cooldown_active = False
+    for entry in cooldown or ():
+        until_text = entry.get("until")
+        until_dt = (datetime.strptime(until_text, "%Y-%m-%dT%H:%M:%SZ")
+                    .replace(tzinfo=timezone.utc)) if until_text is not None else None
+        if until_text is not None:
+            cooldown_until = max(cooldown_until or until_text, until_text)
+        active = until_dt is not None and until_dt > observed_at
+        cooldown_active = cooldown_active or active
+        if entry.get("scope") == resource_ref:
+            if until_dt is None or active:
+                hard_blocked = True
+                effective_cap = 0
+            elif effective_cap is not None:
+                effective_cap = min(effective_cap, 1)  # incumbent half-open bound
+        elif (provider == "bailian"
+              and entry.get("scope") == f"bailian-adaptive429:{account}"
+              and entry.get("mode") == "SOFT" and active):
+            soft_cap = entry.get("soft_cap")
+            if type(soft_cap) is int and soft_cap >= 3 and effective_cap is not None:
+                effective_cap = min(effective_cap, soft_cap)
+    if cooldown_active:
+        reasons.append("cooldown_active")
+    elif cooldown_until is not None:
+        reasons.append("cooldown_elapsed")
+    if hard_blocked:
+        reasons.append("hard_cooldown_blocks_preview")
+    elif effective_cap != configured_cap:
+        reasons.append("broker_cooldown_lowers_concurrency")
+    if not cooldown and owner_parked and parked_until_raw is not None:
         cooldown_until = parked_until_raw
         cooldown_source = "registry_parked_until"
 
     # Admission eligibility for autonomous placement (preview-only verdict).
-    eligible = True
+    eligible = not hard_blocked
     if readiness != "ready":
         eligible = False
     if configured_cap is None:
         reasons.append("no_configured_concurrency_cap")
         eligible = False
-    if active_slots + reserved_slots >= (configured_cap or 0):
+    if active_slots + reserved_slots >= (effective_cap or 0):
         reasons.append("concurrency_cap_reached")
         eligible = False
     if quota_knowledge == "observed" and remaining is not None and remaining <= 0:
@@ -709,14 +751,25 @@ def _build_resource_row(
         eligible = False
     if quota_knowledge == "unknown":
         eligible = False
+    if quota_knowledge == "observed":
+        if quota_observed_at is None:
+            remaining = None
+            remaining_basis = None
+            quota_knowledge = "unknown"
+            reasons.append("quota_observation_timestamp_unqualified")
+            eligible = False
+        else:
+            observed_dt = datetime.strptime(
+                quota_observed_at, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            if observed_dt > observed_at:
+                reasons.append("quota_observation_in_future")
+                eligible = False
+            elif (observed_at - observed_dt) > timedelta(days=7):
+                reasons.append("quota_observation_stale")
+                eligible = False
     if eligible:
         reasons.insert(0, "eligible_in_preview")
-    if quota_knowledge == "observed" and quota_observed_at is not None:
-        observed_dt = datetime.strptime(
-            quota_observed_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-        if (observed_at - observed_dt) > timedelta(days=7):
-            reasons.append("quota_observation_stale")
     if quota_source == "bailian_inline_7d_local_reconstruction":
         reasons.append("quota_source_local_reconstruction")
 
@@ -746,6 +799,7 @@ def _build_resource_row(
         "readiness_state": readiness,
         "configured_concurrency_cap": configured_cap,
         "configured_cap_basis": cap_basis,
+        "broker_limited_concurrency_cap": effective_cap,
         "active_slots": active_slots,
         "reserved_slots": reserved_slots,
         "remaining_quota": remaining,
@@ -810,7 +864,7 @@ def _build_option(
     model_alias = _resolve_model_alias(pool)
     if model_alias is None:
         return None
-    cap = row["configured_concurrency_cap"]
+    cap = row["broker_limited_concurrency_cap"]
     if type(cap) is not int or cap <= 0:
         return None
     estimate = max(0, cap - row["active_slots"] - row["reserved_slots"])
@@ -831,7 +885,11 @@ def _build_option(
         "estimated_startable_jobs": estimate,
         "suggested_parallelism": estimate,
         "expiry_pressure_jobs_per_hour": None,
-        "estimate_basis": "configured_concurrency_minus_broker_active_reserved",
+        "estimate_basis": (
+            "configured_concurrency_minus_broker_active_reserved"
+            if cap == row["configured_concurrency_cap"] else
+            "configured_concurrency_limited_by_broker_cooldown_minus_active_reserved"
+        ),
     }
 
 
