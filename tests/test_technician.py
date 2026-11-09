@@ -244,3 +244,35 @@ def test_flag_registered_in_known_flags_and_authority_map():
                            / "config" / "authority_map.yml").read_text())
     entry = (amap.get("flags") or {}).get("MASTERMIND_TECHNICIAN")
     assert entry is not None and entry.get("authority_level") == "A4"
+
+
+def test_native_persistence_does_not_require_optional_fabric_owner(monkeypatch, tmp_path):
+    monkeypatch.setattr(T, "_ARTIFACTS", tmp_path)
+    monkeypatch.setattr(T.cli_bridge, "_application_fabric_selected", lambda: False)
+    monkeypatch.setattr(T.cli_bridge, "available", lambda: True)
+    monkeypatch.setattr(T.cli_bridge, "reason_sync",
+                        lambda *a, **kw: {"ok": True, "text": '{"verdict":"staged_starter","confidence":0.6}'})
+    def unavailable():
+        raise ImportError("synthetic optional Macro owner absent")
+    monkeypatch.setattr(T, "_fabric_owner", unavailable)
+    verdict = T.run("NVDA", entry_signal={}, tech={}, asof="2026-11-06")
+    assert verdict["verdict"] == "staged_starter"
+    path = tmp_path / "2026-11-06/NVDA/technician.json"
+    assert json.loads(path.read_text())["verdict"] == verdict
+
+
+def test_native_writer_uses_same_lock_as_selected_artifact(monkeypatch, tmp_path):
+    import fcntl
+    import os
+    monkeypatch.setattr(T, "_ARTIFACTS", tmp_path)
+    monkeypatch.setattr(T.cli_bridge, "_application_fabric_selected", lambda: False)
+    path = tmp_path / "2026-11-06/NVDA/technician.json"
+    path.parent.mkdir(parents=True)
+    fd = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            T._write_artifact("2026-11-06", "NVDA", {"ticker": "NVDA"}, T._wait("fixture"))
+        assert not path.exists()
+    finally:
+        os.close(fd)

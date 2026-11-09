@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,11 @@ from typing import Any
 import pytest
 import yaml
 
+import control_plane.executive_authority as executive_authority_module
 from control_plane.executive_authority import (
     PHASE1B_ALLOWED,
     PHASE1B_REQUIRED_DENIES,
+    AuthorityDecision,
     AuthorityDenied,
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
@@ -21,7 +24,9 @@ from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyErr
 
 _ROOT = Path(__file__).resolve().parent.parent
 _POLICY_PATH = _ROOT / "config" / "authority_map.yml"
-_EXPECTED_ALLOWED = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
+_EXPECTED_ALLOWED = frozenset(
+    {"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS", "REQUEST_WORKER_LOGIN_CHECK"}
+)
 _EXPECTED_REQUIRED_DENIES = frozenset(
     {
         "OPEN_PR",
@@ -47,6 +52,7 @@ def _canonical_section() -> dict[str, Any]:
         "scope_requirements": {
             "WRITE_BRANCH": "assigned_workspace_and_declared_paths",
             "RUN_TESTS": "declared_argv_commands",
+            "REQUEST_WORKER_LOGIN_CHECK": "current_attempt_assigned_worker_slot",
         },
     }
 
@@ -388,6 +394,11 @@ def test_allowed_and_denied_overlap_fails_closed(tmp_path):
     [
         ("WRITE_BRANCH", "repository_wide", "workspace and path scoped"),
         ("RUN_TESTS", "shell_commands", "declared argv commands"),
+        (
+            "REQUEST_WORKER_LOGIN_CHECK",
+            "worker_selected_at_runtime",
+            "current-attempt assigned worker slot",
+        ),
     ],
 )
 def test_scope_requirement_drift_fails_closed(tmp_path, capability, scope, message):
@@ -396,3 +407,160 @@ def test_scope_requirement_drift_fails_closed(tmp_path, capability, scope, messa
 
     with pytest.raises(AuthorityPolicyError, match=message):
         ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_scope_requirement_deleted_fails_closed(tmp_path):
+    section = _canonical_section()
+    del section["scope_requirements"]["REQUEST_WORKER_LOGIN_CHECK"]
+
+    with pytest.raises(AuthorityPolicyError, match="current-attempt assigned worker slot"):
+        ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_capability_requires_code_constant_not_yaml_alone(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        executive_authority_module,
+        "PHASE1B_ALLOWED",
+        frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"}),
+    )
+    section = _canonical_section()
+
+    with pytest.raises(AuthorityPolicyError, match="allow-list drifted"):
+        ExecutiveAuthorityPolicy.load(_write_section(tmp_path, section))
+
+
+def test_worker_readiness_capability_is_declarative_and_needs_no_evidence():
+    policy = ExecutiveAuthorityPolicy.load(_POLICY_PATH)
+
+    assert policy.scope_requirements["REQUEST_WORKER_LOGIN_CHECK"] == (
+        "current_attempt_assigned_worker_slot"
+    )
+
+    decision = policy.authorize("REQUEST_WORKER_LOGIN_CHECK")
+
+    assert decision.to_dict() == {
+        "requested": ["REQUEST_WORKER_LOGIN_CHECK"],
+        "policy_sha256": policy.sha256,
+        "policy_schema_version": 1,
+        "worktree": None,
+        "allowed_write_paths": [],
+        "validation_commands": [],
+    }
+
+
+def test_worker_readiness_authority_decision_gains_no_new_fields():
+    field_names = {field.name for field in dataclasses.fields(AuthorityDecision)}
+
+    assert field_names == {
+        "requested",
+        "policy_sha256",
+        "policy_schema_version",
+        "worktree",
+        "allowed_write_paths",
+        "validation_commands",
+    }
+
+
+# The existing ReleaseControllerPolicy consumes this same authority-map
+# source under a 2 MiB ceiling. COO applies its own acquisition gate and parser.
+_BOUNDED_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _record_coo_policy_source_reads(monkeypatch, selected):
+    original_open = Path.open
+    requests, handles = [], []
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            value = self.handle.read(size)
+            requests.append((size, len(value)))
+            return value
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path != selected:
+            return handle
+        handles.append(handle)
+        return Reader(handle)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    return requests, handles
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_bounded_policy_source_coo_exact_limit_preserves_raw_digest(
+    tmp_path, monkeypatch, newline,
+):
+    import control_plane.executive_coo_policy as policy_module
+    expected = CooCyclePolicy.load(_POLICY_PATH)
+    raw = _POLICY_PATH.read_bytes().replace(b"\n", newline)
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    assert raw.endswith(newline) and len(raw) + 1 < limit
+    raw += b"#" + b"x" * (limit - len(raw) - 1)
+    selected = tmp_path / "bounded-authority.yml"
+    selected.write_bytes(raw)
+    requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
+    original_parse = policy_module._extract_block
+
+    def parse_after_close(value, block):
+        assert len(handles) == 1 and handles[0].closed
+        return original_parse(value, block)
+
+    monkeypatch.setattr(policy_module, "_extract_block", parse_after_close)
+    actual = CooCyclePolicy.load(selected)
+    assert actual.to_dict() == expected.to_dict()
+    assert actual.policy_sha256 == expected.policy_sha256
+    assert actual.source_sha256 == hashlib.sha256(raw).hexdigest()
+    assert requests == [(limit + 1, limit)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("fault", ["valid", "invalid_utf8", "multibyte"])
+def test_bounded_policy_source_coo_overflow_precedes_decode_and_parse(
+    tmp_path, monkeypatch, fault,
+):
+    import control_plane.executive_coo_policy as policy_module
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    raw = _POLICY_PATH.read_bytes()
+    if fault == "multibyte":
+        raw += b"#" + "é".encode("utf-8") * ((limit - len(raw)) // 2 + 1)
+        assert len(raw.decode("utf-8")) < limit < len(raw)
+    else:
+        raw += b"#" + b"x" * (limit - len(raw))
+        if fault == "invalid_utf8":
+            raw = b"\xff" + raw[1:]
+    selected = tmp_path / "over-limit-authority.yml"
+    selected.write_bytes(raw)
+    requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
+
+    def forbidden_parse(*_args, **_kwargs):
+        pytest.fail("over-limit COO policy source reached the parser")
+
+    monkeypatch.setattr(policy_module, "_extract_block", forbidden_parse)
+    with pytest.raises(CooCyclePolicyError, match="source exceeds byte limit"):
+        CooCyclePolicy.load(selected)
+    assert requests == [(limit + 1, limit + 1)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+def test_bounded_policy_source_coo_keeps_utf8_and_missing_file_refusals(tmp_path):
+    selected = tmp_path / "bad-authority.yml"
+    selected.write_bytes(b"\xff")
+    with pytest.raises(CooCyclePolicyError, match="not UTF-8") as caught:
+        CooCyclePolicy.load(selected)
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+    with pytest.raises(CooCyclePolicyError, match="unavailable") as missing:
+        CooCyclePolicy.load(tmp_path / "missing-authority.yml")
+    assert isinstance(missing.value.__cause__, FileNotFoundError)

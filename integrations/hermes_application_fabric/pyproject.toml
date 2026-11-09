@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mastermind-hermes-application-fabric"
+version = "0.1.0"
+description = "Native Hermes adapter for the existing Mastermind APPLICATION owner"
+requires-python = ">=3.11"
+dependencies = ["jsonschema==4.26.0", "PyYAML==6.0.3"]
+
+[tool.setuptools]
+packages = ["integrations.hermes_application_fabric"]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+"integrations.hermes_application_fabric" = "."
+
+[tool.setuptools.package-data]
+"integrations.hermes_application_fabric" = [
+  "attended-runtime-files.json", "plugin.yaml", "macro-source.json",
+  "model_provider/__init__.py", "model_provider/plugin.yaml",
+  "gateway_plugin_entry/__init__.py", "gateway_plugin_entry/plugin.yaml",
+]

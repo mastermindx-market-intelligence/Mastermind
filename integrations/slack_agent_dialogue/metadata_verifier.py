@@ -19,6 +19,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import BinaryIO, Mapping, Protocol, Sequence, TextIO
 
+from integrations.slack_executive.slack_web_api import _default_ssl_context
+
 SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
 RECEIPT_SCHEMA = "mastermind.slack_agent_dialogue.metadata_verification.v1"
 MAX_TOKEN_BYTES = 1024
@@ -94,7 +96,7 @@ class UrllibSlackAuthTestTransport:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self._timeout_seconds = timeout_seconds
-        self._ssl_context = ssl_context or ssl.create_default_context()
+        self._ssl_context = ssl_context if ssl_context is not None else _default_ssl_context()
 
     def request(self, *, token: str) -> HttpResult:
         request = urllib.request.Request(

@@ -1,0 +1,277 @@
+{
+  "schema": "mastermind.os.app_control_source_manifest.v1",
+  "protected_source_pin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "plan_admission_commit": "f39f6299218fc76be34569d5a89465229de10306",
+  "scope": "Candidate implementation, test and CI file bytes; compiled app is source proof only",
+  "live_acceptance": false,
+  "files": [
+    {
+      "path": ".github/workflows/mastermind-os.yml",
+      "bytes": 8584,
+      "sha256": "dc0e1797e1b5d9c37bc99d117df99899906d2aeb4cf7d74c6fcfb4e51b0686cc",
+      "git_blob": "2aa8ad170a78bf6684fdff608029314b02863d45"
+    },
+    {
+      "path": "app/mastermind_os/agent-control-proof.html",
+      "bytes": 301,
+      "sha256": "12cb0587200aa5e762174c241861a6f27bf49f43d1e5a4ddb92655dc59b918cd",
+      "git_blob": "c06b62f095004a6d98c63a6068ad9fa100fee3b4"
+    },
+    {
+      "path": "app/mastermind_os/src/App.tsx",
+      "bytes": 322558,
+      "sha256": "4d706e7e3fbd355ba4468c1bd3dd0157ffa158fb335b678571bfde523d5046e7",
+      "git_blob": "6acef1dac13ba0b598629918d8f4112c949f1f4d"
+    },
+    {
+      "path": "app/mastermind_os/src/agent-control/control.test.tsx",
+      "bytes": 16133,
+      "sha256": "5a798f89211bf3fcdfb2db85f184de876b4693fea3af101183a3dfeedbdec257",
+      "git_blob": "07d77c823eef7bcd9e9a0451e39e0a2b41c3c72f"
+    },
+    {
+      "path": "app/mastermind_os/src/agent-control/control.ts",
+      "bytes": 23030,
+      "sha256": "b99f2e0743f3f77ced2789f0b17534efd6dcca87f94dac71aeec7b0277cf8a24",
+      "git_blob": "f35057347bf44fb09bf9ae9a70be249d8d8d3bed"
+    },
+    {
+      "path": "app/mastermind_os/src/agent-control/install.ts",
+      "bytes": 3833,
+      "sha256": "4726ecd4f51196a683457f0a2803d6ac33deb7d84d7ae14a1dae456db3964793",
+      "git_blob": "6af2c61b6a331296dc28d7fe1b724c4f0e4a70ca"
+    },
+    {
+      "path": "app/mastermind_os/src/agent-control/proof.tsx",
+      "bytes": 2092,
+      "sha256": "faa7565e23c7ab574588186decdb8c359ef536773c53c517508a0fa360adcd1e",
+      "git_blob": "2795d44eb457492cbe41ef2ebd5e8673aad92638"
+    },
+    {
+      "path": "app/mastermind_os/src/agent-control/tools.json",
+      "bytes": 3884,
+      "sha256": "d92b03fc91b67fbc35eb3fc3dc0cf8e9bd0d155994189d5b5722731df8e2043c",
+      "git_blob": "28655708319a2207eb7ce7510d7ec1678f0cd9ca"
+    },
+    {
+      "path": "app/mastermind_os/src/main.tsx",
+      "bytes": 2863,
+      "sha256": "cd8261fa26e16b4546d5951de4680a02a79c7fd6bba685b757e45d2420f04b94",
+      "git_blob": "d07410de60cb605806271de415910a0e2d562ed0"
+    },
+    {
+      "path": "app/mastermind_os/vite.browser-proof.config.ts",
+      "bytes": 877,
+      "sha256": "d2b2c190aa011ae24884431fb18448e13504d2861fe578eb2f73c6393f3c3acb",
+      "git_blob": "0abb065a0641d6f87ef761f44da2d7d09d3dfe28"
+    },
+    {
+      "path": "control_plane/browser_resource_contract.py",
+      "bytes": 9919,
+      "sha256": "ee0080081a656b887bfe82d42ad81f96add4c8fdd256c439bb9a5bdcbea7a9ba",
+      "git_blob": "1eae99c4ef1789503a43407ddb1bc900ab549df1"
+    },
+    {
+      "path": "integrations/workbench_action_mcp/service.py",
+      "bytes": 36900,
+      "sha256": "bd66afc3b5e32268be3899400427a720f2e0d97fdb57f9020e8841012577903c",
+      "git_blob": "b7e75b424b98af2c0190ca8ca558a9c46a7321ff"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/app.py",
+      "bytes": 24831,
+      "sha256": "e86976d6ea94e8bee742a2dbf33f9f7ec27ac58fb489318a68c61e3aa224dcd9",
+      "git_blob": "91a19fa99bc77b196a3a1012878e23ff0aef0db1"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/browser_port.py",
+      "bytes": 33551,
+      "sha256": "45a71cb9c3ee5e7df56b58ee5605e5f3664e924f0f674561ed2cb8d3649a8e59",
+      "git_blob": "5cf1464d2eaf02f927f4ffe790588ba49f3b68c2"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/contracts.py",
+      "bytes": 18556,
+      "sha256": "a775d52583ba27227077a6edb755f684a5f7a674d60d7433b0263a81ad803749",
+      "git_blob": "6f6877db39e60ed187635a9a30a7a450617d806f"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/deployment.py",
+      "bytes": 11705,
+      "sha256": "52d862c0ab36acc73fb8fb2999ba57f34a5b4aa02f4eaf1b645cd1680641d263",
+      "git_blob": "5b56044c427259a475d21e17cc298a1256ef9e39"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/relay.py",
+      "bytes": 41308,
+      "sha256": "97e75056540e806e0dcfc422f4dcc9591075a1fc1a210bbd0a42520f4241d9f2",
+      "git_blob": "79abf0a01a6ba09d4c4de59bdc04584da7e9472d"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/resource_port.py",
+      "bytes": 40129,
+      "sha256": "16357c3f7f0c8070405b688d18a2db8130f9bcf2694c9bfe3dd5c60ef58209fb",
+      "git_blob": "62679c5e849b1d1e9932b6f484f79085a0070fe8"
+    },
+    {
+      "path": "integrations/workbench_browser_mcp/tunnel.py",
+      "bytes": 21773,
+      "sha256": "2671cff82478f9094de00f77d0f3656cdb5810da7b875606fcd6f530b1105980",
+      "git_blob": "02f63152104adeba5150f1e70f8b8c7bd44293b2"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/adapter.cjs",
+      "bytes": 4307,
+      "sha256": "c06de8a1b5c107589df025cafecb5b8278bfcd2d4a596b6491f8d82986a00305",
+      "git_blob": "1fb24a1934db8f4a38b1503fbab11ee0623521f0"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/adapter.test.cjs",
+      "bytes": 4646,
+      "sha256": "5927c0d7794a48f43f5d5e82e174afc7eda45716957f8a3977fd67a543bdfbba",
+      "git_blob": "8a02345b13dad3e7de561a36c17faffa178836bb"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/browser-proof.cjs",
+      "bytes": 8839,
+      "sha256": "718aec0b9112561b0b9ad7ca64ea700274edbd8449321fc18c312cc2a1547c76",
+      "git_blob": "69cbb24e3875d53d95bdad509a484b83af79be80"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/catalogue.cjs",
+      "bytes": 1042,
+      "sha256": "5c6880e96b15c27923c37f1c312b46da27263865440738ed87d80814817129af",
+      "git_blob": "6dc85fefa961f606e2bf12d34574efd86e96abaf"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/child.cjs",
+      "bytes": 3063,
+      "sha256": "09935017ef26f4e7b723bf2df2a27f0fc73022347ca9235a4a195e80970e6781",
+      "git_blob": "8e5d2b0cf3df69d870576978fd7fe048ebb2cd0b"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/connection.cjs",
+      "bytes": 3085,
+      "sha256": "4f0fafef2c0ad0da843655f0729147c8b16f34621c19128bf46a4f0cce36439c",
+      "git_blob": "28e844a00235fc97c114bc27686b97f99a03cd12"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/package-lock.json",
+      "bytes": 43094,
+      "sha256": "dae61f523457c781f78b20b86f4190e7a17d45caa40264623b06a8086441f726",
+      "git_blob": "2ae05f1fe18929617c6a81769932404afd9cc097"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/package.json",
+      "bytes": 259,
+      "sha256": "36b88ab394b46fa74853b2896a5667c361adc928c58c0ea33941ed040eb2e89c",
+      "git_blob": "2a6f9cdec41de89857c0021d31f49dfb98c1b875"
+    },
+    {
+      "path": "integrations/worker_browser_runtime/app-control/runtime.cjs",
+      "bytes": 1010,
+      "sha256": "ee7bf35b9e6533da742c65d70c3108ab485b18db2295c61e61f8927e9cb1cfbe",
+      "git_blob": "ed2fe47facf690970573428c0ca9582e2a55dee9"
+    },
+    {
+      "path": "tests/test_native_macos_ci.py",
+      "bytes": 9836,
+      "sha256": "f81d9b792fba37aa5b8787244f02b4ad901cd8e6848692693507461a1dd0b177",
+      "git_blob": "a86fd140e3cfca1a401f56fe2a3dac1bcd6a99d1"
+    },
+    {
+      "path": "tests/test_os_app_control_profile.py",
+      "bytes": 7821,
+      "sha256": "a287d7e30341120b29e6f1044c40bfae14f2aab496331b53de15420fa5cab491",
+      "git_blob": "5618d8d8ef12a58d66bbf9d486c5b66d538e816f"
+    },
+    {
+      "path": "tests/test_workbench_browser_port.py",
+      "bytes": 24246,
+      "sha256": "80fda0215e0ff3fc586fc12090f55175294a8a27b68bec400318fd00c527038b",
+      "git_blob": "61c23933aacf71e1971680266621d3d3e1b9d8be"
+    }
+  ],
+  "compiled_app": [
+    {
+      "path": "app/mastermind_os/dist/assets/Inter-Variable-DiVDrmQJ.woff2",
+      "bytes": 352240,
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+      "git_blob": "5a8d3e72ad7ffb62af3b146e1b1f54ab5813a212"
+    },
+    {
+      "path": "app/mastermind_os/dist/assets/Manrope-Variable-FzEoaBTQ.ttf",
+      "bytes": 165420,
+      "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+      "git_blob": "23dcf5e05a97f19a3567d40ebb3765580a4325f7"
+    },
+    {
+      "path": "app/mastermind_os/dist/assets/atelier-office-poIrp4_y.jpg",
+      "bytes": 27302,
+      "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62",
+      "git_blob": "6887b17ab20b4413d88c5a47f0b897e4c46af5a3"
+    },
+    {
+      "path": "app/mastermind_os/dist/assets/index-DbkkbGgu.css",
+      "bytes": 231243,
+      "sha256": "78d50d838bd7baf0c1f5d7499a0c42096f56476a0e3f960d7bea75209dec0149",
+      "git_blob": "d01fcaf4fef89614c49f60566af3f214566359b4"
+    },
+    {
+      "path": "app/mastermind_os/dist/assets/index-qVDqA55z.js",
+      "bytes": 2126179,
+      "sha256": "32c6f3ab9986f388111c003cb67122489c92953437be97b9b9db9476909df051",
+      "git_blob": "7905d8d1c36a1739e39d1c4f04a0701f4b34b239"
+    },
+    {
+      "path": "app/mastermind_os/dist/assets/private-entry-DdyQrU0W.jpg",
+      "bytes": 49374,
+      "sha256": "f14f930bf84c8d80635fdf34a93030a928ed51cb514cc07bdb8b7e33aebbf597",
+      "git_blob": "458170f3c9c4fcffe9b8999c0457d0026f73880d"
+    },
+    {
+      "path": "app/mastermind_os/dist/index.html",
+      "bytes": 366,
+      "sha256": "88e1e2e37a2acbf16dd9f4f62de9fcc0cb91050b41f79a1b7191e6290a21cd3f",
+      "git_blob": "2f9006f4b002ed2c1d22952ac41561da2bc05b1c"
+    },
+    {
+      "path": "app/mastermind_os/dist/licenses/fonts/Inter-OFL.txt",
+      "bytes": 4380,
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "git_blob": "9b2ca37b3ffc77391d8b2ebef4a974ef32bf46ea"
+    },
+    {
+      "path": "app/mastermind_os/dist/licenses/fonts/Manrope-FONTLOG.txt",
+      "bytes": 3075,
+      "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2",
+      "git_blob": "94b99a9e7ca7dbd4c571a09305bbbf5ef78df0ca"
+    },
+    {
+      "path": "app/mastermind_os/dist/licenses/fonts/Manrope-OFL.txt",
+      "bytes": 4384,
+      "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+      "git_blob": "472064afc4b8dec9079fab03b8ffafb617a1b2d8"
+    },
+    {
+      "path": "app/mastermind_os/dist/third-party/deepseek-client-dependency-NOTICES.txt",
+      "bytes": 70364,
+      "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4",
+      "git_blob": "f12c1ae3740d3533d12e3a75af8d468ca57abbfb"
+    },
+    {
+      "path": "app/mastermind_os/dist/third-party/deepseek-harness-LICENSE.txt",
+      "bytes": 1065,
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+      "git_blob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785"
+    }
+  ],
+  "unchanged_parent_package_lock": {
+    "path": "integrations/worker_browser_runtime/package-lock.json",
+    "bytes": 3346,
+    "sha256": "61fb32ec2c4e3baca8dc9de390b018cfa271908fa4e5501cbdff96ef09f2b5d5",
+    "git_blob": "d270913ec6ababdc217808141cc7cfec63430a4b"
+  },
+  "qualified_procedures_pin": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+  "revision_note": "Protocol default-port constants name stdlib semantics; topology guard unchanged. Source behavior proof predates this semantics-preserving repair; 39 affected tests rerun."
+}

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import tempfile
 import threading
@@ -37,8 +38,7 @@ _UNDERWATER = -0.03         # rel-return below this at a checkpoint → an early
 # checkpoint window (5 or 10 business days from state_asof) has elapsed by the run date.
 # An absent file is not a bug — it means the conviction sleeve has no graduated open theses
 # yet (book is new, ledger is empty, or no thesis has aged past the first checkpoint).
-# There is no silent swallow on the write path: the outer try/except in record() only catches
-# exceptions from all_theses() or outcomes.label_thesis(), not an intentionally empty fresh list.
+# Canonical thesis/mark failures propagate; only a missing/unresolved price label is a normal no-op.
 
 
 def _now_iso() -> str:
@@ -66,18 +66,50 @@ def _marks_lock():
                     pass
 
 
-def _load_unlocked() -> list[dict]:
-    if not _PATH.exists():
-        return []
-    rows: list[dict] = []
-    for line in _PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        row = json.loads(line)
+def _finite_number(value) -> bool:
+    return ((isinstance(value, int) and not isinstance(value, bool))
+            or (isinstance(value, float) and math.isfinite(value)))
+
+
+def _reject_nonfinite_json(_value: str):
+    raise ValueError("interim-mark JSON contains a non-finite number")
+
+
+def _validate_rows(rows: list[dict]) -> None:
+    """Validate consumed evidence without rewriting optional legacy metadata."""
+    seen = set()
+    for row in rows:
         if not isinstance(row, dict):
             raise ValueError("interim-mark row is not a mapping")
-        rows.append(row)
+        if not isinstance(row.get("thesis_id"), str) or not row["thesis_id"]:
+            raise ValueError("interim-mark thesis identity is invalid")
+        if not isinstance(row.get("subject"), str):
+            raise ValueError("interim-mark subject is invalid")
+        if type(row.get("checkpoint")) is not int or row["checkpoint"] not in (5, 10):
+            raise ValueError("interim-mark checkpoint is invalid")
+        if not _finite_number(row.get("rel_return")):
+            raise ValueError("interim-mark return is invalid")
+        if not isinstance(row.get("falsified_so_far"), bool):
+            raise ValueError("interim-mark falsifier evidence is invalid")
+        if not isinstance(row.get("underwater"), bool):
+            raise ValueError("interim-mark underwater evidence is invalid")
+        # JSON extensions are preserved, but NaN/Infinity or non-JSON Python
+        # objects must not be silently coerced into published evidence.
+        json.dumps(row, ensure_ascii=False, allow_nan=False)
+        key = (row["thesis_id"], row["checkpoint"])
+        if key in seen:
+            raise ValueError("duplicate interim-mark checkpoint")
+        seen.add(key)
+
+
+def _load_unlocked() -> list[dict]:
+    try:
+        contents = _PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    rows = [json.loads(line, parse_constant=_reject_nonfinite_json)
+            for line in contents.splitlines() if line.strip()]
+    _validate_rows(rows)
     return rows
 
 
@@ -88,9 +120,14 @@ def _load() -> list[dict]:
 
 
 def _atomic_write(rows: list[dict]) -> None:
-    """Replace interim-mark history atomically; preserve prior bytes on failure."""
+    """Expose complete old/new history; failures before replace preserve prior bytes.
+
+    The file is fsynced before replacement. No parent-directory/power-loss durability
+    guarantee is added here.
+    """
+    _validate_rows(rows)
+    payload = "".join(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in rows)
     _PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = "".join(json.dumps(row, default=str, ensure_ascii=False) + "\n" for row in rows)
     tmp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -156,8 +193,10 @@ def record(asof: str | date | None = None) -> dict:
             if not (lab and lab.get("resolved") and lab.get("rel_return") is not None):
                 continue
             rel = lab["rel_return"]
+            if not _finite_number(rel) or not _finite_number(threshold):
+                raise ValueError("interim-mark label or threshold is invalid")
             falsified = (rel < threshold) if op == "<" else (rel > threshold)
-            candidates.append({
+            candidate = {
                 "thesis_id": thesis_id,
                 "subject": ((thesis.get("entry_levels") or {}).get("ticker")
                             or thesis.get("subject") or "").upper(),
@@ -170,7 +209,9 @@ def record(asof: str | date | None = None) -> dict:
                 "prob_correct": thesis.get("prob_correct"),
                 "horizon_d": thesis.get("horizon_d"),
                 "recorded_at": _now_iso(),
-            })
+            }
+            _validate_rows([candidate])
+            candidates.append(candidate)
             candidate_seen.add(key)
 
     with _marks_lock():
@@ -206,13 +247,17 @@ def scorecard() -> dict:
             "avg_rel": round(sum(r["rel_return"] for r in b) / n, 4),
             "n_underwater": sum(1 for r in b if r.get("underwater"))}
     return {"checkpoints": _CHECKPOINTS, "by_checkpoint": by_cp,
-            "early_warnings": early_warnings(), "n_marks": len(rows)}
+            "early_warnings": _warnings_from_rows(rows), "n_marks": len(rows)}
 
 
 def early_warnings() -> list[dict]:
     """Open theses currently UNDERWATER at their LATEST logged checkpoint — the risk layer's early-exit
     candidates (advisory; never auto-exits). One row per subject, the deepest/most-recent checkpoint."""
-    rows = [r for r in _load() if r.get("underwater")]
+    return _warnings_from_rows(_load())
+
+
+def _warnings_from_rows(rows: list[dict]) -> list[dict]:
+    rows = [r for r in rows if r.get("underwater")]
     by_subj: dict = {}
     for r in rows:
         s = r.get("subject")

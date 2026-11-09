@@ -4811,6 +4811,130 @@ def load_runtime_install_attestation(
     )
 
 
+
+# Additional entry in the SAME ratified node_modules closure. V1's CLI entry,
+# exact lib directory, installer manifest, loader checks and launch stay exact.
+# These reviewed postimages are never learned from a live installation.
+_WORKBENCH_CREDENTIAL_SOURCE_PINS = {
+    "node_modules/@mastermind/workbench-vault/child.cjs": "339c6bc883ec3ed4fa38a93cd9f7d87ff40add91879b4f8f13a90486f7c9ce43",
+    "node_modules/fernet/fernet.js": "d979ce3486be3041d4aebe1604daf002303707a9fd3a201dd6211363eecea70a",
+    "node_modules/fernet/lib/token.js": "b43433e48fe91cd23e5571c26698d6cb3849dcaf25f3e1252417ca2e558c0c09",
+    "node_modules/fernet/lib/secret.js": "c905d56288b63da3f673052556965c53ea21036fce14938383119fc8db05a8ea",
+    "package-lock.json": "61fb32ec2c4e3baca8dc9de390b018cfa271908fa4e5501cbdff96ef09f2b5d5",
+}
+
+
+def qualify_workbench_credential_entry(*, runtime_root: Path,
+        expected_manifest_digest: str, node: Path, mcp: Path, browser: Path) -> Path:
+    """Qualify the fixed private credential entry; no installation or launch.
+
+    The original loader re-attests container identity, complete node_modules,
+    Chromium and exact Node/library closure against the owner-ratified manifest.
+    This new launch projection additionally binds the first-party receiver and
+    selected Fernet engine. It is not the v1 CLI-only anchored launch receipt.
+    The original Workbench relay invokes it again immediately before Popen.
+    """
+    attested = load_runtime_install_attestation(runtime_root,
+        expected_manifest_digest=expected_manifest_digest)
+    if (Path(node) != attested.node_path or Path(mcp) != attested.mcp_executable
+            or Path(browser) != attested.browser_executable):
+        raise _runtime_attestation_invalid("credential launch components changed")
+    root = attested.runtime_root
+    for relative, expected in _WORKBENCH_CREDENTIAL_SOURCE_PINS.items():
+        info, _raw, observed = _stable_runtime_file(root / relative, maximum_bytes=128 * 1024)
+        if (observed != expected or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1 or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o400):
+            raise _runtime_attestation_invalid("credential receiver source changed")
+    return root / "node_modules/@mastermind/workbench-vault/child.cjs"
+
+
+def _credential_node_bootstrap() -> str:
+    """Extend the incumbent descriptor bootstrap without changing v1 bytes."""
+    source = _ANCHORED_NODE_BOOTSTRAP
+    replacements = (
+        ("def A(p,u,z):", "def A(p,u,z,m=0o500):"),
+        ("stat.S_IMODE(a.st_mode)!=0o500", "stat.S_IMODE(a.st_mode)!=m"),
+        ('"mode":0o500,"path":z', '"mode":m,"path":z'),
+        ('os.execve("runtime/bin/node",["runtime/bin/node","runtime/node_modules/@playwright/mcp/cli.js",*sys.argv[1:]],e)',
+         'os.execve("runtime/bin/node",["runtime/bin/node","runtime/node_modules/@mastermind/workbench-vault/child.cjs","runtime",*sys.argv[1:]],e)'),
+    )
+    for before, after in replacements:
+        if source.count(before) != 1:
+            raise _runtime_attestation_invalid("credential bootstrap source drifted")
+        source = source.replace(before, after, 1)
+    pin = _WORKBENCH_CREDENTIAL_SOURCE_PINS["node_modules/@mastermind/workbench-vault/child.cjs"]
+    extra = (
+        ' K="node_modules/@mastermind/workbench-vault/child.cjs"\n'
+        ' C=next(x for x in v["closure_inventory"] if x["path"]==K)\n'
+        f' if C["sha256"]!="{pin}" or C["type"]!="file" or C["mode"]!=0o400 or C["link"]!="": raise ValueError()\n'
+        ' A(K,{"gid":C["gid"],"mode":0o400,"path":os.path.join(r,K),"sha256":C["sha256"],"uid":C["uid"]},os.path.join(r,K),0o400)\n'
+    )
+    marker = " if P(I)!=P(os.fstat(R))"
+    if source.count(marker) != 1:
+        raise _runtime_attestation_invalid("credential bootstrap marker drifted")
+    return source.replace(marker, extra + marker, 1)
+
+
+def workbench_credential_launch(*, runtime_root: Path, expected_manifest_digest: str,
+        node: Path, mcp: Path, browser: Path, python_executable: str,
+        output_dir: Path, resource_id: str, expires_at_ms: int, environment: Mapping[str, str]):
+    """Hold the original installation container through the original Popen.
+
+    The caller stores its Popen handle before leaving this context. The child
+    rechecks the held manifest and direct executable/entry, fchdirs to that same
+    container, and execs relative paths. An ancestor rename cannot select a new
+    runtime. There is one Node child, one process group, and no launch registry.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def held():
+        root = Path(runtime_root)
+        qualify_workbench_credential_entry(runtime_root=root,
+            expected_manifest_digest=expected_manifest_digest, node=node, mcp=mcp, browser=browser)
+        if (root.name != "runtime" or not os.path.isabs(python_executable)
+                or type(resource_id) is not str or re.fullmatch(r"[a-f0-9]{32}", resource_id) is None
+                or type(expires_at_ms) is not int or not 0 < expires_at_ms < 2**53
+                or set(environment) != {"HOME", "TMPDIR", "LANG", "LC_ALL", "NO_COLOR", "PATH"}
+                or not output_dir.is_absolute()):
+            raise _runtime_attestation_invalid("credential launch envelope is invalid")
+        output = output_dir.lstat()
+        if (not stat.S_ISDIR(output.st_mode) or output.st_uid != os.geteuid()
+                or stat.S_IMODE(output.st_mode) != 0o700):
+            raise _runtime_attestation_invalid("credential output directory is unsafe")
+        container_fd = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            manifest = _anchored_runtime_manifest(container_fd,
+                expected_manifest_digest=expected_manifest_digest)
+            _attest_anchored_runtime_launch(container_fd, manifest=manifest, runtime_root=root)
+            rows = {row["path"]: row for row in manifest["closure_inventory"]}
+            for relative, expected in _WORKBENCH_CREDENTIAL_SOURCE_PINS.items():
+                if relative == "package-lock.json":
+                    identity = manifest["mcp"]["package_lock"]
+                else:
+                    row = rows.get(relative)
+                    if row is None or row["sha256"] != expected or row["type"] != "file" or row["link"]:
+                        raise _runtime_attestation_invalid("anchored credential source changed")
+                    identity = {"gid": row["gid"], "mode": row["mode"],
+                        "path": str(root / relative), "sha256": row["sha256"], "uid": row["uid"]}
+                if identity["sha256"] != expected:
+                    raise _runtime_attestation_invalid("credential lock identity changed")
+                _anchored_runtime_file_digest(container_fd, relative_path="runtime/" + relative,
+                    identity=identity, expected_path=root / relative, expected_mode=0o400)
+            browser_relative = Path(browser).relative_to(root).as_posix()
+            launch_env = {**environment, _RUNTIME_CONTAINER_FD_ENV: str(container_fd),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": expected_manifest_digest,
+                "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers"}
+            argv = (python_executable, "-I", "-S", "-c", _credential_node_bootstrap(),
+                    "runtime/" + browser_relative, str(output_dir), resource_id, str(expires_at_ms))
+            yield {"argv": argv, "env": launch_env, "pass_fds": (container_fd,)}
+        finally:
+            os.close(container_fd)
+    return held()
+
+
+
 def _tracked_workspace_snapshot(workspace: Path) -> dict[str, str]:
     env = {
         "GIT_CONFIG_GLOBAL": "/dev/null",

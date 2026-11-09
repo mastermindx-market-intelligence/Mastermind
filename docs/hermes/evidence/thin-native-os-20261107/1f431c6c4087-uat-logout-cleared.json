@@ -1,0 +1,123 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "observation": {
+    "at": "2026-11-07T09:03:50.826Z",
+    "pid": 80261,
+    "windowCount": 1,
+    "content": {
+      "names": [
+        null,
+        null,
+        null
+      ],
+      "groups": [
+        {
+          "index": 0,
+          "names": [
+            "mastermind",
+            "Private workspace"
+          ],
+          "groups": []
+        },
+        {
+          "index": 1,
+          "names": [
+            null,
+            "Your company,\nin focus.",
+            null,
+            null,
+            null,
+            "Welcome back.",
+            null,
+            null,
+            "Sign in",
+            "Display settings",
+            null,
+            null
+          ],
+          "groups": [
+            {
+              "index": 0,
+              "names": [
+                "SPACE TO THINK. CLARITY TO ACT."
+              ],
+              "groups": []
+            },
+            {
+              "index": 1,
+              "names": [
+                "Your company,",
+                "in focus."
+              ],
+              "groups": []
+            },
+            {
+              "index": 2,
+              "names": [
+                "Decisions, projects and conversations."
+              ],
+              "groups": []
+            },
+            {
+              "index": 3,
+              "names": [
+                null
+              ],
+              "groups": []
+            },
+            {
+              "index": 4,
+              "names": [
+                "YOUR PRIVATE WORKSPACE"
+              ],
+              "groups": []
+            },
+            {
+              "index": 5,
+              "names": [
+                "Welcome back."
+              ],
+              "groups": []
+            },
+            {
+              "index": 6,
+              "names": [
+                "Sign in to your workspace."
+              ],
+              "groups": []
+            },
+            {
+              "index": 7,
+              "names": [
+                "Sign-in could not complete. Please try again."
+              ],
+              "groups": []
+            },
+            {
+              "index": 10,
+              "names": [
+                "Continue in your browser, then return here."
+              ],
+              "groups": []
+            },
+            {
+              "index": 11,
+              "names": [
+                "Your workspace stays private until you sign in."
+              ],
+              "groups": []
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "names": [
+            "Mastermind OS"
+          ],
+          "groups": []
+        }
+      ]
+    }
+  },
+  "privateConversationAbsent": true
+}

@@ -49,3 +49,33 @@ def test_record_propagates_canonical_thesis_read_failure(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="boom"):
         IM.record("2026-07-10")
+
+
+
+def test_real_mark_keeps_checkpoint_horizon_override_and_asof(monkeypatch):
+    from datetime import date
+    calls = []
+    def label(synthetic, asof):
+        calls.append((synthetic, asof))
+        return {"resolved": False}
+    monkeypatch.setattr("brain.outcomes.label_thesis", label)
+    thesis = _thesis("t1", "AAA")
+    asof = date(2026, 9, 17)
+    for horizon in [5, 10]:
+        assert IM._mark(thesis, horizon, asof) == {"resolved": False}
+    assert [s["falsifier"]["check"]["horizon_d"] for s, _ in calls] == [5, 10]
+    assert all(d == asof for _, d in calls)
+    assert all(s["falsifier"]["check"]["vs"] == "SPY" for s, _ in calls)
+    assert thesis["horizon_d"] == 21
+
+
+def test_resolved_zero_respects_the_thesis_falsifier_operator(tmp_path, monkeypatch):
+    monkeypatch.setattr(IM, "_PATH", tmp_path / "im.jsonl")
+    thesis = _thesis("t1", "AAA")
+    thesis["falsifier"]["check"].update(op=">", threshold=-0.01)
+    monkeypatch.setattr(IM, "all_theses", lambda: [thesis])
+    monkeypatch.setattr("brain.outcomes.label_thesis",
+                        lambda *_: {"resolved": True, "rel_return": 0})
+    assert IM.record("2026-09-17")["new"] == 2
+    assert all(r["falsified_so_far"] is True for r in IM._load())
+    assert all(r["underwater"] is False for r in IM._load())

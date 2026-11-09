@@ -1,0 +1,20 @@
+{
+  "schema": "mastermind.paper.reference_observation.v1",
+  "observed_at": "2026-10-22T10:39:17.407823+00:00",
+  "file_id": "01M3NRCX55B452A12819WNE1RH",
+  "page_id": "p-C-0",
+  "file_name": "Mastermind OS",
+  "page_name": "11 - Chat Atelier - Current Design",
+  "screenshots_inspected": [
+    "IZB-0",
+    "K5X-0"
+  ],
+  "tokens_hash": "f3c5ac93",
+  "catalog_sha256": "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db",
+  "carrier": "Mastermind_Paper",
+  "operation": "READ_ONLY",
+  "content_mutations": 0,
+  "focus_mutations": 0,
+  "prior_unknown_effects_reconciled": false,
+  "full_design_journey_implemented": false
+}

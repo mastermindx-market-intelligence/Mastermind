@@ -399,10 +399,15 @@ body.page-ag .msg {
   }
 
   fetch("/api/agenda", { headers: { "Accept": "application/json" } })
-    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
     .then(function (res) {
-      if (!res.ok || (res.body && res.body.available === false)) {
-        var note = (res.body && res.body.note) || "agenda unavailable";
+      if (!res.ok || !res.body || typeof res.body !== "object" || Array.isArray(res.body) ||
+          res.body.available === false || res.body.read_status === "unavailable") {
+        var note = "agenda unavailable";
+        if (res.status === 404 && res.body && res.body.available === false &&
+            res.body.read_status !== "unavailable" && res.body.note === "no agenda built yet (brain.improvement_agenda.write runs in the weekly CIO job)") {
+          note = "no agenda built yet";
+        }
         root.innerHTML = '<div class="msg">' + esc(note) + "</div>";
         sub.textContent = "unavailable";
         return;

@@ -16,13 +16,18 @@ than as a clean success.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+from collections import Counter
+from decimal import Decimal, localcontext
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
-from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity
-from scripts.agent_eval.canonical import canonical_json_bytes
+from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity, verification
+from scripts.agent_eval.canonical import canonical_json_bytes, digest_value
 from scripts.agent_eval.errors import ArtifactConflictError, ContractError, VerificationContextError
 
 DEFAULT_ANALYSIS_VERSION = "mastermind.agent_evaluation_r0_analysis.v1"
@@ -130,8 +135,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
 def _cmd_finalize_run(args: argparse.Namespace) -> int:
     artifact_store = store.ArtifactStore(args.root)
     draft = _load_json_file(Path(args.draft))
-    if draft.get("schema") != contracts.RUN_DRAFT_SCHEMA:
-        raise CliUsageError("--draft must be a mastermind.agent_evaluation_run_draft.v1 document")
+    if draft.get("schema") not in contracts.RUN_DRAFT_SCHEMAS:
+        raise CliUsageError("--draft must be a mastermind.agent_evaluation_run_draft.v1, .v2, or .v3 document")
 
     scenario_ref = draft.get("scenario") or {}
     scenario = artifact_store.resolve_scenario(scenario_ref.get("scenario_id"), scenario_ref.get("scenario_version"))
@@ -171,6 +176,75 @@ def _cmd_finalize_run(args: argparse.Namespace) -> int:
             "output": str(args.output),
         }
     )
+    return _EXIT_OK if run["validity"]["status"] == "VALID" else _EXIT_INCOMPLETE
+
+
+def _cmd_harness2_import(args: argparse.Namespace) -> int:
+    """Import explicit retained files into the incumbent store; never follow summary paths."""
+    from scripts.agent_eval.harness2_native import (
+        MAX_JSON_BYTES, Harness2ImportError, decode_json, finalize_selected_run,
+    )
+
+    def read_bounded(name: str) -> bytes:
+        path = Path(name)
+        if path.is_symlink() or not path.is_file():
+            raise CliUsageError("Harness2 inputs must be explicit regular non-symlink files")
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(MAX_JSON_BYTES + 1)
+        except OSError as exc:
+            raise CliUsageError("Harness2 input file is unreadable") from exc
+        if not 0 < len(raw) <= MAX_JSON_BYTES:
+            raise CliUsageError("Harness2 input exceeds the nonempty one-MiB command bound")
+        return raw
+
+    try:
+        binding_bytes = read_bounded(args.binding)
+        summary_bytes = read_bounded(args.summary)
+        native_bytes = read_bounded(args.native_observation)
+        output_bytes = read_bounded(args.output_artifact)
+        encoded_files = decode_json(read_bounded(args.harness_files), canonical=True)
+        if not 0 < len(encoded_files) <= 128:
+            raise CliUsageError("Harness2 harness-files requires one to 128 files")
+        files = {}
+        for path, encoded in encoded_files.items():
+            if type(encoded) is not str:
+                raise CliUsageError("Harness2 harness-files values must be base64 strings")
+            try:
+                files[path] = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise CliUsageError("Harness2 harness-files contains invalid base64") from exc
+        draft = decode_json(native_bytes, canonical=True)
+        contracts.validate_run_draft_shape(draft)
+        artifact_store = store.ArtifactStore(args.root)
+        scenario = artifact_store.resolve_scenario(
+            draft["scenario"]["scenario_id"], draft["scenario"]["scenario_version"])
+        configuration = artifact_store.resolve_configuration(draft["configuration"]["configuration_id"])
+        experiment_id = draft["comparison"]["experiment_id"]
+        experiment = artifact_store.resolve_experiment(experiment_id) if experiment_id else None
+        if scenario is None or configuration is None or (experiment_id and experiment is None):
+            raise CliUsageError("Harness2 native inputs must already resolve through --root")
+        run = finalize_selected_run(
+            binding_bytes=binding_bytes, expected_binding_digest=args.binding_digest,
+            summary_bytes=summary_bytes, native_observation_bytes=native_bytes,
+            output_bytes=output_bytes, harness_files=files,
+            scenario=scenario, configuration=configuration, experiment=experiment,
+            validator_id=args.validator_id, validator_version=args.validator_version,
+            validator_code_ref=args.validator_code_ref, validated_at=args.validated_at,
+            created_at=args.created_at,
+        )
+        receipt = artifact_store.create(run)
+    except Harness2ImportError as exc:
+        raise CliUsageError(str(exc)) from exc
+    _print_json({
+        "scope": "EVALUATION_GRAPH_VERIFIED",
+        "artifact_check": "BYTE_AND_IDENTITY_CHECKED_NOT_AUTHENTICATED",
+        "run_id": run["run_id"], "run_digest": run["run_digest"],
+        "validity_status": run["validity"]["status"],
+        "reason_codes": list(run["validity"]["reason_codes"]),
+        "disposition": receipt.disposition.value, "path": receipt.path,
+        "promotion": "NONE", "runtime_authority": "NONE",
+    })
     return _EXIT_OK if run["validity"]["status"] == "VALID" else _EXIT_INCOMPLETE
 
 
@@ -302,6 +376,160 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     return _EXIT_INCOMPLETE
 
 
+def _resource_usage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Evidence coverage over all verified receipts, including failed/invalid ones.
+
+    Missing observations remain null, not zero. Amounts of unlike currencies
+    remain separate. None of these observations confers product acceptance.
+    """
+    count = len(rows)
+    resources = [row["resources"] for row in rows]
+    output: dict[str, Any] = {"run_count": count}
+    for field in ("input_tokens", "output_tokens", "tool_calls", "elapsed_ms"):
+        known: list[int] = []
+        for resource in resources:
+            value = resource[field]
+            if value is not None:
+                if type(value) is not int or value < 0:
+                    raise ValueError("invalid resource count")
+                known.append(value)
+        total = sum(known)
+        if total > (2 ** 63 - 1):
+            raise ValueError("resource count exceeds signed 64-bit canonical range")
+        output[field] = {
+            "known_sum": total if known else None,
+            "total": total if count and len(known) == count else None,
+            "reported_runs": len(known),
+            "missing_runs": count - len(known),
+        }
+
+    complete = [r for r in resources if r["input_tokens"] is not None and r["output_tokens"] is not None]
+    complete_sum = sum(r["input_tokens"] + r["output_tokens"] for r in complete)
+    if complete_sum > (2 ** 63 - 1):
+        raise ValueError("combined tokens exceed signed 64-bit canonical range")
+    output["total_tokens"] = {
+        "known_sum_from_complete_runs": complete_sum if complete else None,
+        "total": complete_sum if count and len(complete) == count else None,
+        "reported_runs": len(complete),
+        "missing_runs": count - len(complete),
+    }
+
+    currencies: dict[str, list[Decimal]] = {}
+    cost_missing = 0
+    for resource in resources:
+        value, currency = resource["estimated_marginal_cost"], resource["cost_currency"]
+        if value is None or currency is None:
+            cost_missing += 1
+            continue
+        if type(value) is not str or type(currency) is not str or not currency:
+            raise ValueError("invalid estimated cost evidence")
+        amount = Decimal(value)
+        if not amount.is_finite() or amount < 0:
+            raise ValueError("estimated marginal cost must be finite and nonnegative")
+        currencies.setdefault(currency, []).append(amount)
+    groups: list[dict[str, Any]] = []
+    for currency, amounts in sorted(currencies.items()):
+        with localcontext() as ctx:
+            integer_digits = max(max(amount.adjusted() + 1, 1) for amount in amounts)
+            decimal_places = max(max(-amount.as_tuple().exponent, 0) for amount in amounts)
+            ctx.prec = max(28, integer_digits + decimal_places + len(str(len(amounts))) + 3)
+            exact_sum = sum(amounts, Decimal(0))
+            groups.append({
+                "currency": currency,
+                "known_estimated_sum": str(exact_sum),
+                "reported_runs": len(amounts),
+            })
+    output["estimated_cost"] = {
+        "by_currency": groups,
+        "missing_runs": cost_missing,
+        "complete_single_currency": bool(count) and cost_missing == 0 and len(groups) == 1,
+    }
+    output["provider_usage_reference_runs"] = sum(bool(r["provider_usage_ref"]) for r in resources)
+    output["completion_status_counts"] = dict(sorted(Counter(r["execution"]["completion_status"] for r in rows).items()))
+    output["validity_status_counts"] = dict(sorted(Counter(r["validity"]["status"] for r in rows).items()))
+    return output
+
+
+def _cmd_resources(args: argparse.Namespace) -> int:
+    """Existing-store-only EVAL query; requires non-creating ArtifactStore API."""
+    root = Path(args.root)
+    try:
+        if root.is_symlink() or not root.is_dir():
+            raise CliUsageError("resources requires an existing non-symlink store root")
+    except OSError as exc:
+        raise CliUsageError("cannot access evaluation store root") from exc
+    contracts.parse_experiment_id(args.experiment_id)
+    try:
+        source = store.ArtifactStore(root, create_root=False)
+        experiment = source.resolve_experiment(args.experiment_id)
+        if experiment is None:
+            raise CliUsageError("experiment not found in the existing store")
+        verification.verify_experiment_graph(experiment, source)
+        population = sorted(source.enumerate_runs(), key=lambda run: run["run_id"])
+        seen: set[str] = set()
+        selected = []
+        for run in population:
+            run_id = run["run_id"]
+            if run_id in seen:
+                raise ValueError("duplicate run identity in full population")
+            seen.add(run_id)
+            if run["comparison"]["experiment_id"] != args.experiment_id:
+                continue
+            if source.resolve_run(run_id) != run:
+                raise ValueError("run cannot be resolved identically by canonical identity")
+            verification.verify_run_graph(run, source)
+            selected.append(run)
+        selected.sort(key=lambda run: run["run_id"])
+        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for run in selected:
+            key = (
+                run["comparison"]["arm_id"],
+                run["configuration"]["configuration_id"],
+                run["scenario"]["scenario_id"],
+                str(run["scenario"]["scenario_version"]),
+            )
+            groups.setdefault(key, []).append(run)
+        overall_usage = _resource_usage(selected)
+        all_fields_reported = bool(selected) and all(
+            overall_usage[field]["missing_runs"] == 0
+            for field in ("input_tokens", "output_tokens", "tool_calls", "elapsed_ms")
+        ) and overall_usage["estimated_cost"]["missing_runs"] == 0
+        payload = {
+            "schema": "mastermind.agent_evaluation_resource_summary.v1",
+            "experiment_id": args.experiment_id,
+            "experiment_digest": experiment["experiment_digest"],
+            "verification_scope": "EVALUATION_GRAPH_VERIFIED",
+            "external_content_verified": False,
+            "population_scope": "experiment receipts observed by one complete store enumeration",
+            "observed_receipts_digest": digest_value([
+                {"run_id": run["run_id"], "run_digest": run["run_digest"]}
+                for run in selected
+            ]),
+            "all_expected_runs_observed": None,
+            "summary": overall_usage,
+            "observed_resource_field_coverage": "COMPLETE" if all_fields_reported else "INCOMPLETE",
+            "groups": [
+                {"arm_id": key[0], "configuration_id": key[1], "scenario_id": key[2],
+                 "scenario_version": key[3], **_resource_usage(group)}
+                for key, group in sorted(groups.items())
+            ],
+            "cost_per_accepted_outcome": None,
+            "runtime_changed": False,
+            "limitations": [
+                "A verified receipt is not an independently accepted product outcome.",
+                "Elapsed times are receipt totals, not critical-path or wall-clock latency.",
+                "Parent/child usage may overlap; unique provider billing is unverified.",
+                "Token units are recorded observations, not normalized billable tokens.",
+                "Unrecorded attempts, framing, review and integration remain unknown.",
+                "Estimated costs and usage refs do not prove actual billing or subscription consumption.",
+                "Missing observations are unknown, never zero; no winner or routing policy is claimed.",
+            ],
+        }
+    except (KeyError, TypeError, ValueError, ArithmeticError, OSError) as exc:
+        raise CliUsageError("resource evidence is malformed, incomplete or inaccessible") from exc
+    _print_json(payload)
+    return _EXIT_OK if all_fields_reported else _EXIT_INCOMPLETE
+
 def _cmd_corpus_verify(args: argparse.Namespace) -> int:
     """EVAL-C0: scenario-vs-corpus consistency check over a committed public
     corpus tree (never one of R0's three verification scopes -- this is a
@@ -383,6 +611,15 @@ def _build_parser() -> argparse.ArgumentParser:
     finalize_run.add_argument("--output", required=True)
     finalize_run.set_defaults(func=_cmd_finalize_run)
 
+    harness2_import = subparsers.add_parser(
+        "harness2-import", help="bind retained Harness2 bytes to native observations and publish an EVAL run; no promotion"
+    )
+    for flag in ("root", "binding", "binding-digest", "summary", "native-observation",
+                 "output-artifact", "harness-files", "validator-id", "validator-version",
+                 "validator-code-ref", "validated-at", "created-at"):
+        harness2_import.add_argument("--" + flag, required=True)
+    harness2_import.set_defaults(func=_cmd_harness2_import)
+
     score_integrity = subparsers.add_parser("score-integrity", help="append a technical-integrity scorer pass for one run")
     score_integrity.add_argument("--root", required=True)
     score_integrity.add_argument("--run-id", required=True)
@@ -399,6 +636,11 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--created-at", required=True)
     summarize.add_argument("--id", required=True)
     summarize.set_defaults(func=_cmd_summarize)
+
+    resources = subparsers.add_parser("resources", help="read-only coverage over all graph-verified experiment receipts")
+    resources.add_argument("--root", required=True)
+    resources.add_argument("--experiment-id", required=True)
+    resources.set_defaults(func=_cmd_resources)
 
     verify_tree_graph = subparsers.add_parser(
         "verify-tree-graph", help="graph-verify every artifact under --root; never repairs"

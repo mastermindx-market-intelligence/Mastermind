@@ -1,0 +1,232 @@
+{
+  "schema": "mastermind.fabric_native_guard_current_integration.v1",
+  "prejoin_head": "e9ce2b0ebc86c60f60390fb67c8f313b27c92c93",
+  "protected_parent": "9141013f5a969d59f508784b9f4f76794983caa5",
+  "governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "artifact": {
+    "return": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706688962",
+    "sha256": "e5f984d772bbccaedbb2df39b0789a2da66b20d13adeb64a82b5402f8cb43640",
+    "bytes": 13431
+  },
+  "adaptation": "Preserve all four exact APPLICATION cohorts and sparse executor; authenticate historical overlay and regular candidate bytes; keep immutable historical pins and current 107/109/112 identity.",
+  "proof": {
+    "rc": 0,
+    "seconds": 5.27,
+    "command": [
+      "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-c",
+      "/dev/null",
+      "--rootdir",
+      "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+      "--basetemp",
+      "/tmp/mmx-native-guard-914-proof-kk3vhf0i/pytest",
+      "--junitxml",
+      "/tmp/mmx-native-guard-914-proof-kk3vhf0i/tests.xml",
+      "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py"
+    ],
+    "totals": {
+      "tests": 210,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "log": "/tmp/mmx-native-guard-914-proof-kk3vhf0i/tests.log",
+    "log_sha256": "d809e35887d31dfc72d73ecbb6f5c87e8cfa7d0f44f46fb9d98c4a141f73f9ee",
+    "junit": "/tmp/mmx-native-guard-914-proof-kk3vhf0i/tests.xml",
+    "source": {
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "3b804a82cce51a1c222dfd0c89154805a5065f48515bb6cf49c209ffda9301c2",
+      "tests/test_fabric_grok47_qwen_release_composition_20261022.py": "b135fc30d0f9ddf3af0af04939dc8a0eaf0d42310f6b3673207ea47749d45508",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "0b3180b45f30df8188b9171180be468bfbff637bf0d38f878dcb5c7e710bbf56",
+      "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+    },
+    "source_unchanged": true
+  },
+  "built_manifests": {
+    "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e": {
+      "members": 107,
+      "path": "/tmp/mmx-native-guard-914-proof-kk3vhf0i/pytest/test_closed_component_drift_re9/copy/native-manifest.json"
+    },
+    "2ce4700472cbb617a3860dc53d512fc5a02dbabdf40e621e328cef72d962b5ba": {
+      "members": 109,
+      "path": "/tmp/mmx-native-guard-914-proof-kk3vhf0i/pytest/go-reviewed-build0/application/native-manifest.json"
+    },
+    "80a2b1cdf539364b43073f24d86084d4ee19585dc46830f15e252a5864a2fdd6": {
+      "members": 112,
+      "path": "/tmp/mmx-native-guard-914-proof-kk3vhf0i/pytest/go-reviewed-build0/http/native-manifest.json"
+    }
+  },
+  "merge_resolution": {
+    "head": "e9ce2b0ebc86c60f60390fb67c8f313b27c92c93",
+    "protected": "9141013f5a969d59f508784b9f4f76794983caa5",
+    "resolutions": [
+      {
+        "path": "integrations/studio_direct_mcp/private_service_pin_enrollment.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve both distinct owner additions",
+        "equals_prejoin": false,
+        "sha256": "c89e01103de9ce3ce6fae9db6cf4344ea02277f1ab437b596006586fee56dd84"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md",
+        "conflict_blocks": 1,
+        "resolution": "preserve both distinct owner additions",
+        "equals_prejoin": false,
+        "sha256": "31c68fef2e2978b180b93e64e076b325e21e444fd90aa48583b23e15f44607b6"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "conflict_blocks": 4,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "57f972e32c0130efbd857ab2e9d0e079e8511323e4906d20e67c2b64d0e32380"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/native-manifest.json",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+        "conflict_blocks": 30,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": false,
+        "sha256": "138e2d21c49719b833478c91e1e2cbe8029c9e029fbe0e07a17986f5943ad134"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "00a6b7d88cc6fcf0ba34b9e5993e2955d8c8b6652398218303aab397ef9b1862"
+      },
+      {
+        "path": "tests/test_catalog_native_release_staging.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "7be5fb171b0ea0d495c4287517774bbeabb33cf913f44f930187e8be287ed32e"
+      },
+      {
+        "path": "tests/test_fabric_native_security_composition_20261018.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "8710f85a8727b115c474bd058de80ad2f80f52ce53f5e2547aab266cd2db4c8b"
+      },
+      {
+        "path": "tests/test_host_pull_launchd_admission.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "ee7dc07fa33a97d5fd8f7b804c79037236c128200cbb66ef02df12de75ca1551"
+      },
+      {
+        "path": "tests/test_paid_initializer.py",
+        "conflict_blocks": 1,
+        "resolution": "preserve existing qualified APPLICATION composition",
+        "equals_prejoin": true,
+        "sha256": "7f3e9438b305c434b8ee0b88804b9cbeb616479d7f74ca5d8595bf7c8e8a94db"
+      }
+    ]
+  },
+  "checkout_recovery": {
+    "target": "9141013f5a969d59f508784b9f4f76794983caa5",
+    "results": [
+      {
+        "sha": "c9518272ddaf87b098f06c27264c100ed3bbd447",
+        "bytes": 12828,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_harness/doctor.py"
+        ]
+      },
+      {
+        "sha": "58e0b90bb7a8b98833c15629af187e68255520b7",
+        "bytes": 18781,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_harness/tests/test_e2e.py"
+        ]
+      },
+      {
+        "sha": "0f6d6a9b5dfe6d96b08a3c60f23fe82cfa9bc36d",
+        "bytes": 14092,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_harness/tests/test_native_doctor_private_credential.py"
+        ]
+      },
+      {
+        "sha": "3fac5b93720c04a2aa1dc50049b1a667b860aa8c",
+        "bytes": 4534,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/CUTOVER_AND_ROLLBACK.md"
+        ]
+      },
+      {
+        "sha": "48084345a5c51980a590c38f8c8298290c0fab71",
+        "bytes": 4022,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/README.md"
+        ]
+      },
+      {
+        "sha": "e8ece7c1538540b2ed23e37c442805b56765260d",
+        "bytes": 4853,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/relay_mux.py"
+        ]
+      },
+      {
+        "sha": "c2550517de5865428943fb6dc80b7d437e0f8417",
+        "bytes": 1580,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/roster.json"
+        ]
+      },
+      {
+        "sha": "67b3d21cc74e62a7efd7a1cd4567ebfd1492f772",
+        "bytes": 14522,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/roster.py"
+        ]
+      },
+      {
+        "sha": "71ebadc746c4fd2886202735c6e27bcfd1e7ea62",
+        "bytes": 6192,
+        "status": "VERIFIED_OBJECT_HYDRATED",
+        "paths": [
+          "integrations/hermes_secretary/tests/test_relay_mux.py"
+        ]
+      }
+    ]
+  },
+  "remaining": [
+    "Compose original parent b4950c63cefbfb597cc1a3225d4cdef079f1a7d0 without regressing current-source qualification.",
+    "Qualify completed C4 publisher through native forward retained-before context.",
+    "Add paired Metabolism and Cognition/AUTO hosted positive proof, then require exact combined-head CI."
+  ],
+  "runtime_effects": "No provider, native selector, service enrollment or installed runtime changed.",
+  "diff_check": {
+    "merge_delta_except_exact_protected_markdown": "PASS",
+    "protected_markdown_hard_breaks_preserved": [
+      "docs/EXECUTIVE_BROWSER_ACTUATION_LAW.md",
+      "docs/superpowers/plans/2026-09-04-web-sol-browser-actuation-fabric.md",
+      "docs/superpowers/specs/2026-09-04-web-sol-browser-actuation-fabric-design.md"
+    ],
+    "note": "A whole-target comparison also reports pre-existing contribution EOF/patch whitespace. Those previously qualified source bytes are unchanged by this join."
+  }
+}

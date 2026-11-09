@@ -1,0 +1,201 @@
+{
+  "current_final_carrier": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+  "current_guard_success": {
+    "errors": 0,
+    "failures": 0,
+    "receipt": "h1-final-guards.json",
+    "skips": 0,
+    "source_head": "650598ae9236d9817cf33aafb04751f7d8ee3a47",
+    "tests": 30
+  },
+  "enrolled": false,
+  "existing_native_533_receipt": "current-native-composition.json",
+  "immutable_receipt_review": {
+    "records": [
+      {
+        "original_findings": 35,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.log",
+        "sha256": "80853727ac6201e58ee123d4ab0a31c55b8ede993d0239935bba56c48812f101",
+        "sites": 35
+      },
+      {
+        "original_findings": 1,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.xml",
+        "sha256": "971791af5f8194d98c104e5590f525e4aa936fa3d57ec8862a4a0bb0bef500d2",
+        "sites": 1
+      },
+      {
+        "original_findings": 2,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/ci-release-preflight.xml",
+        "sha256": "cae40e77100dfaa74987558327261726962b054cdd8e4a5309cd992a741ff9b1",
+        "sites": 2
+      },
+      {
+        "original_findings": 3,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.xml",
+        "sha256": "0db10663c221bb632710946751d17df374503b10bb262837f0257e4482f8a0ed",
+        "sites": 6
+      },
+      {
+        "original_findings": 10,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-composed-baseline.xml",
+        "sha256": "974a1c7266c19a10ce2be0cc7f56d2aef33c07d1af58ee2471f1f7465c2caa29",
+        "sites": 14
+      },
+      {
+        "original_findings": 1,
+        "path": "review_evidence/fabric_application/h6-recovery-20261107-c2/native-loader-baseline.log",
+        "sha256": "3e21b01c58fdc2a90ad265a0cea6309ec87ac41ffe050200a07baef4a9ac3f93",
+        "sites": 1
+      },
+      {
+        "original_findings": 1,
+        "path": "review_evidence/fabric_application/shared-relay-source-qualification-20261107.json",
+        "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+        "sites": 1
+      }
+    ],
+    "total_sites": 60
+  },
+  "incoming": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+  "inherited_whitespace": "Three exact blank context lines in immutable source proposal; proposal SHA unchanged and other staged source passes whitespace check.",
+  "installed": false,
+  "macro_adoption": {
+    "all_four_proposal_postimages_already_adopted": true,
+    "attended_auto_qualification_claimed": false,
+    "attended_auto_separate_source": "dcb0ef02d700bbc97422b4e1046837641f9fe5ae",
+    "original_carrier_read": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+    "reapply_proposal_to_current_carrier": false,
+    "support_contribution": "a43c7c2c71355521b837974d3e06430688527d00"
+  },
+  "materialization_boundary_cases": 3,
+  "mission_complete": false,
+  "native_payloads_changed_by_this_merge": false,
+  "observed_at": "2026-11-07T16:44:02.800640+00:00",
+  "parents": [
+    "d833bd07819086908c7e6b4695c5da3b389eb2aa",
+    "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc"
+  ],
+  "preparation": {
+    "acquisition_receipt": "h1-source-acquisition.json",
+    "donor_source_objects_modified": false,
+    "exact_fixture_first_checkout": "FAILED_CLEAN_CHECK_REQUIRED_BLOBS_ABSENT",
+    "initial_shared_clone": "FAILED_BEFORE_TESTS_MISSING_UNRELATED_ADVERTISED_COMMIT",
+    "live_Hermes_environment_modified": false,
+    "only_disposable_fixture_objects_written": true,
+    "pinned_Hermes_lock_sync": true,
+    "required_blobs_acquired": 33
+  },
+  "provider_calls": false,
+  "qualification": {
+    "command": [
+      "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/hermes/.venv/bin/python",
+      "-B",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+      "--adapter-root",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2",
+      "--macro-root",
+      "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/macro",
+      "--native-owner-root",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2",
+      "--hermes-root",
+      "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/hermes",
+      "--source-support-proposal"
+    ],
+    "elapsed_seconds": 173.51,
+    "fixture_root": "/private/tmp/h6-h1-exact-fixture-p8ns5zzf",
+    "head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+    "log_sha256": "8bd0059860b98726c6d1b4dcb6d243a18cb5c9c4f5a5b9743d07b6e272fc4e87",
+    "profile": "/private/tmp/h6-h1-owner-proof-lv31mm81/profile",
+    "reported": [
+      {
+        "blocked_external_connections": 0,
+        "errors": 0,
+        "failures": 0,
+        "fixture_overrides_source_flags": false,
+        "live_provider_acceptance": false,
+        "monetary_acceptance": false,
+        "network_counter_scope": "native_conversation_process_after_source_preparation",
+        "provider_is_fixture": true,
+        "provider_sdk_constructions": 0,
+        "real_application_handler": true,
+        "real_broker": true,
+        "skips": 0,
+        "source_support_proposal": {
+          "contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
+          "fixture_files": 2539,
+          "original_owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+          "original_source_unchanged": true,
+          "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+          "postimages": {
+            "engine/provider_production_modes.py": "4df41a878c1368ad3d18da3d6b4eda9f3e4a6ea2afcdf38429a29518bf6464e8",
+            "tests/test_hermes_application_source_support.py": "e3253732804c5adb33b1b2360b1366f9425026897a47e4e843877538d28133bd",
+            "tests/test_hermes_attended_fabric_identity.py": "f344443fd3325ddac1a91d6f77b4add154b40e2c4f6aaa1cf99eb19d50922866",
+            "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+          },
+          "runtime_enrollment": false,
+          "source_materialization": {
+            "bytes": 74768348,
+            "files": 2538,
+            "lazy_fetch_permitted": false,
+            "method": "verified_local_committed_blobs",
+            "unique_blobs": 2534,
+            "worktree_content_used": false
+          },
+          "unit_qualification": {
+            "errors": 0,
+            "failures": 0,
+            "junit_sha256": "b90ed3880fba9b6b8d35c87ab57f399d573e048dd54e40a937a138be02c9113e",
+            "live_acceptance": false,
+            "skipped": 0,
+            "tests": 383
+          }
+        },
+        "sources": {
+          "adapter_root": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+          "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+          "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+          "native_owner_root": "f71a354219298ac0e15460a4c4bbac3b377caf3f"
+        },
+        "tests_run": 21
+      }
+    ],
+    "returncode": 0,
+    "status": "COMPLETED"
+  },
+  "schema": "mastermind.h6.hermes_owner_composition.v1",
+  "selected": false,
+  "source_guard_iterations": [
+    {
+      "cause": "new qualifier attestation versus old committed qualifier and unreviewed immutable output sites",
+      "failures": 1,
+      "phase": "pending merge versus committed prior HEAD",
+      "testcase_records": 535
+    },
+    {
+      "command": [
+        "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--basetemp=/private/tmp/h6-h1-committed-guards-lfb8honk/pytest",
+        "--junitxml=/private/tmp/h6-h1-committed-guards-lfb8honk/guards.xml",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_ceo_submit_armed_composition.py",
+        "tests/test_no_anonymous_macro_reads.py"
+      ],
+      "elapsed_seconds": 68.059,
+      "errors": 0,
+      "failures": 1,
+      "head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+      "log_sha256": "c198c438b0e40975968f471cf3acd86f6153a635c433ef9135f6b77e31272e7a",
+      "returncode": 1,
+      "skips": 0,
+      "testcase_records": 547
+    }
+  ],
+  "source_head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+  "source_tree": "d31c7e88149e15e671108a5f63a82a9a2eac15b1",
+  "v10_native_entry_not_replaced": true
+}

@@ -1,0 +1,17 @@
+{
+  "application_after_manifest_sha256": "75ad0d9aad8361de2b2d11734f90b2f08906f6a731062393f0b10f0eb29a4819",
+  "application_before_manifest_sha256": "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d",
+  "picker": {
+    "bytes": 177734,
+    "patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2",
+    "patch_source": "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "path": "ext/pick.py",
+    "preimage_sha256": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+    "sha256": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019"
+  },
+  "provider_after_manifest_sha256": "ad7f70ad916728ee34c2824225e664a9f0c1986a96cc5bb132745e3235dff4f9",
+  "provider_before_manifest_sha256": "41fad97dedbf2f09389e89890418d262fca31ebc20a8de97cefadf23ba203ddd",
+  "provider_profile_sha256": "2c9010cdf653ce7a03b86193e161a7b45522132652b6f596b4c3b27dcf4ac596",
+  "provider_profile_source": "../provider_plans/remote_placement/profile.json",
+  "schema": "native-provider-application-remote-placement.v1"
+}

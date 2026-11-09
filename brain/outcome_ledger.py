@@ -53,7 +53,8 @@ def _ledger_lock():
     """Serialize KEEP-FIRST resolution across threads and processes."""
     with _LOCAL_LOCK:
         _PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _lock_path().open("a+", encoding="utf-8") as lock:
+        lock = _lock_path().open("a+", encoding="utf-8")
+        try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -61,12 +62,20 @@ def _ledger_lock():
                 try:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
                 except OSError:
-                    # A completed atomic replace already decided the data effect.
+                    # Atomic replacement already decided any canonical data effect.
                     pass
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                # Cleanup cannot revoke a known result or mask the primary error.
+                pass
 
 
 def _read_unlocked() -> list[dict]:
-    if not _PATH.exists():
+    try:
+        _PATH.lstat()
+    except FileNotFoundError:
         return []
     out: list[dict] = []
     for line in _PATH.read_text(encoding="utf-8").splitlines():
@@ -129,20 +138,18 @@ def _realized_map(asof) -> dict[str, float]:
         return {}
 
 
-def _lens_snapshot(subject: str, asof_decided: str | None) -> dict | None:
-    """Return the PIT signal row, or ``None`` only after a successful absence read.
-
-    Canonical signal-history read failure deliberately propagates. Outcome rows are KEEP-FIRST, so
-    converting a temporary/unreadable history failure into an empty snapshot would permanently erase
-    decision-time lens evidence and prevent later recovery.
-    """
+def _lens_snapshot(subject: str, asof_decided: str | None) -> dict:
+    """The PIT signal_history row for this name at its decision date (empty if it predates recording)."""
     if not asof_decided:
-        return None
-    from brain import signal_history
-    for row in signal_history.load(asof_decided):
-        if (row.get("ticker") or "").upper() == (subject or "").upper():
-            return row
-    return None
+        return {}
+    try:
+        from brain import signal_history
+        for r in signal_history.load(asof_decided):
+            if (r.get("ticker") or "").upper() == (subject or "").upper():
+                return r
+    except Exception:
+        pass
+    return {}
 
 
 def _outcome(check: dict, realized: float) -> int | None:
@@ -179,18 +186,14 @@ def resolve(asof, realized: dict | None = None, *, theses: list | None = None) -
         if outcome is None:                       # non-directional (watch/hold) — not a graded bet
             continue
         asof_decided = t.get("state_asof")
-        snapshot = _lens_snapshot(t.get("subject"), asof_decided)
-        snapshot_status = "available" if snapshot is not None else "missing"
-        snap = snapshot or {}
+        snap = _lens_snapshot(t.get("subject"), asof_decided)
         candidates.append({
             "thesis_id": tid, "subject": t.get("subject"),
             "asof_decided": asof_decided, "asof_resolved": asof_resolved,
             "prob_correct": t.get("prob_correct"), "lean": t.get("lean"),
             "horizon_d": t.get("horizon_d"), "sleeve": t.get("sleeve"),
             "realized_rel": round(float(rel), 4), "outcome": outcome,
-            # What it SAW at decision time. ``missing`` means the history read completed but this
-            # thesis predates/has no matching snapshot; unavailable history never reaches this write.
-            "lens_snapshot_status": snapshot_status,
+            # what it SAW at decision time (empty if decided before signal_history existed)
             "lens_dirs": snap.get("lens_dirs") or {},
             "confluence_at_entry": snap.get("confluence"),
             "size_authority_at_entry": snap.get("size_authority"),

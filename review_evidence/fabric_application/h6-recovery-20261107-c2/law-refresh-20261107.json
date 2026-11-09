@@ -1,0 +1,100 @@
+{
+  "changed_candidates": [
+    "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md",
+    "docs/sol_skills/BOOTSTRAP_KERNEL.md"
+  ],
+  "changed_read": [
+    {
+      "git_blob": "fbbb1843e504033e5a23993084ab89168466d2e0",
+      "path": "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md",
+      "sha256": "b274e40c360fdbd1a96571538c14fb16b3287498cf019a68a136feb004eae0f7"
+    },
+    {
+      "git_blob": "4611acddf5e4d60e4d3c41a2913114ea1ce2f13d",
+      "path": "docs/sol_skills/BOOTSTRAP_KERNEL.md"
+    }
+  ],
+  "compatible": true,
+  "new_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "old_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
+  "unchanged": [
+    {
+      "equal": true,
+      "git_blob": "b69d45de68d1f1c31d12dcf5203037122c694711",
+      "path": "docs/sol_skills/INDEX.md",
+      "sha256": "39d4b4273f6f1565c90063bbc1b8848c95a4cd7e4d9fd469ba932c63a1a9e736"
+    },
+    {
+      "equal": true,
+      "git_blob": "be66c2cb9d15c99d9616e2eb5d0c8c4565375c6a",
+      "path": "docs/sol_skills/COLD_START.md",
+      "sha256": "79cf6300db1fa8c66fd4dc1656f158558f0f8a2e58a5adcac57fc17229b8cafa"
+    },
+    {
+      "equal": true,
+      "git_blob": "a09ae0ebb7028965047ee94be0d2a4646d81bd5e",
+      "path": "docs/sol_skills/ACTIVE_EXECUTION.md",
+      "sha256": "371ab3cd835997a8879e89fada1387ff9fe22b5b40a2128f202539a3f37583ce"
+    },
+    {
+      "equal": true,
+      "git_blob": "d6475a52c6b2438c46e257385262545b9601c727",
+      "path": "docs/sol_skills/SESSION_RELIABILITY.md",
+      "sha256": "029d649db0dd5a6ff48700af13854c907ff236a30d8e5d850a29d0dbe9de7d47"
+    },
+    {
+      "equal": true,
+      "git_blob": "7355adcee11769f37a9403bd9dea1776561fffee",
+      "path": "docs/sol_skills/WEB_CEO_DELEGATION.md",
+      "sha256": "33888f548d60327f8767497707d06df271ebca243b4f0292a585b6e8a2aa9b5a"
+    },
+    {
+      "equal": true,
+      "git_blob": "f76c7ea1320d5cc461597a19d2da69fde667074a",
+      "path": "docs/sol_skills/REVIEW_RETURN.md",
+      "sha256": "622626c393d6e24001e7931ac51be99dafe5e3e5fa7d3f9e990e768317bf08fa"
+    },
+    {
+      "equal": true,
+      "git_blob": "e87e2e727e11a73c5ad0605df30c8457456360d6",
+      "path": "docs/sol_skills/RECONCILE_STATE.md",
+      "sha256": "c678cb33c05866f3c0da7d5273bdc8071a45063ac5ee4115249265c40d96bdff"
+    },
+    {
+      "equal": true,
+      "git_blob": "8757525f707c95282ce607e7274e62a55703cf46",
+      "path": "docs/sol_skills/CLOSEOUT.md",
+      "sha256": "af48182c3b367f80912ff3de408614e92887534702a5995baae19a7c84397f2c"
+    },
+    {
+      "equal": true,
+      "git_blob": "3b5bff21382739464108aecbfb086e0dada3e17f",
+      "path": "docs/SESSION_LOCAL_REVIEW_POLICY.md",
+      "sha256": "4bceb3676548e047f835ab28c524bb4d0e63a0c26653789c98b342ff6139bb92"
+    },
+    {
+      "equal": true,
+      "git_blob": "19a13a3b50286607874673f8b12e825b4d63a375",
+      "path": "docs/DELIVERY_WORKFLOW.md",
+      "sha256": "355f1e1b7e3103cfaa9a6cd8e1c75e2f407d1ac262e04f0788ace4dd89277a9a"
+    },
+    {
+      "equal": true,
+      "git_blob": "bfed1f83dc1ae80cc878b6fc78ca50a0a994d5ea",
+      "path": "docs/CEO_PROJECT_PLAN_CONTINUITY.md",
+      "sha256": "5a1ac6bae7cbd9e26fd016e5926b4d07401416e41d5336cb8bafca2d77a49dde"
+    },
+    {
+      "equal": true,
+      "git_blob": "c10fda0c2cbe8c16ce04dd6f3b6971ac6d03ed7a",
+      "path": "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+      "sha256": "93e2e4d347b51240a10e866b0b024040518ddca7a4a07adf8fbac5591c7f615d"
+    },
+    {
+      "equal": true,
+      "git_blob": "d01f7efc2648a061628a6c72e05eccd5559cda8e",
+      "path": "docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md",
+      "sha256": "2d59e5dd86e6494e137cf34c97a2c57995a13e02541c051f3061c0d4ace97c16"
+    }
+  ]
+}

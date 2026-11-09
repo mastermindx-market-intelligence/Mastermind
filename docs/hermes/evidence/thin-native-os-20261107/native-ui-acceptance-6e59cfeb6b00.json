@@ -1,0 +1,104 @@
+{
+  "schema": "mastermind.hermes_thin_native_candidate_acceptance.v1",
+  "at": "2026-11-07T09:28:45.509219+00:00",
+  "compiled_source": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+  "build_identity": "hermes-thin-native-6e59cfeb6b00-20261107-pro-06",
+  "app_tree": "d27925e195d5649ca1fd0cf723cda54b756a0dd7",
+  "classification": "CANDIDATE_JOURNEY_QUALIFIED_WITH_EXPLICIT_SOURCE_CONTINUITY",
+  "acceptedEarlierProof": {
+    "creation": {
+      "source": "386578f66392ae79a1759a0d216c102509277fba",
+      "requestId": "9fbc8f4abb944ab1a170b4990e59f729",
+      "receiptSha256": "6b6baaada7590b64c9fa14b261e50c80b89db5aee8a01ef20e9c06d0dbc6fb59"
+    },
+    "functionalJourney": {
+      "source": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+      "sessionId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+      "requestId": "5226a1441f084477a0fc523796fbe55f",
+      "admissionId": "d901546607d64c1e9c7cd195e4ddf532",
+      "outcome": "terminal/completed",
+      "messageCount": 2,
+      "pendingCount": 0,
+      "canonicalAnswerReceiptSha256": "f128fe6d3cbd90cf0bbf1505d4dd2030d7f90d88d66224e47a3993c58ba92f51",
+      "reconnectAnswerReceiptSha256": "e004e3e8286029ed4a5b613002d4ff88b118cabbea7675b8a42c94e699ea81c0",
+      "proven": [
+        "native_authentication",
+        "original_creation_recovery",
+        "owned_history",
+        "one_useful_send",
+        "unknown_outcome_hold",
+        "original_terminal_answer_recovery",
+        "logout_private_content_clear",
+        "normal_process_reopen",
+        "reconnect_exact_original_history"
+      ]
+    }
+  },
+  "applicationFilesChangedSinceAcceptedProof": [
+    "app/mastermind_os/src/App.test.tsx",
+    "app/mastermind_os/src/App.tsx",
+    "app/mastermind_os/src/hermes-native/HermesNativePanel.test.tsx",
+    "app/mastermind_os/src/hermes-native/HermesNativePanel.tsx"
+  ],
+  "unchangedOwnerBindings": [
+    {
+      "path": "app/mastermind_os/src-tauri/src/auth.rs",
+      "sha256": "2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499"
+    },
+    {
+      "path": "app/mastermind_os/src-tauri/src/main.rs",
+      "sha256": "14be131790c3cb8f4e4e70c20af3c17e360926ba36d2e0725238809d576e0f4d"
+    },
+    {
+      "path": "app/mastermind_os/src-tauri/src/hermes_native/bridge.py",
+      "sha256": "9b267a5b9697bb1f327f4e2c1d8526b24694bda679b5d3bd5f83ed2dd0e786a8"
+    },
+    {
+      "path": "app/mastermind_os/src-tauri/src/auth/hermes_native.rs",
+      "sha256": "63a42c4507791a8f6fe9e2089ea96d9cd28abc2824417899430274fdcc694230"
+    },
+    {
+      "path": "app/mastermind_os/src/hermes-native/contract.ts",
+      "sha256": "1343403a7418bd85df9f938d5f6ac74d00056a983784500d2b12c79c96abf9c2"
+    },
+    {
+      "path": "app/mastermind_os/src/hermes-native/native-port.ts",
+      "sha256": "234d7bc39f3487c3d53eca8f6aba092a6f30302ebdc92927c085b814c53012bd"
+    },
+    {
+      "path": "app/mastermind_os/src/hermes-native/pending-pointer.ts",
+      "sha256": "74319e310afd6c377ef124f899f2c5180cba4babeb971044ff28933e76dc4081"
+    },
+    {
+      "path": "app/mastermind_os/src/orchestration/indexeddb-pending-pointer-store.ts",
+      "sha256": "0d7eecb5772feee021b900ae1b5b15792e685f473e4ee925bcd9c2692cd2e68b"
+    }
+  ],
+  "currentCandidateProof": {
+    "authenticatedBuildIdentity": true,
+    "sameOriginalTwoMessagesMatchCanonical": true,
+    "logoutHidesPrivateContent": true,
+    "successfulLogoutDoesNotShowSignInFailure": true,
+    "additionalCreateSubmitCancelCount": 0,
+    "pid": 23348,
+    "finalUiState": "SIGNED_OUT",
+    "receipts": {
+      "candidate-build-receipt.json": "d105373a3a37875034e4eb2f795f2847a7a843be6c6eeaf673fef0df8629b3d7",
+      "uat-launch.json": "0a33ce38295021b58f4c7444bb03842d93f13aee436cf78fa942c8917082ff46",
+      "uat-signin-action.json": "f4d30cafaf7a7d2d324b150857228f894489753cee1798ee11b5b9cf993eb8ee",
+      "uat-auth-build-confirmed.json": "65b2710fc6c42894b45cca84deaa04950c612d3750d90262d24bee6a97255c68",
+      "uat-retained-original-answer.json": "8feae160775054128860488ebd5296c73bb87d8405b89bf3052bd8b0c5331043",
+      "uat-logout-action.json": "7b66e04ca3f7e5f23b2cb56021eca61c81120b4f0fec5fbcc3b0cbd5e0690edc",
+      "uat-corrected-logout.json": "4a943c121a39c20e6752a1ed93df76d2264f17900bcce0835ed8d3fd237637e8"
+    },
+    "unsettledSendCopyQualification": "19 panel regression tests at current source plus compiled artifact; no new live effect manufactured"
+  },
+  "existingRuntimeRestarted": false,
+  "acceptedCanaryResent": false,
+  "currentCandidateInstalled": false,
+  "installedJourneyQualified": false,
+  "developerIdSigned": false,
+  "notarized": false,
+  "updaterDistributionQualified": false,
+  "nextOwner": "Existing C1 protected queue/app-only installer lane; root retains sole native UI cutover/installed proof"
+}
