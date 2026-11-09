@@ -1,0 +1,35 @@
+# Hermes shared Slack gateway — actual deployment and continuity acceptance
+
+Status: SOURCE CANDIDATE; NOT A PRODUCTION CUTOVER.
+Owner: incumbent M2 Hermes Engineering Slack gateway. Parent: #2198 / #2159.
+Candidate: PR #2342, branch \`sol/slack-hermes-virtual-identity-ingress-20261108-c1\`.
+Base pin: \`Mastermind@06ef56a39c085af72bcbf0866db8e43f99cd6034\`.
+
+## The real incumbent (verified November 8, 2026)
+
+- M2 host: \`~/.hermes/bin/slack_gateway.py\`, launchd \`com.mastermindx.hermes.slack-gateway\`, single Socket Mode owner for the existing \`A0BTCKA7GSY\` app (native bot \`U0BT71H4FQE\`).
+- Pre-change on-host file SHA-256: \`8585d2b0fc8d390ada537cdb4fb7158af13bad6ae596917c9a54a8f26043415d\`. Not the SHA of the source candidate.
+- Configuration: \`~/.hermes/slack-fleet/agents.json\`, 0600. Original runtime state \`relay-state.json\`, 0600. Agent credentials remain on host under \`~/.hermes/secrets\` and MUST NOT enter GitHub, logs or a chat.
+- Nine routable display identities (Engineering, Assurance, Delivery, Intelligence, Product, Reliability, Chief of Staff, Secretary, Meta-CEO); nine \`/mx-*\` slash commands are configured. Real bot/user ID aliases require separate Slack principals; one app provides one native bot ID, not nine.
+- M2 audit sample had 14 thread bindings but zero saved native Hermes session IDs, plus multiple failed/timeout Secretary turns. The Hermes CLI \`hermes chat -Q\` writes \`session_id: ...\` to stderr, not stdout. This source candidate fixes receipt parsing and also rejects unrelated mention wake-ups and rejected-event rate-limit poisoning.
+- The installed gateway performs direct subprocess dispatch. It is not proof of canonical Executive/Agent Dialogue authority, cross-agent handoff, durable native admission or production acceptance.
+
+## Reconciliation and delivery gates
+
+1. Qualify exact-source branch, source diff, all required CI and review/release controls. Do not run this candidate as a SECOND Socket Mode listener. Do not migrate original threads or overwrite active native sessions.
+2. Original M2 host/admin owner must verify current installed SHA, live writer and any in-flight effects immediately before installation. Stop/replace only the original launchd gateway within its approved release lane, never an alternate receiver. Keep the exact installed file for rollback with secure permissions.
+3. Install **only from accepted exact GitHub source** and verify installed SHA/content and service restart. Current M2 host code may have changed since the pre-change SHA above. CAS/check beforehand; any drift requires reconciliation and renewed focused testing.
+4. Keep existing one-app credentials, 0600 registry, native profiles and unchanged Slack channel authorization. Never paste an xapp/xoxb/xoxp/xoxe credential into source or command arguments. Test the authenticated loopback \`/health\` with an existing secret held locally, without emitting the secret.
+5. Use a **fresh** Slack thread, after original admission, to prove a real human \`@Mastermind Executive Relay secretary: ...\` or \`/mx-secretary\` causes one accepted Hermes turn and one attributed reply in the same thread. Read the canonical Hermes session receipt from stderr. Confirm the gateway saved that thread's native session ID, not just the role binding.
+6. Send a follow-up in that same thread with no mention; prove the exact same Hermes session ID was supplied to \`--resume\` and its result returned, not a new session. Test two different roles / independent threads and preserve role memory isolation.
+7. Test dual Slack event delivery \`app_mention\` + \`message.channels\`, revoked/unallowed sender, unrelated user mention, bot echo, Slack restart/reconnect, and timeouts. Confirm no second turn, no unknown-effect blind retries, no model tokens when idle.
+8. **Known remaining gap:** simultaneous messages in one thread can currently dispatch overlapping processes. Resolve with the canonical session-owner admission/busy/continuation behavior; a second ephemeral scheduler or silent dropped message is not acceptable. Also cross-role handoff needs independent native binding/admission, not reuse of a prior role's session ID. Those acceptance cases remain open and should not be represented as solved by the source parser fix.
+9. Hermes native \`peer\` supports peer-gateway DMs and run/status, and Hermes Kanban supports profile collaboration, but both are separate product surfaces. Reuse only when they fit the already authorized Executive/Agent Dialogue owner and do not create a duplicate control plane.
+
+## Evidence and rollback
+
+- Before any mutating step: exact GitHub commit, current M2 installed file hash, launchd state, live gateway PID, current \`relay-state.json\` presence and active session consumers.
+- After: versioned install SHA, service health, actual Slack message link and reply, original native session IDs (redact sensitive context), same-thread resume proof and negative-path receipts.
+- Roll back through the incumbent owner using the saved original exact file with the same launchd service; do not destroy \`relay-state.json\`, native Hermes databases or pending jobs. Reconcile any ambiguous Slack posts rather than reposting after an unknown effect.
+
+**Do not call this deployment complete on CI alone.**
