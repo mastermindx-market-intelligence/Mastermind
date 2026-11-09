@@ -373,3 +373,24 @@ Read-only donor reasoning specialists completed and were explicitly stopped. No 
 - [T3 launch-tool schema at plan pin](https://github.com/pingdotgg/t3code/blob/0770446869d247a8b28c27d7ed93f47f8ff0c1e4/apps/server/src/mcp/toolkits/project/tools.ts)
 - [Same launch-tool schema at companion pin](https://github.com/pingdotgg/t3code/blob/d0f1f7200dce1229f75314b3d9eb1d7ac3abb607/apps/server/src/mcp/toolkits/project/tools.ts)
 - [Immutable companion implementation guide](https://github.com/mastermindx-market-intelligence/Mastermind/blob/e5d3a2489eb091a9b2f6749fd57c13184b3c2b60/docs/plans/2026-11-08-mmos-team-delivery-integration.md)
+
+
+## Resumed hardening — 9 November 2026
+
+The Chairman renewed this design commission: make the existing Hermes Team and T3 experience more robust and better designed. The original outcome, ownership and integration acceptance above remain in force. PR #2358 is merged at 494d095813dad415938800fa0e4d2719497738fa; its completed baseline is preserved.
+
+Current protected procedure pin: 494d095813dad415938800fa0e4d2719497738fa. Current Macro design pin: f92353edd85904b291d158e685c9c62d793587dd. The live Paper file permits disjoint target writers. Another session has added pages 17 Code workspace, 18 Unified settings, 17A Code states and 17B Code Build, plus HC17. Those targets are not owned or modified by this pass. Existing HC01 navigation has also been refreshed; this pass will build new disjoint HC18+ targets in page p-R-0 and new HS/HB targets on the existing state/build pages.
+
+### Bounded outcome and acceptance
+
+Improve everyday Team operation with four connected journeys: attention triage, side-by-side conversations, search with exact-message return, and parent/child work tracing. Add concrete partial-creation and result-delivery recovery, explicit group routing, and lifecycle actions. Preserve drafts, read positions, original message/task identity and the existing Code return destination. Native Paper product/state/build evidence is required; the HTML companion supports executable demonstrations but cannot substitute for Paper. Runtime integration and production acceptance remain outside this design-only pass.
+
+1. Inspect the current native Team frames and adjacent Code/settings surfaces; retain their palette, shell and ownership.
+2. Build the four primary journeys and bounded recovery states as native editable frames. Do not duplicate the other session's Code/settings design work.
+3. Verify actual screenshots, including deliberate narrow layouts and light/ZH treatment for affected daily flows. Resolve concrete readability, clipping and return-path defects.
+4. Extend the existing interactive companion for these accepted journeys, with focused behavior checks; replace its existing saved identity.
+5. Record exact frame IDs, action/acknowledgment/return contracts, preserved features, verification and remaining production proof here. Publish one Ready source PR from this branch and coordinate through #2338.
+
+Direct Paper composition and source integration are retained by the principal for PRINCIPAL_JUDGMENT and LOWER_TOTAL_OVERHEAD. One native reasoning-only audit reviewed workflow gaps; it performed no writes or runtime actions. Its recommendations were accepted for this bounded design pass, not as a live-canvas completeness verdict. No new daemon, queue, runtime identity, checkout allocator, watcher or integration owner is introduced.
+
+The exact revision-6 masterplan remains unverified unless later primary evidence resolves it. The new Code/session provider design is consumed as a capability choice; this pass does not hardcode a new runtime default or supersede the existing implementation owners.
