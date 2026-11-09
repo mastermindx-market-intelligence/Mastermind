@@ -15,7 +15,7 @@ export function NativeWorkAuthorizationControl({host,state,revision,locale,befor
   try{const value=await owner.read({signal:new AbortController().signal});if(n===sequence.current&&current()&&!busy.current){frame.current=current;setData(value);setPhase(uncertain.current?'unknown':'idle');}}
   catch{if(n===sequence.current&&current())setPhase(uncertain.current?'unknown':'unavailable');}
  };
- const send=async()=>{const current=frame.current;frame.current=null;if(busy.current||uncertain.current||data?.state!=='ELIGIBLE'||!current?.()||!owner)return;
+ const send=async()=>{const current=frame.current;frame.current=null;if(busy.current||uncertain.current)return;if(data?.state!=='ELIGIBLE'||!current?.()||!owner){setData(null);setPhase('unavailable');return;}
   const n=sequence.current;busy.current=true;setPhase('pending');try{beforeSignIn?.();if(!current())return;await owner.signIn();}
   catch{uncertain.current=true;if(alive.current&&sequence.current===n&&window.MastermindMissionHost===host&&host?.workAuthorization===owner)setPhase('unknown');}finally{busy.current=false;}
  };

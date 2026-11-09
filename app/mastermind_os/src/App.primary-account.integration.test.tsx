@@ -40,7 +40,7 @@ it.each(['en','zh-CN'] as const)('opens only account authorization on a real App
  const button=screen.getByRole('button',{name:zh?'登录账户':'Sign in to account'});
  expect(button.parentElement?.classList.contains('auth-entry__control')).toBe(true);button.focus();fireEvent.click(button);
  await waitFor(()=>expect(requests(x)).toEqual([['sign_in_primary']]));
- expect(document.activeElement).toBe(screen.getByRole('button',{name:zh?'取消登录':'Cancel sign in'}));
+ await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('button',{name:zh?'取消登录':'Cancel sign in'})));
  await x.publish(connected);expect(x.view.container.querySelector('.shell')).toBeTruthy();
  expect(screen.getByText(zh?'工作连接不可用':'Work connection unavailable')).toBeTruthy();
  expect((screen.getByRole('button',{name:zh?'新建对话':'New conversation'}) as HTMLButtonElement).disabled).toBe(true);

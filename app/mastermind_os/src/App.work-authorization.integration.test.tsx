@@ -3,11 +3,12 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {App} from './App';
+import nativeFixture from './fixtures/native-work-authorization-source.json';
 import {createNativeClient,type AuthState} from './host';
 import {composeMissionHost} from './compose-mission-host';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>{throw Error('INERT_UNAVAILABLE');})}));
 const account:AuthState={status:'signed_in',reason:null,acquisition:true,content:true};
-const ready={schema:'mastermind.native_work_authorization.v1',state:'ELIGIBLE',reason:'WORK_NOT_ESTABLISHED',generation:3};
+const ready=nativeFixture.initial;
 let dispose=()=>{};
 beforeEach(()=>{history.replaceState(null,'','/os/');localStorage.clear();Object.defineProperty(window,'__TAURI_INTERNALS__',{configurable:true,value:{}});});
 afterEach(()=>{cleanup();dispose();dispose=()=>{};delete window.MastermindMissionHost;delete(window as unknown as Record<string,unknown>).__TAURI_INTERNALS__;});
@@ -32,7 +33,7 @@ it.each(['en','zh-CN'] as const)('reaches first work sign-in only after inspecti
  expect(screen.queryByRole('button',{name:zh?'登录以访问工作':'Sign in for work'})).toBeNull();
 });
 it('keeps held Executive refusal administrator-only with zero auth and returns focus',async()=>{
- const x=await mount({...ready,state:'ADMIN_ACTION_REQUIRED',reason:'AUTHORIZATION_REFUSED'});const entry=screen.getByRole('button',{name:'Work access'});entry.focus();fireEvent.click(entry);
+ const x=await mount(nativeFixture.refused);const entry=screen.getByRole('button',{name:'Work access'});entry.focus();fireEvent.click(entry);
  expect(await screen.findByText(/Contact your administrator/)).toBeTruthy();expect(screen.queryByRole('button',{name:'Sign in for work'})).toBeNull();expect(effects(x)).toHaveLength(0);
  fireEvent.click(screen.getByRole('button',{name:'Back'}));expect(document.activeElement).toBe(screen.getByRole('button',{name:'Work access'}));expect(effects(x)).toHaveLength(0);
 });
@@ -42,9 +43,15 @@ it('does not fall back when optional work facet is absent',async()=>{
 it.each(['host','method','generation'] as const)('refuses no-render %s withdrawal at App gesture',async kind=>{
  const x=await mount();fireEvent.click(screen.getByRole('button',{name:'Work access'}));const button=await screen.findByRole('button',{name:'Sign in for work'});
  if(kind==='host')window.MastermindMissionHost={...x.host};else if(kind==='method')x.host.workAuthorization!.signIn=vi.fn();else x.host.invalidationGeneration=()=>999;
- fireEvent.click(button);expect(effects(x)).toHaveLength(0);
+ fireEvent.click(button);expect(effects(x)).toHaveLength(0);if(kind==='host')expect(screen.queryByText('Work sign-in is unavailable here.')).toBeNull();else expect(screen.getByText('Work sign-in is unavailable here.')).toBeTruthy();expect(screen.queryByRole('button',{name:'Sign in for work'})).toBeNull();
 });
 it('retains lost original handoff without duplicate or legacy fallback',async()=>{
  let reject!:(v:unknown)=>void;const held=new Promise((_,r)=>{reject=r;});const x=await mount(ready,()=>held);fireEvent.click(screen.getByRole('button',{name:'Work access'}));const b=await screen.findByRole('button',{name:'Sign in for work'});fireEvent.click(b);fireEvent.click(b);await waitFor(()=>expect(effects(x)).toEqual([['sign_in_for_work']]));
  await act(async()=>reject(Error('INERT_LOST_HANDOFF')));expect(await screen.findByText(/handoff is unconfirmed/)).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'Back'}));fireEvent.click(screen.getByRole('button',{name:'Work access'}));expect(effects(x)).toEqual([['sign_in_for_work']]);
+});
+
+it('withholds a delayed work handoff after native account withdrawal',async()=>{
+ let finish!:(v:unknown)=>void;const held=new Promise(r=>{finish=r;});const x=await mount(ready,()=>held);fireEvent.click(screen.getByRole('button',{name:'Work access'}));fireEvent.click(await screen.findByRole('button',{name:'Sign in for work'}));await waitFor(()=>expect(effects(x)).toHaveLength(1));
+ await act(async()=>{x.handlers.get('mastermind-auth-state')!({payload:{status:'signed_out',reason:'USER_SIGNED_OUT',acquisition:false,content:false}});x.handlers.get('mastermind-executive-auth-state')!({payload:{generation:4,available:false}});});
+ await act(async()=>finish({status:'signing_in',reason:null,acquisition:false,content:false}));expect(x.client.getState().reason).toBe('USER_SIGNED_OUT');expect(screen.queryByRole('button',{name:'Work access'})).toBeNull();expect(effects(x)).toEqual([['sign_in_for_work']]);
 });
