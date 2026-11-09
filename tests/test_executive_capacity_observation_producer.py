@@ -699,4 +699,3 @@ def test_quota_preview_requires_the_sealed_trusted_factory_boundary(tmp_path):
     assert "import os" not in source
     assert "getenv" not in source
     assert "monkeypatch" not in source
-
