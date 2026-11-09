@@ -47,3 +47,23 @@ state never shares the interactive Claude Code home.
 
 T3 picks up new provider instances on its next start; already-open sessions
 keep their model selection.
+
+## Fabric edge consumer contract (T3, Hermes, any sibling consumer)
+
+One boundary, three loopback edges — consumers carry **only the local gateway
+token**, never vendor keys; the fabric owns admission, key/account rotation
+and load balancing; there is no consumer-side fallback.
+
+| edge | wire | auth | admission boundary |
+|---|---|---|---|
+| `127.0.0.1:8312` (anthropic gateway) | Anthropic Messages | `Bearer` gateway token from `anthropic-gateway/gateway.env` | pooled Claude Max OAuth accounts: rolling 5h/weekly budgets, cooldowns, model weights |
+| `127.0.0.1:8311` (experiential edge) | **both**: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`) **and** OpenAI (`/v1/chat/completions`, `/v1/responses`, …) | `Bearer` gateway token from `experiential-gateway/gateway.env` | per-key durable sliding-window RPM + org ceiling; Anthropic surface admits exactly `EXPLABS_ANTHROPIC_MODELS`; OpenAI surface enforces `EXPLABS_PLAN_POLICY` |
+| `127.0.0.1:8313` (unified router) | Anthropic Messages | `Bearer` router token from `fabric-router/router.env` | every pool above plus GLM coding plan (3-account rotation), Bailian token plan (3 keys), MiniMax, BytePlus; `fabric/*` aliases; admission-time failover only |
+
+OpenAI-wire POSTs on 8311 **must** bind to the deployed policy with
+`x-fabric-plan-policy: <plan_policy_digest(EXPLABS_PLAN_POLICY)>` (409
+otherwise); the current `free_and_uncensored` digest is published by
+`GET /statusz`. Anthropic-wire POSTs may bind optionally to the Anthropic
+catalogue digest (`anthropic_policy_digest` in `/statusz`). A request is never
+replayed across keys/routes after a possible effect; refusals are typed
+(`PLAN_*`, `FABRIC_*`).
