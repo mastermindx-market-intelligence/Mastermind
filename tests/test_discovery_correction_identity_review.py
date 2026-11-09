@@ -5,7 +5,7 @@ import pytest
 RECORDS = {
     'app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs': ('cb629df9ba989ea38bc278acc938e4241ef03f6358e9c56de7b629f407fcdb11', ((537, 58, 61, 'int', '600'), (538, 66, 69, 'int', '600'))),
     'integrations/mastermind_workspace_app/native_authorization_identity.py': ('db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))),
-    "app/mastermind_os/src-tauri/src/auth.rs": ('6592b76edb1d58dab83ef905de596919b58995c13e099d8ca9437b35b9b1a040', ((3739, 68, 71, 'int', '503'), (3744, 69, 72, 'int', '503'), (3748, 67, 70, 'int', '503'))),
+    "app/mastermind_os/src-tauri/src/auth.rs": ('ace408ab1b186d614086923fef677000247a1074361c61a5578e78bbc5571844', ((3769, 68, 71, 'int', '503'), (3774, 69, 72, 'int', '503'), (3778, 67, 70, 'int', '503'))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),

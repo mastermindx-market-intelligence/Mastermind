@@ -13,11 +13,9 @@ from functools import wraps
 import httpx
 import pytest
 
-from control_plane.experiential_plan_policy import (
-    anthropic_policy_digest,
-    parse_anthropic_models,
+from ops.native_fabric.experiential_proxy.gateway import (
+    Settings, create_app, anthropic_policy_digest, parse_anthropic_models,
 )
-from ops.native_fabric.experiential_proxy.gateway import Settings, create_app
 
 TOKEN = "local-test-token-32-characters-minimum"
 ADMITTED = ("glm-5.3", "claude-sonnet-latest")
