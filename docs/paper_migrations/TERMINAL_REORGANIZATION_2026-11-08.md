@@ -4,7 +4,7 @@
 
 Chairman Chris assigned this session to assess the Terminal Paper file's size, split related feature families where warranted, and leave future sessions an unambiguous navigation and ownership map. Operation: `terminal-paper-reorganization-20261108-c4`. This is a design-file organization mission, not application implementation or release.
 
-DONE_WHEN: a verified feature-family organization exists in Paper; each source page has one declared current location; retained references and held designs keep their status; shared design tokens retain their existing owner; a fresh session can find the right file and recover exact migration state from this record and the Paper Start Here directory. Physical transfer is not claimed from file creation, copying, or a screenshot alone.
+DONE_WHEN: a verified feature-family organization exists in Paper; each source page has one declared current location; retained references and held designs keep their status; shared design tokens retain their existing owner; a fresh session can find the right file and recover exact migration state from this record and the Paper Start Here directory. The full mission remains incomplete until the warranted feature families have verified smaller working files and the directory routes work to them. Physical transfer is not claimed from file creation, copying, or a screenshot alone.
 
 ## Source and authority
 
@@ -12,7 +12,7 @@ DONE_WHEN: a verified feature-family organization exists in Paper; each source p
 - Exact Terminal source: [Terminal / Start Here](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0).
 - Existing estate map: [MASTERMIND Migration Directory](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0). This is the estate entry, not a new registry.
 - Existing accepted clarity audit: [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). Existing F03 source and release holds remain distinct from this new Terminal organization task.
-- Current design reads and any guarded Paper edits: this session's Studio Direct Paper actions on the observed M2 Studio. Any native UI transaction stays on that same Studio carrier and receives exact source/destination readback. No denied or uncertain operation is transferred.
+- Paper content/metadata edits use this session's Studio Direct Paper actions on the observed M2 Studio. Native selection attempts remained on that carrier and dispatched no copy/paste/delete. A separate isolated Chrome view was read through the Browser connector; it is signed out. No design content edit was dispatched there. Each future logical content mutation must retain its selected carrier until reconciled; the Google authentication denial described below must not be bypassed.
 - Direct work rationale: PRINCIPAL_JUDGMENT for family boundaries and preservation; UNIQUE_APPROVED_ACCESS for attended Paper operations; LOWER_TOTAL_OVERHEAD for the bounded navigation/source edits. A read-only reasoning helper challenged the split and official capacity evidence. No Fabric execution or background worker is claimed.
 
 ## Verified baseline
@@ -27,13 +27,13 @@ The earlier oversized MASTERMIND PAGES file is now labeled MOVED / Navigation on
 
 | Family | Source pages | Artboards | Nodes | Destination state |
 | --- | ---: | ---: | ---: | --- |
-| Terminal · Start Here & Shared Shell | 7 | 38 | 4911 | Existing source entry retained |
+| Terminal · Start Here & Shared Shell | 7 | 38 | 4911 | PLANNED working file; original entry bookmark retained |
 | Terminal · Charts & Scripting | 5 | 29 | 7447 | PLANNED — no content transfer yet |
 | Terminal · Company Research | 12 | 184 | 34023 | PLANNED — no content transfer yet |
 | Terminal · Options Flow, Exposure & Volatility | 8 | 77 | 13074 | PLANNED — no content transfer yet |
 | Terminal · Options Planning & Review | 9 | 126 | 14890 | PLANNED — no content transfer yet |
 | Terminal · Heatmaps & Comparison | 5 | 40 | 6846 | PLANNED — no content transfer yet |
-| Terminal · Portfolio & Returns | 4 | 24 | 3079 | PLANNED — no content transfer yet |
+| Terminal · Portfolio & Returns | 4 | 24 | 3079 | Staging file verified empty; no transfer yet |
 | Existing Macro · Market Structure, Stages & Allocation | 1 | 3 | 259 | Existing Macro target requires reconciliation |
 
 Company responsive/localization/evidence states remain with their feature. Options separates market observation/exposure from planning/save/watch/review. The misplaced D06 Macro completion page has an existing potential home, [Market Structure, Stages & Allocation](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2), and must be reconciled before transfer. Mixed build notes remain fully preserved and cross-linked, not silently divided or discarded.
@@ -56,6 +56,23 @@ Company responsive/localization/evidence states remain with their feature. Optio
 6. Add new work to the appropriate verified family. Keep contracts and variants with that workflow; do not create a new file for each screen or session.
 7. Review capacity when a family accumulates independent workflows, slow operations or a Paper warning; no invented vendor node/page threshold.
 8. Do not delete source or preservation material without a separately proven admitted retirement operation and exact preservation evidence. No raw database edits, endpoint bypasses, new agents/accounts/tunnels, or release/merge bypasses.
+
+## Implemented organization and proof
+
+- Original Terminal sidebar: **51 page IDs preserved, eight feature separators added**. Guarded operation `terminal-paper-reorg-20261108-c4-arrange-01` and a separate exact-file readback agree. Page grouping is implemented; content was not transferred or retired.
+- Existing Start Here page `p-R-0`: subtitle `1BD2-0` routes readers to the transfer status. Existing reference index `1NDQ-0` now contains family routing, exact source page IDs, baseline counts, preservation rules and this record in new section `28T8-0`.
+- Existing estate directory: section `C9-0` on `01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0` identifies Terminal as a **separate, incomplete transfer**, so the completed MASTERMIND PAGES migration is not mistaken for Terminal completion.
+- Pilot file: [STAGING ONLY · Terminal Portfolio transfer · EMPTY](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0). It has one page named “00 · No designs copied · See Terminal Start Here”, **one root node and zero artboards**. Reuse this exact file; do not create a duplicate. The rename initially returned EFFECT_UNKNOWN because its immediate readback retained the old name. A later read on the original Studio carrier confirmed the exact requested name; **no rename replay** occurred.
+- Meaningful checks passed: all 51 baseline page IDs occur in exactly one proposed family, family membership exactly covers the census, and sums equal 521 artboards / 84,529 nodes. The full artboard inventory is [TERMINAL_BASELINE_2026-11-08.json](TERMINAL_BASELINE_2026-11-08.json).
+- Separate live reads: Start Here is now 188 nodes / two artboards (41 navigation nodes added); Portfolio builder remains 249 nodes / four artboards; Returns remains 756 nodes / 11 artboards. File token hash remains `55dd37b7`. These focused checks are not a new whole-file byte measurement.
+- Actual Paper screenshots of the new routing section, original Start Here composition and new estate status were visually inspected: readable text, complete URLs and no clipping. Working indicators were released only for the edited artboards.
+- No Paper design copy, paste, cut or deletion was dispatched. No physical capacity reduction is claimed. Known Returns, F03 and other held source statuses remain unchanged.
+
+## Capacity interpretation
+
+The baseline is large and mixes independent workflows, so a feature split is warranted. It is not evidence that a particular percentage of Paper's quota is consumed. Paper's [official build log](https://paper.design/build-log) says the Pro file-size limit was increased; it does not publish the numeric document ceiling in the inspected entry. The 25 MB / 100 MB values on [pricing](https://paper.design/pricing) are maximum **image** sizes, not maximum whole-file sizes. [Paper's token documentation](https://paper.design/docs/tokens) says copied tokens are not automatically synchronized across files.
+
+The first split keeps responsive and language variants with their features, preserves both Options workflow groups, and routes the unrelated Macro supplement to its existing family after reconciliation. Company is the largest proposed group at 34,023 baseline nodes; observe its actual performance and semantic growth before deciding on a further functional split. Do not separate it merely by device or language.
 
 ## Baseline page map
 
@@ -115,12 +132,21 @@ All links below are the pre-migration source and remain valid until an explicit 
 | [p-2-0](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-2-0) | Terminal · Options Structure Intelligence · R1 · 2026-09-27 | Terminal · Options Planning & Review | 24 | 4971 |
 | [p-8-1](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-8-1) | Market Heatmaps · Unified Workspace · 2026-09-29 | Terminal · Heatmaps & Comparison | 16 | 4746 |
 
-## Current continuation
+## Current continuation — EXACT_HUMAN_GATE
 
-P1 is complete. The original page list is now grouped by feature family with eight dividers; exact readback preserved all 51 page IDs. Operation `terminal-paper-reorg-20261108-c4-arrange-01` returned APPLIED_RESPONSE_OBSERVED and was independently read back. This does not reduce the file's node count.
+**Parent mission incomplete:** assessment, grouping and routing are verified; the physical split is not complete. P1 is complete. P4's interim navigation and P5's verification of applied organization are complete. P2/P3 remain pending.
 
-P2 staging creation is verified: [Terminal · Portfolio & Returns · Migration staging](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0), one empty page, one root node, zero artboards. Creation operation `terminal-paper-reorg-20261108-c4-portfolio-file-01` was reconciled through the original Studio carrier; no replay. No designs have been copied and the source remains canonical. Full source artboard inventory is in [TERMINAL_BASELINE_2026-11-08.json](TERMINAL_BASELINE_2026-11-08.json).
+**Actual gate:** the isolated Chrome Paper view loads the exact Portfolio builder page but is signed out. Its normal Log in flow offers email or Google. Attempting the observed “Continue with Google” link was rejected by the Browser tool's **automatic approval review**, not a manual rejection: authority to observe `https://accounts.google.com` was not granted because the task did not specify Google authentication or the Google account. Do not retry that denied step through another browser, tool, account, raw endpoint or carrier. The Chairman can complete Paper sign-in in the retained Chrome tab, or provide explicit account-specific authorization subject to the actual approval control. No credentials were read or exposed.
 
-Attended UI targeting has exposed disagreement between visible tabs and adapter active-file metadata. Exact-file Paper reads and guarded page organization work. Native foreground actions returned unverifiable window postconditions; no content-changing copy/paste/delete has been dispatched. A source-page selection attempt is being reconciled on its original process before further native input. The original design file and all release/design holds remain intact.
+**Native fallback boundary:** bounded Studio native selection attempts did not establish a stable exact page. Background input lacked a pressable accessibility target; foreground attempts showed window-postcondition/expired-receipt failures and a delayed selection with target drift. Visible content also changed between observations. The cause is not proven. No copy/paste/delete was attempted, and no live writer was displaced. Do not turn these observations into an invented blanket Paper outage or permanent security denial. Resume native work only with a currently qualified, stable exact target and protected live writers.
 
-Source branch: `sol/terminal-paper-reorganization-20261108-c4`; this file is a durable mission record, not protected procedural law or Runtime admission.
+**Next action once the control is available:**
+1. Verify Paper is authenticated to the intended MastermindX team in the isolated view. Re-read the existing source page and the exact empty staging file above. Choose the original carrier for one new native-copy operation.
+2. Pilot source `p-X-0` (249 nodes / four artboards). Preserve the source. Verify editable structure/text, artboard mapping, tokens, assets, visual fidelity, comments and reopen readback. A successful file creation or visually similar reconstruction is insufficient.
+3. Complete Portfolio pages `p-Y-0,p-1F-0,p-Q-0` using the qualified method. Preserve the held Returns board's design/release status independently of migration acceptance.
+4. Continue the other families in the same healthy session after each verified batch. Update this record and the existing directories with actual destination IDs. A smaller working-file handover can retain the original as clearly labeled recovery/reference; retirement of original content requires its own admitted operation and preservation proof. Do not claim that retained source bytes have shrunk.
+5. Reuse exact accepted checks and existing files. Never re-census or rebuild accepted work without relevant drift.
+
+**DO_NOT_REDO:** the 51-page census and 521-artboard inventory; eight sidebar dividers; existing `28T8-0` and `C9-0` navigation sections; pilot file creation or reconciled rename. No unresolved Paper content-edit effect or active/background copy worker remains.
+
+Source branch: `sol/terminal-paper-reorganization-20261108-c4`. This record is durable task evidence, not protected procedural law, runtime admission, a new registry, a design approval or a release authorization.
