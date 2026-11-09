@@ -26,6 +26,7 @@ pub struct ContinuationStatus {
 #[derive(Clone)]
 pub(super) struct ContentTimeout {
     generation: u64,
+    intent: SignInIntent,
     original_state_digest: [u8; 32],
     acquisition: String,
     client: String,
@@ -158,6 +159,7 @@ impl Inner {
         }
         if let Some(token) = self.token(Resource::Acquisition) {
             let anchor = ContentTimeout {
+                intent: pending.intent,
                 generation: self.generation,
                 original_state_digest: Sha256::digest(pending.state.as_bytes()).into(),
                 acquisition: token.value.clone(),
@@ -260,6 +262,7 @@ impl Inner {
             return Ok(());
         };
         if pending.resource != Resource::Content
+            || pending.intent != witness.anchor.intent
             || pending.generation != self.generation
             || pending.expires <= Instant::now()
             || !self.probe_current(&witness.anchor)
@@ -310,7 +313,7 @@ impl Inner {
         let mut active = anchor.clone();
         active.generation = generation;
         self.content_timeout = Some(active.clone());
-        let url = self.transaction(Resource::Content)?;
+        let url = self.transaction_for(Resource::Content, anchor.intent)?;
         self.pending.as_mut().ok_or(INELIGIBLE)?.continuation = Some(ContentContinuation {
             anchor: active,
             account,
@@ -551,6 +554,26 @@ mod tests {
         inner.pending.as_mut().unwrap().expires = expired;
         assert!(inner.expire_transaction(inner.generation, expired, Instant::now()));
         (inner, state)
+    }
+    #[test]
+    fn primary_purpose_survives_timeout_witness_and_explicit_content_continuation() {
+        let mut inner = Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        inner.acquisition = Some(token("synthetic-acquisition"));
+        inner.transaction_for(Resource::Content, SignInIntent::PrimaryAccount).unwrap();
+        let expired = Instant::now() - Duration::from_secs(1);
+        inner.pending.as_mut().unwrap().expires = expired;
+        assert!(inner.expire_transaction(inner.generation, expired, Instant::now()));
+        let anchor = inner.begin_continuation_check().unwrap();
+        assert!(anchor.intent == SignInIntent::PrimaryAccount);
+        let proof = account(Resource::Acquisition, anchor.acquisition_wall, &"a".repeat(64));
+        inner.open_content_continuation(&anchor, proof).unwrap();
+        assert!(inner.pending.as_ref().unwrap().intent == SignInIntent::PrimaryAccount);
+        let state = inner.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = inner.consume(&format!("{CALLBACK}?state={state}&code=inert-new-code")).unwrap();
+        assert!(pending.intent == SignInIntent::PrimaryAccount);
+        assert!(inner.continuation_exchange_guard(&pending).is_ok());
+        assert!(inner.executive.is_none());
     }
     fn account(resource: Resource, wall: SystemTime, digest: &str) -> AccountIdentity {
         let kind = if resource == Resource::Acquisition {

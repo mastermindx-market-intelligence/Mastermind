@@ -129,6 +129,7 @@ fn main() {
             auth::hermes_native::hermes_native,
             auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
+            auth::primary_account::sign_in_primary,
             auth::authorization_continuation::read_authorization_continuation,
             auth::authorization_continuation::continue_authorization,
             auth::sign_out,
