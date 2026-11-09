@@ -117,4 +117,10 @@ All links below are the pre-migration source and remain valid until an explicit 
 
 ## Current continuation
 
-P1 is complete. P2 is next. No Paper design content has been modified by this operation yet. A native page-menu inspection was observed and reconciled without a data edit. No unresolved modifying effect is claimed. Source branch: `sol/terminal-paper-reorganization-20261108-c4`; this file is a durable mission record, not protected procedural law or Runtime admission.
+P1 is complete. The original page list is now grouped by feature family with eight dividers; exact readback preserved all 51 page IDs. Operation `terminal-paper-reorg-20261108-c4-arrange-01` returned APPLIED_RESPONSE_OBSERVED and was independently read back. This does not reduce the file's node count.
+
+P2 staging creation is verified: [Terminal · Portfolio & Returns · Migration staging](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0), one empty page, one root node, zero artboards. Creation operation `terminal-paper-reorg-20261108-c4-portfolio-file-01` was reconciled through the original Studio carrier; no replay. No designs have been copied and the source remains canonical. Full source artboard inventory is in [TERMINAL_BASELINE_2026-11-08.json](TERMINAL_BASELINE_2026-11-08.json).
+
+Attended UI targeting has exposed disagreement between visible tabs and adapter active-file metadata. Exact-file Paper reads and guarded page organization work. Native foreground actions returned unverifiable window postconditions; no content-changing copy/paste/delete has been dispatched. A source-page selection attempt is being reconciled on its original process before further native input. The original design file and all release/design holds remain intact.
+
+Source branch: `sol/terminal-paper-reorganization-20261108-c4`; this file is a durable mission record, not protected procedural law or Runtime admission.
