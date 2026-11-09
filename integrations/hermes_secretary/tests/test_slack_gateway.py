@@ -114,6 +114,17 @@ class InstalledGatewayRoutingTests(unittest.TestCase):
     def setUp(self):
         self.conf = gateway.DEFAULT_CONF
 
+    def test_legacy_meta_profile_alias_selects_chartered_native_home(self):
+        import copy
+        conf = copy.deepcopy(self.conf)
+        conf["agents"]["meta-ceo"]["profile"] = "hermes"  # installed M2 0600 roster
+        self.assertEqual(gateway.agent_identity(conf, "meta-ceo")["profile"],
+                         "meta-ceo-uncensored")
+        # Never apply a broad alias rewrite to another agent's configured home.
+        conf["agents"]["engineering"]["profile"] = "hermes"
+        self.assertEqual(gateway.agent_identity(conf, "engineering")["profile"],
+                         "hermes")
+
     def test_explicit_unbound_role_alias(self):
         self.assertEqual(
             gateway.route(self.conf, text="engineering: Please inspect this",
