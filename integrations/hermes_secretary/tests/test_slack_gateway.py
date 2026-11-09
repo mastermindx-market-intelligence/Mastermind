@@ -175,5 +175,83 @@ class InboundAdmissionSafetyTests(unittest.TestCase):
         self.assertEqual(self.fleet.state["recent"], {})
 
 
+
+class PerThreadTurnSerializationTests(unittest.TestCase):
+    """No two native replies to the same thread may overlap."""
+
+    def setUp(self):
+        import threading
+        self.fleet = gateway.Fleet.__new__(gateway.Fleet)
+        self.fleet.lock = threading.Lock()
+        self.fleet._turn_gates = {}
+
+    def test_same_thread_waits_then_releases_without_leaking_gates(self):
+        import threading
+        import time
+        guard = threading.Lock()
+        entered = threading.Event()
+        release = threading.Event()
+        active = [0]
+        peak = [0]
+        completed = []
+        errors = []
+
+        def one(_fleet, event, agent, reason, authorizations):
+            with guard:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+                completed.append(("enter", event["ts"]))
+            if not entered.is_set():
+                entered.set()
+                if not release.wait(3):
+                    errors.append("timed_out")
+            with guard:
+                active[0] -= 1
+                completed.append(("exit", event["ts"]))
+
+        self.fleet._work_serialized = one.__get__(self.fleet, gateway.Fleet)
+        a = {"channel": "C0CBC6AEAQZ", "ts": "1794180000.123456"}
+        b = {"channel": "C0CBC6AEAQZ", "thread_ts": "1794180000.123456",
+             "ts": "1794180001.123456"}
+        first = threading.Thread(target=self.fleet.work, args=(a, "secretary", "test", []))
+        second = threading.Thread(target=self.fleet.work, args=(b, "secretary", "test", []))
+        first.start()
+        self.assertTrue(entered.wait(2))
+        second.start()
+        time.sleep(0.05)
+        release.set()
+        first.join(3)
+        second.join(3)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(completed, [("enter", a["ts"]), ("exit", a["ts"]),
+                                     ("enter", b["ts"]), ("exit", b["ts"])])
+        self.assertEqual(self.fleet._turn_gates, {})
+
+    def test_different_threads_do_not_share_lock(self):
+        import threading
+        barrier = threading.Barrier(2, timeout=2)
+        errors = []
+        def independent(_fleet, event, agent, reason, authorizations):
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                errors.append("serialized_different_thread")
+        self.fleet._work_serialized = independent.__get__(self.fleet, gateway.Fleet)
+        threads = [
+            threading.Thread(target=self.fleet.work,
+                             args=({"channel": "C0CBC6AEAQZ",
+                                    "ts": f"179418000{i}.123456"}, "secretary", "test", []))
+            for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(3)
+        self.assertEqual(errors, [])
+        self.assertEqual(self.fleet._turn_gates, {})
+
+
 if __name__ == "__main__":
     unittest.main()
