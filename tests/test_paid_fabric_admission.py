@@ -108,3 +108,84 @@ def test_retained_occupancy_does_not_create_paid_capacity(monkeypatch,observatio
     if field in {'held_model','held_route','legacy_model_count'}:value['broker']['held_account']=1
     if field=='held_route':value['broker'].update(held_model=1,held_host=1)
     assert not s._paid_capacity_available(value)
+
+
+# --- WO-05 (census C4.4): admitted classification records at the boundary ------
+
+ROOT=Path(__file__).parents[1]
+
+
+def _binding():
+    return dict(root_id='JOB-root',job_id='JOB-child',attempt_id='ATT-1',
+                effective_grant_digest='a'*64,commission_sha256='b'*64)
+
+
+def test_admitted_record_issuer_derives_from_claim_authorities():
+    from control_plane.child_execution_contracts import C2_COMPLEX_BOUNDED, POLICY_REVISION
+    from control_plane.executive_paid_fabric_adapter import paid_child_admission_record
+    from control_plane.paid_fabric_backend import (PAID_CHILD_ADMISSION_SCHEMA,
+                                                   admitted_child_class_record)
+    binding=_binding()
+    research=SimpleNamespace(requested_authorities=['READ','RESEARCH'],
+                             orchestration_role='work')
+    record=paid_child_admission_record(research,binding)
+    assert record['schema']==PAID_CHILD_ADMISSION_SCHEMA
+    assert record['task_kind']=='research'
+    assert record['effective_complexity']==C2_COMPLEX_BOUNDED
+    assert record['witness_disposition']=='not_required'
+    assert record['policy_revision']==POLICY_REVISION
+    read_only=SimpleNamespace(requested_authorities=['READ'],
+                              orchestration_role='repair')
+    assert paid_child_admission_record(read_only,binding)['task_kind']=='repair'
+    derived=admitted_child_class_record(dict(binding=binding,paid_child_admission=record))
+    assert derived==('research',C2_COMPLEX_BOUNDED,'not_required',POLICY_REVISION)
+
+
+def test_admission_digest_conflicts_on_replay_with_different_claim():
+    from control_plane.executive_paid_fabric_adapter import paid_child_admission_record
+    job=SimpleNamespace(requested_authorities=['READ','RESEARCH'],
+                        orchestration_role='work')
+    record=paid_child_admission_record(job,_binding())
+    other=paid_child_admission_record(job,dict(_binding(),attempt_id='ATT-2'))
+    # Same child key with a different claim digest is a conflict, never a reuse.
+    assert record['admission_digest']!=other['admission_digest']
+    assert paid_child_admission_record(job,_binding())==record
+
+
+def test_witness_disposition_follows_shared_routing_law():
+    from control_plane.child_execution_contracts import (ChildRoutingPolicy,
+                                                         WITNESS_DISPOSITIONS,
+                                                         witness_disposition_of)
+    downgraded=ChildRoutingPolicy().evaluate('frontier','ungated frontier work','')
+    assert witness_disposition_of(downgraded)=='downgraded'
+    plain=ChildRoutingPolicy().evaluate('routine','ordinary bounded work','')
+    assert witness_disposition_of(plain)=='not_required'
+    assert set(WITNESS_DISPOSITIONS)=={'not_required','accepted','insufficient','downgraded'}
+
+
+def test_runtime_floor_consumes_every_projected_complexity():
+    from control_plane.child_execution_contracts import CANONICAL_TASK_COMPLEXITIES
+    source=(ROOT/'ops/native_fabric/quota_continuity/candidate/remote_sub.sh').read_text()
+    case=source.split('case "${POOL_TASK_COMPLEXITY:-}" in')[1].split('esac')[0]
+    # fabric_task.py reads POOL_TASK_COMPLEXITY as existing economic metadata and
+    # the lane runtime lifts its floor on exactly the canonical long names.
+    for name in CANONICAL_TASK_COMPLEXITIES:
+        assert name in case
+
+
+def test_operator_issue_consumer_requires_the_mapped_literal():
+    from control_plane.paid_fabric_backend import (LEGACY_OPERATOR_TASK_CLASS,
+                                                   legacy_pool_task_class)
+    issue=(ROOT/'integrations/session_bridge/paid_operator/fabric_operator_issue.py').read_text()
+    client=(ROOT/'integrations/session_bridge/paid_operator/fabric_operator_client.py').read_text()
+    assert "os.environ.get('POOL_TASK_CLASS') != 'domain_orchestration'" in issue
+    assert "env.get('POOL_TASK_CLASS') != 'domain_orchestration'" in client
+    assert legacy_pool_task_class(
+        'domain_orchestration')==LEGACY_OPERATOR_TASK_CLASS=='domain_orchestration'
+    assert legacy_pool_task_class('research')=='research'
+
+
+def test_fabric_task_complexity_consumer_env_name_unchanged():
+    source=(ROOT/'integrations/session_bridge/prospective_completion/'
+            'candidate/fabric_task.py').read_text()
+    assert 'env.get("POOL_TASK_COMPLEXITY", "")' in source

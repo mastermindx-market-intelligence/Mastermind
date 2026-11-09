@@ -259,3 +259,103 @@ def test_raced_incumbent_singleton_refuses_before_any_credential_read():
     with pytest.raises(IncumbentBusy):
         scope['build_canonical_incumbent_context'](fixed)
     assert calls == [('singleton', fixed+'/glm_shim/shim.lock')]
+
+
+# --- WO-05 (census C4.4): server-derived admitted class projection -------------
+
+def admitted_record(p=None,**overrides):
+    from control_plane.child_execution_contracts import C2_COMPLEX_BOUNDED, POLICY_REVISION
+    p=p if p is not None else material()[0]
+    record=dict(schema=backend.PAID_CHILD_ADMISSION_SCHEMA,binding=dict(p['binding']),
+        task_kind='research',effective_complexity=C2_COMPLEX_BOUNDED,
+        witness_disposition='not_required',policy_revision=POLICY_REVISION)
+    record.update(overrides);record.pop('admission_digest',None)
+    return dict(record,admission_digest=backend.admitted_class_digest(record))
+
+
+def _clear_pool_env(monkeypatch):
+    for name in backend._ADMITTED_POOL_ENV_NAMES:
+        monkeypatch.delenv(name,raising=False)
+
+
+def test_admitted_class_projection_replaces_blanket_stamp(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    from control_plane.child_execution_contracts import C2_COMPLEX_BOUNDED, POLICY_REVISION
+    p,*_=material()
+    env=backend.admitted_pool_class_env({**p,'paid_child_admission':admitted_record(p)})
+    assert env==dict(POOL_TASK_CLASS='research',POOL_TASK_COMPLEXITY=C2_COMPLEX_BOUNDED,
+        POOL_WITNESS_DISPOSITION='not_required',POOL_POLICY_REVISION=POLICY_REVISION)
+
+
+def test_operator_task_class_keeps_legacy_domain_orchestration(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p,task_kind='domain_orchestration',
+        effective_complexity='C3_FRONTIER_JUDGMENT',witness_disposition='accepted')
+    env=backend.admitted_pool_class_env({**p,'paid_child_admission':record})
+    # Legacy consumers require exactly this value for the operator role.
+    assert env['POOL_TASK_CLASS']=='domain_orchestration'
+    assert env['POOL_TASK_COMPLEXITY']=='C3_FRONTIER_JUDGMENT'
+
+
+def test_non_operator_task_kind_projects_verbatim(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p,task_kind='repair')
+    assert backend.admitted_pool_class_env(
+        {**p,'paid_child_admission':record})['POOL_TASK_CLASS']=='repair'
+
+
+def test_missing_admitted_record_refuses_instead_of_default(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    with pytest.raises(backend.PaidOwnerRefused):backend.admitted_pool_class_env(dict(p))
+
+
+def test_env_value_disagreeing_with_admitted_digest_refuses(monkeypatch):
+    p,*_=material()
+    payload={**p,'paid_child_admission':admitted_record(p)}
+    monkeypatch.setenv('POOL_TASK_COMPLEXITY','C3_FRONTIER_JUDGMENT')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env(payload)  # a lane env cannot promote the class
+    monkeypatch.setenv('POOL_TASK_CLASS','domain_orchestration')
+    with pytest.raises(backend.PaidOwnerRefused):backend.admitted_pool_class_env(payload)
+    monkeypatch.setenv('POOL_TASK_CLASS','research')
+    monkeypatch.setenv('POOL_TASK_COMPLEXITY','C2_COMPLEX_BOUNDED')
+    assert backend.admitted_pool_class_env(payload)['POOL_TASK_COMPLEXITY']=='C2_COMPLEX_BOUNDED'
+
+
+def test_restamped_record_cannot_self_promote_past_digest(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p)
+    inflated=dict(record,effective_complexity='C3_FRONTIER_JUDGMENT')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':inflated})
+    repointed=dict(record,binding=dict(p['binding'],attempt_id='ATT-other'))
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':repointed})
+    drifted=dict(record,policy_revision='0.9.0')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':drifted})
+    fabricated=dict(record,witness_disposition='fabricated')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':fabricated})
+    reviewer_lane=dict(record,effective_complexity='REVIEWER')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':reviewer_lane})
+
+
+def test_no_blanket_c2_default_remains_in_backend_source():
+    source=(ROOT/'control_plane/paid_fabric_backend.py').read_text()
+    assert 'C2_COMPLEX_BOUNDED' not in source
+    assert "POOL_TASK_CLASS='research'" not in source
+    assert '**class_env,' in source
+
+
+def test_admitted_record_rides_closed_control_payload():
+    from control_plane import paid_model_execution_contract as contract
+    p,*_=material()
+    assert contract.compile_request({**p,'paid_child_admission':admitted_record(p)})
+    with pytest.raises(contract.PaidModelContractRefused):
+        contract.compile_request({**p,'unrelated_key':'refused'})
