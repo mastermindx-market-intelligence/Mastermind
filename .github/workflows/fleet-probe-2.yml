@@ -1,0 +1,7 @@
+name: fleet-probe-ubuntulatest
+on: [pull_request]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "UBUNTU_LATEST_PROBE host=$(hostname)"
