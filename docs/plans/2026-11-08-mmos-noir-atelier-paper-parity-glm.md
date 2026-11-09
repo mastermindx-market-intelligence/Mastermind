@@ -1,9 +1,9 @@
 # Mastermind OS — Noir Atelier Paper-to-Product Parity Programme
 
-**Status:** EXECUTION BRIEF / NOT IMPLEMENTED BY THIS DOCUMENT.  
-**Program:** [Mastermind issue #2361](https://github.com/mastermindx-market-intelligence/Mastermind/issues/2361).  
-**Executive owner:** Chairman-directed Sol integration; preferred execution: GLM 5.3-qualified Subagent Fabric operator plus bounded leaves, not an assumed model binding.  
-**Intake/source snapshot:** protected Mastermind `master@7f711df8c12b9198aec3559fc017d722f2f7b7a2`; Macro `main@448f681b2dcacd2639674b91afc6a812437e402f`; requalify affected heads/real installed runtime before writes or acceptance.  
+**Status:** EXECUTION BRIEF / NOT IMPLEMENTED BY THIS DOCUMENT.\
+**Program:** [Mastermind issue #2361](https://github.com/mastermindx-market-intelligence/Mastermind/issues/2361).\
+**Executive owner:** Chairman-directed Sol integration; preferred execution: GLM 5.3-qualified Subagent Fabric operator plus bounded leaves, not an assumed model binding.\
+**Intake/source snapshot:** protected Mastermind `master@7f711df8c12b9198aec3559fc017d722f2f7b7a2`; Macro `main@448f681b2dcacd2639674b91afc6a812437e402f`; requalify affected heads/real installed runtime before writes or acceptance.\
 **Chairman outcome:** the signed-in **web and macOS Tauri Mastermind OS** should feel and function like its approved canonical Paper 'Noir Atelier' design, not like the current partially skinned implementation.
 
 ## 1. Completion is a working application, not a visual packet
@@ -28,10 +28,10 @@
 
 ## 3. Architecture and source inventory — keep what works
 
-**One shared interface**: `app/mastermind_os/src/App.tsx` routes/combines React components and `src/main.tsx` uses the web or Tauri host under `composeMissionHost`.  
-**Desktop host**: `app/mastermind_os/src-tauri/tauri.conf.json` (Tauri v2; `com.mastermind.os`; initial window 1200x820/min 390x600) with existing private Rust auth/command path.  
-**Web host**: `https://mcp.mastermind-x.com/os/`, existing sign-in/PKCE/auth/Executive capability and source guards.  
-**Design entry**: `app/mastermind_os/src/styles.css`, route styles and components below.  
+**One shared interface**: `app/mastermind_os/src/App.tsx` routes/combines React components and `src/main.tsx` uses the web or Tauri host under `composeMissionHost`.\
+**Desktop host**: `app/mastermind_os/src-tauri/tauri.conf.json` (Tauri v2; `com.mastermind.os`; initial window 1200x820/min 390x600) with existing private Rust auth/command path.\
+**Web host**: `https://mcp.mastermind-x.com/os/`, existing sign-in/PKCE/auth/Executive capability and source guards.\
+**Design entry**: `app/mastermind_os/src/styles.css`, route styles and components below.\
 **Existing app-control proof**: `docs/MASTERMIND_OS_APP_CONTROL.md` outlines bounded observe/navigate/act/check tools via existing Workbench browser context where actually installed; do not presume they're exposed in every environment. Existing Playwright/Chromium proof remains valid through its own owner.
 
 | Surface / user job | Canonical Paper page + artboard IDs | Current implementation pointers | Primary lane | Check/falsifier |
