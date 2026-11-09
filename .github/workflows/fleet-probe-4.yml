@@ -1,0 +1,7 @@
+name: fleet-probe-readonly
+on: [pull_request]
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - run: echo "RO_PROBE host=$(hostname)"
