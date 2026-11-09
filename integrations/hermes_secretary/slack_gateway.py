@@ -43,6 +43,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -518,7 +519,7 @@ class Fleet:
         text = event.get("text", "") or ""
         thread_ts = event.get("thread_ts") or ts or ""
         prompt = strip_mentions(text).strip() or "(empty message)"
-        run_id = f"{agent}-{int(time.time())}-{os.getpid() % 10000}"
+        run_id = f"{agent}-{int(time.time())}-{uuid.uuid4().hex[:12]}"
         placeholder = None
         if not thread_ts:  # slash invocation: our own placeholder becomes the thread root
             if dconf.get("placeholder", True):
