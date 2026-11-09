@@ -135,6 +135,18 @@ post-D3/Director-A truth (below).
   `tests/test_worker_adapter.py`. The live-proof harness
   (`integrations/t3/live_proof/t3_live_proof.py`) now runs on the same
   state-store seam.
+- **PROVEN_LIVE (this lane, Director A2 — durable canary receipt):** the
+  A1/A2 durability claims ON THE REAL T3 SERVER (environment m2studio,
+  T3 0.1.7, provider capacity_fabric / glm-5.3-flash) with SEPARATE OS
+  PROCESSES per scenario sharing one on-disk `SQLiteT3AdapterStateStore`:
+  crash-after-receipt cold restart recovers with ZERO native calls
+  (retained ref), crash-after-launch recovers through exactly ONE
+  idempotent replay that returns the ORIGINAL thread (one run upstream),
+  and a foreign authenticated namespace is refused locally with zero
+  native calls. Receipt
+  `integrations/t3/live_proof/t3_durable_canary_receipt.json`, pinned in
+  `tests/test_t3_durable_canary_receipt.py`. Exactly 3 real threads were
+  minted (the whole budget); see "Live durable canary" below.
 - **PROVEN by tests (in-tree, fake ports):** all A1/A2 durability and
   idempotency claims; adapter behavior for namespace refusal, replay
   adoption, cursor/cancel survival.
@@ -146,6 +158,58 @@ post-D3/Director-A truth (below).
   worker route — selection is a deployment act); any `dsh-acp` execution
   (named-not-implemented); production admission endpoints (the wire
   protocol is exercised through fetch doubles only).
+
+## Live durable canary (Director A2, 2026-11-09)
+
+`integrations/t3/live_proof/t3_durable_canary.py` turns the fake-port
+cold-restart proof into a REAL-PATH proof against the live T3 desktop app
+at `http://127.0.0.1:3773/mcp`. Crash points are deterministic
+`os._exit` hooks in HARNESS wrappers (a store wrapper after
+`put_launch_receipt` commits, a port wrapper after the native launch
+returns) — never in the adapter. Every scenario runs as its own OS
+process; P1/P2 share one `SQLiteT3AdapterStateStore` at the harness's
+authorized scratch root and one cached OAuth client identity (the live
+finding-1 rule: the authenticated principal is part of launch
+idempotency, so P2 must replay under P1's identity).
+
+Outcome (receipt schema `mastermind.t3_durable_canary_receipt/v1`,
+outcome `DONE`, exactly 3 threads = the whole budget):
+
+| Scenario | Native thread | P1 | P2 recovery | Result |
+|---|---|---|---|---|
+| S1 crash-after-receipt | `…f7f383e3` | launch 1, crash (exit 90) after receipt COMMIT before ACK | ZERO launch/replay/read; retained ref; second start refused; SUCCEEDED; `T3-CANARY-OK durable-s1` | PASS |
+| S2 crash-after-launch | `…08f2d536` | launch 1, crash (exit 91) after native launch before receipt | exactly ONE replay (same clientRequestId+namespace) → ORIGINAL thread, one run; SUCCEEDED; `T3-CANARY-OK durable-s2` | PASS |
+| S3 foreign namespace | — | stubbed `authenticated_namespace`, no 2nd OAuth client | refused LOCALLY on both attempts, ZERO native calls | PASS |
+| S4 interrupt honesty | `…c9ca2265` | live RUNNING target, interrupt `interrupt_requested` | ledger never claimed a settle; settle evidenced by upstream thread row | PASS |
+
+Live findings recorded by the canary (all in the receipt):
+
+1. **Terminal status polls advance the persisted read cursor past the
+   final assistant reply**, so `collect_result` can legitimately read an
+   empty page after `_wait_terminal`. The canary's reply capture now
+   re-reads the thread head and scans ASSISTANT items for the labeled
+   nonce line.
+2. **A human can append messages to a canary thread through the T3 app
+   after the run** (observed on S2: a manual message added failed runs
+   ordinal 2–3 after the canary's completed ordinal 1). Verification
+   therefore pins per-run evidence (`canary_run_status`), not thread-level
+   status.
+3. **T3 reclaims interrupted scratch threads from the exact-run read
+   path** — `t3_thread_read` returned `thread_not_found` ("no longer
+   available") for the interrupted S4 thread at one observation and read
+   it normally minutes later; the project-scoped `t3_thread_list` row
+   keeps reporting it (`status: interrupted`, `settled: false`). A settle
+   must be evidenced by an observation, never inferred from a vanished
+   thread; the adapter ledger correctly never claimed one.
+4. **`CANCELLING` can outlast a 420 s poll deadline** on this
+   server/model pair — the requested-vs-settled ledger (requested,
+   unsettled) remained the honest state at deadline.
+
+Operational notes: read-only verification roles (`--role s1-verify` …
+`s4-verify`) cold-reattach a terminal run with zero launch/replay calls
+and re-observe it; `--assemble` rebuilds the receipt from the current
+batch's side files + role logs without spawning anything. The canary
+never deletes or archives its threads (T3 owns lifecycle).
 
 ## Open issues
 
