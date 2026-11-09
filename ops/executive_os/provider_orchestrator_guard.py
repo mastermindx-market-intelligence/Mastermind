@@ -13,9 +13,15 @@ by the CURRENT broker-issued ExecutionBinding.v1, validated against the
 owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
-Runtime-multiplexed launches (for/while/until bodies, xargs/parallel/
-find -exec), interpreter one-liners and computed command words carrying
-wrapper tokens are refused as unaccounted/unobservable, and POSIX
+The gate classifies the SHAPE of the command structurally (a quote-aware shell
+scanner — see the ``_shell_scan`` layer): interpreter invocations judged by how
+their program is delivered (inline flag text / pipe / heredoc / computed
+argument — every flag spelling alike), computed words refused wherever a
+wrapper name substituted for them would complete a paid launch (shadow
+substitution — no runner allowlist), command substitution anywhere, launches
+inside runtime-multiplying or deferred shapes (loop bodies, function bodies,
+brace groups, xargs/parallel/find -exec, trap payloads, watch repeaters), and
+eval/source/'.' inside the nested -c script that performs the launch. POSIX
 line-continuation splits are canonicalised so no constructed path escapes
 the gate.
 There is no independent signing authority — the binding is only an assignment
@@ -238,17 +244,6 @@ _WRAPPER_NAME_RE = re.compile(
     r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
     re.I,
 )
-#: Interpreter invocations whose PROGRAM TEXT rides in the command itself
-#: (``python -c/-m``, ``perl/node/ruby/osascript -e``, ``php -r``): a launch
-#: assembled inside that text executes without a lexically observed wrapper
-#: invocation (REVIEW_2329 r2 N-3/C4-C5). Shell wrappers (bash/sh/zsh) are
-#: deliberately NOT listed — nested shells are the five-shapes scan's own
-#: territory and their text IS the command the gate judges.
-_INTERPRETER_EVAL_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
-    r"(?:python[23]?(?:\.\d+)?|perl|ruby|node(?:js)?|osascript|php)\s+"
-    r"(?:[^;&|\n]*\s)?-[cemr]"
-)
 #: Loop bodies (for/while/until) execute their contents N times: one lexical
 #: launch inside one is N paid children under one binding's single attempt
 #: (REVIEW_2329 r2 N-2/C1).
@@ -260,12 +255,564 @@ _BATCH_EXECUTOR_RE = re.compile(
     r"(?:xargs|parallel|find)\b[^;&|\n]*",
     re.I,
 )
-#: Prefix runners that only wrap a FOLLOWING command word, so an indirect
-#: word after them is still the launched command (``env X=1 $P run ...``).
-_RUNNER_WORDS = frozenset({
-    "env", "exec", "command", "builtin", "nohup", "setsid",
-    "stdbuf", "nice", "timeout",
+
+# --- structural shell-shape scanner (WO-11 r5; REVIEW_2329 r3 B-1/M-A/M-B) -----
+#
+# The r3 review's core finding was that the r4 refusals were pattern
+# allowlists over an open shell grammar: a one-letter flag change
+# (``python3 -Sc``), a long flag (``node --eval``), a stdin-fed program
+# (``python3 - <<EOF``, ``echo code | python3``), an unlisted runner
+# (``time/sudo/caffeinate/ssh $P run ...``), a function body, a brace-body
+# loop or a nested-shell ``eval`` restored the original bypass. This layer
+# replaces those lists with a real (small) shell scanner: the raw command is
+# tokenised quote-aware into words/operators/heredocs, grouped into simple
+# commands, and the SHAPE of each simple command is classified:
+#
+#   * an interpreter invocation is judged by HOW IT RECEIVES ITS PROGRAM
+#     (inline flag text, pipe, heredoc, computed argument) — never by which
+#     letters the flags spell — so every flag cluster and spelling variant
+#     is refused equally, while the documented script-file form
+#     (``python3 .../slot.py glm -- run``) stays observed;
+#   * a computed word (``$P``, ``${P}``, ``$(...)``, backticks) is refused
+#     wherever substituting a wrapper name for it would make the command a
+#     paid launch (shadow substitution) — no runner allowlist to evade;
+#   * a wrapper launch inside any shape that can execute it more than once
+#     or later (function bodies, brace groups, trap payloads, watch) is a
+#     runtime-multiplexed launch;
+#   * ``eval``/``source``/``.`` inside the same nested ``-c`` script that
+#     performs the launch makes the launch environment unobservable.
+#
+# The layer is conservative by design (over-refusal is honest, under-refusal
+# is a bypass) and is gated on a wrapper NAME appearing anywhere in the
+# canonical command, exactly like the r4 computed-launch gate it replaces.
+
+#: Token kinds emitted by :func:`_shell_scan`.
+_WORD, _OP, _HEREDOC = "word", "op", "heredoc"
+#: Characters that terminate an unquoted word / act as shell operators.
+_OP_CHARS = frozenset(";&|()<>\n")
+#: Two/three-character operators, longest first for greedy matching.
+_MULTI_OPS = (
+    ";;&", "&&", "||", ";;", "<<-", "<<<", "<<", ">>", ">&", "<&", ">|",
+)
+#: Operators that separate one simple command from the next.
+_SEPARATOR_OPS = frozenset({";", "&", "|", "&&", "||", ";;", "\n", "(", ")"})
+#: Words that may precede the command word without being it (reserved words).
+_COMMAND_KEYWORDS = frozenset({
+    "if", "then", "elif", "else", "fi", "for", "while", "until", "do",
+    "done", "case", "esac", "in", "select", "time", "coproc", "function",
+    "!", "{", "}", "[[", "]]",
 })
+#: A word whose text contains any of these is computed at runtime.
+_COMPUTED_WORD_RE = re.compile(r"[$`]")
+#: Runtime-computed segments inside a word (used for shadow substitution).
+_COMPUTED_SEGMENT_RE = re.compile(
+    r"\$\([^()]*\)|\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|`[^`]*`"
+)
+#: Interpreter programs: the launched program is text the command carries,
+#: not a process the guard can attribute (REVIEW_2329 r3 B-1). Judged by
+#: program-delivery shape, never by flag spelling.
+_INTERPRETER_HEAD_RE = re.compile(
+    r"^(?:python[23]?(?:\.\d+)?|pythonw|perl|ruby|irb|node|nodejs|deno|bun|"
+    r"php|osascript|lua|luajit|tclsh|wish|R|Rscript)$"
+)
+#: Interpreters whose program text is ALWAYS an argument (no script-file
+#: form exists): any invocation is an inline-program launch.
+_ALWAYS_INLINE_HEAD_RE = re.compile(r"^(?:gawk|mawk|nawk|awk|sed|jq)$")
+#: Shell programs whose ``-c`` argument is a nested script body.
+_SHELL_HEAD_RE = re.compile(r"^(?:ba|z|da|k|a|l|po)?sh$")
+#: Wrapper basenames used for shadow substitution.
+_SHADOW_WRAPPER_TOKENS = ("pool", "sub.sh", "remote_sub.sh", "slot.py")
+#: Units that only print or return status: a wrapper token inside them is
+#: text being shown, never a launch (shadow-substitution scope only).
+_PRINT_ONLY_HEADS = frozenset({
+    "echo", "printf", "true", "false", ":", *sorted(_INSPECTORS),
+})
+#: Words of the trap/watch commands that stage or repeat a launch.
+_LAUNCH_STAGE_HEADS = frozenset({"trap", "watch"})
+_ASSIGNMENT_WORD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+
+
+def _shell_scan(text: str, origin: int = 0, depth: int = 0) -> list[tuple[str, str, int, int]]:
+    """Tokenise ``text`` into ``(kind, text, start, end)`` shell tokens.
+
+    Quote-aware (single/double quotes, backslash escapes, POSIX
+    line-continuation joins), tracks ``$(...)``/``${...}``/backtick
+    segments verbatim inside words (so a word whose expansion decides what
+    runs keeps its ``$``/backtick marker), and consumes heredoc bodies as
+    single ``heredoc`` tokens. ``start``/``end`` are offsets into the
+    ORIGINAL command (``origin`` maps nested bodies back to it). This is a
+    refusal-scan aid, not a shell implementation: constructs it cannot
+    model degrade towards MORE tokens, never fewer.
+    """
+    tokens: list[tuple[str, str, int, int]] = []
+    length = len(text)
+    index = 0
+    at_word_start = True
+    while index < length:
+        char = text[index]
+        if char in " \t\r":
+            index += 1
+            at_word_start = True
+            continue
+        if char == "#" and at_word_start:
+            newline = text.find("\n", index)
+            index = length if newline < 0 else newline
+            continue
+        if char in _OP_CHARS:
+            index = _scan_operator(text, index, tokens)
+            at_word_start = True
+            continue
+        index = _scan_word(text, index, tokens, at_word_start, depth)
+        at_word_start = False
+    return [(kind, body, origin + start, origin + end)
+            for kind, body, start, end in tokens]
+
+
+def _scan_operator(
+    text: str, index: int, tokens: list[tuple[str, str, int, int]]
+) -> int:
+    length = len(text)
+    matched = next(
+        (op for op in _MULTI_OPS if text.startswith(op, index)), None
+    )
+    if matched is None:
+        matched = text[index]
+    tokens.append((_OP, matched, index, index + len(matched)))
+    index += len(matched)
+    if matched in ("<<", "<<-"):
+        # Consume the delimiter word, then the body up to its line.
+        while index < length and text[index] in " \t":
+            index += 1
+        delimiter_start = index
+        while index < length and text[index] not in " \t\r\n;&|<>":
+            index += 1
+        delimiter = text[delimiter_start:index].strip("'\"")
+        newline = text.find("\n", index)
+        if newline < 0 or not delimiter:
+            return index
+        body_start = newline + 1
+        position = body_start
+        body_end = length
+        while position <= length:
+            line_end = text.find("\n", position)
+            line = text[position:] if line_end < 0 else text[position:line_end]
+            stripped = line.lstrip("\t") if matched == "<<-" else line
+            if stripped.strip() == delimiter:
+                body_end = position
+                position = length if line_end < 0 else line_end + 1
+                break
+            if line_end < 0:
+                position = length + 1
+                break
+            position = line_end + 1
+        tokens.append((_HEREDOC, text[body_start:body_end], body_start, body_end))
+        return min(position, length)
+    return index
+
+
+def _scan_word(
+    text: str,
+    index: int,
+    tokens: list[tuple[str, str, int, int]],
+    at_word_start: bool,
+    depth: int,
+) -> int:
+    length = len(text)
+    parts: list[str] = []
+    start = index
+    while index < length:
+        char = text[index]
+        if char in " \t\r" or char in _OP_CHARS:
+            break
+        if char == "'":
+            close = text.find("'", index + 1)
+            if close < 0:
+                parts.append(text[index + 1:])
+                index = length
+                break
+            parts.append(text[index + 1:close])
+            index = close + 1
+            continue
+        if char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                if text[index] == "\\" and index + 1 < length:
+                    parts.append(text[index + 1])
+                    index += 2
+                    continue
+                parts.append(text[index])
+                index += 1
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            if text[index + 1] == "\n":
+                index += 2  # POSIX continuation: join, keep scanning the word
+                continue
+            parts.append(text[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            close = text.find("`", index + 1)
+            close = length - 1 if close < 0 else close
+            parts.append(text[index:close + 1])  # keep backticks as markers
+            index = close + 1
+            continue
+        if char == "$" and index + 1 < length and text[index + 1] == "(":
+            end = _match_paren(text, index + 1)
+            parts.append(text[index:end])
+            index = end
+            continue
+        parts.append(char)
+        index += 1
+    word = "".join(parts)
+    if not word and start == index:
+        index += 1
+    tokens.append((_WORD, word, start, index))
+    return index
+
+
+def _match_paren(text: str, open_index: int) -> int:
+    """Index just past the ``)`` matching the ``(`` at ``open_index``."""
+    depth = 0
+    index = open_index
+    while index < len(text):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return len(text)
+
+
+class _Unit:
+    """One simple command: its words, span and delivery context."""
+
+    __slots__ = (
+        "words", "start", "end", "pipe_fed", "has_heredoc", "head",
+        "head_index",
+    )
+
+    def __init__(self) -> None:
+        self.words: list[tuple[str, int, int]] = []  # (text, start, end)
+        self.start = -1
+        self.end = -1
+        self.pipe_fed = False
+        self.has_heredoc = False
+        self.head = ""
+        self.head_index = -1
+
+    def arguments(self) -> list[str]:
+        return [text for text, _, _ in self.words[1:]]
+
+    def span_text(self, raw: str) -> str:
+        return raw[self.start:self.end] if self.start >= 0 else ""
+
+
+def _shell_units(
+    tokens: list[tuple[str, str, int, int]]
+) -> list[_Unit]:
+    """Group tokens into simple commands with their delivery context.
+
+    ``{``/``}`` are reserved WORDS that still delimit compound commands,
+    so they end the current simple command like a separator would (a
+    launch inside ``function f { pool run …; }`` must be its own unit with
+    ``pool`` as its head, not an argument swallowed by ``f``)."""
+    units: list[_Unit] = []
+    unit: _Unit | None = None
+    last_separator = ""
+    pending_fd_word: tuple[str, int, int] | None = None
+    for kind, body, start, end in tokens:
+        if kind == _OP:
+            if body in _SEPARATOR_OPS:
+                unit = None
+                last_separator = body
+                pending_fd_word = None
+            elif body.startswith("<<"):
+                if unit is not None:
+                    unit.has_heredoc = True
+            elif unit is None:
+                continue
+            # Redirects (<, >, ...) end any pending fd word but stay in-unit.
+            pending_fd_word = None
+            continue
+        if kind == _HEREDOC:
+            if unit is not None:
+                unit.has_heredoc = True
+            continue
+        if kind == _WORD and body in ("{", "}"):
+            unit = None
+            last_separator = ""
+            pending_fd_word = None
+            continue
+        if unit is None:
+            unit = _Unit()
+            unit.pipe_fed = last_separator == "|"
+            units.append(unit)
+        if pending_fd_word is not None:
+            # ``2>file``: the bare digits belonged to the redirect, not argv.
+            unit.words.pop()
+            pending_fd_word = None
+        unit.words.append((body, start, end))
+        if unit.start < 0:
+            unit.start = start
+        unit.end = end
+        pending_fd_word = (body, start, end) if body.isdigit() else None
+    for candidate in units:
+        candidate.head, candidate.head_index = _command_head(candidate)
+    return units
+
+
+def _command_head(unit: _Unit) -> tuple[str, int]:
+    """``(basename, index)`` of the unit's command word (assignments and
+    keywords skipped), or ``("", -1)``."""
+    for index, (text, _, _) in enumerate(unit.words):
+        if text in _COMMAND_KEYWORDS or _ASSIGNMENT_WORD_RE.match(text):
+            continue
+        if text.startswith("-"):
+            continue
+        return text.rsplit("/", 1)[-1].lower(), index
+    return "", -1
+
+
+def _unit_is_launch(unit: _Unit) -> bool:
+    """True when the unit IS a lexically visible wrapper launch."""
+    head = unit.head
+    words = [text for text, _, _ in unit.words]
+    if head == "pool":
+        after = words[unit.head_index + 1:unit.head_index + 2]
+        return bool(after) and after[0] in ("run", "remote")
+    if head in ("sub.sh", "remote_sub.sh", "slot.py"):
+        return True
+    if _INTERPRETER_HEAD_RE.match(head) or _ALWAYS_INLINE_HEAD_RE.match(head):
+        return any(
+            _COMPUTED_WORD_RE.search(text) is None
+            and text.rsplit("/", 1)[-1] == "slot.py"
+            for text in words[unit.head_index + 1:]
+            if not text.startswith("-")
+        )
+    return False
+
+
+def _shadow_launch_possible(unit: _Unit) -> bool:
+    """True when substituting a wrapper name for a computed word of this
+    unit would make it a paid launch (REVIEW_2329 r3 B-1 computed words).
+
+    No runner allowlist: ANY simple command whose computed word could
+    expand to a wrapper — ``$P run grok``, ``sudo -n $P run grok``,
+    ``su -c '$P run grok'``, ``time $P run grok`` — is a possible
+    unattributable launch, while a computed word that can never complete a
+    wrapper shape (``echo "$POOL_ORCHESTRATOR_ID"``) stays allowed.
+    Assignment VALUES are excluded (they cannot become the command word;
+    their own law is the projection check), and a unit that already IS a
+    lexically visible launch is left to the launch pipeline — the wrapper
+    invocation is observed, and a computed mode token is refused there by
+    token equality.
+    """
+    if _unit_is_launch(unit):
+        return False
+    if unit.head in _PRINT_ONLY_HEADS:
+        return False
+    words = [
+        text for text, _, _ in unit.words
+        if not _ASSIGNMENT_WORD_RE.match(text)
+    ]
+    computed = [
+        text for text in words if _COMPUTED_WORD_RE.search(text)
+    ]
+    if not computed:
+        return False
+
+    def _shadow_variants(text: str, token: str) -> list[str]:
+        # Each computed segment in turn becomes the wrapper token while the
+        # word's other computed segments expand to nothing: a quoted word
+        # never word-splits, so one word can only ever contribute ONE
+        # wrapper-shaped argument.
+        variants: list[str] = []
+        for match in _COMPUTED_SEGMENT_RE.finditer(text):
+            variants.append(
+                _COMPUTED_SEGMENT_RE.sub("", text[:match.start()])
+                + token
+                + _COMPUTED_SEGMENT_RE.sub("", text[match.end():])
+            )
+        return variants
+
+    for token in _SHADOW_WRAPPER_TOKENS:
+        for text in computed:
+            for variant in _shadow_variants(text, token):
+                # Alone: the word may carry a whole launch body
+                # (``su -c '$P run grok' root``).
+                if _wrapper_invocations(variant):
+                    return True
+                # In place: the words around it keep their literal
+                # positions (``sudo -n $P run grok``, ``time $P run …``).
+                substituted = [
+                    variant if other == text else other for other in words
+                ]
+                if _wrapper_invocations(" ".join(substituted)):
+                    return True
+    return False
+
+
+def _interpreter_problem(unit: _Unit) -> str:
+    """Why this interpreter invocation's program is unobservable, or ''.
+
+    Judged by HOW the interpreter receives its program — flag text, pipe,
+    heredoc, computed argument — never by which letters a flag spells, so
+    ``-c``, ``-Sc``, ``-Bc``, ``-we``, ``-E``, ``-p``, ``--eval``, ``-ne``
+    are all one refusal class. Following POSIX grammar, only option words
+    BEFORE the first operand are the interpreter's own (anything after the
+    script path — ``slot.py glm … -- run`` — belongs to the script), so the
+    bare script-file form keeps its lexically observed launch.
+    """
+    head = unit.head
+    if _ALWAYS_INLINE_HEAD_RE.match(head):
+        return (
+            f"{head}'s program text is always an inline argument, so a "
+            "launch it carries is assembled at runtime"
+        )
+    if not _INTERPRETER_HEAD_RE.match(head):
+        return ""
+    operands_started = False
+    for text in unit.arguments():
+        if operands_started:
+            if _COMPUTED_WORD_RE.search(text):
+                return (
+                    f"{head} receives a computed argument ({text!r}); the "
+                    "program or its inputs are assembled at runtime"
+                )
+            continue
+        if text == "-":
+            return f"{head} reads its program from stdin ('-')"
+        if text.startswith("-") and text != "--":
+            return (
+                f"{head} is invoked with option arguments ({text!r}); the "
+                "program may be inline option text (one-liner), which the "
+                "guard cannot attribute"
+            )
+        if text == "--":
+            continue
+        if _COMPUTED_WORD_RE.search(text):
+            return (
+                f"{head} receives a computed argument ({text!r}); the "
+                "program or its inputs are assembled at runtime"
+            )
+        operands_started = True
+    if unit.pipe_fed:
+        return f"{head} reads its program from the pipe feeding it"
+    if unit.has_heredoc:
+        return f"{head} reads its program from a heredoc"
+    return ""
+
+
+def _nested_shell_bodies(
+    units: list[_Unit], raw: str, depth: int
+) -> list[tuple[_Unit, list[tuple[str, str, int, int]]]]:
+    """``(shell_unit, body_tokens)`` for every ``sh -c <script>`` body."""
+    bodies: list[tuple[_Unit, list[tuple[str, str, int, int]]]] = []
+    if depth >= 4:
+        return bodies
+    for unit in units:
+        if not _SHELL_HEAD_RE.match(unit.head):
+            continue
+        words = unit.words
+        for position in range(1, len(words) - 1):
+            text, start, end = words[position]
+            if text != "-c":
+                continue
+            body_text, _, _ = words[position + 1]
+            bodies.append((unit, _shell_scan(body_text, start, depth + 1)))
+            break
+    return bodies
+
+
+def _all_units(
+    tokens: list[tuple[str, str, int, int]], raw: str, depth: int = 0
+) -> list[_Unit]:
+    """Units of this token stream plus every nested ``-c`` body's units."""
+    units = _shell_units(tokens)
+    for _, body_tokens in _nested_shell_bodies(units, raw, depth):
+        units.extend(_all_units(body_tokens, raw, depth + 1))
+    return units
+
+
+def _brace_group_spans(
+    tokens: list[tuple[str, str, int, int]],
+) -> list[tuple[int, int]]:
+    """Spans of ``{ ... }`` groups (loop bodies, function bodies, grouped
+    repeats) among these tokens (REVIEW_2329 r3 M-A). ``{``/``}`` are shell
+    reserved WORDS, so they appear here as word tokens."""
+    spans: list[tuple[int, int]] = []
+    stack: list[int] = []
+    for kind, body, start, end in tokens:
+        if kind != _WORD:
+            continue
+        if body == "{":
+            stack.append(start)
+        elif body == "}" and stack:
+            opened = stack.pop()
+            spans.append((opened, end))
+    return spans
+
+
+def _function_body_spans(
+    tokens: list[tuple[str, str, int, int]], units: list[_Unit]
+) -> list[tuple[int, int]]:
+    """Spans of function-definition bodies: ``name() { … }`` / ``f() ( … )``
+    / ``function f { … }`` (REVIEW_2329 r3 M-A)."""
+    spans: list[tuple[int, int]] = []
+    for position in range(len(tokens) - 2):
+        kind, body, start, end = tokens[position]
+        if kind != _WORD or _ASSIGNMENT_WORD_RE.match(body):
+            continue
+        if (tokens[position + 1][:2] == (_OP, "(")
+                and tokens[position + 2][:2] == (_OP, ")")
+                and tokens[position + 1][2] == end
+                and tokens[position + 2][2] == tokens[position + 1][3]):
+            body_start = tokens[position + 2][3]
+            body_end = _compound_end(tokens, position + 3)
+            if body_end > body_start:
+                spans.append((body_start, body_end))
+    return spans
+
+
+def _compound_end(
+    tokens: list[tuple[str, str, int, int]], index: int
+) -> int:
+    """End offset of the compound command starting at ``index``: a brace
+    group (reserved-word ``{``), a parenthesised subshell, or one simple
+    command up to its separator."""
+    depth = 0
+    brace_depth = 0
+    for kind, body, _, end in tokens[index:]:
+        if kind == _WORD:
+            if body == "{":
+                brace_depth += 1
+                continue
+            if body == "}":
+                if brace_depth == 0:
+                    return end
+                brace_depth -= 1
+                continue
+            continue
+        if body == "(":
+            depth += 1
+            continue
+        if body == ")":
+            if depth == 0:
+                return end
+            depth -= 1
+            continue
+        if body in _SEPARATOR_OPS and depth == 0 and brace_depth == 0:
+            return end
+    return tokens[-1][3] if tokens else 0
+
+
+def _launch_in_text(text: str) -> bool:
+    """A lexically visible wrapper launch inside a plain text span."""
+    return bool(_wrapper_invocations(text))
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -570,67 +1117,135 @@ def launch_provider_token(command: str) -> str:
     return tokens[0][1] if tokens else ""
 
 
-def _indirect_command_word(canon: str) -> str | None:
-    """The first command word computed at runtime — ``$P`` / ``${P}`` in
-    ``P=pool; $P run ...`` (REVIEW_2329 r2 N-3/C6) — or None. Assignments,
-    shell keywords, options and prefix runners are skipped, so
-    ``env NAME=x pool ...``, ``echo $X`` and ``command -v y`` stay concrete;
-    an option-less ``timeout``/``nice`` operand (a duration/niceness) is an
-    argument, not the command."""
-    for segment in re.split(r"[;&|\n()]", canon):
-        words = segment.split()
-        index = 0
-        operand_pending = False
-        while index < len(words):
-            word = words[index]
-            if word in _RUNNER_WORDS:
-                operand_pending = word in ("timeout", "nice")
-            elif word in _COMMAND_PREFIX_WORDS or word.startswith("-"):
-                pass
-            elif re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
-                pass
-            elif operand_pending and re.fullmatch(r"\d[\w.:+-]*", word):
-                operand_pending = False
-                index += 1
-                continue
-            else:
-                operand_pending = False
-                if word.startswith("$"):
-                    return word
-                break
-            index += 1
-    return None
+def _deny_structurally_unobservable(raw: str) -> None:
+    """Refuse command SHAPES no lexically observed wrapper invocation can
+    cover (WO-11 r5; REVIEW_2329 r3 B-1, M-A, M-B).
 
+    Armed sessions only, and only when a wrapper NAME appears somewhere in
+    the canonical command — otherwise the command is the documented
+    arbitrary-process limit, not this gate's fence. The raw command is
+    tokenised (quote-aware, heredoc and nested ``-c`` bodies included) and
+    classified structurally:
 
-def _deny_computed_launch(canon: str) -> None:
-    """Refuse launch-shaped text no lexically observed wrapper invocation
-    can cover (REVIEW_2329 r2 N-3): interpreter one-liners carrying wrapper
-    tokens (``python3 -c 'subprocess.run(["pool",...])'``, ``perl -e
-    'exec("pool",...)'``) and computed command words (``P=pool; $P run``).
-    Armed sessions only; a wrapper NAME must appear in the text, otherwise
-    the command is the documented arbitrary-process limit, not this gate's
-    fence. Conservative by design: an interpreter flag cluster containing
-    c/e/m/r plus a wrapper word anywhere in the same simple command is
-    denied even when innocent."""
+    * interpreter invocations whose program is delivered as inline flag
+      text / pipe / heredoc / computed argument (``python3 -Sc``,
+      ``perl -we``, ``node --eval``, ``python3 - <<EOF``, ``echo | python3``,
+      ``awk 'system("pool …")'``) — refused regardless of flag spelling;
+    * computed words (``$P``, ``${P}``, ``$(...)``, backticks) wherever a
+      wrapper name substituted for them would complete a paid launch —
+      ``time|sudo|caffeinate|ssh|su -c|flock|systemd-run … $P run grok``,
+      ``P=sub.sh; sudo $P glm`` — no runner allowlist to evade;
+    * command substitution (``$(...)``, backticks) anywhere in the command
+      — its expansion is executed and can hide a second launch;
+    * wrapper launches inside shapes that execute them more than once or
+      later: function-definition bodies, ``{ … }`` brace groups (including
+      bash brace-body loops), ``trap`` payloads, ``watch`` repeaters;
+    * ``eval``/``source``/``.`` inside the same nested ``-c`` script that
+      performs the launch (the launch environment becomes unobservable).
+
+    Conservative by design: over-refusal is honest, under-refusal is a
+    bypass. The bare interpreter script-file form
+    (``python3 …/slot.py glm -- run``) keeps its lexically observed launch.
+    """
+    canon = _canonical_command(raw)
     if not _WRAPPER_NAME_RE.search(canon):
         return
-    if _INTERPRETER_EVAL_RE.search(canon):
-        deny(
-            "Mastermind shared-placement guard: unobservable launch — an "
-            "interpreter one-liner (python -c/-m, perl/node/ruby/osascript "
-            "-e, php -r) carrying wrapper tokens constructs the launch at "
-            "runtime, so provider substitution, the identity projection "
-            "and the one-attempt law cannot be checked. Run the paid "
-            "launch as a plain command."
+    tokens = _shell_scan(raw)
+    units = _shell_units(tokens)
+    nested = _nested_shell_bodies(units, raw, 0)
+    all_units = list(units)
+    for _, body_tokens in nested:
+        all_units.extend(_all_units(body_tokens, raw, 1))
+    all_tokens = list(tokens)
+    for _, body_tokens in nested:
+        all_tokens.extend(body_tokens)
+
+    # B-1: interpreter program delivery.
+    for unit in all_units:
+        problem = _interpreter_problem(unit)
+        if problem:
+            deny(
+                "Mastermind shared-placement guard: unobservable launch — "
+                f"{problem}. The launch this interpreter could carry is "
+                "assembled at runtime, so provider substitution, the "
+                "identity projection and the one-attempt law cannot be "
+                "checked. Run the paid launch as a plain command."
+            )
+
+    # M-B: eval/source/. inside the nested -c script that launches (before
+    # the computed-word loop, so the nested launcher's own $X/$Y identity
+    # assembly reports the environment it actually corrupts).
+    for _, body_tokens in nested:
+        body_text = " ".join(body for _, body, _, _ in body_tokens)
+        if not (_launch_in_text(body_text)):
+            continue
+        for kind, body, _, _ in body_tokens:
+            if kind == _WORD and body in ("eval", "source", "."):
+                deny(
+                    "Mastermind shared-placement guard: unobservable "
+                    "launch environment — eval, source or '.' inside the "
+                    "same nested shell script that performs the launch "
+                    "can change the child's POOL_* identity outside what "
+                    "this guard can check. Run the paid launch as a plain "
+                    "command."
+                )
+
+    # B-1: computed words by shadow substitution; $(…)/backticks anywhere.
+    for unit in all_units:
+        for text, _, _ in unit.words:
+            if "$(" in text or "`" in text:
+                deny(
+                    "Mastermind shared-placement guard: unobservable "
+                    f"launch — the computed word {text!r} contains a "
+                    "command substitution, whose expansion runs in this "
+                    "very shell and can construct or hide a paid launch "
+                    "the guard cannot attribute. Pass literal arguments."
+                )
+        if _shadow_launch_possible(unit):
+            deny(
+                "Mastermind shared-placement guard: unobservable launch — "
+                "a computed word ($… or `…`) in this command could expand "
+                "to a paid-launch wrapper (time/sudo/env/ssh/su/flock/"
+                "systemd-run … $P run …), so the wrapper invocation and "
+                "any identity assignment around it cannot be observed. "
+                "Invoke the wrapper by its literal name."
+            )
+
+    # M-A: launches inside runtime-multiplying or deferred shapes.
+    launch_spans = [
+        (unit.start, unit.end)
+        for unit in all_units
+        if _unit_is_launch(unit)
+    ]
+    group_spans = _brace_group_spans(all_tokens)
+    group_spans += _function_body_spans(all_tokens, all_units)
+    for start, end in group_spans:
+        if any(s >= start and e <= end for s, e in launch_spans):
+            deny(
+                "Mastermind shared-placement guard: runtime-multiplexed "
+                "launch — a paid launch sits inside a function body or "
+                "{ … } brace group (loop body / grouped repeat), which "
+                "can execute it more than once or later, but the current "
+                "binding covers exactly one attempt. Every paid child "
+                "must be admitted and claimed through the placement "
+                "authority before launch."
+            )
+    for unit in all_units:
+        if unit.head not in _LAUNCH_STAGE_HEADS:
+            continue
+        role = "trap payload" if unit.head == "trap" else "watch repeater"
+        arguments = " ".join(
+            text for text, _, _ in unit.words[unit.head_index + 1:]
         )
-    word = _indirect_command_word(canon)
-    if word is not None:
-        deny(
-            "Mastermind shared-placement guard: unobservable launch — the "
-            f"command word {word!r} is computed at runtime, so the wrapper "
-            "invocation and any identity assignment around it cannot be "
-            "observed. Invoke the wrapper by its literal name."
-        )
+        if _launch_in_text(arguments):
+            deny(
+                "Mastermind shared-placement guard: runtime-multiplexed "
+                f"launch — a paid launch is staged inside a {role}, which "
+                "can execute it more than once or later, but the current "
+                "binding covers exactly one attempt. Every paid child "
+                "must be admitted and claimed through the placement "
+                "authority before launch."
+            )
 
 
 def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
@@ -859,12 +1474,18 @@ def validate_execution_binding(command: str) -> None:
     text it is shown — every wrapper invocation in it (all five shapes,
     repeated, heredoc bodies included, off-list modes refused) and every
     identity assignment form, with backslash-newline canonicalised as a
-    POSIX join (empty string). Runtime-multiplexed launches (for/while/
-    until bodies, xargs/parallel/find -exec executors) are refused as
-    unaccounted descendants; interpreter one-liners and computed command
-    words carrying wrapper tokens are refused as unobservable
-    (conservative — an interpreter flag cluster c/e/m/r plus a wrapper
-    word in the same simple command is denied even when innocent).
+    POSIX join (empty string). Command SHAPES are classified structurally
+    (``_deny_structurally_unobservable``): interpreter invocations whose
+    program is inline flag text, piped, heredoc-fed or computed are
+    refused regardless of flag spelling; computed words are refused
+    wherever a wrapper substituted for them would complete a launch
+    (shadow substitution); command substitution is refused anywhere;
+    launches inside loop bodies, function bodies, brace groups, batch
+    executors (xargs/parallel/find -exec), trap payloads and watch
+    repeaters are refused as unaccounted descendants; eval/source/'.' in
+    the nested -c script that performs the launch is refused as an
+    unobservable environment (conservative — the bare interpreter
+    script-file form ``python3 …/slot.py glm -- run`` stays observed).
     Scripts staged in an EARLIER command or a
     file and executed later, and environment injected by provider-side
     mechanisms outside the command, are not observed; eval/source/
@@ -1097,11 +1718,12 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
                 "wrapper source fed to a shell launches without a visible "
                 "wrapper invocation. Invoke the wrapper directly."
             )
-        # REVIEW_2329 r2 N-3: interpreter one-liners and computed command
-        # words carrying wrapper tokens never reach the wrapper scan, so
-        # they are refused here — BEFORE the no-launch early return that
-        # used to let an armed session launch with zero binding validation.
-        _deny_computed_launch(canon)
+        # REVIEW_2329 r3 B-1/M-A/M-B: interpreter one-liners, computed
+        # command words, runtime-multiplexing shapes and nested-shell
+        # eval/source never reach the wrapper scan, so they are refused
+        # here — BEFORE the no-launch early return that used to let an
+        # armed session launch with zero binding validation.
+        _deny_structurally_unobservable(raw)
     if not launches and not invocations:
         return
 

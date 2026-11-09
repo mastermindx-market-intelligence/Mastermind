@@ -2355,3 +2355,387 @@ def test_guard_module_stays_stdlib_only() -> None:
             assert node.level == 0, "relative imports break verbatim-copy deployment"
             roots.add(str(node.module).split(".")[0])
     assert roots and roots <= set(sys.stdlib_module_names) | {"__future__"}
+
+
+# --- rework r5: REVIEW_2329 r3 structural findings (B-1 / M-A / M-B) -----------
+#
+# Review-item -> test mapping (REVIEW_2329_r3.md §4; every shape the review
+# named plus the obvious variants, all under a REAL armed session with the
+# faithful binding installed):
+#
+#   B-1 (BLOCKER; r2 N-3 reopened) interpreter one-liners and computed
+#   command words carrying the literal wrapper name escape the whole gate:
+#     python3 -Sc/-Bc/-Ic/-uc, perl -we/-E, node -p/--eval, ruby -ne,
+#     php -nr, python3 -X dev -c, osascript -l JavaScript -e .... test_r5_b1_interpreter_option_forms
+#     python3 - <<'EOF' (option + heredoc feed) .............. test_r5_b1_interpreter_stdin_fed
+#     python3 <<'EOF' (bare heredoc feed, no option) ......... test_r5_b1_interpreter_stdin_fed
+#     echo 'code' | python3 (pipe feed) ...................... test_r5_b1_interpreter_stdin_fed
+#     awk 'system("pool …")', sed e-command, jq filter ........ test_r5_b1_always_inline_interpreters
+#     time/sudo -n/caffeinate/script/strace/flock/systemd-run/
+#     unbuffer/ionice/doas/chrt/ssh host/su -c … $P run grok . test_r5_b1_computed_words_through_unlisted_runners
+#     { $P run grok …; } (computed word inside a brace group) . test_r5_b1_computed_words_through_unlisted_runners
+#     P=sub.sh; sudo -n $P glm … (non-pool wrapper shadow) ... test_r5_b1_computed_words_through_unlisted_runners
+#     pool run glm a /tmp $(date +%s) and `date` arguments .... test_r5_b1_command_substitution_arguments
+#     controls: script-file slot.py launch, nested faithful -c
+#     launch, no-wrapper-token computed/interpreter commands,
+#     inspector reads, heredoc JSON write ................... test_r5_b1_structural_refusals_stay_scoped
+#
+#   M-A (MAJOR; r2 N-2 residual) runtime multiplication outside do…done:
+#     f() { launch; }; f; f and single-call and recursion ..... test_r5_ma_function_definition_bodies
+#     function f { launch; } ................................ test_r5_ma_function_definition_bodies
+#     f() ( subshell-body launch ) ........................... test_r5_ma_function_definition_bodies
+#     for i in 1 2; { launch; } .............................. test_r5_ma_brace_body_loops
+#     for ((i=0;i<2;i++)) { launch; } ........................ test_r5_ma_brace_body_loops
+#     while read x; { launch; } .............................. test_r5_ma_brace_body_loops
+#     trap 'launch' USR1; kill -USR1 $$ twice ................ test_r5_ma_trap_payloads_and_watch_repeaters
+#     watch -n 60 launch and watch -g 'launch' ............... test_r5_ma_trap_payloads_and_watch_repeaters
+#
+#   M-B (new; M-1 class) eval/source/'.' inside the nested -c launcher:
+#     X/Y-split eval "$X$Y" identity assembly (live L11) ...... test_r5_mb_nested_eval_source_dot
+#     bash -c 'eval "$X"; launch' ............................ test_r5_mb_nested_eval_source_dot
+#     sh -c '. ./env.sh; launch' ............................. test_r5_mb_nested_eval_source_dot
+#     bash -c 'source ./env.sh; launch' ...................... test_r5_mb_nested_eval_source_dot
+#     bash -c 'eval "pool run grok …"' (literal launch) ...... test_r5_mb_nested_eval_source_dot
+#     control: bash -c '. ./env.sh'; launch (separate
+#     process — N5-ctl2 stays allowed) ....................... test_r5_mb_separate_process_dot_stays_allowed
+
+_R5_LAUNCH = _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3"
+
+
+def _r5_armed(
+    shared_placement: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E1/E2/F1/F2: bundled option clusters hide the -c.
+        "python3 -Sc 'subprocess.run([\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\"])'",
+        "python3 -Bc 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -Ic 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -uc 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        # r3 E3/E4: perl option clusters.
+        "perl -we 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        "perl -E 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        # r3 E5/E6: node short and long program options.
+        "node -p 'require(\"child_process\").execSync(\"pool run grok a /tmp grok-4.6\")'",
+        "node --eval 'require(\"child_process\").exec(\"pool run grok a /tmp grok-4.6\")'",
+        # r3 E10/F4: ruby / php option clusters.
+        "ruby -ne 'system(\"pool run grok a /tmp grok-4.6\")'",
+        "php -nr 'shell_exec(\"pool run grok a /tmp grok-4.6\");'",
+        # r2 F5/F6 relatives with the same delivery shape.
+        "python3 -X dev -c 'os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "osascript -l JavaScript -e 'app.doShellScript(\"pool run grok a /tmp grok-4.6\")'",
+    ],
+    ids=[
+        "python-Sc", "python-Bc", "python-Ic", "python-uc",
+        "perl-we", "perl-E", "node-p", "node-eval",
+        "ruby-ne", "php-nr", "python-X-dev-c", "osascript-e",
+    ],
+)
+def test_r5_b1_interpreter_option_forms(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # Structural rule: an interpreter is judged by HOW its program is
+    # delivered (here: inline option text), never by which letters the
+    # options spell — so every cluster/long-form variant is one class.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "plain command" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E7: option + heredoc feed.
+        "python3 - <<'EOF'\nimport subprocess\nsubprocess.run([\"pool\",\"run\",\"grok\"])\nEOF",
+        # r3 E8: bare heredoc feed (no option word at all).
+        "python3 <<'EOF'\nimport subprocess\nsubprocess.run([\"pool\",\"run\",\"grok\"])\nEOF",
+        # r3 E9: pipe-fed program text.
+        "echo 'import subprocess; subprocess.run([\"pool\",\"run\",\"grok\"])' | python3",
+    ],
+    ids=["heredoc-dash", "heredoc-bare", "pipe-fed"],
+)
+def test_r5_b1_interpreter_stdin_fed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Interpreters whose program text is ALWAYS an inline argument.
+        "awk 'BEGIN{system(\"pool run grok a /tmp grok-4.6\")}'",
+        "sed 's/x/e pool run grok a \\/tmp grok-4.6/e' notes.txt # pool run grok",
+        "jq --raw-output '\"pool run grok a /tmp grok-4.6\"' cfg.json",
+    ],
+    ids=["awk-system", "sed-e-command", "jq-filter"],
+)
+def test_r5_b1_always_inline_interpreters(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # No script-file form exists for these: any invocation with a wrapper
+    # token in the text is an inline-program launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    assert "unobservable launch" in _emitted(capsys)["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 N3-R: runners outside the old nine-word allowlist.
+        "P=pool; time $P run grok a /tmp grok-4.6",
+        "P=pool; sudo -n $P run grok a /tmp grok-4.6",
+        "P=pool; caffeinate $P run grok a /tmp grok-4.6",
+        "P=pool; script -q /dev/null $P run grok a /tmp grok-4.6",
+        "P=pool; strace -f $P run grok a /tmp grok-4.6",
+        "P=pool; flock /tmp/lock $P run grok a /tmp grok-4.6",
+        "P=pool; systemd-run $P run grok a /tmp grok-4.6",
+        "P=pool; unbuffer $P run grok a /tmp grok-4.6",
+        "P=pool; ionice -c2 $P run grok a /tmp grok-4.6",
+        "P=pool; doas $P run grok a /tmp grok-4.6",
+        "P=pool; chrt -r 10 $P run grok a /tmp grok-4.6",
+        "P=pool; ssh ubuntu0 $P run grok a /tmp grok-4.6",
+        "P=pool; su -c '$P run grok a /tmp grok-4.6' root",
+        # r3 E12/E13/E14: computed word inside a brace group.
+        "P=pool; { $P run grok a /tmp grok-4.6; }",
+        # Non-pool wrapper shadowed through a runner.
+        "P=sub.sh; sudo -n $P grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "time", "sudo", "caffeinate", "script", "strace", "flock",
+        "systemd-run", "unbuffer", "ionice", "doas", "chrt", "ssh",
+        "su-c", "brace-group", "subsh-shadow",
+    ],
+)
+def test_r5_b1_computed_words_through_unlisted_runners(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # Structural rule (shadow substitution): when replacing a computed word
+    # with a wrapper name would complete a paid launch, the launch cannot be
+    # attributed — with no runner allowlist left to evade.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "literal name" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _IDENTITY_PREFIX + "pool run glm a /tmp $(date +%s)",
+        _IDENTITY_PREFIX + "pool run glm a /tmp `date +%s`",
+    ],
+    ids=["command-substitution", "backtick"],
+)
+def test_r5_b1_command_substitution_arguments(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # $(…)/backticks execute inside this very shell: even as launch
+    # arguments they can construct or hide a second paid launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable" in reason
+    assert "command substitution" in reason
+
+
+def test_r5_b1_structural_refusals_stay_scoped(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The structural layer must not swallow the forms it does not own:
+    # the script-file interpreter launch stays OBSERVED (judged by the
+    # normal launch pipeline), the nested faithful -c launch stays
+    # allowed, and no-wrapper-token commands keep the documented
+    # arbitrary-process limit.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    for command in (
+        # Documented launch shape: slot.py through python3, no options —
+        # an OBSERVED launch judged by the normal pipeline, so it carries
+        # the faithful identity projection like every launch.
+        _IDENTITY_PREFIX + "python3 /opt/mastermind/ext/slot.py glm -- run",
+        # Faithful nested -c launch: identity prefix assignments on the
+        # bash invocation itself (inherited by everything the body runs).
+        _IDENTITY_PREFIX + "bash -c 'pool run glm a /tmp glm-5.3'",
+        # Wrapper name present but only as data for inspectors/printers.
+        "cat results.txt | grep pool",
+        "cat > /tmp/pool.json <<'EOF'\n{\"pool\": \"glm\"}\nEOF",
+        "{ echo grouped; }",
+        # Computed/interpreter commands with NO wrapper token anywhere.
+        "TOOL=ls; $TOOL -la /tmp",
+        "python3 -m pytest tests/test_provider_orchestrator_policy.py",
+        "jq -r '.models[]' config.json",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E2: defined once, called twice.
+        "f() { " + _R5_LAUNCH + "; }; f; f",
+        # r3 E2 single call: the body itself is still a deferred repeat.
+        "f() { " + _R5_LAUNCH + "; }; f",
+        # r3 E3: recursion.
+        "f() { " + _R5_LAUNCH + "; f; }; f",
+        # ksh/bash function keyword form.
+        "function f { " + _R5_LAUNCH + "; }; f; f",
+        # POSIX subshell body.
+        "f() ( " + _R5_LAUNCH + " ); f; f",
+    ],
+    ids=["called-twice", "called-once", "recursive", "function-keyword", "subshell-body"],
+)
+def test_r5_ma_function_definition_bodies(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E1/E9: bash brace bodies instead of do…done.
+        "for i in 1 2; { " + _R5_LAUNCH + "; }",
+        "for ((i=0;i<2;i++)) { " + _R5_LAUNCH + "; }",
+        "while read x; { " + _R5_LAUNCH + "; }",
+    ],
+    ids=["for-brace", "arith-for-brace", "while-brace"],
+)
+def test_r5_ma_brace_body_loops(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 E12: trap fires per signal — one lexical launch, N children.
+        "trap '" + _R5_LAUNCH + "' USR1; kill -USR1 $$; kill -USR1 $$",
+        # r3 E4: watch repeats the launch forever.
+        "watch -n 60 " + _R5_LAUNCH,
+        "watch -g '" + _R5_LAUNCH + "'",
+    ],
+    ids=["trap-payload", "watch-interval", "watch-glob"],
+)
+def test_r5_ma_trap_payloads_and_watch_repeaters(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # r3 M-B / live L11: identity re-assembled inside the launcher.
+        "X='export POOL_ORCH' Y='ESTRATOR_ID=root-other' bash -c "
+        "'eval \"$X$Y\"; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-a.
+        "bash -c 'eval \"$X\"; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-b.
+        "sh -c '. ./env.sh; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # r3 N5-c.
+        "bash -c 'source ./env.sh; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3'",
+        # eval staging even a LITERAL launch inside the nested body.
+        "bash -c 'eval \"pool run grok a /tmp grok-4.6\"'",
+    ],
+    ids=["eval-split-identity", "eval-word", "dot-source", "source-word", "eval-literal-launch"],
+)
+def test_r5_mb_nested_eval_source_dot(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "unobservable launch environment" in reason
+
+
+def test_r5_mb_separate_process_dot_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # N5-ctl2 pinned behaviour: a nested shell that sources and EXITS
+    # before the launch cannot change the launch environment, so it stays
+    # allowed — the refusal is scoped to the SAME nested script that
+    # performs the launch.
+    _r5_armed(shared_placement, monkeypatch, tmp_path)
+    _guard_launch(
+        shared_placement,
+        "bash -c '. ./env.sh'; " + _R5_LAUNCH,
+    )
+    assert capsys.readouterr().out == ""
