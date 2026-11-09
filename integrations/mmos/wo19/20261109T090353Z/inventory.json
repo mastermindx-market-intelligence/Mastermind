@@ -1,7 +1,7 @@
 {
   "report": "WO-19 live Hermes child inventory (PREPARED, NOT EXECUTED)",
   "generated_at": "2026-11-09T02:03:56-0700",
-  "profile_home": "/Users/chriswong/.hermes/profiles/engineering",
+  "profile_home": "~/.hermes/profiles/engineering",
   "host": "m2studio",
   "read_only": true,
   "config_modified": false,
@@ -9,53 +9,53 @@
   "owner_gateway": {
     "gateway_pid": 75879,
     "gateway_argv": [
-      "/Users/chriswong/.hermes/hermes-agent/hermes_cli/main.py",
+      "~/.hermes/hermes-agent/hermes_cli/main.py",
       "gateway",
       "run",
       "--quiet"
     ],
-    "gateway_home_recorded": "/Users/chriswong/.hermes/profiles/engineering",
+    "gateway_home_recorded": "~/.hermes/profiles/engineering",
     "gateway_alive": true
   },
   "sources": [
     {
       "source": "state.db:async_delegations",
-      "path": "/Users/chriswong/.hermes/profiles/engineering/state.db",
+      "path": "~/.hermes/profiles/engineering/state.db",
       "status": "ok",
       "detail": "32 rows total, 2 not-completed, 3 task slots",
       "entries_read": 3
     },
     {
       "source": "cache/delegation/live",
-      "path": "/Users/chriswong/.hermes/profiles/engineering/cache/delegation/live",
+      "path": "~/.hermes/profiles/engineering/cache/delegation/live",
       "status": "ok",
       "detail": "77 delegation dirs, 0 unreadable manifests, 2 running task slots",
       "entries_read": 2
     },
     {
       "source": "ps:HERMES_HOME",
-      "path": "HERMES_HOME=/Users/chriswong/.hermes/profiles/engineering",
+      "path": "HERMES_HOME=~/.hermes/profiles/engineering",
       "status": "ok",
-      "detail": "82 hermes-like processes scanned, 2 carry HERMES_HOME=/Users/chriswong/.hermes/profiles/engineering; owner gateway pid=75879 listed as owner, not as a child",
+      "detail": "82 hermes-like processes scanned, 2 carry HERMES_HOME=~/.hermes/profiles/engineering; owner gateway pid=75879 listed as owner, not as a child",
       "entries_read": 2
     },
     {
       "source": "processes.json",
-      "path": "/Users/chriswong/.hermes/profiles/engineering/processes.json",
+      "path": "~/.hermes/profiles/engineering/processes.json",
       "status": "ok",
       "detail": "terminal-sessions/term_session_id-CAC0F83B-6F28-4793-9481-52A3CC8541C1 is a session pointer file, not a live child",
       "entries_read": 0
     },
     {
       "source": "worker-outboxes",
-      "path": "/Users/chriswong/.hermes/profiles/engineering/worker-outboxes",
+      "path": "~/.hermes/profiles/engineering/worker-outboxes",
       "status": "ok",
       "detail": "26 outbox dirs, 0 live owners, 26 not live (11 queued items recorded)",
       "entries_read": 0
     },
     {
       "source": "state.db:session_turn_leases",
-      "path": "/Users/chriswong/.hermes/profiles/engineering/state.db",
+      "path": "~/.hermes/profiles/engineering/state.db",
       "status": "ok",
       "detail": "9 leases, 3 unexpired",
       "entries_read": 3
@@ -110,7 +110,7 @@
       "state": "running",
       "disposition": "stays on local owner until finished",
       "source": "ps:HERMES_HOME",
-      "detail": "[execute_code kernel] 2026 /Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3 /var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/hermes_kernel_6gvenx6e/hermes_kernel_; no HERMES_SESSION_ID in env",
+      "detail": "[execute_code kernel] 2026 ~/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3 /var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/hermes_kernel_6gvenx6e/hermes_kernel_; no HERMES_SESSION_ID in env",
       "pid": 59205,
       "batch": null
     },

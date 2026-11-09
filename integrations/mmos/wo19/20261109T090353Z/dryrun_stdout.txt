@@ -1,5 +1,5 @@
 WO-19 delegation-backend dry run -- PREPARED, NOT EXECUTED (no cutover, read-only)
-profile: /Users/chriswong/.hermes/profiles/engineering
+profile: ~/.hermes/profiles/engineering
 
 CONFIG READBACK (verbatim, via `hermes config get`)
   $ hermes config get delegation.backend   [exit 0]

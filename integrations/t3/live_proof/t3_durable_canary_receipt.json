@@ -116,7 +116,7 @@
     }
   ],
   "store": {
-    "path": "/Users/chriswong/.hermes/profiles/engineering/cache/scratch/t3_durable_canary/batch/state.sqlite3",
+    "path": "~/.hermes/profiles/engineering/cache/scratch/t3_durable_canary/batch/state.sqlite3",
     "sha256": "1620a754a09a9e45fae953f17be1851b4da0e22dc3f8cbf9a6e9336e014b1cff",
     "implementation": "SQLiteT3AdapterStateStore",
     "note": "scratch proof store under the harness's authorized scratch root; NOT data/control_plane (the Executive file is pinned)"

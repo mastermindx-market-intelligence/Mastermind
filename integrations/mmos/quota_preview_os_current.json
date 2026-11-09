@@ -10,7 +10,7 @@
       "released": 13000
     },
     "opened_mode": "ro",
-    "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/broker/leases.sqlite",
+    "path": "~/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/broker/leases.sqlite",
     "sha256": "2ca3bd85fea6016fce34e42ef2285d9122f1cd8b1694ff1a03ad13c9e5bab1fb",
     "waiters_total": 0
   },
@@ -104,7 +104,7 @@
   },
   "production_armed": false,
   "projection": {
-    "path": "/Users/chriswong/.hermes/profiles/engineering/mmos/owner_ext_projection.json",
+    "path": "~/.hermes/profiles/engineering/mmos/owner_ext_projection.json",
     "produced_at": "2026-11-08T14:18:20.901147+00:00",
     "schema": "mastermind.owner_ext_registry_projection/v1",
     "sha256": "9e7553cf01fccde892ea41af5db11bf565dd402373753ca43e3d6d38751d6d86"
@@ -878,7 +878,7 @@
     "owner_ext_root": {
       "mode": "0755",
       "mtime_utc": "2026-11-08T14:13:26.419984+00:00",
-      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext",
+      "path": "~/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext",
       "size_bytes": 102144,
       "uid_gid": "501:20"
     }
