@@ -930,21 +930,16 @@ export function createFabricFacade(engine, options={}) {
         reservation.pid=pid;
         controllers.set(pid,reservation);
         const settled=completedOutput(text);
-        return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
+        return response(withTurnBudgetAdvisory({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
-          ...(args.max_turns!==undefined && ['C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'].includes(args.task_complexity)
-            ? {request_budget_advisory:{code:'EXPLICIT_COMPLEX_TASK_TURN_CEILING',
-              requested_max_turns:args.max_turns,task_complexity:args.task_complexity,
-              effective_max_turns:null,limit_source:'caller_request',retry_authorized:false}}
-            : {}),
           ...(args.pool?{requested_pool:args.pool,requested_model:args.model??(args.pool===EXPERIENTIAL_POOL?'free':'auto'),strict_manual_pin:true}:{}),
           ...(resolvedPlanModel?{resolved_model:resolvedPlanModel}:{}),
           ...(experientialConsent?{retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true}:{}),
           ...(args.response_only===true?{response_only:true}:{}),
           ...(planAuto?{provider_plan_auto:true,quota_continuation:false,attempt_limit:1}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
-          next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
+          next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'},args));
       }
       const s=await status(args);
       if(name==='fabric_status') {
@@ -1035,6 +1030,19 @@ async function main() {
   process.once('SIGINT',()=>close().finally(()=>process.exit(0)));
   process.stdin.once('end',()=>close().catch(()=>{}));
 }
+// An explicit caller ceiling on complex work is recorded as an advisory only:
+// it never raises the installed model/complexity limit and never authorizes a
+// continuation or retry. Omitted ceilings stay absent; effective limits stay
+// unobserved (null) until the installed wrapper reports them.
+function withTurnBudgetAdvisory(payload, args) {
+  if (args.max_turns===undefined
+      || !['C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'].includes(args.task_complexity))
+    return payload;
+  return {...payload,request_budget_advisory:{code:'EXPLICIT_COMPLEX_TASK_TURN_CEILING',
+    requested_max_turns:args.max_turns,task_complexity:args.task_complexity,
+    effective_max_turns:null,limit_source:'caller_request',retry_authorized:false}};
+}
+
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   main().catch(()=>{process.stderr.write('FABRIC_MCP_STARTUP_FAILED\n');process.exitCode=1;});
 }
