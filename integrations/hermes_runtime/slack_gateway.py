@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -402,10 +403,15 @@ def dispatch(profile: str, prompt: str, session_id: str | None, timeout: int,
     env = dict(os.environ)
     env["HERMES_PROFILE"] = profile
     env.pop("HERMES_HOME", None)
-    qfile = CONF_DIR / f".prompt-{os.getpid()}-{int(time.time() * 1000)}.txt"
-    qfile.parent.mkdir(parents=True, exist_ok=True)
-    qfile.write_text(prompt)
-    os.chmod(qfile, 0o600)
+    # Per-turn O_EXCL secure temp files prevent simultaneous roles in this
+    # multi-thread gateway from overwriting or reading another role's prompt.
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix=".prompt-", suffix=".txt",
+        dir=CONF_DIR, delete=False,
+    ) as prompt_file:
+        qfile = Path(prompt_file.name)
+        prompt_file.write(prompt)
     cmd = ["hermes", "chat", "--query-file", str(qfile), "--oneshot", "-Q"]
     if session_id:
         cmd += ["--resume", session_id]
