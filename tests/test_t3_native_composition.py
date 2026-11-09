@@ -20,16 +20,21 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
+import logging
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from control_plane.t3_native_composition import (
     COMPOSITION_COMPOSED,
+    COMPOSITION_ENROLLMENT_BROKEN,
     COMPOSITION_NOT_ENROLLED,
     STORE_BASIS_CHECKOUT_DEFAULT,
     STORE_BASIS_EXECUTIVE_DATA_DIR,
@@ -37,7 +42,9 @@ from control_plane.t3_native_composition import (
     T3McpHttpTransport,
     T3NativeCompositionError,
     T3NativeProcessController,
+    SupervisorBoundaryT3Adapter,
     compose_t3_native_adapter,
+    compose_t3_native_owners_for_service,
     compose_t3_native_supervisor_owners,
     compose_t3_native_supervisor,
     resolve_t3_access_token_file,
@@ -50,7 +57,10 @@ from control_plane.executive_supervisor import (
     ReconcileStatus,
 )
 from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
-from control_plane.t3_execution_adapter import SQLiteT3AdapterStateStore
+from control_plane.t3_execution_adapter import (
+    SQLiteT3AdapterStateStore,
+    T3McpTransportError,
+)
 from tests.test_t3_adapter_durability import CountingT3Port
 from tests.test_t3_execution_adapter import FakeInspector
 
@@ -129,7 +139,9 @@ def test_absent_token_file_is_a_typed_unenrolled_result(tmp_path):
     assert T3_MCP_ACCESS_TOKEN_FILE_ENV in composition.reason
 
 
-def test_empty_token_file_is_typed_not_enrolled(tmp_path):
+def test_empty_token_file_is_a_typed_broken_enrollment(tmp_path):
+    # Review #3 (B1): a CONFIGURED-but-empty token file is a broken
+    # enrollment (a visible fault in that lane), not a quiet unenrolled.
     token_file = tmp_path / "empty-token"
     token_file.write_text("   \n", encoding="utf-8")
     composition = compose_t3_native_adapter(
@@ -138,18 +150,21 @@ def test_empty_token_file_is_typed_not_enrolled(tmp_path):
         token_file=token_file,
         environ={},
     )
-    assert composition.status == COMPOSITION_NOT_ENROLLED
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert not composition.composed
+    assert composition.adapter is None
     assert "empty" in composition.reason
 
 
-def test_missing_token_file_is_typed_not_enrolled(tmp_path):
+def test_missing_token_file_is_a_typed_broken_enrollment(tmp_path):
     composition = compose_t3_native_adapter(
         Runtime.at(tmp_path),
         inspector=FakeInspector(),
         token_file=tmp_path / "absent-token",
         environ={},
     )
-    assert composition.status == COMPOSITION_NOT_ENROLLED
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "unreadable" in composition.reason
 
 
 def test_token_file_resolution_prefers_explicit_then_environment(tmp_path):
@@ -161,6 +176,90 @@ def test_token_file_resolution_prefers_explicit_then_environment(tmp_path):
     )
     assert resolved == env_file
     assert resolve_t3_access_token_file(None, environ={}) is None
+
+
+# --- configured-but-broken enrollment (review #3 B1) ---------------------------
+
+
+def test_malformed_token_file_is_a_typed_broken_enrollment_not_a_crash(tmp_path):
+    # The review #3 probe: 'garbage-no-dot' (no claims separator) and 'a.b'
+    # (unparsable claims) previously raised T3NamespaceAttestationError out
+    # of the composition INTO the service seam, taking the paid/plain/fabric
+    # lanes down together.  Now: typed, fail-closed, token never echoed.
+    for malformed in ("garbage-no-dot", "a.b"):
+        token_file = tmp_path / "bad-token"
+        token_file.write_text(malformed, encoding="utf-8")
+        composition = compose_t3_native_adapter(
+            Runtime.at(tmp_path),
+            inspector=FakeInspector(),
+            token_file=token_file,
+            environ={},
+        )
+        assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+        assert not composition.composed
+        assert composition.adapter is None
+        assert "attest" in composition.reason
+        assert malformed not in composition.reason  # no token material echoed
+
+
+def test_service_seam_surfaces_a_broken_enrollment_and_never_raises(tmp_path, caplog):
+    runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
+    primary = _primary_owner(runtime, tmp_path)
+    bad = tmp_path / "bad-token"
+    bad.write_text("garbage-no-dot", encoding="utf-8")
+    with caplog.at_level(
+        logging.ERROR, logger="control_plane.t3_native_composition"
+    ):
+        owners = compose_t3_native_owners_for_service(
+            primary,
+            runtime,
+            runs_root=tmp_path / "runs",
+            isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+            environ={T3_MCP_ACCESS_TOKEN_FILE_ENV: str(bad)},
+        )
+    # No exception into _service_from_config; the other lanes keep their
+    # owners; the reason is VISIBLE at startup, not discarded.
+    assert owners == {}
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "a broken enrollment must surface visibly at startup"
+    assert any("broken" in record.message for record in errors)
+    assert any("attest" in record.message for record in errors)
+    assert all("garbage-no-dot" not in record.message for record in errors)
+
+
+def test_service_seam_surfaces_an_empty_token_file_reason(tmp_path, caplog):
+    runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
+    primary = _primary_owner(runtime, tmp_path)
+    empty = tmp_path / "empty-token"
+    empty.write_text("\n", encoding="utf-8")
+    with caplog.at_level(
+        logging.ERROR, logger="control_plane.t3_native_composition"
+    ):
+        owners = compose_t3_native_owners_for_service(
+            primary,
+            runtime,
+            runs_root=tmp_path / "runs",
+            isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+            environ={T3_MCP_ACCESS_TOKEN_FILE_ENV: str(empty)},
+        )
+    assert owners == {}
+    assert any("empty" in record.message for record in caplog.records)
+
+
+def test_unenrolled_service_seam_never_touches_a_stand_in_primary(tmp_path):
+    # Review #3 (B1 MAJOR): 16 existing tests' stand-in supervisors carry no
+    # ``.inspector``; the seam must resolve enrollment FIRST and never read
+    # a primary attribute on an unenrolled host.
+    runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
+    probe = SimpleNamespace(runtime=runtime)  # no .inspector, no .instance_id
+    owners = compose_t3_native_owners_for_service(
+        probe,
+        runtime,
+        runs_root=tmp_path / "runs",
+        isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+        environ={},
+    )
+    assert owners == {}
 
 
 # --- attestation + transport share ONE token ----------------------------------
@@ -248,6 +347,178 @@ def test_real_transport_sends_the_file_token_as_bearer_authorization(tmp_path):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+# --- transport hardening (review #3 B1): initialize / redirect / proxy --------
+
+
+class _FakeUpstream:
+    """A local MCP HTTP endpoint recording every request it serves."""
+
+    def __init__(self, handler_cls) -> None:
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever, daemon=True
+        )
+        self.thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_address[1]}/mcp"
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.thread.join(timeout=5)
+
+
+def test_transport_initializes_once_before_the_first_tool_call(tmp_path):
+    """Review #3 B1: initialize() is never called by the donor clients'
+    contract — the transport itself opens the session lazily, exactly once,
+    BEFORE the first tools/call (call-order proof against a fake upstream)."""
+    seen: dict[str, list] = {"methods": [], "authorizations": []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - http.server API
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            seen["methods"].append(payload.get("method"))
+            seen["authorizations"].append(self.headers.get("Authorization"))
+            if payload.get("method") == "initialize":
+                body = json.dumps({
+                    "jsonrpc": "2.0", "id": payload.get("id"),
+                    "result": {"protocolVersion": "2025-03-26"},
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Mcp-Session-Id", "sess-transport-1")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if payload.get("method") == "notifications/initialized":
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = json.dumps({
+                "jsonrpc": "2.0", "id": payload.get("id"),
+                "result": {"structuredContent": {"threadId": "thr-init"}},
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence the test server
+            return
+
+    upstream = _FakeUpstream(Handler)
+    try:
+        transport = T3McpHttpTransport(upstream.url, _session_token("sess-x"))
+        reply = transport.call_tool("t3_thread_launch", {"clientRequestId": "k"})
+        assert reply == {"threadId": "thr-init"}
+        # The session handshake PRECEDES the first tool call, exactly once:
+        assert seen["methods"] == [
+            "initialize", "notifications/initialized", "tools/call",
+        ]
+        # A second tool call does NOT re-initialize (the session persists).
+        transport.call_tool("t3_thread_read", {"runId": "r"})
+        assert seen["methods"].count("initialize") == 1
+        assert seen["methods"][-1] == "tools/call"
+    finally:
+        upstream.close()
+
+
+def test_transport_refuses_redirects_and_never_resends_the_bearer(tmp_path):
+    """A 3xx is a typed transport error; the redirect target is NEVER
+    requested, so the bearer header is never resent off-origin."""
+    seen: dict[str, list] = {"paths": []}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - http.server API
+            seen["paths"].append(self.path)
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(302)
+            self.send_header("Location", "/attacker-sink")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):  # silence the test server
+            return
+
+    upstream = _FakeUpstream(Handler)
+    try:
+        transport = T3McpHttpTransport(upstream.url, _session_token("sess-x"))
+        with pytest.raises(T3McpTransportError) as caught:
+            transport.call_tool("t3_thread_launch", {"clientRequestId": "k"})
+        assert caught.value.http_status == 302
+        assert "redirect" in str(caught.value)
+        # Only the original endpoint was ever contacted.
+        assert seen["paths"] == ["/mcp"]
+    finally:
+        upstream.close()
+
+
+def test_transport_ignores_environment_proxies(tmp_path):
+    """A hostile/dead http_proxy in the environment must not reroute the
+    bearer: the opener is built with NO proxies at all."""
+    seen: dict[str, str] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - http.server API
+            seen["authorization"] = self.headers.get("Authorization", "")
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            if payload.get("method") == "initialize":
+                body = json.dumps({
+                    "jsonrpc": "2.0", "id": payload.get("id"),
+                    "result": {"protocolVersion": "2025-03-26"},
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if payload.get("method") == "notifications/initialized":
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = json.dumps({
+                "jsonrpc": "2.0", "id": payload.get("id"),
+                "result": {"structuredContent": {"ok": True}},
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence the test server
+            return
+
+    upstream = _FakeUpstream(Handler)
+    token = _session_token("sess-proxy")
+    dead_proxy = "http://127.0.0.1:9/"
+    try:
+        with mock.patch.dict(os.environ, {
+            "http_proxy": dead_proxy, "HTTP_PROXY": dead_proxy,
+            "https_proxy": dead_proxy, "HTTPS_PROXY": dead_proxy,
+            "all_proxy": dead_proxy, "ALL_PROXY": dead_proxy,
+        }):
+            transport = T3McpHttpTransport(upstream.url, token)
+            reply = transport.call_tool("t3_thread_read", {"runId": "r"})
+        # Direct delivery: had the environment proxy been honoured the
+        # request would have failed to connect to the dead proxy instead.
+        assert reply == {"ok": True}
+        assert seen["authorization"] == f"Bearer {token}"
+    finally:
+        upstream.close()
+
+
+
 
 
 # --- route row proposal loads through the REAL router -------------------------
@@ -549,3 +820,82 @@ def test_supervisor_composition_requires_a_composed_adapter(tmp_path):
             runs_root=tmp_path / "runs",
             isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
         )
+
+
+# --- supervisor-boundary bridge: recovery identity (review #3 B2) --------------
+
+
+def _launch_coordinates(tmp_path):
+    """Launch one t3-native attempt through the composed mixed owners and
+    return ``(inner adapter, genuine recovery binding, run id)``."""
+    runtime, job_id, _workspace, observations = _t3_runtime_and_job(tmp_path)
+    primary = _primary_owner(runtime, tmp_path)
+    port = CountingT3Port(principal="oauth-client-compose")
+    mixed, composition = _compose_mixed(runtime, tmp_path, primary, port)
+    lease = _claim_t3_route(runtime, job_id, observations)
+    active = asyncio.run(
+        mixed._start(mixed._select(lease.attempt), job_id, lease, None)
+    )
+    attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert attempt is not None
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding
+    binding = WorkerRecoveryBinding.from_dict(
+        attempt.launch_metadata["worker_recovery_binding"]
+    )
+    spec = SimpleNamespace(run_id=active.lease.attempt.attempt_id)
+    return composition.adapter, binding, spec
+
+
+def test_bridge_reattach_refuses_a_forged_binding_before_the_inner_adapter_runs(
+    tmp_path,
+):
+    """Review #3 (B2 MAJOR): the bridge used to substitute the retained ref
+    into the binding unconditionally, so the inner adapter's "retained ref
+    differs from the recovery binding" check compared the retained ref to
+    ITSELF and a forged ``thread-FOREIGN``/``foreign-key`` binding was
+    ACCEPTED.  Now the supervisor-supplied binding must BE the twin of the
+    retained ref before anything is substituted, and the inner adapter is
+    never called for a forged one."""
+    inner, binding, spec = _launch_coordinates(tmp_path)
+    retained = inner.retained_original_ref(spec.run_id)
+    assert retained is not None
+    bridge = SupervisorBoundaryT3Adapter(inner)
+    # Sanity: the genuine persisted binding carries the twin shape.
+    assert bridge._twin(retained) == binding.process_ref
+
+    forged = dataclasses.replace(
+        binding,
+        process_ref=dataclasses.replace(
+            binding.process_ref,
+            provider_session_id="thread-FOREIGN",
+            launch_nonce="foreign-key",
+        ),
+    )
+    with mock.patch.object(
+        inner,
+        "reattach",
+        side_effect=AssertionError("inner reattach must never run"),
+    ):
+        with pytest.raises(T3NativeCompositionError) as caught:
+            bridge.reattach(spec, forged)
+    assert "refusing to swap executions" in str(caught.value)
+
+
+def test_bridge_reattach_refuses_entry_from_a_running_event_loop(tmp_path):
+    """The sync bridge drives the inner coroutine on a private one-shot
+    loop; entering it from a running loop is a typed refusal (the supervisor
+    surfaces it as LIVE_QUARANTINED), never a nested-loop attempt."""
+    inner, binding, spec = _launch_coordinates(tmp_path)
+    bridge = SupervisorBoundaryT3Adapter(inner)
+
+    async def on_loop():
+        return bridge.reattach(spec, binding)
+
+    with mock.patch.object(
+        inner,
+        "reattach",
+        side_effect=AssertionError("inner reattach must never run"),
+    ):
+        with pytest.raises(T3NativeCompositionError) as caught:
+            asyncio.run(on_loop())
+    assert "running event loop" in str(caught.value)

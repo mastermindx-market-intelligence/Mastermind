@@ -51,8 +51,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace as dataclass_replace
@@ -62,6 +64,7 @@ from typing import Any, Callable, Mapping
 from control_plane.t3_execution_adapter import (
     T3ExecutionAdapter,
     T3_NATIVE_ADAPTER_ID,
+    T3NamespaceAttestationError,
     T3McpToolPort,
     T3McpTransportError,
     SQLiteT3AdapterStateStore,
@@ -87,10 +90,19 @@ STORE_BASIS_CHECKOUT_DEFAULT = "CHECKOUT_DEFAULT"
 #: Typed composition statuses.
 COMPOSITION_COMPOSED = "COMPOSED"
 COMPOSITION_NOT_ENROLLED = "T3_NOT_ENROLLED"
+#: Enrollment is CONFIGURED but broken (unreadable, empty or malformed token
+#: file): a capability gap that must be VISIBLE, never a crash of the host
+#: service and never a silent ``{}``.
+COMPOSITION_ENROLLMENT_BROKEN = "T3_ENROLLMENT_BROKEN"
 
 
 class T3NativeCompositionError(Exception):
     """Typed, fail-closed composition refusal (never a bare OSError here)."""
+
+
+#: Module logger: the only surfacing seam for a broken enrollment that keeps
+#: the phase1c service call sites (plain ``dict`` consumers) unchanged.
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -202,6 +214,14 @@ def _endpoint_url(
     return f"http://{host_port}/mcp"
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a 3xx: the redirect target is unverified, so resending
+    the Authorization header to it would leak the bearer off-origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None  # decline: urllib raises HTTPError for the 3xx instead
+
+
 class T3McpHttpTransport:
     """Minimal stdlib streamable-HTTP MCP client for the t3-native adapter.
 
@@ -212,6 +232,16 @@ class T3McpHttpTransport:
     classifier depends on (pre-send failures vs everything after send).  The
     token is kept only in the authorization header it sends; it is never
     stored on an error, repr, or log line.
+
+    Hardening pinned by review #3 (B1): the opener disables environment and
+    system proxies (a misconfigured ``http_proxy`` must not reroute the
+    bearer) and REFUSES redirects (any 3xx is a typed transport error — the
+    bearer is never resent to a redirect target); the MCP session is opened
+    lazily, exactly once and thread-safely BEFORE the first tool call (an
+    endpoint that requires a session for ``tools/call`` fails closed without
+    it); re-initialization exists ONLY as the typed explicit path
+    :meth:`reinitialize_after_session_loss` — a mutating call is never
+    auto-retried or auto-reinitialized after a failure.
     """
 
     def __init__(self, url: str, access_token: str, *,
@@ -222,6 +252,14 @@ class T3McpHttpTransport:
         self._next_id = 0
         self._timeout = float(timeout_seconds)
         self.protocol_version = "2025-03-26"
+        self._init_lock = threading.Lock()
+        self._initialized = False
+        self._init_result: Mapping[str, Any] | None = None
+        # ProxyHandler({}) installs NO proxies (environment and system
+        # proxies are ignored); _RefuseRedirects declines every 3xx.
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _RefuseRedirects()
+        )
 
     # -- plumbing -------------------------------------------------------------
 
@@ -240,7 +278,7 @@ class T3McpHttpTransport:
         )
         after = T3McpTransportError.AFTER_SEND
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as resp:
+            with self._opener.open(request, timeout=self._timeout) as resp:
                 sid = resp.headers.get("Mcp-Session-Id") or resp.headers.get(
                     "mcp-session-id"
                 )
@@ -250,6 +288,15 @@ class T3McpHttpTransport:
                 raw = resp.read().decode("utf-8", "replace")
                 status = resp.status
         except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                # The redirect is never followed, so the bearer was never
+                # resent to the (unverified) target: a typed refusal.
+                raise T3McpTransportError(
+                    f"HTTP {exc.code} redirect refused: the t3 transport "
+                    "never follows redirects and never resends its "
+                    "authorization header",
+                    phase=after, http_status=exc.code,
+                ) from exc
             # An explicit upstream HTTP answer (the status is the evidence).
             detail = exc.read().decode("utf-8", "replace")[:500]
             raise T3McpTransportError(
@@ -295,8 +342,8 @@ class T3McpHttpTransport:
 
     # -- MCP surface ----------------------------------------------------------
 
-    def initialize(self) -> Mapping[str, Any]:
-        """Open the MCP session (initialize + initialized notification)."""
+    def _initialize_locked(self) -> Mapping[str, Any]:
+        """The initialize handshake body (caller holds ``_init_lock``)."""
         resp = self._post({
             "jsonrpc": "2.0",
             "id": self._rpc_id(),
@@ -325,8 +372,48 @@ class T3McpHttpTransport:
         )
         return result
 
+    def initialize(self) -> Mapping[str, Any]:
+        """Open the MCP session (initialize + initialized notification).
+
+        Idempotent and thread-safe: the handshake runs at most once without an
+        explicit :meth:`reinitialize_after_session_loss`.
+        """
+        with self._init_lock:
+            if self._initialized and self._init_result is not None:
+                return self._init_result
+            result = self._initialize_locked()
+            self._init_result = result
+            self._initialized = True
+            return result
+
+    def reinitialize_after_session_loss(self) -> Mapping[str, Any]:
+        """The ONE typed re-initialization path, for a RECONCILED 404.
+
+        Contract (review #3 B1): a caller that has positively reconciled an
+        upstream 404 as MCP session loss may call this before its NEXT
+        operation.  It never retries, replays or re-sends the failed call —
+        a mutating call whose outcome is unknown stays unknown; the adapter's
+        lost-reply classifier owns that decision, not the transport.
+        """
+        with self._init_lock:
+            self._session_id = None
+            self._initialized = False
+            self._init_result = None
+            result = self._initialize_locked()
+            self._init_result = result
+            self._initialized = True
+            return result
+
     def call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """The transport callable ``T3McpToolPort`` requires."""
+        """The transport callable ``T3McpToolPort`` requires.
+
+        Lazily opens the MCP session exactly once BEFORE the first tool call
+        (thread-safe); whether an endpoint rejects ``tools/call`` without a
+        session is upstream-dependent, so the transport never depends on the
+        permissive answer.
+        """
+        if not self._initialized:
+            self.initialize()
         resp = self._post({
             "jsonrpc": "2.0",
             "id": self._rpc_id(),
@@ -374,8 +461,10 @@ class T3McpHttpTransport:
 
 @dataclass(frozen=True)
 class T3NativeComposition:
-    """Typed composition result — composed, or typed-not-enrolled.  Never a
-    bare exception: an unenrolled host is a normal state, not a fault."""
+    """Typed composition result — composed, typed-not-enrolled (no token
+    file configured; a normal state) or typed-enrollment-broken (a token
+    file is configured but cannot be read or attested; a visible fault in
+    that lane alone).  Never a bare exception."""
 
     status: str
     store_placement: T3AdapterStorePlacement
@@ -419,9 +508,12 @@ def compose_t3_native_adapter(
     """Compose the reviewed t3-native adapter over real production inputs.
 
     Fail-closed and typed: an absent token file yields
-    ``T3_NOT_ENROLLED`` (the route stays unselected); a present token builds
-    the port over the SAME token the transport sends and constructs the
-    adapter through the reviewed instantiation path.
+    ``T3_NOT_ENROLLED`` (the route stays unselected); a CONFIGURED but
+    broken enrollment (unreadable, empty or malformed token file) yields
+    ``T3_ENROLLMENT_BROKEN`` with a visible reason — never an exception at
+    composition time, and never a silent capability gap.  A present, valid
+    token builds the port over the SAME token the transport sends and
+    constructs the adapter through the reviewed instantiation path.
     """
     placement = store_placement or resolve_t3_adapter_store_placement(runtime)
     url = _endpoint_url(endpoint, projection)
@@ -440,23 +532,38 @@ def compose_t3_native_adapter(
         token = _read_access_token(resolved_file)
     except T3NativeCompositionError as exc:
         return T3NativeComposition(
-            status=COMPOSITION_NOT_ENROLLED,
+            status=COMPOSITION_ENROLLMENT_BROKEN,
             store_placement=placement,
             endpoint_url=url,
             reason=str(exc),
         )
-    if port_factory is not None:
-        # A test-injected port over the same token (no real transport).
-        port = port_factory(token)
-    else:
-        transport = (
-            transport_factory(url, token)
-            if transport_factory is not None
-            else T3McpHttpTransport(url, token)
+    try:
+        if port_factory is not None:
+            # A test-injected port over the same token (no real transport).
+            port = port_factory(token)
+        else:
+            transport = (
+                transport_factory(url, token)
+                if transport_factory is not None
+                else T3McpHttpTransport(url, token)
+            )
+            # COMPOSITION PRECONDITION (re-check M2): attestation and transport
+            # are built from the SAME token, right here, with nothing between.
+            port = T3McpToolPort.from_access_token(transport.call_tool, token)
+    except T3NamespaceAttestationError as exc:
+        # A configured token that cannot attest an MCP-client session is a
+        # BROKEN enrollment, not an unenrolled host and not a service crash
+        # (review #3 B1): typed, with the reason, before any owner exists.
+        # The attestation error text names no token material.
+        return T3NativeComposition(
+            status=COMPOSITION_ENROLLMENT_BROKEN,
+            store_placement=placement,
+            endpoint_url=url,
+            reason=(
+                f"access token file {resolved_file} does not attest an "
+                f"MCP-client bearer session: {exc}"
+            ),
         )
-        # COMPOSITION PRECONDITION (re-check M2): attestation and transport
-        # are built from the SAME token, right here, with nothing between.
-        port = T3McpToolPort.from_access_token(transport.call_tool, token)
     if inspector is None:
         from control_plane.codex_worker import ProcessInspector
         inspector = ProcessInspector()
@@ -611,6 +718,28 @@ class SupervisorBoundaryT3Adapter:
                 "recovery binding has no durable retained ref for run "
                 f"{spec.run_id!r}; refusing to translate"
             )
+        # Review #3 (B2 MAJOR): the supervisor-supplied binding must carry
+        # the TWIN of the retained ref BEFORE the twin ref is substituted
+        # back to its neutral form — otherwise the inner adapter's
+        # "retained original ref differs from the recovery binding" check
+        # compares the retained ref against ITSELF and a forged binding
+        # would be waved through.  Fail closed, typed, inner never called.
+        if self._twin(retained) != binding.process_ref:
+            raise T3NativeCompositionError(
+                "supervisor recovery binding is not the twin of the durable "
+                f"retained ref for run {spec.run_id!r}; refusing to swap "
+                "executions"
+            )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # off-loop: the production path (sync reconcile entry point)
+        else:
+            raise T3NativeCompositionError(
+                "sync reattach bridge entered from a running event loop; "
+                "recovery from a loop must use the async owner path "
+                "(LIVE_QUARANTINED, never a nested loop)"
+            )
         neutral_binding = dataclass_replace(binding, process_ref=retained)
         return self._twin(
             asyncio.run(self._inner.reattach(spec, neutral_binding))
@@ -736,15 +865,37 @@ def compose_t3_native_owners_for_service(
 ) -> dict[str, Any]:
     """The Executive service seam: compose once, return per-worker owners.
 
-    An unenrolled host (no token file) or one with no registered t3-native
-    workers composes NOTHING — the existing supervisor composition stays
-    byte-identical.  A configured-but-broken enrollment surfaces as its typed
-    composition error instead of a silent capability gap.
+    An unenrolled host (no token file configured) or one with no registered
+    t3-native workers composes NOTHING — the existing supervisor composition
+    stays byte-identical, and the primary is never touched at all.  A
+    CONFIGURED-but-broken enrollment (unreadable, empty or malformed token
+    file) surfaces as a typed, VISIBLE ``T3_ENROLLMENT_BROKEN`` result at
+    startup (module log, with the reason) and composes no owner — fail-closed
+    for the t3-native lane only, never a crash of the paid/plain/fabric
+    lanes around it (review #3 B1).
+
+    Review #3 (B1 MAJOR): enrollment is resolved BEFORE any ``primary``
+    attribute is read — the seam must not require stand-in primaries to
+    carry the primary supervisor's inspector surface when the host is not
+    even enrolled.
     """
+    if resolve_t3_access_token_file(environ=environ) is None:
+        # Not enrolled: a normal state.  Never touch the primary here —
+        # stand-in primaries (tests, partial compositions) owe no
+        # ``inspector`` surface to an unenrolled host.
+        return {}
     composition = compose_t3_native_adapter(
-        runtime, inspector=primary.inspector, environ=environ
+        runtime, inspector=getattr(primary, "inspector", None), environ=environ
     )
     if not composition.composed:
+        if composition.status == COMPOSITION_ENROLLMENT_BROKEN:
+            # Visible, typed, fail-closed for this lane only: the service
+            # keeps its existing owners and every other lane stays up.
+            _log.error(
+                "t3-native enrollment is configured but broken; composing "
+                "no t3-native owner (fail-closed): %s",
+                composition.reason,
+            )
         return {}
     return compose_t3_native_supervisor_owners(
         primary,
