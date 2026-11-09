@@ -63,10 +63,11 @@ these local limits become global provider quotas.
 
 | Setting | Default | Meaning |
 |---|---:|---|
-| `FABRIC_MAX_IN_FLIGHT` | 32 | Local process concurrency, including admission and active streams |
+| `FABRIC_MAX_IN_FLIGHT` | 32 | Local process concurrency, including body uploads, admission and active streams |
 | Route `max_in_flight` | 0 | Optional per-route ceiling; zero means only other ceilings apply |
 | Route `concurrency_group` and `group_max_in_flight` | unset | Explicit shared local ceiling across routes; every group member must agree |
 | `FABRIC_REQUEST_TIMEOUT_S` | 1800 | Total admitted-request deadline, including streaming keepalives |
+| `FABRIC_REQUEST_BODY_TIMEOUT_S` | 30 | Incoming body upload deadline inside the process concurrency limit |
 | `FABRIC_UPSTREAM_TIMEOUT_S` | 900 | Upstream HTTP inactivity timeout |
 | `FABRIC_MAX_BODY_BYTES` | 8388608 | Incoming request body limit |
 | `FABRIC_MAX_RESPONSE_BYTES` | 16777216 | Upstream response limit, including streamed bytes |

@@ -5,6 +5,7 @@ import asyncio
 import base64
 import fcntl
 import json
+import sys
 import time
 import threading
 from dataclasses import replace
@@ -701,6 +702,117 @@ async def test_slow_credential_admission_is_inside_global_bulkhead(tmp_path, mon
             release.set()
             await first
     assert app.state.router_state.in_flight == 0
+
+
+@async_test
+async def test_slow_request_body_is_inside_global_bulkhead(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def upload():
+        yield b'{"model":'
+        started.set()
+        await release.wait()
+        yield b'"m","messages":[],"max_tokens":16}'
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"id": "m", "content": []})
+
+    app = create_app(config(tmp_path, max_in_flight=1), transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        first = asyncio.create_task(session.post("/v1/messages", headers=HEADERS, content=upload()))
+        await asyncio.wait_for(started.wait(), 1)
+        try:
+            assert app.state.router_state.in_flight == 1
+            second = await session.post("/v1/messages", headers=HEADERS, json=body())
+            assert second.status_code == 503
+            assert second.json()["error"]["code"] == "FABRIC_ROUTER_BUSY"
+            assert not calls
+        finally:
+            release.set()
+            await first
+    assert len(calls) == 1
+    assert app.state.router_state.in_flight == 0
+
+
+@async_test
+async def test_request_body_deadline_refuses_without_upstream_or_circuit_effect(tmp_path):
+    async def upload():
+        yield b'{"model":'
+        await asyncio.Event().wait()
+
+    calls = []
+    app = create_app(config(tmp_path, request_body_timeout_s=.02), transport=httpx.MockTransport(
+        lambda request: calls.append(request)))
+    async with client(app) as session:
+        reply = await asyncio.wait_for(session.post("/v1/messages", headers=HEADERS, content=upload()), 1)
+    assert reply.status_code == 408
+    assert reply.json()["error"]["code"] == "FABRIC_REQUEST_BODY_TIMEOUT"
+    assert not calls
+    assert app.state.router_state.in_flight == 0
+    assert app.state.router_state.refused == 1
+    assert app.state.router_state.routes.consecutive_failures == {}
+
+
+@async_test
+async def test_disconnected_upload_releases_global_slot_without_upstream(tmp_path):
+    started = asyncio.Event()
+
+    async def upload():
+        yield b'{"model":'
+        started.set()
+        await asyncio.Event().wait()
+
+    app = create_app(config(tmp_path))
+    async with client(app) as session:
+        task = asyncio.create_task(session.post("/v1/messages", headers=HEADERS, content=upload()))
+        await asyncio.wait_for(started.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert app.state.router_state.in_flight == 0
+    assert app.state.router_state.cancelled == 1
+    assert app.state.router_state.selected == 0
+    assert app.state.router_state.routes.consecutive_failures == {}
+
+
+@async_test
+async def test_asgi_disconnect_during_upload_releases_global_slot(tmp_path):
+    app = create_app(config(tmp_path))
+    incoming = iter((
+        {"type": "http.request", "body": b'{"model":', "more_body": True},
+        {"type": "http.disconnect"},
+    ))
+
+    async def receive():
+        return next(incoming)
+
+    scope = {"type": "http", "method": "POST", "path": "/v1/messages",
+             "scheme": "http", "query_string": b"", "server": ("proxy", 80),
+             "client": ("127.0.0.1", 50000),
+             "headers": [(b"authorization", HEADERS["authorization"].encode())]}
+    endpoint = next(r.endpoint for r in app.routes if r.path == "/v1/messages")
+    response = await endpoint(Request(scope, receive))
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"]["code"] == "FABRIC_REQUEST_DISCONNECTED"
+    assert app.state.router_state.in_flight == 0
+    assert app.state.router_state.cancelled == 1
+    assert app.state.router_state.selected == 0
+
+
+@async_test
+async def test_deeply_nested_body_is_a_bounded_caller_refusal(tmp_path):
+    app = create_app(config(tmp_path))
+    depth = sys.getrecursionlimit() + 100
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS,
+                                   content=b'[' * depth + b'0' + b']' * depth)
+    assert reply.status_code == 400
+    assert reply.json()["error"]["code"] == "FABRIC_INVALID_REQUEST"
+    assert app.state.router_state.in_flight == 0
+    assert app.state.router_state.selected == 0
 
 
 def test_explicit_refresh_wait_is_bounded_and_cancellable(tmp_path):

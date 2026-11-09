@@ -32,6 +32,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 from ops.native_fabric.unified_router.routes import (
     DEFAULT_AUTH_STORE,
@@ -96,6 +97,7 @@ class Settings:
     route_cooldown_s: float = 30.0
     max_in_flight: int = 32
     request_timeout_s: float = 1800.0
+    request_body_timeout_s: float = 30.0
     max_response_bytes: int = 16 * 1024 * 1024
     max_sse_event_bytes: int = 1024 * 1024
 
@@ -117,7 +119,8 @@ class Settings:
                       self.max_response_bytes, self.max_sse_event_bytes):
             if type(value) is not int or value <= 0:
                 raise ValueError("router limits must be positive integers")
-        for value in (self.upstream_timeout_s, self.route_cooldown_s, self.request_timeout_s):
+        for value in (self.upstream_timeout_s, self.route_cooldown_s,
+                      self.request_timeout_s, self.request_body_timeout_s):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("router timeouts must be positive and finite")
         for alias, targets in self.aliases:
@@ -176,6 +179,7 @@ def settings_from_env() -> Settings:
         route_cooldown_s=float(os.environ.get("FABRIC_ROUTE_COOLDOWN_S", "30")),
         max_in_flight=int(os.environ.get("FABRIC_MAX_IN_FLIGHT", "32")),
         request_timeout_s=float(os.environ.get("FABRIC_REQUEST_TIMEOUT_S", "1800")),
+        request_body_timeout_s=float(os.environ.get("FABRIC_REQUEST_BODY_TIMEOUT_S", "30")),
         max_response_bytes=int(os.environ.get("FABRIC_MAX_RESPONSE_BYTES", str(16 * 1024 * 1024))),
         max_sse_event_bytes=int(os.environ.get("FABRIC_MAX_SSE_EVENT_BYTES", str(1024 * 1024))),
     )
@@ -434,6 +438,7 @@ def create_app(cfg: Settings | None = None, *,
             "provider_quota_authority": False,
             "in_flight": state.in_flight, "max_in_flight": cfg.max_in_flight,
             "request_timeout_s": cfg.request_timeout_s,
+            "request_body_timeout_s": cfg.request_body_timeout_s,
             "routes": [
                 {"route_id": r.route_id, "wire": r.wire, "models": list(r.models),
                  "weight": r.weight, "priority": r.priority,
@@ -739,32 +744,40 @@ def create_app(cfg: Settings | None = None, *,
         declared = request.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > cfg.max_body_bytes:
             return _error("FABRIC_REQUEST_TOO_LARGE", 413)
-        body = bytearray()
-        async for chunk in request.stream():
-            if len(body) + len(chunk) > cfg.max_body_bytes:
-                return _error("FABRIC_REQUEST_TOO_LARGE", 413)
-            body.extend(chunk)
-        try:
-            payload = json.loads(bytes(body))
-            if not isinstance(payload, dict):
-                raise ValueError()
-            candidates = _model_candidates(payload, cfg.aliases)
-        except (ValueError, WireTranslationError) as exc:
-            return _error(_public_reason(exc, "FABRIC_INVALID_REQUEST"), 400)
-        counting = request.url.path.endswith("/count_tokens")
-        eligible_routes = [r for r in cfg.routes if not counting or r.wire == WIRE_ANTHROPIC]
-        if counting and not any(r.serves(model) for r in eligible_routes for model, _ in candidates):
-            return _error("FABRIC_COUNT_TOKENS_UNSUPPORTED", 501)
         if state.in_flight >= cfg.max_in_flight:
             state.refused += 1
             return _error("FABRIC_ROUTER_BUSY", 503, retry_after_s=1)
-        # Reserve the process bulkhead before any asynchronous credential read.
-        # A burst cannot create unbounded admission/executor work ahead of it.
+        # Reserve before the first body read as well as credential admission.
+        # Partial uploads cannot retain unbounded buffers outside the bulkhead.
         state.in_flight += 1
         admission_started = time.monotonic()
         admission_reserved = True
         try:
             async with asyncio.timeout_at(admission_started + cfg.request_timeout_s):
+                body = bytearray()
+                try:
+                    async with asyncio.timeout(cfg.request_body_timeout_s):
+                        async for chunk in request.stream():
+                            if len(body) + len(chunk) > cfg.max_body_bytes:
+                                state.refused += 1
+                                return _error("FABRIC_REQUEST_TOO_LARGE", 413)
+                            body.extend(chunk)
+                except TimeoutError:
+                    state.refused += 1
+                    return _error("FABRIC_REQUEST_BODY_TIMEOUT", 408)
+                try:
+                    payload = json.loads(bytes(body))
+                    if not isinstance(payload, dict):
+                        raise ValueError()
+                    candidates = _model_candidates(payload, cfg.aliases)
+                except (ValueError, RecursionError, WireTranslationError) as exc:
+                    state.refused += 1
+                    return _error(_public_reason(exc, "FABRIC_INVALID_REQUEST"), 400)
+                counting = request.url.path.endswith("/count_tokens")
+                eligible_routes = [r for r in cfg.routes if not counting or r.wire == WIRE_ANTHROPIC]
+                if counting and not any(r.serves(model) for r in eligible_routes for model, _ in candidates):
+                    state.refused += 1
+                    return _error("FABRIC_COUNT_TOKENS_UNSUPPORTED", 501)
                 known_refusal = None
                 available_routes = []
                 for route in eligible_routes:
@@ -809,6 +822,9 @@ def create_app(cfg: Settings | None = None, *,
         except TimeoutError:
             state.refused += 1
             return _error("FABRIC_ADMISSION_DEADLINE", 503)
+        except ClientDisconnect:
+            state.cancelled += 1
+            return _error("FABRIC_REQUEST_DISCONNECTED", 400)
         except asyncio.CancelledError:
             state.cancelled += 1
             raise

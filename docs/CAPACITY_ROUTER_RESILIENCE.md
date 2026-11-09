@@ -105,7 +105,8 @@ credentials, consumer settings, service, provider or release selection changed.
 ## Current qualified candidate — 2026-11-09 00:18 America/Vancouver
 
 UR1–UR4 are implemented and qualified in this isolated source operation.
-UR5 publication is in progress. UR6 remains unaccepted; the live source is still
+UR5 is published as Ready PR #2369, scoped against the original #2367 source.
+UR6 remains unaccepted; the live source is still
 a58c34f1. The parent DONE_WHEN is not met.
 
 ### Final behavior and proof
@@ -195,3 +196,47 @@ No archived author/chat is a required recipient.
 UR7–UR10 are explicit unimplemented program obligations, not claims of delivered
 capacity, new controllers or authorization to infer provider limits. They extend
 the same parent #983; no second quota/auth/queue/workstream registry is created.
+
+
+## Request-body admission and predecessor recovery — 2026-11-09
+
+A further fault reproduction showed that partial uploads held body buffers before
+the process concurrency slot. Admission now reserves the same global slot before
+the first body read, with a separate 30-second configurable body deadline inside
+the total request deadline. Timeout, task cancellation, ASGI disconnect and deeply
+nested invalid JSON release local resources without an upstream send or circuit
+penalty. The existing size limit remains eight MiB.
+
+The affected suite is now **96 passing tests** in scratch Python 3.12.14 and the
+exact installed M2 dependency set (native process 7010, Python 3.14.7 / FastAPI
+0.162.2 / Starlette 1.10.0 / httpx 0.28.1, exit 0). The new upload regressions
+reproduced the missing admission/cancellation boundary before repair.
+
+Hosted CI at source 08917fc4 (run 42585309236) independently reproduces the
+predecessor's immutable provider APPLICATION lineage failure. It is not green.
+The source repair is being qualified under operation
+capacity-router-parent-ci-repair-20261109-c4 in its own registered workspace;
+the six temporary predecessor files have been verified there and restored out
+of this scoped router workspace. Original #2367 remains the publication carrier.
+
+Qualified predecessor repairs so far preserve the exact protected policy/profile
+bytes, move additive Anthropic helpers into the existing gateway, and register
+the exact query-free Capacity GET path in the existing transport. Focused proof:
+96 passed / 3 existing SDK-dependent skips for policy and historical composition,
+8 actual APPLICATION transition cases passed, and 168 capacity/transport cases
+passed including Unix authentication and expiry. These do not qualify the entire
+predecessor or authorize runtime installation.
+
+The predecessor also accidentally tracks 3,924 dependency files in two existing
+npm installation directories. Both manifests and lockfiles match protected source;
+the source-only repair will remove those tracked trees while preserving the
+declared npm-ci installation and other app-control changes. Source/site review
+fingerprints are being requalified only where the original protected functions,
+literal values and negative controls remain exact. No scanner-wide exemption,
+identity/default change, provider release repin, or protected gate bypass is
+part of this work.
+
+Protected master advanced from the procedure pin to 3652d890 through the disjoint
+Hermes GitHub-plugin change. Applicable procedure bytes are unchanged; the source
+qualification above still states its exact input and runtime. The original live
+router and consumer configuration remain unchanged by this operation.
