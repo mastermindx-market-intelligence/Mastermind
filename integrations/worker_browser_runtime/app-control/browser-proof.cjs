@@ -93,10 +93,17 @@ async function main() {
     await page.getByText('glm:fixture-allowance', { exact: true }).waitFor();
     const setDisplay = async (theme, locale) => {
       const before = await inspect();
-      await act(before.locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
-      await act(before.locale === 'zh-CN' ? '主题' : 'Theme', 'select', { value: theme });
-      await act(before.locale === 'zh-CN' ? '语言' : 'Language', 'select', { value: locale });
+      const fromZh = before.locale === 'zh-CN';
+      // On narrow viewports the disclosure lives in the closed navigation
+      // drawer: open it first, and close it with the new locale's toggle.
+      const disclosure = fromZh ? '显示设置' : 'Display settings';
+      const drawer = !before.controls.some(row => row.name === disclosure);
+      if (drawer) await act(fromZh ? '打开导航' : 'Open navigation', 'activate');
+      await act(disclosure, 'activate');
+      await act(fromZh ? '主题' : 'Theme', 'select', { value: theme });
+      await act(fromZh ? '语言' : 'Language', 'select', { value: locale });
       await act(locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
+      if (drawer) await act(locale === 'zh-CN' ? '打开导航' : 'Open navigation', 'activate');
       const after = await inspect();
       assert.equal(after.theme, theme); assert.equal(after.locale, locale);
     };
