@@ -728,9 +728,32 @@ Exact native JSX comparison preserved54 unchanged leaves per desktop and49 per p
 
 No source implementation, runtime reader, URL/selection ownership, exact-version recovery mechanism, deployment or existing hold was changed.
 
+
+## Intraday Flow — distinguish nominal delay from actual source age
+
+The [Intraday Flow R1 discovery workspace](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) remains explicitly DRAFT. Its filtered-empty390px board `9F-0` displayed “≈15-min delayed” beside a build timestamp, immediately below “Current prices unavailable.” That wording could imply the age of current evidence even though the adjacent price source is unavailable.
+
+Root read the existing source contract at Macro `7d98b3b469f42219a742d6aea35c3ffc9554dbc5`:
+
+- `research/INTRADAY_FLOW_TRACKER_DESIGN.md`, blob `a769d2314ed6cca54f41c15647e18c80c5703f9d`: identifies the nominal15-minute delayed intraday-bar source, requires provider delay to be labeled separately, and distinguishes actual source age from polling cadence or unavailable/last-session source stamps.
+- `agentos/workstreams/WS-INTRADAY-FLOW-P0-RECOVERY.md`, blob `59764b7dd35952700fd35d0b92840ea7ccf161d9`: build/deployment/response recency cannot establish source health; quote, pulse and options-flow health remain independent.
+
+Changed only `A0-0` to:
+
+> Board built 2 Nov 10:21 UTC · Nominal price delay ≈15m
+
+Adjacent `A1-0` retains the unavailable price source and27Jul22:32UTC volume source. The historical session badge, recorded-classification warning, filtered query, counts, Clear/Reset actions, loading state, source-details states and R4 recorded-evidence guides remain unchanged. This is a meaning correction to the existing nominal-delay information; it makes no new source-freshness claim and adds no reader or feature.
+
+Root inspected the complete native screenshot and exact text node. The revised label fits the existing354×12px node; the390×844px board remains unclipped. All19 other text leaves match the original exactly. Both operations returned APPLIED_RESPONSE_OBSERVED, with explicit finish limited to `9F-0`.
+
+- `paper-intraday-nominal-delay-meaning-20261109-c4-sd`
+- `paper-intraday-nominal-delay-finish-20261109-c4-sd`
+
+No current production proof, live data, source implementation, provider change, held source action or Draft promotion is claimed.
+
 ## Active continuation
 
-The successor now covers eleven design files. Preserve all accepted work and existing holds. A bounded read-only audit of the separate Intraday Flow R1 Draft is checking for one remaining state or meaning gap against its own authority and prior accepted work; do not promote that draft or change a held source. Continue only with a concrete useful delta, keeping native design proof separate from source/runtime acceptance.
+The successor now covers twelve design files. Preserve accepted work and all existing holds. Bounded read-only audits are checking BioCatalyst's blueprint/builder contracts and a different Government Revenue workflow beyond the completed mobile return-action repair. Continue only with a concrete source-supported design gap; no feature should be added merely to extend the work.
 
 
 ## Acceptance boundary
