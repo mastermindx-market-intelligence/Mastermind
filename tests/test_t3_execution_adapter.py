@@ -940,14 +940,13 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
             receipt.request_namespace, _t3m.t3_request_namespace(f"client:{_SID}")
         )
         self.assertEqual(receipt.created_at, "")  # never a local clock
-        # An upstream thread id that does NOT prove (namespace, key): no echo.
+        # An upstream thread id that does NOT prove (namespace, key) is an
+        # UNKNOWN outcome (re-audit N5) — never an echo-free receipt.
         foreign = FakeMcpTransport()
         foreign.thread_override = "mcp:launch:" + "0" * 64
         other_port = _t3m.T3McpToolPort.from_access_token(foreign, _session_token())
-        unproven = await other_port.launch_thread(
-            adapter.launch_intent("run-1").envelope
-        )
-        self.assertEqual((unproven.client_request_id, unproven.request_namespace), ("", ""))
+        with self.assertRaises(T3UnknownOutcomeError):
+            await other_port.launch_thread(adapter.launch_intent("run-1").envelope)
 
     async def test_port_refuses_an_envelope_for_another_namespace_before_sending(self) -> None:
         transport = FakeMcpTransport()
@@ -963,21 +962,29 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lost_replies_keep_the_intent_and_clean_refusals_roll_back(self) -> None:
         err = _t3m.T3McpTransportError
+        # Re-audit N1 supersedes audit #4's table: 429 and a codeless (or
+        # non-allowlisted) tool isError are UNKNOWN, not clean refusals.
         unknown = {
             "timeout after send": err("timed out", phase="after_send"),
             "connection reset": err("reset by peer", phase="after_send"),
             "HTTP 502 after send": err("bad gateway", phase="after_send", http_status=502),
             "HTTP 408": err("request timeout", phase="after_send", http_status=408),
+            "HTTP 429": err("rate limited", phase="after_send", http_status=429),
             "JSON-RPC internal error": err("internal", phase="after_send", rpc_code=-32603),
             "unclassified exception": OSError("socket closed mid-read"),
+            "tool isError without code": err("x", phase="after_send", tool_error=True),
+            "tool isError invalid_request": err(
+                "x", phase="after_send", tool_error=True, tool_error_code="invalid_request"
+            ),
         }
         clean = {
             "pre-send connection refused": err("refused", phase="pre_send"),
             "HTTP 400": err("bad request", phase="after_send", http_status=400),
             "HTTP 403": err("forbidden", phase="after_send", http_status=403),
-            "HTTP 429": err("rate limited", phase="after_send", http_status=429),
             "JSON-RPC invalid params": err("invalid", phase="after_send", rpc_code=-32602),
-            "tool isError": err("invalid_request", phase="after_send", tool_error=True),
+            "tool isError capability_denied": err(
+                "x", phase="after_send", tool_error=True, tool_error_code="capability_denied"
+            ),
         }
         for label, failure in unknown.items():
             with self.subTest(unknown=label):
@@ -1067,6 +1074,557 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(adapter.result_ledger_entry("run-1"))
 
 
+# =============================================================================
+# A4 re-audit (N1-N9) — donor-faithful MCP server model.  New names are
+# resolved through the module INSIDE each test (fail-before per test).
+# =============================================================================
+
+
+def _donor_failure(code: str):
+    """The donor's declared-failure wire body (effect McpServer, return mode)."""
+    return _t3m.T3McpTransportError(
+        f"tool returned failure: {code}", phase="after_send", tool_error=True,
+        tool_error_code=code,
+    )
+
+
+class DonorMcpServer:
+    """Shared upstream state; ``session(sid)`` is one OAuth client's transport.
+
+    Models the donor at the pin: ``threadId = mcp:launch:sha256(JSON[ns,
+    key])`` with ``ns = client:<sid>`` (a replay under the SAME session
+    returns the original thread; another session mints another thread); the
+    initial user message carries ``messageId == threadId``; reads page from
+    the head (``limit`` items after ``afterPosition``; ``hasMore``;
+    ``nextPosition``), list only the newest ``runLimit`` runs, and report
+    ``thread.runCount``; ``t3_thread_wait`` looks a run up by id.
+    """
+
+    def __init__(self) -> None:
+        self.threads: dict[str, dict] = {}
+        self.calls: list[tuple[str, str, dict]] = []
+        #: raised ONCE after the next launch COMMITTED (lost reply after commit)
+        self.after_commit_failure: BaseException | None = None
+        self.wait_echo_run: str | None = None
+
+    def session(self, sid: str):
+        namespace = f"client:{sid}"
+
+        def call_tool(tool: str, arguments):
+            self.calls.append((sid, tool, dict(arguments)))
+            return self._handle(namespace, tool, dict(arguments))
+
+        return call_tool
+
+    def mints(self) -> int:
+        return len(self.threads)
+
+    def add_runs(self, thread_id: str, count: int, status: str = "completed") -> None:
+        runs = self.threads[thread_id]["runs"]
+        for _ in range(count):
+            runs.append({"runId": f"later-{len(runs) + 1}", "ordinal": len(runs) + 1,
+                         "status": status})
+
+    def _thread(self, thread_id: str) -> dict:
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            raise _donor_failure("thread_not_found")
+        return thread
+
+    def _handle(self, namespace: str, tool: str, arguments: dict):
+        if tool == "t3_thread_launch":
+            thread_id = _t3m.t3_expected_launch_thread_id(
+                namespace, arguments["clientRequestId"]
+            )
+            thread = self.threads.get(thread_id)
+            if thread is None:
+                run_id = f"run-{len(self.threads) + 1}"
+                thread = {
+                    "runs": [{"runId": run_id, "ordinal": 1, "status": "running"}],
+                    "items": [{"position": 1, "itemId": f"{thread_id}:u1",
+                               "runId": run_id, "messageId": thread_id,
+                               "type": "user_message", "text": arguments["message"]}],
+                }
+                self.threads[thread_id] = thread
+            reply = {"threadId": thread_id, "runId": thread["runs"][0]["runId"],
+                     "projectId": "p-1", "status": thread["runs"][0]["status"],
+                     "link": f"https://app.t3/{thread_id}"}
+            if self.after_commit_failure is not None:
+                failure, self.after_commit_failure = self.after_commit_failure, None
+                raise failure
+            return reply
+        if tool == "t3_thread_read":
+            thread_id = arguments["threadId"]
+            thread = self._thread(thread_id)
+            after = arguments.get("afterPosition", -1)
+            limit = min(int(arguments.get("limit", 20)), 100)
+            run_limit = min(int(arguments.get("runLimit", 10)), 50)
+            rest = [i for i in thread["items"] if i["position"] > after]
+            page = rest[:limit]
+            runs = sorted(thread["runs"], key=lambda r: -r["ordinal"])[:run_limit]
+            return {
+                "thread": {"threadId": thread_id, "projectId": "p-1",
+                           "runCount": len(thread["runs"]), "status": "idle",
+                           "link": f"https://app.t3/{thread_id}"},
+                "recentRuns": [dict(r) for r in runs],
+                "items": [dict(i) for i in page],
+                "nextPosition": page[-1]["position"] if page else None,
+                "hasMore": len(rest) > len(page),
+            }
+        if tool == "t3_thread_wait":
+            thread = self._thread(arguments["threadId"])
+            run = next((r for r in thread["runs"] if r["runId"] == arguments["runId"]), None)
+            if run is None:
+                raise _donor_failure("run_not_found")
+            return {"threadId": arguments["threadId"],
+                    "runId": self.wait_echo_run or run["runId"],
+                    "status": run["status"], "timedOut": run["status"] == "running"}
+        if tool == "t3_thread_interrupt":
+            self._thread(arguments["threadId"])
+            return {"threadId": arguments["threadId"], "runId": arguments.get("runId"),
+                    "status": "interrupt_requested"}
+        raise AssertionError(f"unexpected tool {tool}")
+
+
+_SID_B = "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f"
+
+
+def _donor_adapter(server: DonorMcpServer, sid: str = _SID, *, state_store=None):
+    port = _t3m.T3McpToolPort.from_access_token(
+        server.session(sid), _session_token(sid), launch_arguments={"scratch": True}
+    )
+    adapter = T3ExecutionAdapter(
+        port, lambda spec: _binding(), FakeInspector(),
+        clock=_clock, state_store=state_store,
+    )
+    return adapter, port
+
+
+def _pre_ack_ref(spec: WorkerLaunchSpec, key: str) -> WorkerProcessRef:
+    from control_plane.t3_execution_adapter import _T3_REMOTE_BINARY_PLACEHOLDER
+
+    return WorkerProcessRef(
+        run_id=spec.run_id, pid=0, pgid=0, session_id=None,
+        process_start_identity="", boot_session_id="",
+        launch_nonce=key, provider_session_id=None,
+        stdout_path="", stderr_path="", result_path="",
+        started_at="", binary=_T3_REMOTE_BINARY_PLACEHOLDER, base_sha="",
+    )
+
+
+def _mutating_calls(server: DonorMcpServer) -> list:
+    return [c for c in server.calls if c[1] in {"t3_thread_launch", "t3_thread_interrupt"}]
+
+
+class A4ReauditN1ClassifierTests(unittest.TestCase):
+    """N1: the lost-reply classifier is an explicit, total allowlist."""
+
+    def test_n1_classifier_table(self) -> None:
+        err = _t3m.T3McpTransportError
+        classify = _t3m.t3_mcp_failure_is_definitive_refusal
+        launch, interrupt = "t3_thread_launch", "t3_thread_interrupt"
+
+        class Exploding(err):
+            @property
+            def http_status(self):  # noqa: D401 — attribute access raises
+                raise RuntimeError("boom")
+
+            @http_status.setter
+            def http_status(self, value):
+                pass
+
+        table = [
+            # (label, failure, tool, definitive refusal?)
+            ("pre-send", err("x", phase="pre_send"), launch, True),
+            ("after-send, nothing explicit", err("x", phase="after_send"), launch, False),
+            ("HTTP 400", err("x", phase="after_send", http_status=400), launch, True),
+            ("HTTP 401", err("x", phase="after_send", http_status=401), launch, True),
+            ("HTTP 403", err("x", phase="after_send", http_status=403), launch, True),
+            ("HTTP 405", err("x", phase="after_send", http_status=405), launch, True),
+            ("HTTP 406", err("x", phase="after_send", http_status=406), launch, True),
+            ("HTTP 415", err("x", phase="after_send", http_status=415), launch, True),
+            ("HTTP 404 (post-handler swap)", err("x", phase="after_send", http_status=404), launch, False),
+            ("HTTP 408", err("x", phase="after_send", http_status=408), launch, False),
+            ("HTTP 409", err("x", phase="after_send", http_status=409), launch, False),
+            ("HTTP 422", err("x", phase="after_send", http_status=422), launch, False),
+            ("HTTP 429", err("x", phase="after_send", http_status=429), launch, False),
+            ("HTTP 499", err("x", phase="after_send", http_status=499), launch, False),
+            ("HTTP 500", err("x", phase="after_send", http_status=500), launch, False),
+            ("HTTP 503", err("x", phase="after_send", http_status=503), launch, False),
+            ("status as str", err("x", phase="after_send", http_status="400"), launch, False),
+            ("status as bool", err("x", phase="after_send", http_status=True), launch, False),
+            ("status as float", err("x", phase="after_send", http_status=400.0), launch, False),
+            ("JSON-RPC -32602", err("x", phase="after_send", rpc_code=-32602), launch, True),
+            ("JSON-RPC -32601", err("x", phase="after_send", rpc_code=-32601), launch, True),
+            ("JSON-RPC -32603", err("x", phase="after_send", rpc_code=-32603), launch, False),
+            ("JSON-RPC code as str", err("x", phase="after_send", rpc_code="-32602"), launch, False),
+            ("isError no code", err("x", phase="after_send", tool_error=True), launch, False),
+            ("isError orchestration_error (post-commit wrap)", _donor_failure("orchestration_error"), launch, False),
+            ("isError invalid_request (post-create dispatch refusal)", _donor_failure("invalid_request"), launch, False),
+            ("isError capability_denied", _donor_failure("capability_denied"), launch, True),
+            ("isError parent_not_active", _donor_failure("parent_not_active"), launch, True),
+            ("isError thread_not_found (calling thread)", _donor_failure("thread_not_found"), launch, True),
+            ("isError target_required", _donor_failure("target_required"), launch, True),
+            ("isError runtime escalation", _donor_failure("runtime_mode_escalation_denied"), launch, True),
+            ("isError interaction escalation", _donor_failure("interaction_mode_escalation_denied"), launch, True),
+            ("isError unknown future code", _donor_failure("quota_exceeded"), launch, False),
+            ("isError allowlisted code, no tool named", _donor_failure("capability_denied"), None, False),
+            ("isError allowlisted code, unknown tool", _donor_failure("capability_denied"), "t3_thread_send", False),
+            ("interrupt thread_not_found", _donor_failure("thread_not_found"), interrupt, True),
+            ("interrupt target_required", _donor_failure("target_required"), interrupt, False),
+            ("interrupt orchestration_error", _donor_failure("orchestration_error"), interrupt, False),
+            ("isError + allowlisted HTTP status", err("x", phase="after_send", tool_error=True,
+                                                      http_status=400), launch, False),
+            ("not a transport error", RuntimeError("x"), launch, False),
+            ("None", None, launch, False),
+            ("classification raises", Exploding("x", phase="after_send"), launch, False),
+        ]
+        for label, failure, tool, expected in table:
+            with self.subTest(label):
+                self.assertIs(classify(failure, tool=tool), expected)
+
+    def test_n1_tool_error_code_parses_only_the_donor_declared_failure_shape(self) -> None:
+        parse = _t3m.t3_mcp_tool_error_code
+        declared = {"isError": True, "content": [{"type": "text", "text": _json.dumps(
+            {"_tag": "OrchestratorMcpFailure", "code": "capability_denied",
+             "message": "This credential cannot control threads."})}]}
+        defect = {"isError": True, "content": [{"type": "text",
+                  "text": "Tool execution failed due to an internal server error."}]}
+        self.assertEqual(parse(declared), "capability_denied")
+        for label, value in {
+            "defect text": defect,
+            "other tag": {"content": [{"type": "text", "text": _json.dumps(
+                {"_tag": "Other", "code": "capability_denied"})}]},
+            "code not a string": {"content": [{"type": "text", "text": _json.dumps(
+                {"_tag": "OrchestratorMcpFailure", "code": 7})}]},
+            "no content": {"isError": True},
+            "content not a list": {"content": 3},
+            "not a mapping": "isError",
+            "None": None,
+        }.items():
+            with self.subTest(label):
+                self.assertIsNone(parse(value))
+
+
+class A4ReauditLivePortTests(unittest.IsolatedAsyncioTestCase):
+    async def test_n1_is_error_after_commit_keeps_intent_and_replay_adopts_original(self) -> None:
+        """Reviewer's double-launch: a post-commit isError must stay UNKNOWN."""
+        server = DonorMcpServer()
+        store = InMemoryT3AdapterStateStore()
+        server.after_commit_failure = _donor_failure("orchestration_error")
+        adapter, port = _donor_adapter(server, state_store=store)
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await adapter.start(spec)
+        self.assertEqual(server.mints(), 1)  # the launch DID commit upstream
+        intent = adapter.launch_intent("run-1")
+        self.assertIsNotNone(intent)  # kept: never rolled back
+        # A retry from ANOTHER OAuth client can never relaunch the run: the
+        # claim is held, so no second thread is minted (pre-fix: intent was
+        # cleared and this minted thread #2).
+        other, _ = _donor_adapter(server, _SID_B, state_store=store)
+        with self.assertRaises(T3ExecutionAdapterError):
+            await other.start(spec)
+        self.assertEqual(server.mints(), 1)
+        # Recovery under the ORIGINAL session replays and adopts the ORIGINAL.
+        ref = await adapter.reattach(
+            spec, _recovery_binding(spec, _pre_ack_ref(spec, intent.client_request_id))
+        )
+        self.assertEqual(
+            ref.provider_session_id,
+            _t3m.t3_expected_launch_thread_id(f"client:{_SID}", intent.client_request_id),
+        )
+        self.assertEqual(server.mints(), 1)
+        self.assertEqual([c[0] for c in _mutating_calls(server)].count(_SID_B), 0)
+
+    async def test_n1_mcp_isError_with_an_allowlisted_code_is_a_clean_refusal(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        port._call_tool = lambda tool, arguments: (_ for _ in ()).throw(
+            _donor_failure("capability_denied")
+        )
+        with self.assertRaises(T3ExecutionAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertNotIsInstance(ctx.exception, T3LaunchEffectUnknownError)
+        self.assertIsNone(adapter.launch_intent("run-1"))
+
+    async def test_n5_unproven_thread_id_is_unknown_and_never_acked(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        inner = port._call_tool
+
+        def foreign_thread(tool, arguments):
+            reply = dict(inner(tool, arguments))
+            if tool == "t3_thread_launch":
+                reply["threadId"] = "mcp:launch:" + "0" * 64
+            return reply
+
+        port._call_tool = foreign_thread
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await adapter.start(_launch_spec())
+        self.assertIsNotNone(adapter.launch_intent("run-1"))  # intent kept
+        self.assertIsNone(adapter.launch_receipt("run-1"))  # never ACKed
+
+    async def test_n5_adapter_never_acks_an_echo_free_receipt(self) -> None:
+        class EchoFreeLaunchPort(FakeT3Port):
+            async def launch_thread(self, envelope):
+                receipt = await super().launch_thread(envelope)
+                return dataclasses.replace(receipt, client_request_id="", request_namespace="")
+
+        adapter, port, _ = _t3_adapter(EchoFreeLaunchPort(), binding=_binding())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await adapter.start(_launch_spec())
+        self.assertIsNotNone(adapter.launch_intent("run-1"))
+        self.assertIsNone(adapter.launch_receipt("run-1"))
+
+    async def _terminal_run_with_timeline(self, total_items: int):
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        thread = server.threads[receipt.thread_id]
+        thread["runs"][0]["status"] = "completed"
+        for position in range(2, total_items + 1):
+            thread["items"].append({
+                "position": position, "itemId": f"i-{position}",
+                "runId": receipt.run_id, "messageId": None,
+                "type": "assistant_message", "text": f"step {position}",
+            })
+        return server, adapter, port, ref, receipt
+
+    async def test_n2_terminal_read_refuses_when_pages_run_out_with_has_more(self) -> None:
+        server, adapter, port, ref, receipt = await self._terminal_run_with_timeline(1200)
+        with self.assertRaises(T3ExecutionAdapterError):
+            await adapter.collect_result(ref)
+        # Never ledgered an intermediate assistant item (e.g. "step 1000").
+        self.assertIsNone(adapter.result_ledger_entry("run-1"))
+        direct = await port.read_result(receipt.thread_id, receipt.run_id)
+        self.assertEqual(direct.result_ref, "")
+        self.assertEqual(dict(direct.result_payload), {})
+
+    async def test_n2_terminal_read_names_the_final_item_of_a_complete_timeline(self) -> None:
+        server, adapter, port, ref, receipt = await self._terminal_run_with_timeline(900)
+        await adapter.collect_result(ref)
+        self.assertEqual(
+            adapter.result_ledger_entry("run-1").result_ref,
+            f"t3://thread/{receipt.thread_id}/run/{receipt.run_id}/item/i-900",
+        )
+
+    async def test_n2_stalled_paging_with_has_more_refuses(self) -> None:
+        server, adapter, port, ref, receipt = await self._terminal_run_with_timeline(60)
+        inner = port._call_tool
+
+        def stalled(tool, arguments):
+            reply = dict(inner(tool, arguments))
+            if tool == "t3_thread_read":
+                reply["hasMore"] = True
+                reply["nextPosition"] = arguments.get("afterPosition") or 0
+            return reply
+
+        port._call_tool = stalled
+        direct = await port.read_result(receipt.thread_id, receipt.run_id)
+        self.assertEqual(direct.result_ref, "")
+
+    async def test_n9_run_beyond_recent_runs_is_looked_up_exactly(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        server.threads[receipt.thread_id]["runs"][0]["status"] = "completed"
+        server.add_runs(receipt.thread_id, 60, status="running")  # 61 runs > 50 listed
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.SUCCEEDED)
+        lookups = [c for c in server.calls if c[1] == "t3_thread_wait"]
+        self.assertEqual(len(lookups), 1)
+        self.assertEqual(lookups[0][2]["runId"], receipt.run_id)
+        self.assertEqual(lookups[0][2]["timeoutMs"], 1)
+
+    async def test_n9_exact_lookup_never_guesses(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        server.threads[receipt.thread_id]["runs"][0]["status"] = "completed"
+        server.add_runs(receipt.thread_id, 60)
+        server.wait_echo_run = "later-61"  # upstream followed a continuation
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
+        server.wait_echo_run = None
+        server.threads[receipt.thread_id]["runs"].pop(0)  # run no longer listed at all
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
+
+    async def test_n9_listed_run_needs_no_lookup(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        server.threads[receipt.thread_id]["runs"][0]["status"] = "completed"
+        server.add_runs(receipt.thread_id, 30)  # 31 runs <= 50: listed
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.SUCCEEDED)
+        self.assertFalse([c for c in server.calls if c[1] == "t3_thread_wait"])
+
+
+class A4DryRunStatusVocabularyTests(unittest.IsolatedAsyncioTestCase):
+    """D1 (found by the A4 canary dry run): the donor's terminal run statuses."""
+
+    def test_d1_every_donor_run_status_maps_honestly(self) -> None:
+        mapping = {
+            "preparing": WorkerRunStatus.STARTING, "queued": WorkerRunStatus.STARTING,
+            "starting": WorkerRunStatus.STARTING, "running": WorkerRunStatus.RUNNING,
+            "waiting": WorkerRunStatus.RUNNING, "completed": WorkerRunStatus.SUCCEEDED,
+            "interrupted": WorkerRunStatus.CANCELLED, "failed": WorkerRunStatus.FAILED,
+            "cancelled": WorkerRunStatus.CANCELLED, "rolled_back": WorkerRunStatus.CANCELLED,
+        }
+        for native, expected in mapping.items():
+            with self.subTest(native):
+                self.assertEqual(_t3m._map_t3_status(native), expected)
+
+    async def test_d1_an_interrupted_run_settles_the_requested_cancel(self) -> None:
+        server = DonorMcpServer()
+        adapter, port = _donor_adapter(server)
+        ref = await adapter.start(_launch_spec())
+        receipt = adapter.launch_receipt("run-1")
+        await adapter.cancel(ref, "stop")
+        self.assertFalse(adapter.cancel_report("run-1").settled)
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.CANCELLING)
+        server.threads[receipt.thread_id]["runs"][0]["status"] = "interrupted"
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.CANCELLED)
+        report = adapter.cancel_report("run-1")
+        self.assertTrue(report.settled)
+        self.assertEqual(report.settled_state, "CANCELLED")
+
+
+class A4ReauditAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_n4_undecodable_specs_are_refused_before_any_claim(self) -> None:
+        cases = {
+            "isolation_roots list item": dict(isolation_roots=(["x"],)),
+            "result_schema_path int": dict(result_schema_path=123),
+        }
+        for label, override in cases.items():
+            with self.subTest(label):
+                adapter, port, _ = _t3_adapter(binding=_binding())
+                spec = dataclasses.replace(_launch_spec(), **override)
+                with self.assertRaises(_t3m.T3LaunchSpecNotDurableError) as ctx:
+                    await adapter.start(spec)
+                self.assertEqual(ctx.exception.code, "T3_SPEC_NOT_DURABLE")
+                self.assertIsNone(adapter.launch_intent("run-1"))
+                self.assertEqual(port.launch_calls, [])
+
+    async def test_n4_round_trip_drift_is_refused(self) -> None:
+        """A value whose JSON round trip changes the spec sha is not durable."""
+        adapter, port, _ = _t3_adapter(binding=_binding())
+        # A str given for a Path field reloads as Path("…/x"): "./" is
+        # normalized away, so the reloaded spec hashes differently.
+        spec = dataclasses.replace(_launch_spec(), workspace_path="/tmp/mmos-t3-ws/./x")
+        with self.assertRaises(_t3m.T3LaunchSpecNotDurableError):
+            await adapter.start(spec)
+        self.assertIsNone(adapter.launch_intent("run-1"))
+        self.assertEqual(port.launch_calls, [])
+
+    async def test_n4_sqlite_store_never_persists_an_undecodable_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _t3m.SQLiteT3AdapterStateStore(Path(tmp) / "state.sqlite3")
+            adapter, port, _ = _t3_adapter(binding=_binding(), state_store=store)
+            spec = dataclasses.replace(_launch_spec(), result_schema_path=123)
+            with self.assertRaises(_t3m.T3LaunchSpecNotDurableError):
+                await adapter.start(spec)
+            self.assertEqual(store.run_ids(), ())
+            store.close()
+
+    async def test_n7_status_cancel_collect_check_namespace_continuity(self) -> None:
+        store = InMemoryT3AdapterStateStore()
+        owner, owner_port, _ = _t3_adapter(
+            FakeT3Port(principal="client:A"), binding=_binding(), state_store=store
+        )
+        ref = await owner.start(_launch_spec())
+        for label, principal, reason in (
+            ("different principal", "client:B", "PRINCIPAL_MISMATCH"),
+            ("unattested port", None, "UNATTESTED"),
+        ):
+            with self.subTest(label):
+                port = FakeT3Port(principal=principal)
+                other, _, _ = _t3_adapter(port, binding=_binding(), state_store=store)
+                for operation in (
+                    lambda: other.status(ref),
+                    lambda: other.collect_result(ref),
+                    lambda: other.cancel(ref, "stop"),
+                ):
+                    with self.assertRaises(_t3m.T3NamespaceAttestationError) as ctx:
+                        await operation()
+                    self.assertEqual(ctx.exception.reason, reason)
+                self.assertEqual(port.trace, [])  # zero native calls
+                self.assertIsNone(owner.cancel_report("run-1"))
+        # The original principal still operates normally.
+        self.assertEqual(await owner.status(ref), WorkerRunStatus.RUNNING)
+
+    async def test_n6_any_session_adopts_a_stranded_launch_by_deterministic_read(self) -> None:
+        server = DonorMcpServer()
+        store = InMemoryT3AdapterStateStore()
+        server.after_commit_failure = _donor_failure("orchestration_error")
+        owner, _ = _donor_adapter(server, state_store=store)
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await owner.start(spec)
+        intent = owner.launch_intent("run-1")
+        binding = _recovery_binding(spec, _pre_ack_ref(spec, intent.client_request_id))
+        other, other_port = _donor_adapter(server, _SID_B, state_store=store)
+        # Replay under another principal stays refused — unchanged by N6.
+        calls_before = len(server.calls)
+        with self.assertRaises(_t3m.T3NamespaceAttestationError) as ctx:
+            await other.reattach(spec, binding)
+        self.assertEqual(ctx.exception.reason, "PRINCIPAL_MISMATCH")
+        self.assertEqual(len(server.calls), calls_before)  # zero native calls
+        # Read-only adoption by the deterministic id works under ANY session.
+        ref = await other.adopt_stranded_launch(spec, binding)
+        expected = _t3m.t3_expected_launch_thread_id(f"client:{_SID}", intent.client_request_id)
+        self.assertEqual(ref.provider_session_id, expected)
+        self.assertEqual(server.mints(), 1)
+        b_tools = [c[1] for c in server.calls[calls_before:]]
+        self.assertEqual(b_tools, ["t3_thread_read"])  # NO launch/replay
+        receipt = owner.launch_receipt("run-1")
+        self.assertEqual(receipt.request_namespace, intent.request_namespace)
+        self.assertEqual(receipt.client_request_id, intent.client_request_id)
+        # The original principal reattaches the adopted ref with zero calls.
+        calls_before = len(server.calls)
+        self.assertEqual(await owner.reattach(spec, _recovery_binding(spec, ref)), ref)
+        self.assertEqual(len(server.calls), calls_before)
+        # ...and the adopter still cannot operate the run (N7).
+        with self.assertRaises(_t3m.T3NamespaceAttestationError):
+            await other.status(ref)
+
+    async def test_n6_absence_proves_nothing_and_keeps_the_intent(self) -> None:
+        server = DonorMcpServer()
+        store = InMemoryT3AdapterStateStore()
+        owner, owner_port = _donor_adapter(server, state_store=store)
+        owner_port._call_tool = lambda tool, arguments: (_ for _ in ()).throw(
+            _t3m.T3McpTransportError("reset", phase="after_send")
+        )
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await owner.start(spec)  # never reached upstream in this model
+        intent = owner.launch_intent("run-1")
+        binding = _recovery_binding(spec, _pre_ack_ref(spec, intent.client_request_id))
+        other, _ = _donor_adapter(server, _SID_B, state_store=store)
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await other.adopt_stranded_launch(spec, binding)
+        self.assertIsNotNone(owner.launch_intent("run-1"))
+        self.assertIsNone(owner.launch_receipt("run-1"))
+        self.assertEqual(_mutating_calls(server), [])
+
+    async def test_n6_ports_without_the_read_seam_are_refused(self) -> None:
+        store = InMemoryT3AdapterStateStore()
+        owner, port, _ = _t3_adapter(
+            FakeT3Port(principal="client:A"), binding=_binding(), state_store=store
+        )
+        port.unknown_outcome_on_launch = True
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await owner.start(spec)
+        intent = owner.launch_intent("run-1")
+        binding = _recovery_binding(spec, _pre_ack_ref(spec, intent.client_request_id))
+        with self.assertRaises(T3ExecutionAdapterError):
+            await owner.adopt_stranded_launch(spec, binding)
+        self.assertEqual(port.replay_calls, [])
+
+
 def _import_live_proof_harness(name: str):
     """Import one A2/A3 live-proof harness module from its directory."""
     import importlib
@@ -1133,6 +1691,93 @@ class T3LiveProofHarnessTests(unittest.IsolatedAsyncioTestCase):
             )
             ref = await adapter.start(_launch_spec())
             self.assertEqual(adapter.retained_original_ref("run-1"), ref)
+
+
+class _FakeHttpReply:
+    def __init__(self, payload: dict) -> None:
+        self._raw = _json.dumps(payload).encode()
+        self.headers = {"Content-Type": "application/json"}
+        self.status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._raw
+
+
+class A4HarnessTests(unittest.IsolatedAsyncioTestCase):
+    """The A4 harness edits (no live call made)."""
+
+    def test_mcp_http_carries_the_donor_failure_code(self) -> None:
+        from unittest import mock
+
+        harness = _import_live_proof_harness("t3_live_proof")
+        mcp = harness.McpHttp("unused-token")
+        declared = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": [
+            {"type": "text", "text": _json.dumps({"_tag": "OrchestratorMcpFailure",
+                                                 "code": "orchestration_error",
+                                                 "message": "The operation could not be completed."})}]}}
+        defect = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": [
+            {"type": "text", "text": "Tool execution failed due to an internal server error."}]}}
+        for payload, code in ((declared, "orchestration_error"), (defect, None)):
+            with self.subTest(code=code):
+                with mock.patch.object(
+                    harness.urllib.request, "urlopen", return_value=_FakeHttpReply(payload)
+                ):
+                    with self.assertRaises(_t3m.T3McpTransportError) as ctx:
+                        mcp.call_tool("t3_thread_launch", {})
+                self.assertTrue(ctx.exception.tool_error)
+                self.assertEqual(ctx.exception.tool_error_code, code)
+                self.assertFalse(
+                    _t3m.t3_mcp_failure_is_definitive_refusal(
+                        ctx.exception, tool="t3_thread_launch"
+                    )
+                )
+
+    def test_canary_r2_is_built_on_the_reference_port(self) -> None:
+        canary = _import_live_proof_harness("t3_durable_canary")
+        harness = _import_live_proof_harness("t3_live_proof")
+        self.assertTrue(issubclass(canary.CanaryToolPort, _t3m.T3McpToolPort))
+        self.assertFalse(hasattr(canary, "CanaryLivePort"))
+        self.assertIs(canary.McpHttp, harness.McpHttp)
+        import os
+
+        if "T3_CANARY_RECEIPT_OUT" not in os.environ:
+            # r2 writes its OWN receipt; r1's is immutable evidence.
+            self.assertEqual(canary.RECEIPT_OUT.name, "t3_durable_canary_receipt_r2.json")
+        self.assertEqual(canary.THREAD_BUDGET, 5)
+        port = canary.CanaryToolPort(DonorMcpServer().session(_SID), _session_token(), events=[])
+        self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
+
+    async def test_canary_s5_injection_keeps_the_intent_and_replay_adopts(self) -> None:
+        canary = _import_live_proof_harness("t3_durable_canary")
+        server = DonorMcpServer()
+        store = InMemoryT3AdapterStateStore()
+        events: list = []
+        lost = canary.LostReplyTransport(server.session(_SID), events)
+        port = canary.CanaryToolPort(lost, _session_token(), events=events)
+        adapter = T3ExecutionAdapter(port, lambda s: _binding(), FakeInspector(),
+                                     clock=_clock, state_store=store)
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        with self.assertRaises(T3LaunchEffectUnknownError):
+            await adapter.start(spec)
+        self.assertEqual(server.mints(), 1)
+        intent = adapter.launch_intent("run-1")
+        self.assertIsNotNone(intent)
+        recover_port = canary.CanaryToolPort(server.session(_SID), _session_token(), events=[])
+        recover = T3ExecutionAdapter(recover_port, lambda s: _binding(), FakeInspector(),
+                                     clock=_clock, state_store=store)
+        ref = await recover.reattach(
+            spec, _recovery_binding(spec, _pre_ack_ref(spec, intent.client_request_id))
+        )
+        self.assertEqual(ref.provider_session_id, lost.observed_reply["thread_id"])
+        self.assertEqual(recover_port.counts()["replay"], 1)
+        self.assertEqual(recover_port.counts()["launch"], 0)
+        self.assertEqual(server.mints(), 1)
 
 
 def _neutral_ref_for(run_id: str) -> WorkerProcessRef:
