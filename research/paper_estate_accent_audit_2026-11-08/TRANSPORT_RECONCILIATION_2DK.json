@@ -1,0 +1,337 @@
+{
+  "schema": "PAPER_TRANSPORT_EFFECT_RECONCILIATION_V1",
+  "operationId": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
+  "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+  "root": "2DK-0",
+  "observedAtUtc": "2026-11-09T00:14:39.425Z",
+  "classification": "EFFECT_UNKNOWN_ORIGINAL_CARRIER_NO_REPLAY",
+  "intent": {
+    "operationId": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
+    "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+    "nodeId": "2DK-0",
+    "tool": "write_html",
+    "arguments": {
+      "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+      "targetNodeId": "2DK-0",
+      "mode": "replace",
+      "html": "<x-paper-clone node-id=\"2DK-0\" style=\"border-left-color:#00000000;\" />"
+    },
+    "guard": "ff274eafab9cc820263379992c43c96f9059c89523213d19be130a070e19aeb3",
+    "inputCheckpoint": {
+      "path": "research/paper_estate_accent_audit_2026-11-08/BATCH_INPUTS/resume-002.json",
+      "sha": "002c54bf2ce666c2520f960a37c7b6bd4b85935a"
+    }
+  },
+  "source": {
+    "target": {
+      "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+      "fileName": "Mastermind - Bonds and Transmission - Pre-R30 Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Bonds + Transmission · pre-R30",
+      "artboardId": "2AO-0",
+      "artboardName": "117 · R24 · Bonds · Unified Decision Workspace · Desktop",
+      "nodeId": "2DK-0",
+      "kind": "accent-refinement-added",
+      "expected": {
+        "borderLeftColor": "var(--mx-dark-warn)",
+        "paddingBlock": "11px",
+        "paddingInline": "14px"
+      },
+      "expectedAbsent": [],
+      "css": "border-left-color:#00000000;",
+      "verify": {
+        "borderLeftColor": "#00000000"
+      },
+      "change": "Decorative container cap or callout side rail. Preserve its explicit title/status/warning, quantities and existing fill; remove only border paint so existing width, padding and bounds remain stable.",
+      "sourceClassification": {
+        "ledgerSha256": "d961407e2f4b53d5f3d320da371d8a5bc64701ec96b57156ce8551d84e998301",
+        "sources": [
+          {
+            "batch": 6,
+            "lane": "side_strip",
+            "sha256": "b20238a0059c522ba01c8733198815eba632a08a159994f3061ffacecc81bc7c",
+            "decision": "REMOVE"
+          }
+        ],
+        "coveredChildren": [],
+        "companionFor": [],
+        "applyAfterNodeIds": []
+      },
+      "inputCheckpoint": {
+        "path": "research/paper_estate_accent_audit_2026-11-08/BATCH_INPUTS/resume-002.json",
+        "sha": "002c54bf2ce666c2520f960a37c7b6bd4b85935a"
+      }
+    },
+    "raw": "(\n    <div id=\"2DK-0\" style={{ backgroundColor: 'var(--mx-dark-panel2)', borderLeftColor: 'var(--mx-dark-warn)', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', fontSynthesis: 'none', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingBlock: '11px', paddingInline: '14px', WebkitFontSmoothing: 'antialiased' }}>\n      <div id=\"2DL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', fontFamily: 'var(--font-ui)', fontSize: '11px', lineHeight: '150%' }}>\n        Do not average changed and unchanged families into a middling score. The disagreement is the decision: rates pressure is real; higher-order stress is not confirmed.\n      </div>\n    </div>\n  )",
+    "rootParentContext": null,
+    "sourceInfo": {
+      "id": "2DK-0",
+      "name": "Frame",
+      "component": "Frame",
+      "width": 1168,
+      "height": 39,
+      "worldX": 8377.422,
+      "worldY": 10628.016,
+      "x": 32.00087499999972,
+      "y": 229.00062500000058,
+      "isVisible": true,
+      "isLocked": false,
+      "parentId": "2D5-0",
+      "childIds": [
+        "2DL-0"
+      ],
+      "childCount": 1,
+      "artboardId": "2AO-0",
+      "textContent": null
+    },
+    "guard": "ff274eafab9cc820263379992c43c96f9059c89523213d19be130a070e19aeb3"
+  },
+  "originalResponse": {
+    "envelope": {
+      "error": "McpServerError: Connection timed out.",
+      "error_code": "UNAVAILABLE",
+      "error_data": {
+        "type": "mcp_network_error",
+        "code": "network_error",
+        "message": "Connection timed out.",
+        "url": "https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_6ab8f4a69db08191b61677f7ebc78c05"
+      }
+    },
+    "blocks": []
+  },
+  "readAttempt1": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "tool": "get_node_info",
+        "result": {
+          "envelope": {
+            "state": "OBSERVED",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\n  \"file\": {\n    \"id\": \"01M6Y3VVGX4K4MXZ8JK2A1YG28\",\n    \"name\": \"Mastermind - Bonds and Transmission - Pre-R30 Archive\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"6234666b\"\n  }\n}"
+                },
+                {
+                  "type": "text",
+                  "text": "{\n  \"id\": \"2DK-0\",\n  \"name\": \"Frame\",\n  \"component\": \"Frame\",\n  \"width\": 1168,\n  \"height\": 39,\n  \"worldX\": 8377.422,\n  \"worldY\": 10628.016,\n  \"x\": 32.00087499999972,\n  \"y\": 229.00062500000058,\n  \"isVisible\": true,\n  \"isLocked\": false,\n  \"parentId\": \"2D5-0\",\n  \"childIds\": [\n    \"2DL-0\"\n  ],\n  \"childCount\": 1,\n  \"artboardId\": \"2AO-0\",\n  \"textContent\": null\n}"
+                }
+              ]
+            }
+          },
+          "blocks": [
+            {
+              "file": {
+                "id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+                "name": "Mastermind - Bonds and Transmission - Pre-R30 Archive"
+              },
+              "contentHash": {
+                "tokens": "6234666b"
+              }
+            },
+            {
+              "id": "2DK-0",
+              "name": "Frame",
+              "component": "Frame",
+              "width": 1168,
+              "height": 39,
+              "worldX": 8377.422,
+              "worldY": 10628.016,
+              "x": 32.00087499999972,
+              "y": 229.00062500000058,
+              "isVisible": true,
+              "isLocked": false,
+              "parentId": "2D5-0",
+              "childIds": [
+                "2DL-0"
+              ],
+              "childCount": 1,
+              "artboardId": "2AO-0",
+              "textContent": null
+            }
+          ],
+          "data": {
+            "id": "2DK-0",
+            "name": "Frame",
+            "component": "Frame",
+            "width": 1168,
+            "height": 39,
+            "worldX": 8377.422,
+            "worldY": 10628.016,
+            "x": 32.00087499999972,
+            "y": 229.00062500000058,
+            "isVisible": true,
+            "isLocked": false,
+            "parentId": "2D5-0",
+            "childIds": [
+              "2DL-0"
+            ],
+            "childCount": 1,
+            "artboardId": "2AO-0",
+            "textContent": null
+          }
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "tool": "get_jsx",
+        "result": {
+          "envelope": {
+            "error": "McpServerError: Connection timed out.",
+            "error_code": "UNAVAILABLE",
+            "error_data": {
+              "type": "mcp_network_error",
+              "code": "network_error",
+              "message": "Connection timed out.",
+              "url": "https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_6ab8f4a69db08191b61677f7ebc78c05"
+            }
+          },
+          "blocks": []
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "tool": "get_children",
+        "result": {
+          "envelope": {
+            "state": "OBSERVED",
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\n  \"file\": {\n    \"id\": \"01M6Y3VVGX4K4MXZ8JK2A1YG28\",\n    \"name\": \"Mastermind - Bonds and Transmission - Pre-R30 Archive\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"6234666b\"\n  }\n}"
+                },
+                {
+                  "type": "text",
+                  "text": "{\n  \"children\": [\n    {\n      \"id\": \"2D6-0\",\n      \"name\": \"Frame\",\n      \"component\": \"Frame\",\n      \"childCount\": 2,\n      \"worldX\": 8377.422,\n      \"worldY\": 10423.016,\n      \"x\": 32.00087499999972,\n      \"y\": 24.000625000000582\n    },\n    {\n      \"id\": \"2D9-0\",\n      \"name\": \"Frame\",\n      \"component\": \"Frame\",\n      \"childCount\": 2,\n      \"worldX\": 8377.422,\n      \"worldY\": 10461.015,\n      \"x\": 32.00087499999972,\n      \"y\": 61.99964843750058\n    },\n    {\n      \"id\": \"2DK-0\",\n      \"name\": \"Frame\",\n      \"component\": \"Frame\",\n      \"childCount\": 1,\n      \"worldX\": 8377.422,\n      \"worldY\": 10628.016,\n      \"x\": 32.00087499999972,\n      \"y\": 229.00062500000058\n    }\n  ],\n  \"count\": 3\n}"
+                }
+              ]
+            }
+          },
+          "blocks": [
+            {
+              "file": {
+                "id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+                "name": "Mastermind - Bonds and Transmission - Pre-R30 Archive"
+              },
+              "contentHash": {
+                "tokens": "6234666b"
+              }
+            },
+            {
+              "children": [
+                {
+                  "id": "2D6-0",
+                  "name": "Frame",
+                  "component": "Frame",
+                  "childCount": 2,
+                  "worldX": 8377.422,
+                  "worldY": 10423.016,
+                  "x": 32.00087499999972,
+                  "y": 24.000625000000582
+                },
+                {
+                  "id": "2D9-0",
+                  "name": "Frame",
+                  "component": "Frame",
+                  "childCount": 2,
+                  "worldX": 8377.422,
+                  "worldY": 10461.015,
+                  "x": 32.00087499999972,
+                  "y": 61.99964843750058
+                },
+                {
+                  "id": "2DK-0",
+                  "name": "Frame",
+                  "component": "Frame",
+                  "childCount": 1,
+                  "worldX": 8377.422,
+                  "worldY": 10628.016,
+                  "x": 32.00087499999972,
+                  "y": 229.00062500000058
+                }
+              ],
+              "count": 3
+            }
+          ],
+          "data": {
+            "children": [
+              {
+                "id": "2D6-0",
+                "name": "Frame",
+                "component": "Frame",
+                "childCount": 2,
+                "worldX": 8377.422,
+                "worldY": 10423.016,
+                "x": 32.00087499999972,
+                "y": 24.000625000000582
+              },
+              {
+                "id": "2D9-0",
+                "name": "Frame",
+                "component": "Frame",
+                "childCount": 2,
+                "worldX": 8377.422,
+                "worldY": 10461.015,
+                "x": 32.00087499999972,
+                "y": 61.99964843750058
+              },
+              {
+                "id": "2DK-0",
+                "name": "Frame",
+                "component": "Frame",
+                "childCount": 1,
+                "worldX": 8377.422,
+                "worldY": 10628.016,
+                "x": 32.00087499999972,
+                "y": 229.00062500000058
+              }
+            ],
+            "count": 3
+          }
+        }
+      }
+    }
+  ],
+  "readAttempt2": [
+    {
+      "status": "fulfilled",
+      "result": {
+        "envelope": {
+          "error": "McpServerError: Connection timed out.",
+          "error_code": "UNAVAILABLE",
+          "error_data": {
+            "type": "mcp_network_error",
+            "code": "network_error",
+            "message": "Connection timed out.",
+            "url": "https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_6ab8f4a69db08191b61677f7ebc78c05"
+          }
+        },
+        "blocks": []
+      }
+    },
+    {
+      "status": "fulfilled",
+      "result": {
+        "envelope": {
+          "error": "McpServerError: Connection timed out.",
+          "error_code": "UNAVAILABLE",
+          "error_data": {
+            "type": "mcp_network_error",
+            "code": "network_error",
+            "message": "Connection timed out.",
+            "url": "https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_6ab8f4a69db08191b61677f7ebc78c05"
+          }
+        },
+        "blocks": []
+      }
+    }
+  ],
+  "completedOtherBatchEdits": 38,
+  "next": "Reconcile original target through the same Mastermind Paper app when transport is usable. Do not replay or change carriers for this mutation. Independent source evidence/design preparation remains authorized."
+}
