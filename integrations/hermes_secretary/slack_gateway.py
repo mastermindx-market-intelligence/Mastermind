@@ -548,7 +548,9 @@ class Fleet:
         started = time.time()
         ok, reply, new_sid = dispatch(agent_identity(conf, agent)["profile"], prompt, sid,
                                       int(dconf.get("timeout_s", 420)), str(dconf.get("model") or ""))
-        if new_sid:
+        # A failed/ambiguous native turn cannot advance a thread's canonical
+        # resume pointer merely because its stderr printed a session ID.
+        if ok and new_sid:
             with self.lock:
                 self.state.setdefault("sessions", {})[session_key] = new_sid
                 save_state(self.state)
