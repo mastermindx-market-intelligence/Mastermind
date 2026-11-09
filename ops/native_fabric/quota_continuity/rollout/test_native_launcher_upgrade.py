@@ -119,32 +119,14 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify the current107 build before restoring any historical bytes."""
+    """Qualify all current107 bytes before restoring historical fixtures."""
+    import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
-    manifest_raw = (output / 'native-manifest.json').read_bytes()
-    inventory_raw = (output / 'native-source-inventory.json').read_bytes()
-    baseline_raw = (native / 'rollout/native-manifest.json').read_bytes()
-    baseline_inventory_raw = (native / 'rollout/native-source-inventory.json').read_bytes()
-    manifest = json.loads(manifest_raw)
-    inventory = json.loads(inventory_raw)
-    if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
-            or len(manifest) != 107
-            or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
-            or set(inventory['files']) != set(manifest)
-            or inventory['native_code_files'] != len(manifest)):
-        raise AssertionError('current application source closure differs')
-    for name, wanted in manifest.items():
-        data = (output / 'native-code-stage' / name).read_bytes()
-        row = inventory['files'][name]
-        source = (native / row['source']).read_bytes()
-        if (g.digest(data) != wanted or row['sha256'] != wanted
-                or row['bytes'] != len(data) or source != data):
-            raise AssertionError('current captured source differs: ' + name)
-        if name in APPLICATION_PREIMAGES:
-            candidate = 'candidate/' + name.split('/')[1]
-            if row['source'] != candidate or (native / candidate).read_bytes() != data:
-                raise AssertionError('current application candidate differs: ' + name)
-    return manifest
+    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return current_source.verify_current_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
 
 
 def restore_application_preimages(stage, manifest):

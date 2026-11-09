@@ -359,3 +359,46 @@ def _original_canonical_owner(gateway):
         raise _canonical_refuse()
     owner.require_gateway(gateway)
     return owner
+
+
+class GlmApplicationGateway:
+    """Narrow GLM HTTP entry into the original shared APPLICATION owner.
+
+    Recovery and settlement remain on the exact original common gateway;
+    this facade creates no database, lease, request journal or listener.
+    """
+
+    def __init__(self, application_gateway):
+        from go_lease_gateway import GoLeaseGateway
+        if type(application_gateway) is not GoLeaseGateway:
+            raise LeaseGatewayError("original application gateway required")
+        application_gateway._application_owner()
+        self._application_gateway = application_gateway
+
+    def begin_application(self, request, **scope):
+        if not isinstance(request, dict) or request.get("pool") != "glm":
+            raise LeaseGatewayError("GLM application scope required")
+        return self._application_gateway.begin_application(request, **scope)
+
+    def recover_application(self, request, **scope):
+        # Original request identity governs recovery before fresh route policy.
+        return self._application_gateway.recover_application(request, **scope)
+
+    def prepare_application(self, token, **scope):
+        if not isinstance(token, str) or not token.startswith("app4."):
+            raise LeaseGatewayError("GLM HTTP application capability required")
+        if scope.pop("expected_pool", "glm") != "glm":
+            raise LeaseGatewayError("GLM application scope required")
+        return self._application_gateway.prepare_application(
+            token, expected_pool="glm", **scope)
+
+    def complete_application(self, dispatch_id, *, terminal_receipt):
+        return self._application_gateway.complete_application(
+            dispatch_id, terminal_receipt=terminal_receipt)
+
+    def mark_application_unknown(self, dispatch_id, *, reason):
+        return self._application_gateway.mark_application_unknown(
+            dispatch_id, reason=reason)
+
+    def close_application_turn(self, **scope):
+        return self._application_gateway.close_application_turn(**scope)

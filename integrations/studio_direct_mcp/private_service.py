@@ -891,7 +891,20 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
 
 # Retained sealed Tailnet seats, each with only its original and exact native
 # pool-pin postimage. These are profile selectors, never an argv fallback.
-_NATIVE_POOL_PIN_TAILNET_CANONICAL = {'fabric-design': frozenset(('87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c', 'b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46', 'a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c')), 'fabric-read': frozenset(('f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb', '328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819', '6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c'))}
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
+    "fabric-design": frozenset((
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c",
+        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
+        "070cebf2c4b4bbd41eb7fd687347292e40e13519a98a303bafca13202e971e8c",
+    )),
+    "fabric-read": frozenset((
+        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
+        "6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c",
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "32f76d5282f1187a3c355835bd5b34bb73f4e00fe05b9de9a84c958780ef9836",
+    )),
+}
 
 
 
@@ -906,14 +919,64 @@ CONTROL_BUNDLE_FILES = (
     "studio_direct_control.py",
     "private_service_status_successor.py",
     "private_service_pin.py",
-    "fleet_git_failure_compat.py",
     "private_service_pin_enrollment.py",
     "paper_v20_fleet_cohorts.py",
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
-    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
-    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
+    "fleet_git_failure_compat.py",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
+    "control_plane/provider_protocols.py",
+    "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py",
+    "ops/native_fabric/provider_plans/maintenance_guard/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/maintenance_guard/remote_sub_exec.py.patch",
+    "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
+    "ops/native_fabric/provider_plans/memory118/lease_broker.after-maintenance.py.patch",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_contract.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_owner.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/run_observation_delivery.py",
+    "ops/native_fabric/provider_plans/memory118_support_status/after_terminal_diagnostics/profile.json",
+    "ops/native_fabric/provider_plans/memory118_support_status/artifact_delivery.py.patch",
+    "ops/native_fabric/provider_plans/memory118_support_status/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "ops/native_fabric/provider_plans/profile.json",
+    "ops/native_fabric/provider_plans/remote_placement/profile.json",
+    "ops/native_fabric/provider_plans/router_admission.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/component.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/current40/profile.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/candidate/application_http_transports.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+    "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+    "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_bridge.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_host_context.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_transport.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native_plan_worker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/remote-placement.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/source/application_http_transports.py.preimage",
+    "ops/native_fabric/quota_continuity/source/codex_provider_realm.py.preimage",
+    "ops/native_fabric/quota_continuity/source/glm_keys.py",
+    "ops/native_fabric/quota_continuity/source/go_shim.py",
+    "ops/native_fabric/support_policy_status/reader.py",
 )
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.
@@ -1767,6 +1830,29 @@ def _paper_design_config(
         "appPath": str(user_root / PAPER_APP_REL),
         "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
     }
+
+
+def _publication_upgrade_paper_config(
+    account: str, previous_config: dict, user_root: Path,
+) -> dict | None:
+    """Retain the fixed publication seat's qualified, already selected v20."""
+    if account != "mastermind-os-publication" or "paperDesign" not in previous_config:
+        return None
+    paper = previous_config["paperDesign"]
+    if (type(paper) is not dict or paper.get("enabled") is not True
+            or type(paper.get("commandTimeoutMs")) is not int):
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    if paper == _paper_design_config(user_root):
+        return None
+    expected = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256,
+    )
+    if paper != expected:
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    _verify_paper_runtime(
+        user_root, runtime_rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256,
+    )
+    return expected
 
 
 def _fleet_status_config(user_root: Path) -> dict | None:
@@ -5178,23 +5264,38 @@ def cmd_upgrade(args) -> int:
         )
         _verify_upgrade_preserves_installed_fleet_capabilities(
             prior, roots, projected)
-    # Preserve the existing restricted profile; do not silently restore tools.
-    if not fabric_only:
-        _verify_paper_runtime(_user_root())
-
-    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
-    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
-    retained_config = None
     retained_raw = _fabric_release_bytes(roots["config"])
     if hashlib.sha256(retained_raw).hexdigest() != prior["configHash"]:
         raise SystemExit("original upgrade configuration changed")
     previous_config = _original_json(retained_raw.decode("utf-8"))
+    # Keep the existing restricted profile and the fixed publication seat's
+    # already selected Paper generation. Runtime qualification precedes writes.
+    retained_paper = None
+    if not fabric_only:
+        retained_paper = _publication_upgrade_paper_config(account, previous_config, _user_root())
+        if retained_paper is None:
+            _verify_paper_runtime(_user_root())
+
+    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
+    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
+    retained_config = None
     if previous_config.get("originalCollection") is not None:
         retained_config = dict(previous_config)
         if original_collection is None:
             retained_config.pop("originalCollection")
         else:
             retained_config["originalCollection"] = original_collection
+    if retained_paper is not None:
+        # Rebuild through the normal owner so an explicitly refreshed commission
+        # digest still takes effect; retain only the exact qualified Paper member.
+        if retained_config is None:
+            retained_config = _build_config(
+                account, host, port, node_abs, backend_abs, roots["state"], _user_root(),
+                repository_workspaces=repository_workspaces, commission_digest=commission_digest,
+                fabric_only=fabric_only, modern_fabric=modern_fabric,
+                original_collection=original_collection,
+            )
+        retained_config["paperDesign"] = retained_paper
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),

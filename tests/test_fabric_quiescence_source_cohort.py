@@ -4,6 +4,11 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+import tempfile
+import io
+import sys
+from contextlib import redirect_stdout
+from unittest import mock
 from tests.native107_source_fixtures import historical_manifest_and_inventory
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -13,8 +18,18 @@ builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
 
 
 class Cohort(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.stage_temp = tempfile.TemporaryDirectory(prefix="current-quiescence-source-")
+        cls.addClassCleanup(cls.stage_temp.cleanup)
+        output = Path(cls.stage_temp.name) / "reviewed-stage"
+        with mock.patch.object(sys, "argv", ["builder", "--output", str(output)]), redirect_stdout(io.StringIO()):
+            builder.main()
+        cls.current_manifest = json.loads((output / "native-manifest.json").read_bytes())
+        cls.current_inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+
     def setUp(self):
-        self.actual_manifest=json.loads((ROLLOUT/'native-manifest.json').read_bytes())
+        self.actual_manifest=dict(self.current_manifest)
         historical, _ = historical_manifest_and_inventory()
         self.manifest=builder.before_sparse_index_advice(historical)
 
@@ -136,7 +151,7 @@ class Cohort(unittest.TestCase):
 
 
     def test_current_application_capture_is_qualified_from_actual_inventory(self):
-        inventory = json.loads((ROLLOUT / 'native-source-inventory.json').read_bytes())
+        inventory = self.current_inventory
         current = self.actual_manifest
         self.assertEqual(set(current), set(inventory['files']))
         self.assertEqual(len(current), 107)
