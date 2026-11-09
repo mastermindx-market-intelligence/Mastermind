@@ -1441,16 +1441,25 @@ def test_memory_support_copied_addition_requires_source_record(copied_memory_gua
         copied_memory_guard["before_provider_memory_support"]({member: "0" * 64})
 
 
+@pytest.mark.parametrize("cohort", ["memory_support", "fleet_launch_repair"])
 def test_memory_support_installed_control_reads_exact_retained_transition(
-        retained_go_owner, memory_support_provider_stage, memory_support_builds, tmp_path):
+        retained_go_owner, cohort, tmp_path,
+        memory_support_provider_stage, memory_support_builds,
+        fleet_launch_repair_provider_stage, fleet_launch_repair_builds):
     """Read the marked 119-to-126 plan using only the sealed installed closure."""
     import ast
     import hashlib
     import importlib.util
     import stat
     case = retained_go_owner
+    # Declare both module fixtures above so public source composition completes
+    # before the function-scoped installer fixture activates its process guard.
+    provider_stage, builds = {
+        "memory_support": (memory_support_provider_stage, memory_support_builds),
+        "fleet_launch_repair": (fleet_launch_repair_provider_stage, fleet_launch_repair_builds),
+    }[cohort]
     api, plan, forward = prepare_combined(
-        case, "retained_go_owner", memory_support_provider_stage, memory_support_builds.glm)
+        case, "retained_go_owner", provider_stage, builds.glm)
 
     def owner_bytes():
         result = {}
@@ -1520,7 +1529,7 @@ def test_memory_support_installed_control_reads_exact_retained_transition(
         verified = bundle.verify(control_root=control, launcher=launcher)
         assert installed["state"] == "CONTROL_BUNDLE_INSTALLED"
         assert verified == {**installed, "state": "CONTROL_BUNDLE_VERIFIED"}
-    assert len(installed["files"]) == 63
+    assert len(installed["files"]) == 74
     assert installed["source"] == str(copied_source)
     shutil.rmtree(repository)
     assert not copied_source.exists()
@@ -1586,21 +1595,258 @@ print(json.dumps({"observed":observed,"real_reader_calls":len(calls)},sort_keys=
     assert value["observed"] == expected
     assert owner_bytes() == before and g.current(case.store) == pointer
     api.history(case)
-    captured = control / (
-        "ops/native_fabric/quota_continuity/rollout/provider_application/"
-        "memory_support/composition.json")
-    original = captured.read_bytes()
-    for fault in ("missing", "changed"):
-        try:
-            if fault == "missing":
-                captured.unlink()
-            else:
-                captured.write_bytes(original + b"\n")
-            refused = read_installed()
-            assert refused.returncode != 0
-            assert "CONTROL_BUNDLE_CLOSURE_REFUSED" in refused.stderr
-            assert owner_bytes() == before and g.current(case.store) == pointer
-            api.history(case)
-        finally:
-            captured.write_bytes(original)
-            captured.chmod(0o600)
+    fault_members = [
+        "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/composition.json"]
+    if cohort == "fleet_launch_repair":
+        fault_members.extend(bundle.FLEET_REVIEW_SOURCE_FILES)
+    for member in fault_members:
+        captured = control / member
+        original = captured.read_bytes()
+        for fault in ("missing", "changed"):
+            try:
+                if fault == "missing":
+                    captured.unlink()
+                else:
+                    captured.write_bytes(original + b"\n")
+                refused = read_installed()
+                assert refused.returncode != 0
+                assert "CONTROL_BUNDLE_CLOSURE_REFUSED" in refused.stderr
+                assert owner_bytes() == before and g.current(case.store) == pointer
+                api.history(case)
+            finally:
+                captured.write_bytes(original)
+                captured.chmod(0o600)
+
+
+# Native43 preserves the released fleet repair inside the existing APPLICATION
+# composition and original retained-Go transaction. All fixtures are offline.
+@pytest.fixture(scope="module")
+def fleet_launch_repair_provider_stage(memory_support_provider_stage, tmp_path_factory):
+    repository = ROOT.parents[2]
+    with mock.patch.object(sys, "path", [str(repository), *sys.path]):
+        from ops.native_fabric.provider_plans import compose
+    root = tmp_path_factory.mktemp("fleet-launch-repair-provider")
+    base, stage = root / "selected119", root / "code"
+    shutil.copytree(memory_support_provider_stage.stage, base)
+    profile = json.loads((compose.HERE / "fleet_launch_repair/profile.json").read_bytes())
+    (base / "RELEASE.json").write_text(json.dumps({
+        "digest": profile["base_selection"]["generation"],
+        "files": memory_support_provider_stage.files,
+        "fixture_premise": "SOURCE_ONLY, not an installed receipt"}))
+    result = compose.compose(base, stage, profile_name="terminal119-fleet-launch-repair")
+    files = json.loads((stage / "FILES.json").read_bytes())
+    assert result["publication_performed"] is result["selection_performed"] is False
+    assert files == builder.provider_fleet_launch_repair_files() and len(files) == 119
+    return SimpleNamespace(root=root, stage=stage, files=files)
+
+
+@pytest.fixture(scope="module")
+def fleet_launch_repair_builds(tmp_path_factory):
+    root = tmp_path_factory.mktemp("fleet-launch-repair-application-builds").resolve()
+    outputs = {}
+    common = ["--include-provider-plan-application",
+              "--include-provider-plan-remote-placement",
+              "--include-provider-plan-maintenance-guard",
+              "--include-provider-plan-terminal-diagnostics",
+              "--include-provider-plan-memory-support",
+              "--include-provider-plan-fleet-launch-repair"]
+    for name, flags in (
+        ("base", []), ("application", ["--include-go-application"]),
+        ("http", ["--include-go-application", "--include-application-http"]),
+        ("glm", ["--include-go-application", "--include-application-http",
+                 "--include-application-glm"]),
+    ):
+        output = root / name
+        with mock.patch.object(sys, "argv", [
+                "builder", "--output", str(output), *common, *flags,
+        ]), redirect_stdout(io.StringIO()):
+            builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+@pytest.mark.parametrize("extension,count", [
+    ("base", 119), ("application", 121), ("http", 124), ("glm", 126),
+])
+def test_fleet_launch_repair_preserves_whole_source_and_dependencies(
+        extension, count, fleet_launch_repair_builds, memory_support_builds,
+        fleet_launch_repair_provider_stage):
+    output = getattr(fleet_launch_repair_builds, extension)
+    previous = getattr(memory_support_builds, extension)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    prior = json.loads((previous / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    record, predecessor, _ = builder.provider_fleet_launch_repair_record()
+    assert predecessor == fleet_launch_repair_provider_stage.files
+    assert len(manifest) == count and set(manifest) == set(prior)
+    assert {name for name in manifest if manifest[name] != prior[name]} == set(record["members"])
+    assert manifest["ext/lease_broker.py"] == (
+        "cd1537c409fa9f6c8d99a453747e355998980e03352c1ffb4c66fc447fb79d74")
+    unwrapped = builder.before_glm_application_core(builder._application_base(manifest))
+    old_core = builder.before_glm_application_core(builder._application_base(prior))
+    assert builder.before_provider_fleet_launch_repair(unwrapped) == old_core
+    assert builder.before_provider_application(unwrapped) == builder.before_provider_application(old_core)
+    for relative, wanted in manifest.items():
+        raw = (output / "native-code-stage" / relative).read_bytes()
+        row = inventory["files"][relative]
+        assert g.digest(raw) == wanted == row["sha256"] and len(raw) == row["bytes"]
+        if relative not in record["members"]:
+            assert raw == (previous / "native-code-stage" / relative).read_bytes()
+    broker = inventory["files"]["ext/lease_broker.py"]["composition"]["inherited"]
+    assert broker["successor_composition_sha256"] == builder.PROVIDER_FLEET_LAUNCH_REPAIR_RECORD_SHA256
+    assert broker["preimage_sha256"] == record["members"]["ext/lease_broker.py"]["before"]
+    assert broker["inherited"]["composition"]["successor_composition_sha256"] == (
+        builder.PROVIDER_MEMORY_SUPPORT_RECORD_SHA256)
+    if extension != "base":
+        saved = dict(predecessor), dict(manifest)
+        builder.validate_go_source_transition(predecessor, manifest)
+        assert (predecessor, manifest) == saved
+        component = json.loads((output / "external-go-component/component.json").read_bytes())
+        assert component["native_stage_dependencies"]["lease_broker.py"] == manifest["ext/lease_broker.py"]
+        assert installer._go_component(
+            output / "external-go-component", Path(component["stable_ext"]), manifest)
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS))
+def test_fleet_launch_repair_refuses_each_mixed_predecessor(member, fleet_launch_repair_builds):
+    before = builder.provider_fleet_launch_repair_files()
+    before[member] = builder.provider_memory_support_files()[member]
+    after = json.loads((fleet_launch_repair_builds.glm / "native-manifest.json").read_bytes())
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("fault", ["missing", "extra", "unrelated"])
+def test_fleet_launch_repair_binds_complete_predecessor(fault, fleet_launch_repair_builds):
+    before = builder.provider_fleet_launch_repair_files()
+    if fault == "missing":
+        del before["ext/model_tier.py"]
+    elif fault == "extra":
+        before["ext/foreign.py"] = "0" * 64
+    else:
+        before["ext/model_tier.py"] = "0" * 64
+    after = json.loads((fleet_launch_repair_builds.glm / "native-manifest.json").read_bytes())
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS))
+@pytest.mark.parametrize("source", ["native", "previous"])
+def test_fleet_launch_repair_refuses_each_mixed_target(
+        member, source, fleet_launch_repair_builds, memory_support_builds):
+    before = builder.provider_fleet_launch_repair_files()
+    after = json.loads((fleet_launch_repair_builds.glm / "native-manifest.json").read_bytes())
+    previous = json.loads((memory_support_builds.glm / "native-manifest.json").read_bytes())
+    after[member] = (before if source == "native" else previous)[member]
+    # remote_sub.sh intentionally equals the exact protected native43 source.
+    if after[member] == json.loads(
+            (fleet_launch_repair_builds.glm / "native-manifest.json").read_bytes())[member]:
+        assert member == "ext/remote_sub.sh" and source == "native"
+        return
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("fault", ["old-native42-target", "missing-go", "extra", "unrelated"])
+def test_fleet_launch_repair_cannot_hide_invalid_target(
+        fault, fleet_launch_repair_builds, memory_support_builds):
+    before = builder.provider_fleet_launch_repair_files()
+    after = json.loads((fleet_launch_repair_builds.glm / "native-manifest.json").read_bytes())
+    if fault == "old-native42-target":
+        after = json.loads((memory_support_builds.glm / "native-manifest.json").read_bytes())
+    elif fault == "missing-go":
+        del after[g.GO_HANDLER]
+    elif fault == "extra":
+        after["ext/foreign.py"] = "0" * 64
+    else:
+        after["ext/model_tier.py"] = "0" * 64
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http", "glm"])
+def test_fleet_launch_repair_native43_original_transaction_commits_and_recovers(
+        owner_name, extension, request, fleet_launch_repair_provider_stage,
+        fleet_launch_repair_builds):
+    test_combined_application_commits_and_recovers_original_transaction(
+        owner_name, extension, request, fleet_launch_repair_provider_stage, fleet_launch_repair_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("boundary", ["selection", "receipt"])
+def test_fleet_launch_repair_native43_postcommit_recovery_does_not_select_again(
+        owner_name, boundary, request, fleet_launch_repair_provider_stage, fleet_launch_repair_builds):
+    test_combined_postcommit_interruption_does_not_select_again(
+        owner_name, boundary, "glm", request, fleet_launch_repair_provider_stage, fleet_launch_repair_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+def test_fleet_launch_repair_native43_stale_current_refuses_before_write(
+        owner_name, request, fleet_launch_repair_provider_stage, fleet_launch_repair_builds):
+    test_combined_plan_rechecks_complete_pointer_before_any_write(
+        owner_name, "glm", request, fleet_launch_repair_provider_stage, fleet_launch_repair_builds)
+
+
+def test_fleet_launch_repair_staged_application_and_memory_journeys(fleet_launch_repair_builds, tmp_path):
+    test_memory_support_staged_application_and_memory_journeys(fleet_launch_repair_builds, tmp_path)
+
+
+def test_fleet_launch_repair_preserves_application_publisher_and_inspector(
+        fleet_launch_repair_builds, memory_support_builds):
+    import ast
+    def function(stage, member, name):
+        tree = ast.parse((stage / "native-code-stage" / member).read_bytes())
+        return ast.dump(next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name))
+    for member, name in (("ext/support_bundle.py", "ensure_policy"), ("ext/fabric_task.py", "_inspect_run")):
+        assert function(fleet_launch_repair_builds.base, member, name) == function(
+            memory_support_builds.base, member, name)
+
+
+def test_fleet_launch_repair_staged_original_runtime_behaviors(fleet_launch_repair_builds, tmp_path):
+    script = """import json, sys
+from pathlib import Path
+import test_fleet_launch_repair_composition as proof
+stage, scratch = map(Path, sys.argv[1:])
+proof.test_support_status_reader_pins_repaired_support_bundle(stage)
+proof.test_retained_settlements_are_metadata_and_everything_else_blocks(stage, scratch)
+proof.test_status_snapshot_serializes_yaml_timestamps_and_refusal_names_detail(stage, scratch)
+print(json.dumps({"fleet_cases": 3, "passed": 3}))
+"""
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+        [str(ROOT.parents[2] / "tests"), str(ROOT.parents[2])]), PYTHONDONTWRITEBYTECODE="1")
+    result = subprocess.run([sys.executable, "-B", "-c", script,
+        str(fleet_launch_repair_builds.glm / "native-code-stage"), str(tmp_path)],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == {"fleet_cases": 3, "passed": 3}
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS))
+def test_fleet_launch_repair_copied_marker_requires_source_record(copied_memory_guard, member):
+    manifest = {member: copied_memory_guard["PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS"][member]}
+    with pytest.raises(ValueError, match="regular file"):
+        copied_memory_guard["before_provider_fleet_launch_repair"](manifest)
+
+
+def test_fleet_launch_repair_copied_legacy_guard_needs_no_new_record(copied_memory_guard):
+    manifest = {"ext/legacy.py": "0" * 64}
+    assert copied_memory_guard["before_provider_fleet_launch_repair"](manifest) == manifest
+
+
+@pytest.mark.parametrize("flags", [
+    ["--include-provider-plan-fleet-launch-repair"],
+    ["--include-provider-plan-application", "--include-provider-plan-remote-placement",
+     "--include-provider-plan-maintenance-guard", "--include-provider-plan-terminal-diagnostics",
+     "--include-provider-plan-fleet-launch-repair"],
+])
+def test_fleet_launch_repair_unqualified_flags_refuse_before_output(tmp_path, flags):
+    output = tmp_path / "must-not-exist"
+    with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *flags]):
+        with pytest.raises(SystemExit) as stopped:
+            builder.main()
+    assert stopped.value.code == 2 and not output.exists()

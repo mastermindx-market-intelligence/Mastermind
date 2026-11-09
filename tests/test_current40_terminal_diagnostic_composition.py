@@ -146,6 +146,10 @@ def test_cli_emits_only_source_and_preserves_existing_builder_contract(base,tmp_
 
 def test_entire_composer_inverse_is_exact_protected_preimage():
     raw=Path(compose.__file__).read_text()
+    repair_branch='    elif profile_name == "terminal119-fleet-launch-repair":\n        profile_root = HERE / "fleet_launch_repair"\n'
+    repair_choice=', "terminal119-fleet-launch-repair"'
+    assert raw.count(repair_branch)==raw.count(repair_choice)==1
+    raw=raw.replace(repair_branch,'').replace(repair_choice,'')
     successor_branch='    elif profile_name == "terminal116-protected-memory":\n        profile_root = HERE / "memory118" / "after_terminal_diagnostics"\n'
     successor_choice=', "terminal116-protected-memory"'
     assert raw.count(successor_branch)==raw.count(successor_choice)==1

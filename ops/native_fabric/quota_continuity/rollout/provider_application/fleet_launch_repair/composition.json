@@ -1,0 +1,61 @@
+{
+  "application_after_manifest_sha256": "6f2752c54f0fa2a58d49fe8f994551732a7510356c2c193e7880bd9f1708ba59",
+  "application_before_manifest_sha256": "ac671d31e6b1ed204554452a1cc31ed13f2c1706a4ba784d9dc48a1f55cd1ab2",
+  "members": {
+    "ext/fabric_task.py": {
+      "after": "c5536896f85db738f4d636dd37e81b44939716597544be559cd6b9abeb2b8826",
+      "before": "867b7ff8a450959e5a103e3050b688a5d0c13a56438f3627eaa79e43ee819c83",
+      "bytes": 126169,
+      "patch_sha256": "7f22987ec06db9d1244d5e8cc9622093a0cda9b8e6087582a21f90de4bfd3b05",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch"
+    },
+    "ext/lease_broker.py": {
+      "after": "d6da96bb45792fc87da81e8065a80956325a2536b1fba11ca10ea21933df8d6c",
+      "before": "096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b",
+      "bytes": 215075,
+      "patch_sha256": "fe843e8010eee6d5b1c2af8452f3c2f119725511f1a40f4b9e5b04cb8c37d523",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch"
+    },
+    "ext/remote_sub.sh": {
+      "after": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
+      "before": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+      "bytes": 118429,
+      "patch_sha256": "7475b6d8284261a003818c2901d1abfe0affa716f5c2eaf221214ff3e6642a92",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch"
+    },
+    "ext/support_bundle.py": {
+      "after": "2e331a32f6915f6d4641a4385f9ec2bd23bf606c9b7d6ba54d8799eb5c5dcb3c",
+      "before": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "bytes": 51723,
+      "patch_sha256": "531226b42bb777d1962ebce6f246c87a9273a67e6c61f0b60f14b16d90f5365c",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch"
+    }
+  },
+  "original_patches": {
+    "ext/fabric_task.py": {
+      "sha256": "e9df6bfc4e9c2fe8da654d445b67b156e30b993fb92e0980bd57152fcfb440c5",
+      "source": "../provider_plans/fleet_launch_repair/fabric_task.py.patch"
+    },
+    "ext/lease_broker.py": {
+      "sha256": "67923017f1e3fd2e8ee436e5afb77df4b8f456ca8e3f345231421d74458477da",
+      "source": "../provider_plans/fleet_launch_repair/lease_broker.py.patch"
+    },
+    "ext/remote_sub.sh": {
+      "sha256": "66a35ad8b1f7ba0d1f4c252bdaba7e511ff324149397489a7c6882525b771052",
+      "source": "../provider_plans/fleet_launch_repair/remote_sub.sh.patch"
+    },
+    "ext/support_bundle.py": {
+      "sha256": "76a27a7e31624b43a4840b7419f301f440eaeb3d01602b238fbabf684ff0bb4a",
+      "source": "../provider_plans/fleet_launch_repair/support_bundle.py.patch"
+    }
+  },
+  "original_profile": {
+    "native_after_manifest_sha256": "7b9d0d8f24d8cc370492bc0d645c24a4f77e23948f38ef2fd70dfa377050fabd",
+    "native_before_manifest_sha256": "8d522018443e4d0bf7ccae2d385eb548ae59afebd2a5079ddbf2004d196bf944",
+    "protected_commit": "ff6d5ab67c3535056d69f603fac0d95c058baad8",
+    "sha256": "a991e5962f2b273dc256e4858eda22cad1b0b6ba83f998d28076766e5c3fe6b6",
+    "source": "../provider_plans/fleet_launch_repair/profile.json"
+  },
+  "schema": "native-provider-fleet-launch-repair-composition.v1",
+  "source_status": "SOURCE_ONLY_REQUIRES_PROTECTED_RELEASE_AND_ORIGINAL_OWNER_CAS"
+}
