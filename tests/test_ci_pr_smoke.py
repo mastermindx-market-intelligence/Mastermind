@@ -2,19 +2,21 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from scripts.ci_pr_smoke import (
     SmokeUnqualified, check_changed_python, select_modules,
-    _IDENTITY_PIN_REGISTRIES, _MAX_SELECTED_MODULES, _registry_blob,
-    _registry_keys, _reviewed_registries,
+    _IDENTITY_PIN_REGISTRIES, _MAX_REGISTRY_BYTES, _MAX_SELECTED_MODULES,
+    _quoted_path_in, _registry_blob, _reviewed_registries,
 )
 
-_FABRIC_REGISTRY, FABRIC_TESTS = _IDENTITY_PIN_REGISTRIES[0]
-_INCIDENT_REGISTRY, INCIDENT_TESTS = _IDENTITY_PIN_REGISTRIES[1]
+_FABRIC_REGISTRY, FABRIC_CHAIN, FABRIC_TESTS = _IDENTITY_PIN_REGISTRIES[0]
+_INCIDENT_REGISTRY, INCIDENT_CHAIN, INCIDENT_TESTS = _IDENTITY_PIN_REGISTRIES[1]
 
 
 def repo(tmp_path: Path) -> Path:
@@ -25,12 +27,14 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def identity_repo(tmp_path: Path, fabric=(), incident=()):
+def identity_repo(tmp_path: Path, fabric: bytes = b"", incident: bytes = b""):
     root = repo(tmp_path)
-    for _, tests in _IDENTITY_PIN_REGISTRIES:
+    for _path, _chain, tests in _IDENTITY_PIN_REGISTRIES:
         for name in tests:
             (root / name).write_text("def test_pin(): assert True\n", encoding="utf-8")
-    return root, ((frozenset(fabric), FABRIC_TESTS), (frozenset(incident), INCIDENT_TESTS))
+    # Synthetic registry chains are plain chain text: the selector only does
+    # quoted-literal containment against these bytes.
+    return root, ((fabric, FABRIC_TESTS), (incident, INCIDENT_TESTS))
 
 
 def test_source_module_selects_matching_test_without_positive_global_allowlist(tmp_path):
@@ -154,7 +158,8 @@ def test_real_smoke_runner_propagates_stage_pin_drift(tmp_path, monkeypatch):
 # identity-reviewed source must select its owning review modules.
 def test_identity_reviewed_source_selects_owning_review_modules(tmp_path):
     root, registries = identity_repo(
-        tmp_path, fabric=("integrations/hermes_attended_fabric/native.py",),
+        tmp_path,
+        fabric=b"REVIEWED_FILES['integrations/hermes_attended_fabric/native.py'] = {}\n",
     )
     assert select_modules(
         root, ("integrations/hermes_attended_fabric/native.py",),
@@ -164,7 +169,8 @@ def test_identity_reviewed_source_selects_owning_review_modules(tmp_path):
 
 def test_identity_modules_are_fixed_dependencies_not_cap_victims(tmp_path):
     root, registries = identity_repo(
-        tmp_path, fabric=("ops/executive_os/autonomy_control.py",),
+        tmp_path,
+        fabric=b"REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {}\n",
     )
     changed = ["ops/executive_os/autonomy_control.py"]
     for i in range(10):
@@ -180,7 +186,8 @@ def test_identity_modules_are_fixed_dependencies_not_cap_victims(tmp_path):
 @pytest.mark.parametrize("fault", ["missing", "symlink", "oversized"])
 def test_identity_review_modules_cannot_be_silently_omitted(tmp_path, fault):
     root, registries = identity_repo(
-        tmp_path, fabric=("integrations/hermes_attended_fabric/native.py",),
+        tmp_path,
+        fabric=b"REVIEWED_FILES['integrations/hermes_attended_fabric/native.py'] = {}\n",
     )
     target = root / FABRIC_TESTS[1]
     if fault == "missing":
@@ -199,7 +206,8 @@ def test_identity_review_modules_cannot_be_silently_omitted(tmp_path, fault):
 
 def test_source_outside_review_registry_keeps_legacy_selection(tmp_path):
     root, registries = identity_repo(
-        tmp_path, fabric=("integrations/hermes_attended_fabric/native.py",),
+        tmp_path,
+        fabric=b"REVIEWED_FILES['integrations/hermes_attended_fabric/native.py'] = {}\n",
     )
     (root / "app").mkdir()
     (root / "app/module.py").write_text("x = 1\n", encoding="utf-8")
@@ -214,7 +222,8 @@ def test_source_outside_review_registry_keeps_legacy_selection(tmp_path):
 # exactly the #2365 defect class for those five sources if left unwired.
 def test_incident_reviewed_source_selects_only_its_owning_module(tmp_path):
     root, registries = identity_repo(
-        tmp_path, incident=("control_plane/executive_incident_origin.py",),
+        tmp_path,
+        incident=b"REVIEWED_FILES['control_plane/executive_incident_origin.py'] = {}\n",
     )
     assert select_modules(
         root, ("control_plane/executive_incident_origin.py",),
@@ -225,8 +234,8 @@ def test_incident_reviewed_source_selects_only_its_owning_module(tmp_path):
 def test_distinct_registries_stack_their_own_owning_modules(tmp_path):
     root, registries = identity_repo(
         tmp_path,
-        fabric=("integrations/hermes_attended_fabric/native.py",),
-        incident=("ops/executive_os/provider_incident_forward.py",),
+        fabric=b"REVIEWED_FILES['integrations/hermes_attended_fabric/native.py'] = {}\n",
+        incident=b"REVIEWED_FILES['ops/executive_os/provider_incident_forward.py'] = {}\n",
     )
     selected = select_modules(root, (
         "integrations/hermes_attended_fabric/native.py",
@@ -236,23 +245,73 @@ def test_distinct_registries_stack_their_own_owning_modules(tmp_path):
                         *FABRIC_TESTS, *INCIDENT_TESTS)
 
 
-def test_both_frozen_pin_registries_are_wired_with_distinct_owning_tests():
-    assert [path for path, _ in _IDENTITY_PIN_REGISTRIES] == [
-        "tests/executive_fabric_release_identity_review.py",
-        "tests/executive_incident_identity_review.py",
+def test_both_frozen_pin_registries_are_wired_with_chains_and_distinct_owning_tests():
+    assert [(path, chain) for path, chain, _ in _IDENTITY_PIN_REGISTRIES] == [
+        ("tests/executive_fabric_release_identity_review.py",
+         ("tests/executive_fabric_release_identity_review.py",
+          "tests/test_hermes_workspace_oauth_identity_review.py")),
+        ("tests/executive_incident_identity_review.py",
+         ("tests/executive_incident_identity_review.py",)),
     ]
-    owned = [name for _, tests in _IDENTITY_PIN_REGISTRIES for name in tests]
+    owned = [name for _p, _c, tests in _IDENTITY_PIN_REGISTRIES for name in tests]
     assert owned and len(set(owned)) == len(owned)
 
 
-def _git_repo_with_registry(tmp_path: Path, registry: str,
-                            path: str = _FABRIC_REGISTRY) -> tuple[Path, str]:
+# Literal matching: selection fires on a quoted path in the chain text and on
+# nothing else. Both quote styles count; a partial or unquoted spelling does
+# not, and that choice is deliberate (see the unquoted-mention test below).
+def test_quoted_literal_match_covers_both_quote_styles_and_nothing_less():
+    text = (b"REVIEWED_FILES = {'app/one.py': {}}\n"
+            b'REVIEWED_FILES["app/two.py"] = {}\n')
+    assert _quoted_path_in(text, "app/one.py")
+    assert _quoted_path_in(text, "app/two.py")
+    assert not _quoted_path_in(text, "app/one")
+    assert not _quoted_path_in(text, "one.py")
+    assert not _quoted_path_in(text, "docs/other.py")
+
+
+def test_unquoted_path_mention_does_not_select(tmp_path):
+    """An unquoted mention must not select; this is a chosen non-over-selection.
+
+    Matching unquoted text would fire on comments, identifiers and prose. The
+    matching under-selection risk — a real runtime key with no quoted spelling
+    anywhere in its chain — is closed by the live guard, which fails the
+    registry's own PR, instead of by widening this match.
+    """
+    root, registries = identity_repo(
+        tmp_path,
+        fabric=(b"# reviewed: integrations/hermes_attended_fabric/native.py\n"
+                b"REVIEWED_FILES = {'app/main.py': {}}\n"),
+    )
+    assert select_modules(
+        root, ("integrations/hermes_attended_fabric/native.py",),
+        identity_registries=registries,
+    ) == ("tests/test_ci_pytest_policy.py",)
+
+
+def test_dynamically_built_key_is_not_selected_statically(tmp_path):
+    """A concatenated key spelling carries no quoted literal of the whole
+    path, so static selection cannot see it. The live guard flags exactly
+    this shape on the registry's own PR (next test)."""
+    root, registries = identity_repo(
+        tmp_path,
+        fabric=(b"REVIEWED_FILES = {'app/main.py': {}}\n"
+                b"REVIEWED_FILES['ops/' + 'x.py'] = {}\n"),
+    )
+    assert select_modules(root, ("ops/x.py",), identity_registries=registries) == (
+        "tests/test_ci_pytest_policy.py",
+    )
+
+
+def _git_repo_with_files(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
     root = tmp_path / "trusted"
     root.mkdir()
-    (root / path).parent.mkdir(parents=True, exist_ok=True)
-    (root / path).write_text(registry, encoding="utf-8")
+    for relative, text in files.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
-    subprocess.run(["git", "-C", str(root), "add", path], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
     subprocess.run(
         ["git", "-C", str(root), "-c", "user.email=t@e.st", "-c", "user.name=t",
          "commit", "-q", "-m", "registry"], check=True,
@@ -264,111 +323,71 @@ def _git_repo_with_registry(tmp_path: Path, registry: str,
     return root, sha
 
 
-def test_reviewed_registry_keys_come_from_the_trusted_base_blob(tmp_path):
+def test_chain_text_is_read_from_the_trusted_base_blobs(tmp_path):
     registry = (
-        '"""Frozen reviewed literals."""\n'
-        "REVIEWED_FILES = {\n"
-        "    'integrations/hermes_attended_fabric/native.py': "
-        "{'sha256': 'a' * 64, 'sites': ()},\n"
-        "}\n"
+        "REVIEWED_FILES = {'integrations/hermes_attended_fabric/native.py': "
+        "{'sha256': 'a' * 64}}\n"
         "REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = "
-        "{'sha256': 'b' * 64, 'sites': ()}\n"
+        "{'sha256': 'b' * 64}\n"
         "MORE = {'control_plane/executive_backup.py': {'sha256': 'c' * 64}}\n"
         "REVIEWED_FILES.update(MORE)\n"
-        "REVIEWED_FILES.update({'app/main.py': {'sha256': 'd' * 64}})\n"
     )
-    root, sha = _git_repo_with_registry(tmp_path, registry)
-    registries = _reviewed_registries(root, sha)
-    assert registries[0][1] == FABRIC_TESTS
-    assert registries[0][0] == frozenset({
-        "integrations/hermes_attended_fabric/native.py",
-        "ops/executive_os/autonomy_control.py",
-        "control_plane/executive_backup.py",
-        "app/main.py",
+    sub = ("REVIEWED_FILES = {'ops/native_fabric/hidden.py': {'sha256': 'd' * 64}}\n")
+    incident = ("REVIEWED_FILES = {'control_plane/executive_incident_origin.py': "
+                "{'sha256': 'e' * 64}}\n")
+    root, sha = _git_repo_with_files(tmp_path, {
+        _FABRIC_REGISTRY: registry,
+        FABRIC_CHAIN[1]: sub,
+        _INCIDENT_REGISTRY: incident,
     })
-    # The incident registry is absent at this base: legacy empty mapping.
-    assert registries[1] == (frozenset(), INCIDENT_TESTS)
-
-
-def test_each_registry_is_extracted_from_its_own_base_blob(tmp_path):
-    root, _ = _git_repo_with_registry(
-        tmp_path,
-        "REVIEWED_FILES = {'integrations/hermes_attended_fabric/native.py': "
-        "{'sha256': 'a' * 64}}\n",
-    )
-    incident = root / _INCIDENT_REGISTRY
-    incident.parent.mkdir(parents=True, exist_ok=True)
-    incident.write_text(
-        "REVIEWED_FILES = {'control_plane/executive_incident_origin.py': "
-        "{'sha256': 'b' * 64}}\n", encoding="utf-8",
-    )
-    subprocess.run(["git", "-C", str(root), "add", _INCIDENT_REGISTRY], check=True)
-    subprocess.run(
-        ["git", "-C", str(root), "-c", "user.email=t@e.st", "-c", "user.name=t",
-         "commit", "-q", "-m", "incident"], check=True,
-    )
-    sha = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        check=True, stdout=subprocess.PIPE,
-    ).stdout.decode("ascii").strip()
+    # The fabric chain text is the registry blob plus the sub-registry blob;
+    # the incident registry reads only its own single-file chain.
     assert _reviewed_registries(root, sha) == (
-        (frozenset({"integrations/hermes_attended_fabric/native.py"}), FABRIC_TESTS),
-        (frozenset({"control_plane/executive_incident_origin.py"}), INCIDENT_TESTS),
+        (registry.encode("utf-8") + sub.encode("utf-8"), FABRIC_TESTS),
+        (incident.encode("utf-8"), INCIDENT_TESTS),
     )
 
 
-def test_registry_follows_imported_reviewed_files_merge(tmp_path):
+def test_sub_registry_chain_key_selects_the_owners(tmp_path):
+    """A key living only in the imported sub-registry still fires the fabric
+    owners: the chain text concatenates both blobs before matching."""
     registry = (
-        "from tests.test_other_identity_review import (\n"
+        "from tests.test_hermes_workspace_oauth_identity_review import (\n"
         "    REVIEWED_FILES as OTHER_REVIEWED_FILES,\n"
         ")\n"
         "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
         "REVIEWED_FILES.update(OTHER_REVIEWED_FILES)\n"
     )
-    other = (
-        "from pathlib import Path\n"
-        "import pytest\n"
-        "REVIEWED_FILES = {\n"
-        "    'integrations/hermes_runtime/native_session_control.py': "
-        "{'sha256': 'b' * 64},\n"
-        "}\n"
-        "def test_review(path):\n"
-        "    for key in REVIEWED_FILES:\n"
-        "        if key == path:\n"
-        "            assert REVIEWED_FILES[key]['sha256']\n"
+    sub = ("REVIEWED_FILES = {'integrations/hermes_runtime/native_session_control.py': "
+           "{'sha256': 'b' * 64}}\n")
+    files = {
+        _FABRIC_REGISTRY: registry,
+        FABRIC_CHAIN[1]: sub,
+        "tests/test_ci_pytest_policy.py": "def test_baseline(): assert True\n",
+    }
+    for name in FABRIC_TESTS:
+        files[name] = "def test_pin(): assert True\n"
+    root, sha = _git_repo_with_files(tmp_path, files)
+    selected = select_modules(
+        root, ("integrations/hermes_runtime/native_session_control.py",),
+        identity_registries=_reviewed_registries(root, sha),
     )
-    root, _ = _git_repo_with_registry(tmp_path, registry)
-    (root / "tests/test_other_identity_review.py").write_text(other, encoding="utf-8")
-    subprocess.run(["git", "-C", str(root), "add", "tests/"], check=True)
-    subprocess.run(
-        ["git", "-C", str(root), "-c", "user.email=t@e.st", "-c", "user.name=t",
-         "commit", "-q", "-m", "other"], check=True,
-    )
-    sha = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        check=True, stdout=subprocess.PIPE,
-    ).stdout.decode("ascii").strip()
-    # Test functions with control flow do not affect the imported registry.
-    assert _reviewed_registries(root, sha)[0][0] == frozenset({
-        "app/main.py",
-        "integrations/hermes_runtime/native_session_control.py",
-    })
+    assert selected == ("tests/test_ci_pytest_policy.py", *FABRIC_TESTS)
 
 
 def test_registry_missing_at_trusted_base_keeps_legacy_empty_mapping(tmp_path):
-    root, _ = _git_repo_with_registry(tmp_path, "# placeholder\n")
-    (root / _FABRIC_REGISTRY).unlink()
-    subprocess.run(
-        ["git", "-C", str(root), "-c", "user.email=t@e.st", "-c", "user.name=t",
-         "commit", "-q", "-am", "remove"], check=True,
-    )
-    sha = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        check=True, stdout=subprocess.PIPE,
-    ).stdout.decode("ascii").strip()
+    root, sha = _git_repo_with_files(tmp_path, {"README.md": "# none\n"})
     assert _reviewed_registries(root, sha) == (
-        (frozenset(), FABRIC_TESTS), (frozenset(), INCIDENT_TESTS),
+        (b"", FABRIC_TESTS), (b"", INCIDENT_TESTS),
     )
+
+
+def test_over_bound_registry_blob_fails_closed(tmp_path):
+    root, sha = _git_repo_with_files(tmp_path, {
+        _FABRIC_REGISTRY: "#" * (_MAX_REGISTRY_BYTES + 1),
+    })
+    with pytest.raises(SmokeUnqualified, match="SMOKE_REVIEWED_REGISTRY_OVER_BOUND"):
+        _reviewed_registries(root, sha)
 
 
 class _Proc:
@@ -395,6 +414,20 @@ def test_unreadable_registry_blob_fails_closed(tmp_path, monkeypatch,
         ci_pr_smoke._registry_blob(tmp_path, "base", "tests/x.py")
 
 
+def test_unreadable_chain_blob_fails_closed_through_registry_reading(
+        tmp_path, monkeypatch):
+    from scripts import ci_pr_smoke
+
+    def fake_run(cmd, **_):
+        if cmd[3] == "ls-tree":
+            return _Proc(0, b"100644 blob abc\ttests/x.py\n")
+        return _Proc(1, b"")  # cat-file cannot read the blob
+
+    monkeypatch.setattr(ci_pr_smoke.subprocess, "run", fake_run)
+    with pytest.raises(SmokeUnqualified, match="SMOKE_REVIEWED_REGISTRY_UNREADABLE"):
+        ci_pr_smoke._reviewed_registries(tmp_path, "base")
+
+
 def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypatch):
     from scripts import ci_pr_smoke
 
@@ -407,197 +440,13 @@ def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypa
     assert ci_pr_smoke._registry_blob(tmp_path, "base", "tests/x.py") is None
 
 
-@pytest.mark.parametrize("registry", [
-    "REVIEWED_FILES = 'not-a-dict'\n",
-    "REVIEWED_FILES = {key: value for key, value in pairs}\n",
-    "REVIEWED_FILES = build_registry()\n",
-    "OTHER = {}\n",
-    "def broken(:\n",
-    # Top-level control flow or unrecognized mutation of the registry cannot
-    # prove the reviewed set, even when a dict literal is also present.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "if True:\n    REVIEWED_FILES['x.py'] = {}\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "for path in more:\n    REVIEWED_FILES.update(path)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "REVIEWED_FILES |= {'x.py': {}}\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "del REVIEWED_FILES['app/main.py']\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "merge(REVIEWED_FILES)\n",
-    # Alias rebinding, multi-target assignment, dynamic subscript keys and
-    # string-constant lookups can each mutate the runtime registry without
-    # the extractor seeing it; they must fail closed, not under-extract.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "SHADOW = REVIEWED_FILES\n",
-    "SHADOW = REVIEWED_FILES\n"
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n",
-    "X = REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "REVIEWED_FILES[make_key()] = {}\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "globals()['REVIEWED_FILES'].update({'x.py': {}})\n",
-    # Def-time expressions execute during registry import even though the
-    # function bodies themselves never run.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "@REVIEWED_FILES.get('app/main.py')\n"
-    "def deco():\n    pass\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def take(x=REVIEWED_FILES):\n    return x\n",
-    # Module-level execution other than the update gate: helper mutation,
-    # called functions, exec/eval and attribute calls all run unreviewed
-    # code whose registry effects static extraction cannot see.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "EXTRA = {'b.py': {}}\n"
-    "EXTRA.update({'c.py': {}})\n"
-    "REVIEWED_FILES.update(EXTRA)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def _m():\n    REVIEWED_FILES.update({'c.py': {}})\n"
-    "_m()\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "exec(\"REVIEWED_FILES['c.py'] = {}\")\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "os.system('true')\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "match flag:\n    case _:\n        helper()\n",
-    # Calls inside assigned or merged expressions execute at import.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "MORE = {'b.py': make()}\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "REVIEWED_FILES.update({'b.py': make()})\n",
-    # A tracked helper name may not be aliased, rebound through an import,
-    # or otherwise reused after its binding: any of those can change what
-    # a later merge actually merges.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "MORE = {'b.py': {}}\n"
-    "RESULT = MORE\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "MORE = {'b.py': {}}\n"
-    "from x import y as MORE\n",
-    # Class bodies execute at import like the module top level.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "class Holder:\n    data = REVIEWED_FILES\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "class Holder:\n    data = build()\n",
-    # A REVIEWED_FILES import alias must not shadow a tracked helper or an
-    # earlier alias: the runtime binding changes while the tracked mapping
-    # goes stale. Relative imports resolve on a different path space.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "D = {'b.py': {}}\n"
-    "from side import REVIEWED_FILES as D\n"
-    "REVIEWED_FILES.update(D)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "from .side import REVIEWED_FILES as R\n"
-    "REVIEWED_FILES.update(R)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "from side import REVIEWED_FILES as D\n"
-    "import other as D\n"
-    "REVIEWED_FILES.update(D)\n",
-    # Def-time calls rooted at a same-module name execute an unchecked body
-    # (its mutation of the registry is invisible to static extraction).
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def _wrap(f):\n    return f\n"
-    "def dec():\n"
-    "    REVIEWED_FILES.update({'x.py': {}})\n"
-    "    return _wrap\n"
-    "@dec()\n"
-    "def g():\n    return 1\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def _m():\n"
-    "    REVIEWED_FILES.update({'x.py': {}})\n"
-    "    return 1\n"
-    "def g(q=_m()):\n    return q\n",
-    # A decorator expression is applied even without call parens: a bare
-    # @dec rooted at a same-module name executes an unchecked body.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def dec(f):\n"
-    "    REVIEWED_FILES.update({'x.py': {}})\n"
-    "    return f\n"
-    "@dec\n"
-    "def g():\n    return 1\n",
-    # Rebinding an imported registry alias — to an attribute or to a fresh
-    # literal — leaves the tracked imports mapping stale while runtime
-    # merges something else; aliases are frozen after their import.
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "from side import REVIEWED_FILES as D\n"
-    "import side\n"
-    "D = side.REG\n"
-    "REVIEWED_FILES.update(D)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "from side import REVIEWED_FILES as D\n"
-    "D = {'b.py': {}}\n"
-    "REVIEWED_FILES.update(D)\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "from side import REVIEWED_FILES as D\n"
-    "MORE = D\n"
-    "REVIEWED_FILES.update(D)\n",
-    # A same-module function laundered through an untracked alias must not
-    # reach a decorator or def-time call (each would add runtime-only keys).
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def shadow(f):\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n    return f\n"
-    "SHADOW = shadow\n"
-    "@SHADOW\ndef g():\n    pass\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def shadow(f):\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n    return f\n"
-    "MORE = {'dec': shadow}\n"
-    "@MORE['dec']\ndef g():\n    pass\n",
-    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-    "def _m():\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n"
-    "CALLER = _m\n"
-    "def g(q=CALLER()):\n    pass\n",
-])
-
-
-def test_malformed_present_registry_fails_closed(tmp_path, registry):
-    root, sha = _git_repo_with_registry(tmp_path, registry)
-    with pytest.raises(SmokeUnqualified, match="REGISTRY"):
-        _reviewed_registries(root, sha)
-
-
-def test_parametrize_style_decorator_on_test_function_still_parses(tmp_path):
-    """The real registry chain uses @pytest.mark.parametrize at import time."""
-    root, sha = _git_repo_with_registry(
-        tmp_path,
-        "import pytest\n"
-        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-        "@pytest.mark.parametrize('name', ['a', 'b'])\n"
-        "def test_pins(name):\n"
-        "    assert name\n",
-    )
-    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
-
-
-def test_bare_imported_decorator_on_test_function_still_parses(tmp_path):
-    """@pytest.fixture applies an imported name; only same-module roots refuse."""
-    root, sha = _git_repo_with_registry(
-        tmp_path,
-        "import pytest\n"
-        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-        "@pytest.fixture\n"
-        "def case():\n    return 1\n",
-    )
-    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
-
-
-def test_benign_top_level_class_parses_without_crashing(tmp_path):
-    root, sha = _git_repo_with_registry(
-        tmp_path,
-        '"""Frozen reviewed literals with a helper class."""\n'
-        "import typing\n"
-        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
-        "class Span(typing.NamedTuple):\n"
-        "    line: int\n"
-        "    column: int\n",
-    )
-    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
-
-
 def test_main_passes_identity_modules_to_the_test_runner(tmp_path, monkeypatch):
     import sys
     from scripts import ci_pr_smoke
 
     root, registries = identity_repo(
-        tmp_path, fabric=("integrations/hermes_attended_fabric/native.py",),
+        tmp_path,
+        fabric=b"REVIEWED_FILES['integrations/hermes_attended_fabric/native.py'] = {}\n",
     )
     (root / ".git").mkdir()
     source = root / "integrations/hermes_attended_fabric/native.py"
@@ -624,18 +473,8 @@ def test_main_passes_identity_modules_to_the_test_runner(tmp_path, monkeypatch):
     assert list(argv) == ["tests/test_ci_pytest_policy.py", *FABRIC_TESTS]
 
 
-def test_live_identity_registries_extract_to_their_runtime_reviewed_files():
-    """Every wired registry must stay extractable by the trusted-base parser.
-
-    The selector reads registries only from the trusted base, so a registry
-    edit is never parsed against its own new bytes. Without this guard a
-    registry rewritten into a refused shape would merge cleanly and then
-    fail every later smoke candidate closed. The registry is parsed from the
-    committed HEAD blob (imports are followed at HEAD too) and compared with
-    the module imported under the exact dotted name the owning pin tests use,
-    so a __name__-gated mutation cannot show the guard a different set.
-    """
-    root = Path(__file__).resolve().parents[1]
+def _chain_text_at_head(root: Path, chain: Sequence[str]) -> bytes:
+    """Concatenated chain blobs at HEAD; absent members fail with a message."""
     try:
         head = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -643,21 +482,75 @@ def test_live_identity_registries_extract_to_their_runtime_reviewed_files():
         ).stdout.decode("ascii").strip()
     except (subprocess.SubprocessError, OSError) as error:
         pytest.fail(f"cannot resolve HEAD for the live registry guard: {error}")
-    for path, _tests in _IDENTITY_PIN_REGISTRIES:
-        blob = _registry_blob(root, head, path)
+    parts: list[bytes] = []
+    for member in chain:
+        blob = _registry_blob(root, head, member)
         assert blob is not None, (
-            f"wired identity registry {path} is absent at HEAD; "
-            "update _IDENTITY_PIN_REGISTRIES with the registry change")
-        extracted = _registry_keys(root, head, path, blob, frozenset())
-        module = importlib.import_module(path[:-len(".py")].replace("/", "."))
-        assert extracted == set(module.REVIEWED_FILES), path
-        assert extracted, path
+            f"identity registry chain path {member} is absent at HEAD; "
+            "update _IDENTITY_PIN_REGISTRIES with the chain change")
+        parts.append(blob)
+    return b"".join(parts)
 
 
-@pytest.mark.parametrize("registry", [path for path, _ in _IDENTITY_PIN_REGISTRIES])
-def test_registry_edit_selects_its_owners_and_the_live_registry_guard(registry):
+def _assert_runtime_keys_are_quoted_literals(module, chain_text: bytes,
+                                             label: str) -> None:
+    """Every runtime REVIEWED_FILES key must be quoted in the chain text."""
+    keys = set(module.REVIEWED_FILES)
+    assert keys, f"{label}: runtime REVIEWED_FILES has no keys"
+    missing = sorted(key for key in keys if not _quoted_path_in(chain_text, key))
+    assert not missing, (
+        f"{label}: runtime keys absent as quoted literals from the chain text "
+        f"(dynamically constructed keys are invisible to literal selection): "
+        f"{missing}")
+
+
+def test_live_identity_registry_keys_are_quoted_literals_in_their_chain():
+    """Every wired registry's runtime keys must be quoted literals in its chain.
+
+    Selection reads only quoted literals from trusted-base blobs, so a key
+    constructed dynamically at import time would never select its owning
+    tests. This guard imports each registry under the exact dotted name its
+    owning pin tests use, reads the chain at HEAD, and fails the registry PR
+    when any runtime key lacks a quoted spelling there. The one residual is
+    a key built dynamically inside a function body, gated on a condition
+    that is false while this guard runs.
+    """
     root = Path(__file__).resolve().parents[1]
-    owners = dict(_IDENTITY_PIN_REGISTRIES)[registry]
-    picked = select_modules(root, [registry], identity_registries=())
+    for path, chain, _tests in _IDENTITY_PIN_REGISTRIES:
+        module = importlib.import_module(path[:-len(".py")].replace("/", "."))
+        _assert_runtime_keys_are_quoted_literals(
+            module, _chain_text_at_head(root, chain), path)
+
+
+def test_dynamic_runtime_key_is_flagged_by_the_guard(tmp_path):
+    """A dynamically built runtime key fails the guard — modeled on a tmp
+    module, never the real registry."""
+    source = tmp_path / "tmp_dynamic_registry.py"
+    source.write_text(
+        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+        "REVIEWED_FILES['ops/' + 'x.py'] = {}\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("tmp_dynamic_registry", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert set(module.REVIEWED_FILES) == {"app/main.py", "ops/x.py"}
+    with pytest.raises(AssertionError, match=r"ops/x\.py"):
+        _assert_runtime_keys_are_quoted_literals(
+            module, source.read_bytes(), str(source))
+
+
+_EDIT_CASES = [
+    (member, tests)
+    for _path, chain, tests in _IDENTITY_PIN_REGISTRIES
+    for member in chain
+]
+
+
+@pytest.mark.parametrize("edited,owners", _EDIT_CASES)
+def test_registry_or_chain_edit_selects_owners_and_the_live_registry_guard(
+        edited, owners):
+    root = Path(__file__).resolve().parents[1]
+    picked = select_modules(root, [edited], identity_registries=())
     assert set(owners) <= set(picked)
     assert "tests/test_ci_pr_smoke.py" in picked

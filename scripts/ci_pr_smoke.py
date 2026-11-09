@@ -3,11 +3,23 @@
 The trusted-base CI scope selects this non-privileged path. This selector
 never edits branch protection, suppresses a required check, or publishes a
 review verdict. No remote access, shell interpolation, credentials or workers.
+
+Identity-pin ownership selection is literal text matching, not parsing: a
+registry fires when a changed path appears as a quoted string literal in its
+chain text read from the trusted base. Every real registry key is a literal
+path string in the registry source, so bytes containment covers the same set
+an interpreter would build without an allow/deny vocabulary that new Python
+shapes could launder. Over-selection (a quoted path that is not a live key)
+costs a few extra test modules; the live guard in tests/test_ci_pr_smoke.py
+fails the registry PR when a runtime key is not present as a quoted literal
+anywhere in its chain. The single residual is a key built dynamically inside
+a function body, gated on a condition that is false when the guard runs: the
+guard imports the real module, so such a key stays hidden from both selection
+and the guard until the gating condition flips.
 """
 from __future__ import annotations
 
 import argparse
-import ast
 import pathlib
 import subprocess
 import sys
@@ -35,39 +47,40 @@ _PAPER_STAGE_TEST = "tests/test_paper_runtime_stage.py"
 # edit its own reviewed-file set; the test modules themselves still run from
 # the checkout and verify the checkout's pins against its sources. #2365
 # (merge group 42592403849) certified a scoped group without these modules
-# while master's full pytest failed the frozen identity pins. Every frozen
-# registry module is wired with the test modules that enforce its pins:
-# the fabric release review chain and the dormant incident-source review
-# (enforced through reviewed_literal_spans in tests/executive_identity_review.py).
+# while master's full pytest failed the frozen identity pins. Each entry is
+# (registry, chain, owning tests):
+# - registry is the frozen registry module the owning tests import.
+# - chain is every file whose text can contribute runtime keys: the registry
+#   itself plus every module it imports REVIEWED_FILES from. The fabric
+#   registry merges tests/test_hermes_workspace_oauth_identity_review.py via
+#   ``from ... import REVIEWED_FILES as ...`` + ``REVIEWED_FILES.update(...)``;
+#   that sub-registry imports no further registry modules.
+# Selection fires when a changed path is quoted in the concatenated chain
+# text, so a key edited only in the sub-registry still selects these owners.
 _IDENTITY_PIN_REGISTRIES = (
     ("tests/executive_fabric_release_identity_review.py", (
+        "tests/executive_fabric_release_identity_review.py",
+        "tests/test_hermes_workspace_oauth_identity_review.py",
+    ), (
         "tests/test_executive_reviewed_site_identity_tokens.py",
         "tests/test_executive_fabric_release_identity_review.py",
         "tests/test_hermes_fabric_native_identity_review.py",
     )),
     ("tests/executive_incident_identity_review.py", (
+        "tests/executive_incident_identity_review.py",
+    ), (
         "tests/test_incident_identity_review.py",
     )),
 )
 _MAX_REGISTRY_BYTES = 256_000
-# A registry edit is read from the trusted base, never from the candidate,
-# so the candidate's new registry bytes would otherwise merge without ever
-# meeting the extractor, and every later smoke candidate would then refuse
-# SMOKE_REVIEWED_REGISTRY_MALFORMED. Editing a wired registry therefore also
-# selects its owning tests and this live-registry extractability guard.
+# A registry or chain edit is read from the trusted base, never from the
+# candidate, so the candidate's new registry bytes would otherwise merge
+# without ever meeting selection or the guard, and every later smoke
+# candidate would silently lose that registry's ownership mapping. Editing
+# any chain path therefore selects its owning tests and this live guard,
+# which proves at HEAD that every runtime key is a quoted literal in the
+# chain text.
 _REGISTRY_GUARD_TEST = "tests/test_ci_pr_smoke.py"
-
-# Top-level statements that either are control flow or mutate in place; a
-# registry module must not contain them at all. ``match`` executes at import
-# like the rest, so it is included wherever the running Python defines it.
-_CONTROL_FLOW_STATEMENTS = tuple(
-    node for node in (
-        ast.For, ast.While, ast.If, ast.Try, ast.With,
-        getattr(ast, "Match", None),
-        ast.AugAssign, ast.AnnAssign, ast.Delete,
-        ast.Raise, ast.Assert, ast.Global, ast.Nonlocal,
-    ) if node is not None
-)
 
 
 class SmokeUnqualified(ValueError):
@@ -98,56 +111,6 @@ def _diff_paths(repo: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
     return paths
 
 
-def _registry_dict_keys(node: ast.expr) -> set[str] | None:
-    """Constant string keys of a dict-literal expression, else None."""
-    if not isinstance(node, ast.Dict):
-        return None
-    keys = {
-        key.value for key in node.keys
-        if isinstance(key, ast.Constant) and type(key.value) is str
-    }
-    return keys if len(keys) == len(node.keys) else None
-
-
-def _registry_subscript_key(target: ast.expr) -> str | None:
-    """Constant string subscript target like REVIEWED_FILES['path']."""
-    if (isinstance(target, ast.Subscript)
-            and isinstance(target.value, ast.Name)
-            and target.value.id == "REVIEWED_FILES"
-            and isinstance(target.slice, ast.Constant)
-            and type(target.slice.value) is str):
-        return target.slice.value
-    return None
-
-
-def _mentions_name(node: ast.AST, name: str) -> bool:
-    """True when the name is referenced, including as an exact string key.
-
-    ``globals()['REVIEWED_FILES']`` reaches the registry through a string
-    constant rather than a Name node, so both spellings count as a mention.
-    """
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.Name) and sub.id == name:
-            return True
-        if isinstance(sub, ast.Constant) and type(sub.value) is str and sub.value == name:
-            return True
-    return False
-
-
-def _mentions_any(node: ast.AST, names) -> bool:
-    """True when any already-bound helper name is referenced."""
-    if not names:
-        return False
-    wanted = set(names)
-    return any(isinstance(sub, ast.Name) and sub.id in wanted
-               for sub in ast.walk(node))
-
-
-def _contains_call(node: ast.AST) -> bool:
-    """True when any call executes while the statement itself runs."""
-    return any(isinstance(sub, ast.Call) for sub in ast.walk(node))
-
-
 def _registry_blob(repo: pathlib.Path, base: str, path: str) -> bytes | None:
     """Bounded registry blob read; None only when absent at the base."""
     try:
@@ -176,236 +139,58 @@ def _registry_blob(repo: pathlib.Path, base: str, path: str) -> bytes | None:
     return done.stdout
 
 
-def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
-                   seen: frozenset[str]) -> set[str]:
-    """Extract the reviewed-file keys from one trusted-base registry module.
+def _quoted_path_in(text: bytes, path: str) -> bool:
+    """True when path appears as a '...' or "..." string literal in text.
 
-    Only top-level statements are interpreted, so test functions in a
-    registry module cannot affect the extracted set, and no base tree code
-    is executed. The recognized vocabulary is the frozen-literal shape:
-    an initial ``REVIEWED_FILES = {...}``, constant subscript assignments,
-    pure dict-literal helper names, ``REVIEWED_FILES.update(...)`` of those
-    or of an imported alias registry, and ``from X import REVIEWED_FILES as
-    ALIAS`` merges. Everything else that executes or could mutate at import
-    fails closed: control flow including ``match``, any call other than the
-    update gate (bare-name, attribute, exec/eval, calls inside assigned or
-    merged expressions), class definitions (whose bodies execute), def-time
-    decorators/defaults/annotations that mention the registry or call a name
-    defined in the same module, decorators (with or without call parens)
-    rooted at a same-module name, alias or multi-target assignment, dynamic
-    subscript keys, exact string-constant lookups, relative or shadowing
-    ``REVIEWED_FILES`` imports, and any reuse or rebinding of a tracked
-    helper or alias name after its binding.
-    Registry files sit on CRITICAL review paths, and imports are parsed,
-    not executed; mutation hiding in an imported module's own import side
-    effects is the one residual outside this parser's reach.
+    Pure bytes containment with no parsing: comments, identifiers or split
+    (dynamically constructed) spellings do not match, so an unquoted mention
+    never selects. That under-selection edge is closed by the live guard,
+    which fails the registry PR when a runtime key has no quoted spelling in
+    its chain text, rather than by widening this match.
     """
-    if path in seen:
-        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-    if not text:
-        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-    try:
-        tree = ast.parse(text.decode("utf-8"), filename=path)
-    except (UnicodeError, SyntaxError):
-        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED") from None
-    keys: set[str] | None = None
-    literals: dict[str, set[str]] = {}
-    imports: dict[str, str] = {}
-    module_defs: set[str] = set()
-
-    def merge(argument: ast.expr, chain: frozenset[str]) -> None:
-        nonlocal keys
-        if keys is None:
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-        if isinstance(argument, ast.Name) and argument.id in literals:
-            keys |= literals[argument.id]
-            return
-        if isinstance(argument, ast.Name) and argument.id in imports:
-            blob = _registry_blob(repo, base, imports[argument.id])
-            if blob is None:
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            keys |= _registry_keys(repo, base, imports[argument.id], blob, chain)
-            return
-        added = _registry_dict_keys(argument)
-        if added is None:
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-        keys |= added
-
-    for node in tree.body:
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            continue  # module docstring or stray literal: cannot mutate
-        if isinstance(node, ast.ClassDef):
-            # Class bodies execute at import, so the whole statement counts
-            # as module-level code: any registry mention or any call inside
-            # (including bases, decorators and the body) is refused.
-            if _mentions_name(node, "REVIEWED_FILES") or _contains_call(node):
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            module_defs.add(node.name)
-            continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Function bodies run only when called and nothing at module
-            # level may call them (see the call gate below), so only the
-            # def-time expressions are checked. A def-time call rooted at a
-            # name defined in this module executes an unchecked body; calls
-            # rooted at imported names stay under the documented import
-            # residual.
-            edges: list[ast.expr] = [*node.decorator_list]
-            args = node.args
-            edges.extend(args.defaults)
-            edges.extend(d for d in args.kw_defaults if d is not None)
-            annotated = (*args.posonlyargs, *args.args, *args.kwonlyargs,
-                         *(a for a in (args.vararg, args.kwarg) if a))
-            edges.extend(a.annotation for a in annotated
-                         if a.annotation is not None)
-            for bound in getattr(node, "type_params", ()):
-                edge = getattr(bound, "bound", None)
-                if edge is not None:
-                    edges.append(edge)
-            if node.returns is not None:
-                edges.append(node.returns)
-            for edge in edges:
-                if _mentions_name(edge, "REVIEWED_FILES"):
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                for call in (sub for sub in ast.walk(edge)
-                             if isinstance(sub, ast.Call)):
-                    root = call.func
-                    while isinstance(root, ast.Attribute):
-                        root = root.value
-                    if isinstance(root, ast.Name) and root.id in module_defs:
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            for decorator in node.decorator_list:
-                # A decorator expression is applied (called) at import even
-                # without call parens: @dec is g = dec(g). Refuse it when its
-                # leftmost base is defined in this module; imported bases
-                # (pytest.fixture, pytest.mark.parametrize) stay allowed.
-                root = decorator
-                while isinstance(root, (ast.Attribute, ast.Subscript)):
-                    root = root.value
-                if isinstance(root, ast.Name) and (
-                        root.id in module_defs or root.id in literals):
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            module_defs.add(node.name)
-            continue
-        if isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                if alias.name == "REVIEWED_FILES":
-                    if (node.module is None or alias.asname is None or node.level
-                            or alias.asname in literals or alias.asname in imports):
-                        # Relative imports resolve differently, and an alias
-                        # that shadows an earlier helper or registry binding
-                        # makes the tracked mapping stale.
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                    imports[alias.asname] = node.module.replace(".", "/") + ".py"
-                elif alias.asname is not None and (
-                        alias.asname in literals or alias.asname in imports):
-                    # Rebinding a tracked helper or alias name invalidates
-                    # its mapping.
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            continue
-        if isinstance(node, ast.Import):
-            if any(alias.asname is not None
-                   and (alias.asname in literals or alias.asname in imports)
-                   for alias in node.names):
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            continue
-        if isinstance(node, ast.Assign):
-            # No statement may execute a call while assigning: the call's
-            # side effects are invisible to static extraction.
-            if _contains_call(node):
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            if len(node.targets) == 1:
-                target = node.targets[0]
-                if isinstance(target, ast.Name) and target.id == "REVIEWED_FILES":
-                    if keys is not None:
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                    keys = _registry_dict_keys(node.value)
-                    if keys is None:
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                    continue
-                literal = _registry_subscript_key(target)
-                if literal is not None:
-                    if keys is None:
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                    keys.add(literal)
-                    continue
-                if (isinstance(target, ast.Subscript)
-                        and isinstance(target.value, ast.Name)
-                        and target.value.id == "REVIEWED_FILES"):
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                if isinstance(target, ast.Name):
-                    named = _registry_dict_keys(node.value)
-                    if named is not None:
-                        # A helper dict that references an earlier helper or
-                        # an imported alias aliases the same runtime object;
-                        # refuse the alias, and never rebind an alias.
-                        if (_mentions_any(node.value, {*literals, *imports, *module_defs})
-                                or target.id in imports):
-                            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                        literals[target.id] = named
-                    elif (_mentions_name(node, "REVIEWED_FILES")
-                            or target.id in imports
-                            or _mentions_any(node, {*literals, *imports, *module_defs})):
-                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                    continue
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            if (_mentions_name(node, "REVIEWED_FILES")
-                    or _mentions_any(node, {*literals, *imports})):
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            continue
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            call = node.value
-            if (isinstance(call.func, ast.Attribute) and call.func.attr == "update"
-                    and isinstance(call.func.value, ast.Name)
-                    and call.func.value.id == "REVIEWED_FILES"):
-                if keys is None or len(call.args) != 1 or call.keywords:
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                if _contains_call(call.args[0]):
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                merge(call.args[0], seen | {path})
-                continue
-            # Every other module-level call executes unreviewed code whose
-            # effects (including registry mutation through helpers, exec or
-            # an imported module) static extraction cannot see.
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-        if isinstance(node, _CONTROL_FLOW_STATEMENTS):
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-        if (_mentions_name(node, "REVIEWED_FILES")
-                or _mentions_any(node, {*literals, *imports})):
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-    if keys is None:
-        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-    return keys
+    raw = path.encode("utf-8")
+    return b"'" + raw + b"'" in text or b'"' + raw + b'"' in text
 
 
 def _reviewed_registries(
     repo: pathlib.Path, base: str,
-) -> tuple[tuple[frozenset[str], tuple[str, ...]], ...]:
-    """Read every wired identity pin registry from the trusted base commit.
+) -> tuple[tuple[bytes, tuple[str, ...]], ...]:
+    """Read every wired identity registry's chain text from the trusted base.
 
-    Each registry is parsed with ``ast`` only; no base tree code is executed.
-    A base object predating a registry keeps that registry's legacy empty
-    source set (nothing was identity reviewed there, so no ownership mapping
-    can be lost); an unreadable or present-but-unrecognized registry fails
-    closed instead of silently dropping identity-reviewed sources from
-    smoke coverage.
+    Each registry contributes the concatenated blobs of its chain (itself
+    plus every module it imports REVIEWED_FILES from); selection later tests
+    changed paths against that text by quoted-literal containment only. A
+    registry absent at the base keeps its legacy empty text (nothing was
+    identity reviewed there, so no ownership mapping can be lost); a chain
+    member absent at the base contributes nothing for the same reason. An
+    unreadable or over-bound blob fails closed instead of silently dropping
+    identity-reviewed sources from smoke coverage. No base tree code is
+    executed or parsed.
     """
-    out: list[tuple[frozenset[str], tuple[str, ...]]] = []
-    for path, tests in _IDENTITY_PIN_REGISTRIES:
-        blob = _registry_blob(repo, base, path)
-        sources = (frozenset() if blob is None else
-                   frozenset(_registry_keys(repo, base, path, blob, frozenset())))
-        out.append((sources, tests))
+    out: list[tuple[bytes, tuple[str, ...]]] = []
+    for path, chain, tests in _IDENTITY_PIN_REGISTRIES:
+        if _registry_blob(repo, base, path) is None:
+            # No registry module at the base means no import chain there
+            # either: the legacy empty mapping, exactly as before.
+            out.append((b"", tests))
+            continue
+        text = b"".join(
+            blob for blob in (
+                _registry_blob(repo, base, member) for member in chain
+            ) if blob is not None
+        )
+        out.append((text, tests))
     return tuple(out)
 
 
 def select_modules(
     repo: pathlib.Path, changed: Sequence[str], *,
-    identity_registries: Sequence[tuple[frozenset[str], tuple[str, ...]]],
+    identity_registries: Sequence[tuple[bytes, tuple[str, ...]]],
 ) -> tuple[str, ...]:
     """Pick fixed ownership dependencies, then capped source-proximate tests.
 
     Fixed dependencies — the paper stage pin and the owning test modules of
-    every identity registry whose reviewed sources intersect the diff — are
+    every identity registry whose chain text quotes a changed path — are
     exempt from the module cap, so a selection legitimately exceeds
     _MAX_SELECTED_MODULES when several ownership groups fire together and
     the cap never truncates a required owner.
@@ -429,14 +214,15 @@ def select_modules(
     if _PAPER_STAGE_SOURCES.intersection(changed):
         required += (_PAPER_STAGE_TEST,)
     # Identity-reviewed ownership keeps the same fixed-dependency rule as the
-    # paper stage pin: each registry contributes exactly its own owning
-    # modules, they cannot be lost to alphabetic ties or the module cap, and
-    # an unavailable module fails the check.
-    for sources, tests in identity_registries:
-        if sources.intersection(changed):
+    # paper stage pin: a registry fires when any changed path appears as a
+    # quoted string literal in its chain text, contributes exactly its own
+    # owning modules, cannot be lost to alphabetic ties or the module cap,
+    # and an unavailable module fails the check.
+    for chain_text, tests in identity_registries:
+        if any(_quoted_path_in(chain_text, path) for path in changed):
             required += tests
-    for path, tests in _IDENTITY_PIN_REGISTRIES:
-        if path in changed:
+    for path, chain, tests in _IDENTITY_PIN_REGISTRIES:
+        if any(member in changed for member in chain):
             required += (*tests, _REGISTRY_GUARD_TEST)
     for path in required:
         file = root / path
