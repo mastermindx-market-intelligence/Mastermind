@@ -442,11 +442,59 @@ def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypa
     "def deco():\n    pass\n",
     "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
     "def take(x=REVIEWED_FILES):\n    return x\n",
+    # Module-level execution other than the update gate: helper mutation,
+    # called functions, exec/eval and attribute calls all run unreviewed
+    # code whose registry effects static extraction cannot see.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "EXTRA = {'b.py': {}}\n"
+    "EXTRA.update({'c.py': {}})\n"
+    "REVIEWED_FILES.update(EXTRA)\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def _m():\n    REVIEWED_FILES.update({'c.py': {}})\n"
+    "_m()\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "exec(\"REVIEWED_FILES['c.py'] = {}\")\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "os.system('true')\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "match flag:\n    case _:\n        helper()\n",
+    # Calls inside assigned or merged expressions execute at import.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "MORE = {'b.py': make()}\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "REVIEWED_FILES.update({'b.py': make()})\n",
+    # A tracked helper name may not be aliased, rebound through an import,
+    # or otherwise reused after its binding: any of those can change what
+    # a later merge actually merges.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "MORE = {'b.py': {}}\n"
+    "RESULT = MORE\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "MORE = {'b.py': {}}\n"
+    "from x import y as MORE\n",
+    # Class bodies execute at import like the module top level.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "class Holder:\n    data = REVIEWED_FILES\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "class Holder:\n    data = build()\n",
 ])
 def test_malformed_present_registry_fails_closed(tmp_path, registry):
     root, sha = _git_repo_with_registry(tmp_path, registry)
     with pytest.raises(SmokeUnqualified, match="REGISTRY"):
         _reviewed_registries(root, sha)
+
+
+def test_benign_top_level_class_parses_without_crashing(tmp_path):
+    root, sha = _git_repo_with_registry(
+        tmp_path,
+        '"""Frozen reviewed literals with a helper class."""\n'
+        "import typing\n"
+        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+        "class Span(typing.NamedTuple):\n"
+        "    line: int\n"
+        "    column: int\n",
+    )
+    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
 
 
 def test_main_passes_identity_modules_to_the_test_runner(tmp_path, monkeypatch):
