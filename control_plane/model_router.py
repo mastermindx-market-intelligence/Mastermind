@@ -494,7 +494,7 @@ class WorkRequest:
                     "effective_complexity must be a canonical class, got "
                     f"{self.effective_complexity!r}"
                 )
-            object.__setattr__(self, "effective_complexity", complexity)
+        object.__setattr__(self, "effective_complexity", complexity)
         capabilities = tuple(
             sorted(
                 {
@@ -601,11 +601,20 @@ class RoutingDecision(_RoutingDecisionCompatibility):
         return value
 
     def job_constraints(self) -> dict[str, Any]:
-        """Return worker-placement constraints, never raw credentials or authority."""
+        """Return worker-placement constraints only for a dispatchable preview.
+
+        Principal-reviewed admission belongs to the incumbent owner. Until
+        that disposition is integrated, a required-review preview cannot be
+        converted into an executable worker request by a legacy caller.
+        """
 
         if not self.worker_eligible:
             raise RoutingPolicyError(
                 "frontier-lead work must be decomposed or adjudicated before worker dispatch"
+            )
+        if self.principal_review_required:
+            raise RoutingPolicyError(
+                "principal review required before worker dispatch"
             )
         role_fields: dict[str, Any] = {}
         if self.responsibility_intent is not None:
