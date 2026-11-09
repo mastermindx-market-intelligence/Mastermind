@@ -21,15 +21,17 @@ to the thread unchanged.
 `ops/native_fabric/unified_router` (launchd `ai.mastermind.fabric-router`,
 `127.0.0.1:8313`) is the fabric's single intelligent edge. T3's provider
 **Capacity Fabric** (`capacity_fabric`) points at it and exposes the union
-catalogue (32 models + `fabric/frontier|balanced|fast` routing aliases).
+catalogue (36 models + `fabric/frontier|balanced|fast` routing aliases).
 
 - **Every pool, every key, no new custody**: routes compose the incumbent
   owners — the two local gateways (their own loopback tokens), the GLM coding
   plan (`~/.glm/config.json`), the Bailian token plan (3-key rotation,
-  `~/.bailian/config.json`), the MiniMax token plan (`~/.minimax/config.json`)
-  and the BytePlus coding plan key — each read live at request time through
-  the same pointers the incumbents use. PAYG keys (Z.AI `paas`) are
-  deliberately not routed: subscription surfaces only, no silent spend.
+  `~/.bailian/config.json`), the MiniMax token plan (`~/.minimax/config.json`),
+  the BytePlus coding plan key and the OpenCode Go plan (2-key rotation,
+  `x-api-key` + `x-opencode-session` per-route headers) — each read live at
+  request time through the same pointers the incumbents use. PAYG keys
+  (Z.AI `paas`) are deliberately not routed: subscription surfaces only, no
+  silent spend.
 - **Smart routing**: exact slugs resolve to all serving routes in priority
   tiers; within a tier, weighted selection with caller affinity
   (`metadata.user_id`) preserves prompt-cache locality. `fabric/*` aliases are
@@ -46,9 +48,29 @@ catalogue (32 models + `fabric/frontier|balanced|fast` routing aliases).
 
 `GET /statusz` reports per-route health/counters (never keys); `GET /v1/models`
 is the unified catalogue. Remaining un-routed capacity: Codex ChatGPT seats
-(backend protocol owned by the codex CLI lane), xAI OAuth (token-refresh lane),
-OpenCode-Go free tier and the Cursor pool — each drops in as one more route
-entry plus key pointer.
+(backend protocol owned by the codex CLI lane), xAI OAuth (token-refresh lane)
+and the Cursor pool — each drops in as one more route entry plus key pointer.
+
+## Pool wiring for the flash/uncensored family (2026-11-09)
+
+DeepSeek/GLM flash and uncensored variants load-balance across every pool
+that serves them, in priority tiers (admission-time failover, no replay):
+
+| model | tier 1 | tier 2 | tier 3 |
+|---|---|---|---|
+| `glm-5.3` | GLM coding plan (z.ai, 3 keys) | labs Max plan | OpenCode Go |
+| `glm-5.3-flash` | GLM coding plan (z.ai) | labs | OpenCode Go → BytePlus |
+| `deepseek-v4.1-flash` | labs | OpenCode Go | BytePlus |
+| `glm-5.3-uncensored` | labs | — | — |
+| `glm-5.3-flash-uncensored` | labs | — | — |
+| `deepseek-v4.1-flash-uncensored` | labs | — | — |
+
+`glm-5.3-uncensored` was admitted to the labs gateway's deployed
+`EXPLABS_ANTHROPIC_MODELS` catalogue (vendor catalog carries the slug);
+uncensored variants exist only on the labs plan — z.ai, BytePlus and
+OpenCode Go serve standard models only. OpenCode Go workspaces enforce a
+5-hour usage window surfaced as 429; the router benches the route and fails
+over to the next tier without inventing headroom.
 
 ## Architecture
 

@@ -13,13 +13,21 @@ quotas, incumbent config files keep their keys, and this router composes them.
 |---|---|---|
 | `gateway` | loopback `FABRIC_PROXY_TOKEN` of an incumbent fabric gateway | `anthropic_oauth` (8312, Claude Max pool), `experiential` (8311, multi-vendor Max plan) |
 | `config_file` | pointer into an incumbent pool config | GLM coding plan (`~/.glm/config.json`), Bailian token plan (`~/.bailian/config.json`, 3 keys = 3 routes), MiniMax token plan (`~/.minimax/config.json`) |
-| `credential_pool` | Hermes `credential_pool` label or `env:` source | BytePlus coding plan key |
+| `credential_pool` | Hermes `credential_pool` label or `env:` source | BytePlus coding plan key, OpenCode Go plan (2 keys = 2 routes) |
 
 Vendor endpoints are the org's existing **Anthropic-wire** subscription
 surfaces (`api.z.ai/api/anthropic`, `…aliyuncs.com/apps/anthropic`,
-`api.minimax.io/anthropic`, `ark…bytepluses.com/api/coding`); pools that only
-speak the OpenAI wire are served through the closed translator in `wire.py`
+`api.minimax.io/anthropic`, `ark…bytepluses.com/api/coding`,
+`opencode.ai/zen/go/v1`); pools that only speak the OpenAI wire are served
+through the closed translator in `wire.py`
 (request/response + SSE, tool-use round trips).
+
+Two route fields adapt non-Bearer, session-routing upstreams without new
+kinds: `auth_header` names the header that carries the raw credential
+(default `Authorization: Bearer`), and `session_header` names a header that
+receives a stable, sanitized per-affinity session id. OpenCode Go uses
+`auth_header: x-api-key` + `session_header: x-opencode-session` — its
+messages endpoint rejects Bearer auth and headerless sessions.
 
 ## Routing rules
 
