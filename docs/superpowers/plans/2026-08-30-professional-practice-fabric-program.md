@@ -9,7 +9,7 @@
 **Parent operation:** `mastermind-professional-practice-fabric-20260830-sol-001`  
 **Protected source:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**Cognition:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
+**Cognition at original freeze:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
 **State:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`  
 **Spec:** `docs/superpowers/specs/2026-08-30-professional-practice-fabric-design.md`  
 **Standing law:** `docs/EXECUTIVE_PROFESSIONAL_PRACTICE_LAW.md`  
@@ -38,9 +38,10 @@ real vertical show measurable advantage.
 
 Every wave obeys:
 
-1. current protected Mastermind and same-SHA Skillpack procedure are reloaded before modification;
-2. `COGNITION_ROUTE: CHAT_PRO_DEFAULT` remains the Sol-class default unless a complete approved
-   metered exception exists;
+1. reuse a verified compatible protected Mastermind/Skillpack pin; refresh only materially affected
+   facts, and read the required procedures at the same SHA when establishing a new pin;
+2. human-attended cognition follows current ACTIVE_EXECUTION section 1B mode fit and stickiness;
+   automated cognition retains the incumbent router, budget and exception gates;
 3. Executive OS remains Job / Attempt / Worker / Event lifecycle authority;
 4. Agent OS remains durable workstream / decision / discovery / handoff authority;
 5. GitHub remains implementation and immutable evidence truth;
@@ -52,7 +53,9 @@ Every wave obeys:
    identities;
 10. one independently useful capability or one explicit records-only source-law slice ships per PR;
 11. professional artifacts precede expensive implementation when late defect discovery is material;
-12. builder and independent auditor remain separate for consequential work;
+12. apply current session-local review policy: ChatGPT Web has no blanket independent technical/source
+    review prerequisite; required professional experiment evaluators remain independent, and actual
+    GitHub/CODEOWNERS approval rules, security/release holds and admitted review effects still bind;
 13. real production proof and outcome measurement remain distinct from CI, merge and installation;
 14. no wave inherits START, capacity claim, receiver or modification authority from this program;
 15. no super-skill, practice database, persona registry, duplicate router, transcript memory or
@@ -137,7 +140,8 @@ Acceptance:
 - [ ] current CNM, SCF and Executive capability contracts are extended rather than replaced;
 - [ ] Product Design artifact, selection, implementation and audit boundaries are explicit;
 - [ ] state remains `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`;
-- [ ] exact-head repository/security checks and independent source review;
+- [ ] exact-head source self-check and required repository/security checks; obtain genuine non-author
+      approval where an actual current GitHub/source rule requires it;
 - [ ] expected-head merge only;
 - [ ] Agent OS durable parent/decision/handoff updated through its accepted owner after protection.
 
@@ -407,7 +411,8 @@ source/digest
 ### Cases
 
 - routine text change remains `GENERALIST`;
-- consequential UI redesign requires Product Design lead and independent audit;
+- consequential UI redesign identifies a Product Design lead and independent professional audit
+  where the commissioned experiment or current binding policy requires that evaluation;
 - critical security change cannot be downgraded because no specialist is available;
 - several compatible submethods can remain one session;
 - high information-separation need recommends distinct responsibilities;

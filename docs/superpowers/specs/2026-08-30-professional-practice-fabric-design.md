@@ -7,7 +7,7 @@
 **Carrier:** `sol/professional-practice-fabric-f0-20260830`  
 **Protected source:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**Cognition:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
+**Cognition at original freeze:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
 **State:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`  
 **Standing law:** `docs/EXECUTIVE_PROFESSIONAL_PRACTICE_LAW.md`
 
@@ -783,7 +783,8 @@ Frozen rulings:
 8. independent first passes and qualified selection precede synthesis;
 9. professional artifacts gate build where craft is load-bearing, as validity predicates with zero
    runtime authority;
-10. consequential work receives independent practice-aware audit;
+10. independent practice-aware audit follows the commissioned professional experiment or actual
+    current binding policy; it is not a blanket ChatGPT Web code-delivery prerequisite;
 11. competence evidence attaches to reproducible composition;
 12. learning uses Agent OS/GitHub and evidence-gated doctrine;
 13. Product Design is the first controlled vertical;

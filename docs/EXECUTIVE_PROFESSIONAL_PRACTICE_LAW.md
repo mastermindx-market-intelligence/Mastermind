@@ -13,6 +13,17 @@ This law creates no live Sol session, Skill installation, MCP connection, plugin
 route, Executive Job, worker, RuntimeBinding, Wake obligation, repository mutation beyond this source
 carrier, or production capability.
 
+Execution and release follow the current protected `docs/sol_skills/INDEX.md`,
+`docs/sol_skills/ACTIVE_EXECUTION.md`, `docs/SESSION_LOCAL_REVIEW_POLICY.md` and
+`docs/DELIVERY_WORKFLOW.md`. The source and cognition values recorded in this packet are original
+freeze provenance, not action-time instructions. Reuse a verified compatible pin and refresh only
+materially affected facts; attended mode fit and stickiness remain with ACTIVE_EXECUTION section 1B,
+while automated cognition retains the router and budget gates. ChatGPT Web has no blanket independent
+technical/source-review prerequisite. Focused self-check, affected tests and owed real-path proof
+still apply, as do actual GitHub/CODEOWNERS rules, security/release holds and unsettled admitted review
+effects. Professional validity and the commissioned experiment's independent, blinded evaluation
+remain distinct requirements; neither grants organizational or runtime authority.
+
 ## 1. Core ruling
 
 Mastermind will develop **professional specialization as a first-class quality system**, but it will

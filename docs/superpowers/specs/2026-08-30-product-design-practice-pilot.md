@@ -99,8 +99,12 @@ chooses the smallest sufficient topology.
 ```text
 Product Design practice applied by Project Sol
 -> bounded implementation
--> independent design review
+-> focused self-check, affected tests and owed real-path proof
 ```
+
+Current session-local review policy governs delivery. ChatGPT Web has no blanket independent review
+prerequisite; actual GitHub/CODEOWNERS rules and security/release holds still bind. The separate
+controlled experiment in section 11 retains its independent, blinded evaluator composition.
 
 ### 3.2 Material workflow redesign
 
