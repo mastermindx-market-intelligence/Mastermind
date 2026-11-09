@@ -23,65 +23,8 @@ REVIEWED_FILES = {
             (689, 44, 47, 'int', '400'),
         ),
     },
-    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
-        "sha256": '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
-        "sites": (
-            (487, 66, 69, 'int', '502'),
-            (1707, 32, 37, 'int', '0o700'),
-            (2058, 140, 143, 'int', '900'),
-            (2060, 33, 36, 'int', '900'),
-            (2123, 22, 25, 'int', '429'),
-            (2311, 79, 82, 'int', '500'),
-            (2389, 34, 37, 'int', '400'),
-            (2404, 33, 36, 'int', '500'),
-            (2424, 34, 37, 'int', '502'),
-            (2733, 92, 95, 'int', '400'),
-            (2740, 99, 102, 'int', '503'),
-            (2743, 80, 83, 'int', '409'),
-            (2775, 110, 113, 'int', '503'),
-            (2781, 100, 103, 'int', '409'),
-            (2788, 101, 104, 'int', '409'),
-            (2804, 31, 34, 'int', '409'),
-            (2804, 51, 54, 'int', '503'),
-            (2812, 73, 76, 'int', '409'),
-            (2816, 99, 102, 'int', '503'),
-            (2923, 107, 110, 'int', '503'),
-            (2932, 102, 105, 'int', '400'),
-            (2953, 96, 99, 'int', '429'),
-            (2963, 103, 106, 'int', '503'),
-            (2980, 105, 108, 'int', '503'),
-            (3018, 27, 30, 'int', '503'),
-            (3023, 101, 104, 'int', '502'),
-            (3031, 91, 94, 'int', '401'),
-            (3035, 96, 99, 'int', '400'),
-            (3065, 113, 116, 'int', '512'),
-            (3069, 94, 97, 'int', '400'),
-            (3083, 101, 104, 'int', '409'),
-            (3085, 110, 113, 'int', '503'),
-            (3099, 101, 104, 'int', '409'),
-            (3107, 105, 108, 'int', '409'),
-            (3110, 101, 104, 'int', '409'),
-            (3115, 104, 107, 'int', '400'),
-            (3126, 105, 108, 'int', '409'),
-            (3135, 94, 97, 'int', '400'),
-            (3155, 109, 112, 'int', '400'),
-            (3158, 96, 99, 'int', '400'),
-            (3178, 96, 99, 'int', '429'),
-            (3188, 102, 105, 'int', '503'),
-            (3196, 106, 109, 'int', '429'),
-            (3237, 103, 106, 'int', '503'),
-            (3256, 74, 77, 'int', '502'),
-            (3350, 23, 26, 'int', '400'),
-            (3423, 35, 38, 'int', '429'),
-            (3452, 37, 40, 'int', '404'),
-            (3483, 27, 30, 'int', '400'),
-            (3486, 27, 30, 'int', '400'),
-            (3489, 27, 30, 'int', '400'),
-            (3495, 31, 34, 'int', '400'),
-            (3502, 31, 34, 'int', '429'),
-        ),
-    },
-    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc', 'sites': ((831, 60, 65, 'int', '0o700'),)},
+    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': 'a5af142fda4911f6dbe72896dd37df3b10d24be26fcff57da61a4ad636c4c14e', 'sites': [[469, 66, 69, 'int', '502'], [1689, 32, 37, 'int', '0o700'], [2040, 140, 143, 'int', '900'], [2042, 33, 36, 'int', '900'], [2105, 22, 25, 'int', '429'], [2293, 79, 82, 'int', '500'], [2371, 34, 37, 'int', '400'], [2386, 33, 36, 'int', '500'], [2406, 34, 37, 'int', '502'], [2753, 92, 95, 'int', '400'], [2760, 99, 102, 'int', '503'], [2763, 80, 83, 'int', '409'], [2795, 110, 113, 'int', '503'], [2801, 100, 103, 'int', '409'], [2808, 101, 104, 'int', '409'], [2824, 31, 34, 'int', '409'], [2824, 51, 54, 'int', '503'], [2832, 73, 76, 'int', '409'], [2836, 99, 102, 'int', '503'], [2941, 107, 110, 'int', '503'], [2950, 102, 105, 'int', '400'], [2971, 96, 99, 'int', '429'], [2981, 103, 106, 'int', '503'], [2998, 105, 108, 'int', '503'], [3036, 27, 30, 'int', '503'], [3041, 101, 104, 'int', '502'], [3049, 91, 94, 'int', '401'], [3053, 96, 99, 'int', '400'], [3075, 476, 479, 'int', '512'], [3079, 94, 97, 'int', '400'], [3090, 101, 104, 'int', '409'], [3092, 110, 113, 'int', '503'], [3103, 101, 104, 'int', '409'], [3111, 105, 108, 'int', '409'], [3114, 101, 104, 'int', '409'], [3117, 104, 107, 'int', '400'], [3127, 105, 108, 'int', '409'], [3137, 94, 97, 'int', '400'], [3153, 109, 112, 'int', '400'], [3156, 96, 99, 'int', '400'], [3169, 96, 99, 'int', '429'], [3179, 102, 105, 'int', '503'], [3187, 106, 109, 'int', '429'], [3218, 103, 106, 'int', '503'], [3229, 272, 275, 'int', '502'], [3323, 23, 26, 'int', '400'], [3396, 35, 38, 'int', '429'], [3425, 37, 40, 'int', '404'], [3456, 27, 30, 'int', '400'], [3459, 27, 30, 'int', '400'], [3462, 27, 30, 'int', '400'], [3468, 31, 34, 'int', '400'], [3475, 31, 34, 'int', '429']]},
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878', 'sites': [[1044, 60, 65, 'int', '0o700']]},
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
         "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
         "sites": (
@@ -220,7 +163,12 @@ REVIEWED_FILES = {
  'ops/executive_os/bootstrap-host.sh': {'sha256': 'acb2c16a703b018fe110bf88ff576b60a32b2d029db24a769e58dac3d98daf60',
  'sites': ((784, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
            (786, 97, 120, 'str', '_mastermind_agent_relay'),
-           (792, 89, 92, 'int', '457'))}}
+           (792, 89, 92, 'int', '457'))},    # Application claim lifetime cap; this literal is not host identity.
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py": {
+        "sha256": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+        "sites": ((326, 113, 116, "int", "900"),),
+    },
+}
 
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does
@@ -558,7 +506,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
            (643, 25, 30, 'int', '0o700'),
            (653, 22, 27, 'int', '0o755'),
            (661, 82, 87, 'int', '0o755'))},
- 'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': '93267de79c92231f853fc16e03f939e8d52d3322d19a828a568ffcb5d7a7f867',
+ 'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': 'd680789e7a184b7b882a57f6cc7b0337b6bebc4e27069ac8263aeffd456c5fed',
                                                                 'sites': ((1280,
                                                                            46,
                                                                            49,
@@ -639,13 +587,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '3a08b8031a710276afb98622998835afdd4f87b9fee35138889e2eebd9c821f0',
+# Original-transaction recovery keeps these six literal tokens, their enclosing
+# owners and calls unchanged. Root re-reviewed the full recovery diff and these
+# exact moved spans; no identity/numeric exception or scanner rule is added.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'e8c812d6bc11a00a00db0fbb0bf4b60ff354c3b4ff9fcce18e3e11cebe45d0b0',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6975, 35, 37, 'int', '80'),
-           (6976, 50, 55, 'int', '0o755'),
-           (7844, 41, 46, 'int', '0o644'),
-           (8625, 64, 69, 'int', '0o644'),
-           (10037, 41, 46, 'int', '0o644'))}
+           (7008, 35, 37, 'int', '80'),
+           (7009, 50, 55, 'int', '0o755'),
+           (7889, 41, 46, 'int', '0o644'),
+           (8689, 64, 69, 'int', '0o644'),
+           (10104, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -807,9 +758,8 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-# Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture function.
-# Fixed Capacity READ composition: original reviewed block and tokens unchanged.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ace408ab1b186d614086923fef677000247a1074361c61a5578e78bbc5571844', 'sites': ((3769, 68, 71, 'int', '503'), (3774, 69, 72, 'int', '503'), (3778, 67, 70, 'int', '503'))}
+# Primary/work-entry plus Capacity READ: original diagnostic fixture unchanged.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -913,7 +863,9 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6b141c941fac4ebdb8f8f1fa6a48c6ff1d86deb9159e313ce68f460a6998e5c9', 'sites': ((1724, 26, 31, 'int', '0o700'),)}
+# The authenticated release-record verifier moved this unchanged mode site three lines.
+# Whole-file and exact-token drift rejection, including all prior unmasked findings, stays intact.
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '7c1b7147bf5236c68c043f20ad1bda37872c9fe13050a70374a44e433783324b', 'sites': ((1727, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -1152,11 +1104,12 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
 }
 
 # Content-continuation source union independently qualified at282140ec5,
-# exact final treee9b3984c (review6eb650a8). Only two synthetic600-second
+# original treee9b3984c (review6eb650a8), then primary-purpose and mode fixtures.
+# Root re-reviewed the final composition. Only two synthetic600-second
 # token lifetimes and six fixed HTTP400/403 response tokens are qualified.
 # No principal/UID/callee or arbitrary nearby literal is exempted; changed
 # bytes invalidate the whole pin, preserving the generic topology guard.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': 'cb629df9ba989ea38bc278acc938e4241ef03f6358e9c56de7b629f407fcdb11', 'sites': ((537, 58, 61, 'int', '600'), (538, 66, 69, 'int', '600'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': '71b76671de68819ac6ed92a4d705800aed84b9d51cf46f3858f6f974788cb2cb', 'sites': ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))}
 REVIEWED_FILES['integrations/mastermind_workspace_app/native_authorization_identity.py'] = {'sha256': 'db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', 'sites': ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))}
 # Fixed explicit Memory owner source: closed Control helper dependency paths;
 # same private mkdir, turn/CPU/reference/HTTP bounds, incumbent TTL and full

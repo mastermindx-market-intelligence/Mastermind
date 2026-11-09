@@ -152,3 +152,38 @@ it("uses the fixed native command and rejects reader or auth replacement before 
   notify({ ...signed, status: "signed_out", acquisition: false }); finish(fixture);
   await expect(pending).rejects.toThrow("READ_CANCELLED");
 });
+
+it.each(["primary", "work"] as const)("withdraws a pending Capacity read before %s sign-in returns", async kind => {
+  const signed: AuthState = { status: "signed_in", reason: null, acquisition: true, content: true };
+  let finishRead!: (value: unknown) => void, finishAction!: (value: unknown) => void;
+  const invoke = vi.fn(async (command: string) => {
+    if (command === "auth_status") return signed;
+    if (command === "executive_auth_status") return { generation: 0, available: false };
+    if (command === "read_capacity_fabric") return new Promise(resolve => { finishRead = resolve; });
+    if (command === "read_work_authorization") return {
+      schema: "mastermind.native_work_authorization.v1", state: "ELIGIBLE",
+      reason: "WORK_NOT_ESTABLISHED", generation: 0,
+    };
+    if (command === "sign_in_primary" || command === "sign_in_for_work")
+      return new Promise(resolve => { finishAction = resolve; });
+    throw Error("UNEXPECTED_NATIVE_COMMAND");
+  });
+  const raw = await createNativeClient(invoke as never, async () => () => {});
+  const host = bindMissionHost(raw);
+  if (kind === "work") await host.workAuthorization!.read({ signal: new AbortController().signal });
+  const pending = host.readCapacityFabric!({ signal: new AbortController().signal })
+    .then(() => "UNEXPECTED_RELEASE", error => (error as Error).message);
+  // The public primary gesture is closed while already signed in. The native
+  // owner still fences an explicit reauthentication before its handoff returns.
+  if (kind === "primary") await expect(host.primaryAccount!.signIn()).rejects.toThrow("PRIMARY_AUTH_UNAVAILABLE");
+  const action = kind === "primary" ? raw.signInPrimary!() : host.workAuthorization!.signIn();
+  const command = kind === "primary" ? "sign_in_primary" : "sign_in_for_work";
+  expect(invoke.mock.calls.filter(([name]) => name === command)).toEqual([[command]]);
+  finishRead(fixture);
+  expect(await pending).toBe("READ_CANCELLED");
+  finishAction(signed); await action;
+  const current = host.readCapacityFabric!({ signal: new AbortController().signal });
+  finishRead(fixture);
+  expect((await current).state).toBe("AVAILABLE");
+  expect(invoke.mock.calls.filter(([name]) => name === "read_capacity_fabric")).toHaveLength(2);
+});

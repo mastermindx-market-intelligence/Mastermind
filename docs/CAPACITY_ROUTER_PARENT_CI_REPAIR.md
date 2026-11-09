@@ -5,7 +5,8 @@ Original publication carrier: PR #2367, fabric-router-codex-oauth-dsh.
 Repair operation: capacity-router-parent-ci-repair-20261109-c4.
 Source input: a58c34f1d935ee06e5ef45e77aa5705185398d77.
 Protected procedure pin: ff6d5ab67c3535056d69f603fac0d95c058baad8.
-Current disjoint protected advance observed: 3652d8907df1738de551dd3032b42aa2a2acb482.
+Current material protected integration: dd45d1112cb437d8a033ef314e5bf5b8f97a65bc.
+Previous published repair: dc59c41e97b263a784997a7e0fbe610e304a4dc3.
 The scoped routing/resilience upgrade remains separately in PR #2369.
 
 ## Assignment and custody
@@ -143,3 +144,90 @@ and changed sealed policy cannot be reintroduced.
 The router's separate plan records its 96 passing affected regressions and the
 remaining installed Hermes/DSH/T3 proof. Source repair, CI, merge, service selection,
 consumer execution and acceptance are distinct outcomes.
+
+## Material protected-source integration and security recovery
+
+After the first repair was published, protected master accepted primary-account /
+work-authorization controls (#2344) and stopped Control recovery (#2363). The
+registered qualification workspace now composes that exact dd45d111 protected
+source with the original Capacity work. Applicable procedure law remains pinned
+to ff6d5ab6; no affected law changed in this protected advance.
+
+The only merge conflicts were the two precise identity catalogues. Their resolved
+records retain the accepted master catalogue, the three established Capacity
+records, and the one exact combined auth.rs fingerprint. The resulting auth.rs
+SHA-256 is 612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737.
+Removing the unchanged 30-line Capacity reader insertion reproduces accepted
+master's auth.rs byte-for-byte. The original three diagnostic HTTP fixture
+operands remain 503, now at lines 3812, 3817 and 3821. No scanner exemption, source
+identity, authorization requirement, or accepted Control behavior is loosened.
+
+Capacity continues to require Acquisition authorization and a current generation
+after the native read returns. It does not acquire an Executive prerequisite.
+The new primary-account and work-authorization entry controls, continuation
+purpose checks, and stale-read invalidation remain accepted-master behavior.
+
+CodeQL identified five exception-detail paths in the original router. Public
+errors now return one of 25 explicit constant reason literals or the fixed
+upstream-failure fallback. A matching-looking arbitrary exception is never
+returned, including the Responses request path that formerly used str(exc).
+The ten new regressions exercise known codes, unregistered text, and all five
+reported request/response boundaries with synthetic providers and credentials.
+The discriminating fail-before result was six failures and four passes; after
+repair the parent router's 33 original cases plus ten privacy cases all passed.
+No credential, provider request, runtime auth file or live consumer was involved.
+
+Additional observed source qualification:
+
+- 230 exact identity/catalogue and negative-control cases passed after resolving
+  the two conflicts; accepted authorization-continuation and Control sources
+  remain byte-identical to protected master.
+- 25 Company and installed-wrapper composition cases passed (308 unrelated
+  collected cases deselected).
+- TypeScript checking passed. The six primary-account, work-authorization,
+  recovery and Projects test files passed 54 cases. The Capacity suite passed
+  23 cases, including delayed-read withdrawal during both primary-account and
+  work-authorization transitions. The initial added primary test correctly hit
+  PRIMARY_AUTH_UNAVAILABLE through an already-signed-in public control; only its
+  fixture was corrected to use the existing native transition test seam.
+- The first native Rust command stopped in build.rs because MM_SOURCE_REVISION
+  was absent; no native tests ran. Qualification must supply the exact immutable
+  candidate source object and a distinct build identity, then exercise both
+  accepted refresh configurations. This is a build-input correction, not an
+  authentication denial or a reason to weaken the build identity guard.
+
+The exact immutable candidate, final native/paired/D8 receipts, and required
+hosted CI results are recorded on the original PR when each completes. Evidence
+for an earlier tree is not silently promoted to the current candidate.
+
+## Existing owner and release boundary refresh
+
+At dd45d111 the original APPLICATION owner additionally supports fixed GLM
+openai-chat HTTP requests for glm-5.3 and glm-5.3-flash. Its app4 grant, selected
+profile/account binding, canonical glm account/model budget, and original common
+journal remain authoritative. Go, Bailian and GLM APPLICATION HTTP still require
+non-streaming chat-completions requests; raw Anthropic/Responses streaming and
+8313 enrollment are not established by that source addition. The router upgrade
+must use the existing owner rather than creating another admission or settlement
+ledger. Cross-product physical-allowance consolidation still needs an explicit
+account/allowance join and concurrent real-consumer proof.
+
+The live router remains source a58c34f1 in generation
+80141f9373320f8d8f337c8475551bc40665a9676aa0c9776685bee281609035.
+Its loaded launchd termination budget is five seconds, while its single Uvicorn
+worker can drain active requests without a finite application deadline. A safe
+initial cutover needs an effective hold on all Hermes, DSH, T3 and background
+8313 callers, one identity-checked graceful drain, observed terminal worker exit,
+then the incumbent owner's accepted-generation selection and consumer proof.
+The accepted Hermes gateway drain alone does not establish a hold on DSH/T3.
+No service signal, restart, release selection or provider inference has been
+performed by this recovery.
+
+The connected GitHub integration returned an explicit 403 for the master branch
+protection endpoint. Actual enforcement readback remains unavailable; no alternate
+identity/endpoint is used to evade it, and no protected auto-merge is armed on an
+assumption. An incidental Git auto-GC also could not read another writer's index;
+that index and gc.log are untouched. Direct Git commands in this owned recovery
+use per-command maintenance.auto=false and gc.auto=0 to avoid that unrelated work.
+Neither limitation prevents qualification and exact-head source publication on
+these already-owned PR carriers.

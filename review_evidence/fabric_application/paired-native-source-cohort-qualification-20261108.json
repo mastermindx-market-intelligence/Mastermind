@@ -1,0 +1,283 @@
+{
+  "brain_initial_environment_failure": {
+    "chromium_receipt_sha256": "ed9325942bab3861e2ab441324b521f98bfd34327a42c5b86e5d4adeef56e313",
+    "classification": "missing declared claude-agent-sdk dependency before affected module test assertions",
+    "dependency_receipt_sha256": "ed983e722492ef8072a9371296d6dd335762fd4ba8dde772eb6ef4ac63fd4f42",
+    "qualification_sha256": "5b6c5856b43d3689970aff840b1df94a9a1a19470ea5d9a38204cfd53f84c8b7",
+    "source_or_guard_change": false
+  },
+  "brain_projection_sha256": "00c6fa8141704727883d548178d93465290c78101b8c2dd7b85d1a6581c5fdcc",
+  "brain_qualification_sha256": "1e48b8c3d48654d6d6f7c677143f56707029747f79a45c700d7a55a3615a0336",
+  "brain_results": [
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:00:37.855224+00:00",
+      "label": "inference",
+      "log_sha256": "468e3972ce7bff28a0f912bca9b7f7872db0910284c9e477c66e42ddeb965c3b",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:34.330467+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 52
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:00:39.658699+00:00",
+      "label": "buffered",
+      "log_sha256": "b0d7bd5a8e70affccec22f639d170635282c4fef14b84a727ed32403bd8da8df",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:37.855962+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 8
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:00:41.279474+00:00",
+      "label": "text-native",
+      "log_sha256": "ae30c2bcb1a2318aa74a623663221639349d1f50e7815ee29d4fa8ac21e5aaee",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:39.659297+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 32
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:00:45.156364+00:00",
+      "label": "translation",
+      "log_sha256": "095daa22e6278ecb77ec3eeb78ec9a5df316b993f43492bfec0f71ba08684502",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:41.280118+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 24
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:00:53.572550+00:00",
+      "label": "cognition",
+      "log_sha256": "3f56e290a31bfb53ce16ffbc0b9d94b285ed92b3111676a3383abbadb7ac35fa",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:45.156971+00:00",
+      "summary": {
+        "errors": 0,
+        "failures": 0,
+        "modules": {
+          "tests.integration.test_fabric_chat_cross_pool_auto": 16,
+          "tests.integration.test_fabric_text_cross_pool_auto": 14,
+          "tests.test_advisor_cognition_plane": 12
+        },
+        "skipped": 0,
+        "tests": 58
+      },
+      "xml_sha256": "7d9476a868d38cb6e37a56e0e5818c1126ea2d0059b76a784089ca6bb6506ffe"
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:01:21.876251+00:00",
+      "label": "portfolio",
+      "log_sha256": "e7e5f8137313cdbfe5cfd17ea2ea244006544b2e9c83aa3dc5e244b8c94760ac",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:00:53.573098+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 32
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:01:43.517537+00:00",
+      "label": "regional",
+      "log_sha256": "bb32b9c102d3e8f81666b3ef78504ad23e5a5a39b6b84198d0e07e6688d0c218",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:01:21.876779+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 42
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:01:48.162302+00:00",
+      "label": "chat-auto",
+      "log_sha256": "ccdcaba8e033b05cd580189f00a446350711da8bb42a561b8a93ccb05d287933",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:01:43.518199+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 16
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:01:50.951321+00:00",
+      "label": "text-auto",
+      "log_sha256": "a8883c40469b7d94849adcdf4ff54c4f740a1a80dbb720123e25637cfddfc6e3",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:01:48.162858+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 14
+      },
+      "xml_sha256": null
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T22:01:55.114001+00:00",
+      "label": "browser",
+      "log_sha256": "7e8c1522e9f6e62056b0312d74484968f248c6172fd4481e907b09daebd8e67c",
+      "returncode": 0,
+      "started_at": "2026-11-08T22:01:50.951825+00:00",
+      "summary": {
+        "skipped": 0,
+        "tests": 3
+      },
+      "xml_sha256": null
+    }
+  ],
+  "claims": {
+    "current_head_hosted_ci": false,
+    "protected_merge": false,
+    "provider_execution": false,
+    "runtime_deployment": false,
+    "source_qualification": true
+  },
+  "e3_provenance": {
+    "commit": "68dde5e7b98c7818c32e5bd270be9c7e8d8679f4",
+    "head_and_zero_refs_preserved": true,
+    "receipt_sha256": "6e45280504d572bc55d85441e0e6515fce668c4673063f57a3e2f3fd8592bdb4",
+    "scope": "unchanged E3 test and compiler only; not candidate source HEAD"
+  },
+  "macro_publication": {
+    "api_readback_verified": true,
+    "branch": "sol/web-fabric-application-consumer-composition-20261104-sol",
+    "changed_files": {
+      "tests/test_fabric_exact_scoped_model_composition.py": "be7a4ac292226d15e0385ec269ec4306b50f679c",
+      "tests/test_metabolism_fabric_composition.py": "762e5f8e11e745e70c6a358b11f043ab5f90de6e"
+    },
+    "expected_head_nonforce_update": true,
+    "native_macro_ref_mutation": false,
+    "parent": "463d7c5f1eb585e1bc214f011cd88a9f4d9352bf",
+    "published_commit": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
+    "schema": "h4-macro-paired-cohort-publication.v1",
+    "tree": "f0d20dd1c01376b7018f631972904de1f97ee489"
+  },
+  "macro_publication_receipt_sha256": "5c5486302ae9bcf5aaa1ee5bdb45c2a137dc16d66de00be2f29ab28bc8daa908",
+  "mastermind_producer_commit": "479d59766aa5edee1365139d80b963ffea81925c",
+  "overlays": {
+    "tests/test_fabric_exact_scoped_model_composition.py": {
+      "candidate_blob": "be7a4ac292226d15e0385ec269ec4306b50f679c",
+      "candidate_sha256": "cca4cbc2046fc4e602e87d12ef63b7d7bd34064a65b350f8aae868cbf72f7aad",
+      "original_blob": "45595bea7f35aa726162876c4fc0b6add47b3695",
+      "original_sha256": "0f17870629c87dd2b26168d984b846ca7543db996ca2eea8847c9356c8853c98"
+    },
+    "tests/test_metabolism_fabric_composition.py": {
+      "candidate_blob": "762e5f8e11e745e70c6a358b11f043ab5f90de6e",
+      "candidate_sha256": "1fa95b831077c2f8abfc2623830985bd0a69438900078d0699800ed9ab86a55f",
+      "original_blob": "2e574ddb11a3b325f09fc66a11a9a6f3acf90990",
+      "original_sha256": "f4cf972097231df032b6f5ccbefcaae01d4e7e781dbcf4cfc110474f103b20de"
+    }
+  },
+  "paired_projection_sha256": "1275c7359ca2f899606e7dd76b2bfc6489f07605f316fc4d7aa3efb7c9909d45",
+  "paired_qualification_sha256": "264ef632882ea20e0eefd8d39149b775dd4b3e615e41206c25d5035a27c7cc39",
+  "paired_results": [
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T21:49:52.253093+00:00",
+      "expected_tests": 119,
+      "failure_cases": [],
+      "fresh_process": true,
+      "label": "original-exact",
+      "log_sha256": "c131b6a27e7dc86b7e52cff481c710651a188e8e4518e20b0d6373faaafcace5",
+      "producer_commit": "0a59c93a5fc5944fa096ac1a49dc36e697e5681f",
+      "returncode": 0,
+      "started_at": "2026-11-08T21:49:38.544260+00:00",
+      "summary": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 119
+      },
+      "xml_sha256": "15596047b4a046833264afef07a210a83a997395a10353d13f8a8b076a8589b3"
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T21:50:04.361352+00:00",
+      "expected_tests": 119,
+      "failure_cases": [],
+      "fresh_process": true,
+      "label": "glm-exact",
+      "log_sha256": "45a9f1068fccf7fc16bb3f46e5b229935e42c97d83f698554ab5e1def558dd86",
+      "producer_commit": "479d59766aa5edee1365139d80b963ffea81925c",
+      "returncode": 0,
+      "started_at": "2026-11-08T21:49:52.253649+00:00",
+      "summary": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 119
+      },
+      "xml_sha256": "f482f5b154b9dfbeefe4b56c43d27ee07e2c714fb038535724ddb2c16db23220"
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T21:50:24.371734+00:00",
+      "expected_tests": 291,
+      "failure_cases": [],
+      "fresh_process": true,
+      "label": "original-metabolism",
+      "log_sha256": "e8298cc0b6f48ca6d48fecede75614621bde115286d342ae883d5a5e4f20ac7f",
+      "producer_commit": "0a59c93a5fc5944fa096ac1a49dc36e697e5681f",
+      "returncode": 0,
+      "started_at": "2026-11-08T21:50:04.361963+00:00",
+      "summary": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 291
+      },
+      "xml_sha256": "628da4367f15249e1bbc9353d5a2a03aa619bc0250e1ebabc44aad0c4adc4096"
+    },
+    {
+      "accepted": true,
+      "completed_at": "2026-11-08T21:50:43.554065+00:00",
+      "expected_tests": 291,
+      "failure_cases": [],
+      "fresh_process": true,
+      "label": "glm-metabolism",
+      "log_sha256": "40b8f6db204236490520c7f23f9f06e442ce28f8cdabc04d5fcbfd21a4b29d75",
+      "producer_commit": "479d59766aa5edee1365139d80b963ffea81925c",
+      "returncode": 0,
+      "started_at": "2026-11-08T21:50:24.372348+00:00",
+      "summary": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 291
+      },
+      "xml_sha256": "860591cd274a816abde4ee399923c4e48dec9c7b12126ac09716b6fb59e776e2"
+    }
+  ],
+  "reason": "GLMv4 intentionally changes five producer identities; paired fixtures must accept complete original or complete GLMv4 cohorts and reject mixed source.",
+  "schema": "mastermind.h4.paired-native-cohort-qualification.v1",
+  "timestamp": "2026-11-08T22:04:27.849412+00:00",
+  "workflow_change": {
+    "new_paired_macro": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
+    "only_one_ref_literal_changed": true,
+    "ordinary_vendor_macro_preserved": "268a89e3828d848848c77dfe69191c3fa7319361",
+    "path": ".github/workflows/ci.yml",
+    "previous_paired_macro": "f38c5b9ea25ea598094a309f0edf48e2722408be"
+  }
+}

@@ -1,0 +1,5 @@
+name: mmx_github
+version: "1.0.0"
+description: "Host-bound GitHub App access for the current native Hermes session. Unbound discovery exposes no tool."
+author: "Mastermind"
+provides_tools: []

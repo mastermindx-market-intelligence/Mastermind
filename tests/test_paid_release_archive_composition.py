@@ -20,6 +20,8 @@ import tarfile
 
 import pytest
 
+from tests.test_glm_native_release_record_transition import expected_core_release_records
+
 ROOT = Path(__file__).resolve().parents[1]
 RELATIVE_ROLLOUT = Path("ops/native_fabric/quota_continuity/rollout")
 MARKER = "MASTERMIND_RELEASE_NATIVE_STAGE"
@@ -76,7 +78,8 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
                for name in ("native-manifest.json", "native-source-inventory.json")}
     result = _materialize(root)
     assert result.returncode == 0, result.stderr
-    manifest = json.loads(records["native-manifest.json"])
+    expected_records = expected_core_release_records(rollout.parent, records)
+    manifest = json.loads(expected_records["native-manifest.json"])
     # Read the archived owner's explicit graph without adding an import cache
     # to the namespace whose exact installer additions we are checking.
     import types
@@ -101,7 +104,7 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     assert (component_root / "source-go_shim.py").read_bytes() == predecessor
     assert (component_root / "go_shim.py").read_bytes() == candidate
     assert hashlib.sha256(predecessor).hexdigest() == builder.GO_INSTALLED_PREIMAGE
-    inventory = json.loads(records["native-source-inventory.json"])
+    inventory = json.loads(expected_records["native-source-inventory.json"])
     component = json.loads((component_root / "component.json").read_bytes())
     assert component["schema"] == "native-external-go-component.v1"
     assert component["component"] == "go_application_handler"
@@ -118,11 +121,13 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     for name, row in component["dependencies"].items():
         data = (native / "candidate" / name).read_bytes()
         assert row == {"source": "candidate/" + name, "bytes": len(data),
-                       "sha256": hashlib.sha256(data).hexdigest()}
+                       "sha256": hashlib.sha256(data).hexdigest(),
+                       "composition": dict(inventory["files"]["ext/" + name]["composition"],
+                                           inherited=None)}
     after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
     assert after - before == expected_new
     assert before <= after
-    for name, raw in records.items():
+    for name, raw in expected_records.items():
         assert (rollout / name).read_bytes() == raw
     for name, sha in manifest.items():
         path = rollout / "native-code-stage" / name
