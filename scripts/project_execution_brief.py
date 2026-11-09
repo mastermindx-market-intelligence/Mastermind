@@ -232,7 +232,12 @@ def apply_creation(path: Path, new_text: str) -> dict:
         temp.chmod(0o600)
         if path.is_symlink() or path.exists():
             raise ValueError('Target appeared during preparation; no write performed')
-        os.replace(temp, path)
+        try:
+            # Hard-link publication is atomic creation: it fails if any file or
+            # symlink took the name in the checking gap, instead of clobbering it.
+            os.link(temp, path)
+        except FileExistsError:
+            raise ValueError('Target appeared during preparation; no write performed') from None
     finally:
         temp.unlink(missing_ok=True)
     after = digest(path.read_bytes())
@@ -262,8 +267,10 @@ def main() -> int:
             parser.error('Target does not exist; pass --create-target to create it explicitly')
         if args.profile == 'memory':
             parser.error('--create-target supports the codex and claude profiles only')
-        if args.apply and args.expected_sha256:
+        if args.expected_sha256:
             parser.error('Creation has no byte preimage; omit --expected-sha256')
+        if not args.path.parent.is_dir() or args.path.parent.is_symlink():
+            parser.error('Creation target parent must be an existing real directory')
         brief_path = args.brief or Path(__file__).resolve().parents[1] / 'docs/NATIVE_EXECUTION_BRIEF.md'
         brief = brief_path.read_text(encoding='utf-8')
         text = project('', brief, args.profile)

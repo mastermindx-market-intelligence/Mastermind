@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('candidate_writer', ROOT / 'scripts/project_execution_brief.py')
@@ -158,7 +159,7 @@ class CreateTargetCliTests(unittest.TestCase):
     def invoke(self, path, profile, *extra):
         return subprocess.run([sys.executable, '-B', str(ROOT / 'scripts/project_execution_brief.py'),
             '--path', str(path), '--profile', profile, *extra],
-            text=True, capture_output=True, timeout=20, cwd=path.parent if path.parent.is_dir() else Path(directory := tempfile.gettempdir()))
+            text=True, capture_output=True, timeout=20, cwd=tempfile.gettempdir())
 
     def test_missing_target_refused_without_explicit_flag(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -216,6 +217,23 @@ class CreateTargetCliTests(unittest.TestCase):
                                  '--create-target', '--apply', '--backup-dir', str(root / 'backup'))
             self.assertNotEqual(orphan.returncode, 0)
             self.assertFalse((root / 'missing').exists())
+            real = root / 'real'
+            real.mkdir()
+            linked = root / 'linked'
+            linked.symlink_to(real, target_is_directory=True)
+            via_link = self.invoke(linked / 'instructions.md', 'claude', '--create-target', '--apply',
+                                   '--backup-dir', str(root / 'backup'))
+            self.assertNotEqual(via_link.returncode, 0)
+            self.assertIn('existing real directory', via_link.stderr)
+            self.assertFalse((real / 'instructions.md').exists())
+
+    def test_create_apply_refuses_when_target_appears_during_preparation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'instructions.md'
+            with mock.patch.object(M.os, 'link', side_effect=FileExistsError):
+                with self.assertRaisesRegex(ValueError, 'appeared'):
+                    M.apply_creation(path, 'x')
+            self.assertFalse(path.exists())
 
 
 if __name__ == '__main__':
