@@ -147,7 +147,7 @@ That readback also showed additional changes beyond this session's observed call
 
 ## Bonds production-source recovery — verified native design
 
-File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5), page `p-2-0`. New native artboard `3PO-0`, “R33 · Source publication recovery · EN and ZH390”, was duplicated from the existing index and placed at x2090/y−6207, 1440px wide, beyond the existing right edge with 80px clearance. Owned body `3QM-0` was composed incrementally.
+File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0), page `p-2-0`. New native artboard `3PO-0`, “R33 · Source publication recovery · EN and ZH390”, was duplicated from the existing index and placed at x2090/y−6207, 1440px wide, beyond the existing right edge with 80px clearance. Owned body `3QM-0` was composed incrementally.
 
 ### User-facing recovery and build routing
 
@@ -1279,9 +1279,9 @@ The contract distinguishes requested and actual endpoints, selected sessions, 21
 
 ### Entry pages and recorded effects agree
 
-Root compared every row in the21-file delivery map with the corresponding successful native edit records. Twenty page pointers already matched. The Bonds/cross-asset row still pointed to `p-1-0`, while all20 recorded changes addressed `p-2-0`. A fresh native read confirmed the current recovery board `3PO-0` and entry map `1T0-0` on that exact page. The delivery link now opens [the correct Bonds recovery page](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0).
+Root compared every row in the 21-file delivery map with the corresponding successful native edit records. Twenty page pointers already matched. The Bonds/cross-asset row still pointed to `p-1-0`, while all 20 recorded changes addressed `p-2-0`. A fresh native read confirmed the current recovery board `3PO-0` and entry map `1T0-0` on that exact page. The delivery link now opens [the correct Bonds recovery page](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0).
 
-The21 mapped file identities exactly equal the21 successfully amended file identities. Each file's last observed owned editing action is its explicit `finish_working_on_nodes`. Historical exceptional receipts remain documented: the Breadth insertion's original-target readback confirmed no effect before the distinct repair, and the unsupported Expectation `finish` name was resolved through the catalog's reviewed action. No uncertain new mutation remains open in this successor.
+The 21 mapped file identities exactly equal the 21 successfully amended file identities. Each file's last observed owned editing action is its explicit `finish_working_on_nodes`. Historical exceptional receipts remain documented: the Breadth insertion's original-target readback confirmed no effect before the distinct repair, and the unsupported Expectation `finish` name was resolved through the catalog's reviewed action. No uncertain new mutation remains open in this successor.
 
 A separate editorial pass inserted missing spaces in the handoff prose. Its verification preserved every non-whitespace character, numeric sequence, inline/fenced code segment and URL. No value, identity, source reference or receipt changed.
 
@@ -1293,9 +1293,9 @@ Root independently read the period and build content and recomputed the illustra
 
 | Case | Verified result | Existing design meaning |
 | --- | --- | --- |
-| $10,000 → $7,500,15Oct2024 to15Oct2026 | 730 elapsed days;730/365.25 =1.9986310746 years; CAGR−13.405991% | −13.41% annualized,−25.0% total; date basis remains explicit. |
-| Same amounts, explicitly selected2Years | CAGR−13.397460% | −13.40%; a distinct user-selected period basis. |
-| $10,000 at7% for10years | $19,671.5136 final value; +96.715136% total | $19,672 and+96.7%, explicitly an arithmetic projection. |
+| $10,000 → $7,500, 15 Oct 2024 to 15 Oct 2026 | 730 elapsed days; 730 / 365.25 = 1.9986310746 years; CAGR −13.405991% | −13.41% annualized, −25.0% total; date basis remains explicit. |
+| Same amounts, explicitly selected 2 Years | CAGR −13.397460% | −13.40%; a distinct user-selected period basis. |
+| $10,000 at 7% for 10 years | $19,671.5136 final value; +96.715136% total | $19,672 and +96.7%, explicitly an arithmetic projection. |
 
 The annualized rate is a constant-rate equivalent, not each year's actual return. Invalid/reversed date states retain fields, withhold the current result/Copy and require an explicit switch to retained Years. Copy failure preserves a valid calculation and supplies the attempted text for manual recovery. The existing build contract already addresses obsolete completion feedback and exact copied-period identity.
 
