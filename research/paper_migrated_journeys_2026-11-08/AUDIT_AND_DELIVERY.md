@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the fourteen files amended in this successor. Each file retains its existing current, Draft or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the fifteen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -28,6 +28,7 @@ Direct entry points for the fourteen files amended in this successor. Each file 
 | [Intraday Flow](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) | Separated nominal price-feed delay from build time and actual source availability. |
 | [BioCatalyst](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0) | Clarified that dialog dismissal preserves the parent research/comparison draft. |
 | [MedTech](https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0) | Distinguished narrower guidance from a source conflict or an earlier launch. |
+| [Watchlist save recovery](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) | Added EN390 and ZH320 browser-retention failure states; checking storage preserves the original operation and never resends a save. |
 
 ## Verified mobile meaning corrections
 
@@ -916,9 +917,73 @@ The read-only MarketOntology audit identified current R22–R25 architecture, re
 
 The read-only News Intelligence audit found later Activity, count-window and publisher-return work in the file's current authority map and candidate #10874 at `6ac8c20013dbea575f7007d51ba37d952056f927`. The retained recovery states and later writers' work were preserved. This audit did not turn an absent branch file into a missing-design claim and did not recertify browser or production behavior. Neither file was mutated by this successor.
 
+
+## Watchlist save recovery — browser retention failure before dispatch
+
+The [Shared Market Watchlists file](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) already separated its22 historical Reference boards from four Proposed D23 boards covering exact-list return, read outcomes, account/chooser changes and unbound destinations. The bounded whole-file audit found no specimen for the existing browser-retention barrier. The older local-storage mentions described prohibited fallback stores, not this save owner's required unresolved-request record.
+
+### Exact incumbent implementation
+
+Root read these immutable Terminal sources at `aafc16cef1635e851a9cbb95966c5cfbe1e657a0`:
+
+| Source | Blob | Relevant behavior |
+| --- | --- | --- |
+| [CompanyWatchSave.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/aafc16cef1635e851a9cbb95966c5cfbe1e657a0/terminal/components/fin/CompanyWatchSave.tsx) | `7dab903014873180aae2e50be4a05fb1618c7801` | Requires the exact unresolved-operation record to be retained and read back before POST. While storage is blocked, Save is disabled and Check browser storage calls the incumbent recovery path. |
+| [watchlistOwner.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/aafc16cef1635e851a9cbb95966c5cfbe1e657a0/terminal/lib/watchlistOwner.ts) | `e3e44b11dbe28679011eaccef8d62247bfe921f7` | Unreadable/corrupt retention is blocked, never empty. The record is a no-replay fence, not an outbox or retry authorization. A different unresolved operation cannot replace it. |
+
+Root independently fetched CompanyWatchSave at D23's original `b38d93c2cc8d05f9f5c29598a3691304330ffee6` pin and verified **identical component content and blob**. This design follows an already-present owner behavior.
+
+`recoverFence()` only reads current retention and, when it finds a held request, restores that exact operation as unknown and reconciles its membership through the same owner. A successful check does not send a save. If storage is available and no operation remains held, a new save still needs the user's explicit action and the existing eligibility/owner checks. Timeout, malformed, network and5xx results do not authorize replay.
+
+### Editable proposed states
+
+New gallery `2RP-0`, **05–06 · PROPOSED · Browser retention blocks new save · EN390 + ZH320**, is on the existing Proposed page at x3895/y−3547. Its native rendered capture is900×1595. The original four Proposed boards and all Reference boards retain their IDs, content and status.
+
+| Frame | Rendered size | Important nodes |
+| --- | --- | --- |
+| `2MV-0` · English |390×844 | Exact status `2P3-0`; sample company `2P5-0`; AI research choice `2P9-0`; disabled Save `2PC-0`; Check browser storage `2PE-0` / `2PF-0`; helper `2PG-0`. |
+| `2NX-0` · Chinese |320×844 | Exact status `2PQ-0`; same company `2PS-0`; AI研究 choice `2PW-0`; disabled Save `2PZ-0`; 检查浏览器存储 `2Q1-0` / `2Q2-0`; helper `2Q3-0`. |
+| `2RV-0` · separate Build binding |844×503 | Existing source pins, before-dispatch condition, both storage-check outcomes, no-replay/identity rule and remaining browser proof. |
+
+The product status and action match the implementation exactly in both languages:
+
+- **This browser cannot safely retain a save request. No new save was sent.**
+- **Check browser storage**
+- **浏览器无法安全保留保存请求。未发送新的保存请求。**
+- **检查浏览器存储**
+
+The pre-dispatch example retains the existing illustrative **NVDA · NVIDIA / AI research** labels. No account, list UUID or membership is fabricated. The wording is **No new save was sent**, not a claim that no previous operation could exist. Save is visually disabled; the recovery action is prominent. Both phones explain that checking storage does not send a request. Their existing Close and return-to-setup affordances remain separate from submission.
+
+The sheet composition is proposed; the actual component's current inline presentation is not recertified by this drawing. The source and behavioral notes sit outside both product frames. They preserve D23 `2D4-0`, distinguish membership confirmation from insertion ownership, and introduce no guest fallback, separate store, automatic retry or Undo entitlement.
+
+### Verification and release
+
+Root inspected both complete phone screenshots, the separate builder panel and the complete paired gallery. The controls use the existing44px close/return/select targets and48px Save/recovery targets. All text remains visible at320px and390px. Native JSX confirms the exact bilingual source status/action, selected company and existing translated list labels. Both original templates were re-read: **all28 original text leaves remain identical**.
+
+Native cross-page tree reads returned unknown computed heights for several offscreen nodes. Height claims above therefore come from the exact native JPEG dimensions and inspected captures, rather than fabricated geometry values. The native tree still establishes parent/child identity, widths and separation of the builder guide from product frames.
+
+All9 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the new gallery and its two phone frames.
+
+- `paper-watch-storage-phone-copies-20261109-c4-sd`
+- `paper-watch-storage-phone-en-20261109-c4-sd`
+- `paper-watch-storage-phone-zh-20261109-c4-sd`
+- `paper-watch-storage-gallery-copy-20261109-c4-sd`
+- `paper-watch-storage-gallery-content-20261109-c4-sd`
+- `paper-watch-storage-gallery-row-20261109-c4-sd`
+- `paper-watch-storage-gallery-place-phones-20261109-c4-sd`
+- `paper-watch-storage-gallery-names-20261109-c4-sd`
+- `paper-watch-storage-finish-20261109-c4-sd`
+
+This closes a missing design state. No account endpoint was called, no save was sent, and no browser-storage, request-count, identity-transition, keyboard or production proof is claimed.
+
+### Shared Search and Comparison — no extra amendment warranted
+
+The bounded read-only audit of file `01M6Y31C449F02KGRNPGK94Q8D` found its Reference discovery, local refinement, applied/no-match states, unavailable reads and return behavior already coherent. Its illustrative Atlas8.4%, theme5.8% and2.6-percentage-point difference match the retained comparison scale. It remains distinct from both T47 and the current F01 exact-company picker. No reference promotion, replacement search service or mutation was made in that file.
+
+
 ## Active continuation
 
-The successor covers fourteen design files, with a direct entry map and the newly completed populated Stage phone. Preserve accepted work and existing holds. Continue bounded read-only reasoning across remaining current destinations to find a material, evidence-supported architecture or feature gap; keep each new amendment within its existing source and design owner.
+The successor covers fifteen design files, including the populated Stage phone and browser-retention save recovery. Preserve accepted work and existing holds. The next supported phase is a proposed F01 phone company-search companion: exact listing, partial metadata with Open Analysis still available, and browser-Back restoration under the incumbent history owner. Held F01 candidate/readme effects and the later Today proposal remain untouched.
 
 
 ## Acceptance boundary
