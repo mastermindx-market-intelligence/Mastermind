@@ -34,6 +34,8 @@ def test_claude_fabric_skill_is_exact_source_blob() -> None:
     git_blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
     assert git_blob == policy.CLAUDE_FABRIC_SKILL_BLOB_SHA
     assert raw == policy._canonical_claude_fabric_skill()
+    assert policy.CLAUDE_FABRIC_SKILL_MAX_BYTES == 9216
+    assert 0 < len(raw) <= 9216
     text = raw.decode("utf-8")
     for required in (
         "fabric_task.py", "fabric_request", "fabric_status", "fabric_result",
@@ -208,11 +210,29 @@ def _protected_pre_review_guide_claude_skill() -> bytes:
     return prefix + next_heading + suffix
 
 
-def test_previous_protected_claude_skill_upgrades_safely(tmp_path: Path) -> None:
+def _protected_pre_recovery_claude_skill() -> bytes:
+    """Reconstruct the genuine protected guide immediately before this addition."""
     current = (ROOT / "skills/mastermind-claude-fabric-delegation/SKILL.md").read_bytes()
-    previous = _protected_pre_review_guide_claude_skill()
+    marker = b"\n## Attempt-local recovery\n"
+    next_heading = b"\n## First 30 seconds: choose the existing entrypoint\n"
+    assert current.count(marker) == current.count(next_heading) == 1
+    prefix, rest = current.split(marker, 1)
+    _, suffix = rest.split(next_heading, 1)
+    return prefix + next_heading + suffix
+
+
+@pytest.mark.parametrize("preimage, expected_blob", [
+    ("pre_review", "a4a29ba025db0e50f084179b248501fd27327bfb"),
+    ("pre_recovery", "3f9d0bbad57de0174b715f4186dc2d0be5ca58b7"),
+])
+def test_previous_protected_claude_skill_upgrades_safely(
+    tmp_path: Path, preimage: str, expected_blob: str,
+) -> None:
+    current = (ROOT / "skills/mastermind-claude-fabric-delegation/SKILL.md").read_bytes()
+    previous = (_protected_pre_review_guide_claude_skill() if preimage == "pre_review"
+                else _protected_pre_recovery_claude_skill())
     blob = hashlib.sha1(b"blob " + str(len(previous)).encode("ascii") + b"\0" + previous).hexdigest()
-    assert blob == "a4a29ba025db0e50f084179b248501fd27327bfb"
+    assert blob == expected_blob
     assert blob in policy.CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS
     assert 8192 < len(current) <= policy.CLAUDE_FABRIC_SKILL_MAX_BYTES
     home = tmp_path / "home"

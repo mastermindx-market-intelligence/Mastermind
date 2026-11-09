@@ -86,6 +86,10 @@ def test_stale_foreign_or_relabelled_parent_refuses_before_output(terminal_sourc
 
 def test_composer_extension_recovers_exact_accepted_S5_source_and_default():
     raw=Path(compose.__file__).read_text()
+    repair_branch='    elif profile_name == "terminal119-fleet-launch-repair":\n        profile_root = HERE / "fleet_launch_repair"\n'
+    repair_choice=', "terminal119-fleet-launch-repair"'
+    assert raw.count(repair_branch)==raw.count(repair_choice)==1
+    raw=raw.replace(repair_branch,'').replace(repair_choice,'')
     for profile,folder,count in CASES:
         branch=f'    elif profile_name == "{profile}":\n        profile_root = HERE / "{folder}" / "after_terminal_diagnostics"\n'
         choice=f', "{profile}"'

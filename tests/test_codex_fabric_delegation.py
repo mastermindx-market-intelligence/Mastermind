@@ -27,6 +27,17 @@ def _legacy_skill() -> bytes:
     return skill.split(marker, 1)[0]
 
 
+def _protected_pre_recovery_codex_skill() -> bytes:
+    """Remove only this addition before deriving genuine historical prefixes."""
+    current = (ROOT / SKILL_PATH).read_bytes()
+    marker = b"\n## Review failure recovery without replay\n"
+    next_heading = b"\n## Independent PR review: one portable source contract\n"
+    assert current.count(marker) == current.count(next_heading) == 1
+    prefix, rest = current.split(marker, 1)
+    _, suffix = rest.split(next_heading, 1)
+    return prefix + next_heading + suffix
+
+
 def _home(tmp_path: Path, *, with_pointer: bool) -> tuple[Path, bytes, bytes, bytes]:
     home = tmp_path / "home"
     (home / ".codex/skills/mastermind-fabric-delegate").mkdir(parents=True)
@@ -51,6 +62,7 @@ def test_codex_source_pin_and_existing_legacy_digest() -> None:
     git_blob = hashlib.sha1(b"blob " + str(len(new)).encode() + b"\0" + new).hexdigest()
     assert git_blob == policy.CODEX_FABRIC_SKILL_BLOB_SHA
     assert policy._canonical_codex_fabric_skill() == new
+    assert 0 < len(new) <= 24576
     assert hashlib.sha256(_legacy_skill()).hexdigest() == policy.CODEX_FABRIC_LEGACY_SHA256
     s = new.decode()
     for token in ("fabric_operator_scope", "fabric_child_request",
@@ -158,7 +170,7 @@ def test_new_macro_cwd_guide_upgrades_exact_current_skill_only(tmp_path: Path) -
     current = (ROOT / SKILL_PATH).read_bytes()
     section = b"\n## New Macro sparse-worktree requests\n"
     assert current.count(section) == 1
-    prior, guidance = current.split(section, 1)
+    prior, guidance = _protected_pre_recovery_codex_skill().split(section, 1)
     prior_blob = hashlib.sha1(b"blob " + str(len(prior)).encode() + b"\0" + prior).hexdigest()
     assert prior_blob == "1ae788e373c93546ac4990e7ab48c1fa539561e9"
     assert b"--cwd '~'" in prior
@@ -217,14 +229,21 @@ def test_bounded_operator_source_keeps_plain_leaf_denied() -> None:
         )
 
 
-def test_previous_current_codex_skill_is_exact_upgrade_preimage(tmp_path: Path) -> None:
-    """An installed reviewed pre-#1924 skill must upgrade, not be rejected as drift."""
+@pytest.mark.parametrize("preimage, expected_blob", [
+    ("pre_review", "b2a24eaada6c2996513eed32ea6a8fa283175015"),
+    ("pre_recovery", "21480522be625525f1569fbc0b1dec09d0f06160"),
+])
+def test_previous_current_codex_skill_is_exact_upgrade_preimage(
+    tmp_path: Path, preimage: str, expected_blob: str,
+) -> None:
+    """Genuine protected guides must upgrade without manufacturing historical hashes."""
     current = (ROOT / SKILL_PATH).read_bytes()
     marker = b"\n## Independent PR review: one portable source contract\n"
     assert current.count(marker) == 1
-    former = current.split(marker, 1)[0]
+    protected = _protected_pre_recovery_codex_skill()
+    former = protected.split(marker, 1)[0] if preimage == "pre_review" else protected
     blob = hashlib.sha1(b"blob " + str(len(former)).encode("ascii") + b"\0" + former).hexdigest()
-    assert blob == policy.CODEX_FABRIC_PREVIOUS_BLOB_SHA
+    assert blob == expected_blob
     home, doc, config, hooks = _home(tmp_path, with_pointer=True)
     (home / USER_SKILL).write_bytes(former)
     assert policy.verify_codex_fabric_entrypoint(home)["state"] == "DRIFT"
