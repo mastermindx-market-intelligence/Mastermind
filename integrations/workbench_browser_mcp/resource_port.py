@@ -15,6 +15,8 @@ from typing import Any
 
 from control_plane.browser_resource_contract import (
     WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    APP_CONTROL_TOOL_SCHEMA_DIGEST,
+    validate_app_control_origin,
     BrowserCleanupAction,
     BrowserMode,
     decide_browser_cleanup,
@@ -99,6 +101,7 @@ class BrowserHostConfig:
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
     startup_timeout_seconds: float = 10.0
     credential_runtime: object | None = None
+    app_control_origin: str | None = None
 
 
 def _absolute(value: str, name: str) -> str:
@@ -157,6 +160,17 @@ def validate_host_config(value: object) -> BrowserHostConfig:
         if type(value.credential_runtime) is not CredentialRuntimeConfig:
             raise BrowserResourceRefused("CREDENTIAL_RUNTIME_INVALID")
         parse_credential_runtime(dataclasses.asdict(value.credential_runtime))
+    if value.app_control_origin is not None:
+        try:
+            validate_app_control_origin(value.app_control_origin)
+        except ValueError as error:
+            raise BrowserResourceRefused("APP_CONTROL_ORIGIN_INVALID") from error
+        if value.expected_tool_schema_digest != APP_CONTROL_TOOL_SCHEMA_DIGEST or value.credential_runtime is not None:
+            raise BrowserResourceRefused("APP_CONTROL_PROFILE_NOT_QUALIFIED")
+        if Path(value.mcp_cli_path) != value.source_root / "integrations/worker_browser_runtime/node_modules/@playwright/mcp/cli.js":
+            raise BrowserResourceRefused("APP_CONTROL_RUNTIME_NOT_IN_SOURCE_RELEASE")
+    elif value.expected_tool_schema_digest == APP_CONTROL_TOOL_SCHEMA_DIGEST:
+        raise BrowserResourceRefused("APP_CONTROL_ORIGIN_REQUIRED")
     return value
 
 
@@ -192,6 +206,7 @@ def default_relay_command(
         config.node_executable,
         "--mcp-cli-path",
         config.mcp_cli_path,
+        *(("--app-control-origin", config.app_control_origin) if config.app_control_origin is not None else ()),
         "--chrome-executable",
         config.chrome_executable,
         "--output-dir",

@@ -6000,7 +6000,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </button>
           {freshEntryUnavailableReason ? <p id="new-conversation-unavailable" className="sidebar-new-entry-hint">{freshEntryUnavailableReason}</p> : null}
           </div>
-          <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+          <button type="button" className="sidebar-search" data-agent-route="Search" aria-current={active === "Search" ? "page" : undefined}
             onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
           </button>
@@ -6010,6 +6010,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {primaryNavigation.map((x) => (
                 <button
                   key={x}
+                  data-agent-route={x}
                   className={active === x ? "active" : ""}
                   aria-label={navigationLabel(x, locale)}
                   aria-current={active === x ? "page" : undefined}
@@ -6046,6 +6047,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {advancedNavigation.map((x) => (
                   <button
                     key={x}
+                    data-agent-route={x}
                     className={active === x ? "active" : ""}
                     aria-label={advancedLabel(x, locale)}
                     aria-current={active === x ? "page" : undefined}
