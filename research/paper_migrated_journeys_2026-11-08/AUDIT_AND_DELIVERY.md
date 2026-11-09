@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the sixteen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the seventeen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -30,6 +30,7 @@ Direct entry points for the sixteen files amended in this successor. Each file r
 | [MedTech](https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0) | Distinguished narrower guidance from a source conflict or an earlier launch. |
 | [Watchlist save recovery](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) | Added EN390 and ZH320 browser-retention failure states; checking storage preserves the original operation and never resends a save. |
 | [Shared Shell company search](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) | Added a proposed phone selection/return journey with exact listing identity and enabled Analysis access when descriptive metadata is unavailable. |
+| [Expectation Surface](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | Added proposed EN/ZH finder-loading and unavailable states that preserve the query and chart, with a source-bound retry and no-match contract. |
 
 ## Verified mobile meaning corrections
 
@@ -1039,10 +1040,65 @@ Browser navigation, eligibility changes, request counts, metadata races, keyboar
 
 The bounded read-only audit of file `01M6Y2Z642VN20X8WDSWV07M0M` found its Reference comparison → evidence → return journey internally consistent: Atlas8.4% versus theme5.8% remains a2.6-percentage-point difference, with five-session period,25Sep date, fictional fixture, basket limitations and preserved return context. Its synthetic NVDA setup keeps listing identity, intraday horizon, inspection and watchlist choice distinct. The existing PARTIAL/reference status was preserved; no exact current implementation-owner binding was established in that bounded lookup, and no new state or owner was invented.
 
+
+## Expectation Surface — separate unavailable ticker search from no match
+
+[File/page](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0), **02 · Build · States + implementation**. New proposed module `4DE-0` sits in existing build root `3UR-0`, immediately after the selection/recovery contract `3XP-0`. This closes a source-observed gap in finder availability without rewriting the existing successful no-match specimen `U4-0`, selected-security failure specimens or current navigation work.
+
+### Source-observed gap and precise proposal
+
+Root inspected [templates/expectation_surface.html.j2](https://github.com/mastermindx-market-intelligence/Macro/blob/0997d488f73ebe76773ce4d534fa97749a0c1674/templates/expectation_surface.html.j2) at Macro `0997d488f73ebe76773ce4d534fa97749a0c1674`, blob `51d99c9ac76557e2dce356a53231416f5fe84a44`. The template blob is identical at the prior `b5674d8ef898e503d6164922654f5ff89be9981c` source pin. The current PR #10874 head `6e8b67d989465435a39a6ef1fe60ad6d89c119c7` was read separately; its incumbent navigation integration remains intact.
+
+The inspected `ensureIndex` converts a failed fetch/JSON read and a non-array response into an empty array cache. Because that cache is truthy, later focus cannot recover it through the current guard. Input and Enter handling can reach no-match behavior while the index is pending or failed, and successful completion does not rerender suggestions for the current query. These are source observations, not an executed browser reproduction.
+
+The new module visibly says **PROPOSED · FINDER AVAILABILITY · REQUIRED IMPLEMENTATION EXTENSION**. The existing ticker-index loader remains the owner. The new Retry action is a required extension to that loader, not a claim that the inspected implementation already provides it.
+
+### Native English and Chinese states
+
+All four native product fragments are **390×432**, retain the existing no-match query **MUU**, and preserve the current chart. No new ticker, estimate, market data or source clock is invented.
+
+| Native product frame | Meaning | Visible action |
+| --- | --- | --- |
+| `4DM-0` | English list loading: “Loading captured tickers…”; keep typing and use the current query once ready. | Clear search only. |
+| `4E0-0` | English unavailable list: “Ticker search is unavailable”; the captured-ticker list could not be loaded. | Retry ticker search, plus Clear search. |
+| `4EH-0` | Chinese list loading: “正在读取已采集代码…”; retain and later evaluate the current query. | 清空搜索 only. |
+| `4EV-0` | Chinese unavailable list: “暂时无法搜索代码”; the captured-ticker list could not be read. | 重试代码搜索, plus 清空搜索. |
+
+Inputs and action targets are at least44px high. English uses the established dark tokens; Chinese uses the established light tokens. Root inspected each full native product fragment, the1110×454 build binding and the complete1160×1610 module. Text and actions fit, with no clipped edge or accidental overflow.
+
+Separate build reference `4F9-0` records the implementation obligations:
+
+- Distinguish pending, usable success and failed/malformed list reads. Show successful no-match only after searching a usable result.
+- During loading or failure, Enter/arrows cannot fabricate a match or commit a security.
+- Retry rereads the same `expectation_surface/tickers/index.json` through its existing owner. Preserve typed query, settled security, metric, fiscal period and source context.
+- A finder-list failure does not become a selected-security failure. The current chart and values remain intact.
+- Completion uses the current query and finder visibility. It must not reopen a dismissed list, steal later focus, reuse an obsolete query or automatically select a security.
+- Clear retains its existing owner. Accessible announcements distinguish loading, unavailable and actual no-match.
+
+The acceptance matrix still requires delayed response, failed/malformed index, successful retry after a query edit, clear/blur before completion, valid empty/successful no-match, and English/Chinese keyboard and touch proof. Existing `UQ-0`/`45Z-0` selected-context recovery, `47N-0` comparison continuity, rollover and `4D3-0` navigation remain unchanged.
+
+### Preservation, operation readback and bounded diagnostics
+
+Exact full-root JSX readback preserved **all244 pre-existing text leaves** with their node IDs and values unchanged. The new module adds42 text leaves. All four query leaves remain MUU. Root observed four APPLIED_RESPONSE_OBSERVED actions:
+
+- `paper-expectation-finder-availability-content-20261109-c4-sd`
+- `paper-expectation-finder-availability-place-20261109-c4-sd`
+- `paper-expectation-finder-availability-names-20261109-c4-sd`
+- `paper-expectation-finder-availability-release-20261109-c4-sd`
+
+Explicit `finish_working_on_nodes` released only `3UR-0` and `4DE-0`. Two read attempts included unsupported `pageId` arguments and were rejected before execution; the catalog's exact file/node schemas were then used successfully. A call to nonexistent catalog action `finish` was rejected as TOOL_NOT_ALLOWED. Catalog inspection and the preceding successful operation ledger established the reviewed action name `finish_working_on_nodes`; that action completed on the same carrier with the same explicit node scope. There was no uncertain mutation or alternate-carrier replay.
+
+A separate read-only layout check found no defect in existing state specimen `QN-0`: its native JPEG is1160×1987 and all nine children are visible; the reported904px tree height is stale intrinsic metadata. Current JSX has no fixed height, maximum height, clipping or absolute child placement, and the next module remains in normal parent flow. No speculative QN layout edit was made.
+
+### Other bounded reviews: preserve existing coverage
+
+Read-only reasoning on Risk Radar found that calibration uncertainty, unrounded precision, absent-input meaning, conditional retry and protected source-context returns are already represented in later current states. The relevant workspace JavaScript remains unchanged at Macro `c3c955d012d71e6c95ae99a46db27057c06e00b9`, blob `c8cb8c0f879f6276ad75e986e2d373157a2d07a7`. No additional design change was justified; refused Events and unresolved China targets remain protected.
+
+Read-only reasoning on the OS Projects sharing path found that pending, recorded, unknown, no-effect, changed and refused decisions already have design coverage, including exact owner-receipt reread and distinct dismissal behavior. The visible confirmed access statement still requires actual implementation evidence; bounded source inspection did not establish it. No new sharing owner, invitation, permission change or unsupported success state was introduced. These bounded reviews are preservation decisions, not runtime acceptance.
+
 ## Active continuation
 
-The successor covers sixteen design files. The populated Stage phone, browser-retention watchlist recovery and proposed exact-company phone return companion are verified and saved. Preserve accepted work, live writers and existing holds. Bounded read-only audits are checking remaining Expectation Surface and Risk Radar journeys for a concrete source-supported gap beyond prior accepted work; continue only with a justified amendment.
-
+The successor covers seventeen design files. The proposed ticker-finder availability module is visually verified, its244 original build-root text leaves are preserved, and the exact source gap is recorded separately from runtime implementation. Preserve accepted work, live writers and existing holds. Continue only with a concrete source-supported architecture, journey or clarity gap beyond the accepted work and later current states.
 
 ## Acceptance boundary
 
