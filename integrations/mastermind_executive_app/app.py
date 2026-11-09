@@ -7,9 +7,10 @@ bearer-authenticated HTTP:
   (:data:`gateway.READ_TOOL_NAMES`) — reused verbatim through
   ``integrations.executive_mcp.adapter.ExecutiveMcpGateway``.
 * ``POST /v1/tools/submit_ceo_intent`` — the ONE modifying tool, admitted
-  ONLY through :mod:`integrations.mastermind_executive_app.admission`
-  (dedicated CeoIngress socket, never in-process, never the general
-  Executive control socket).
+  through the dedicated CeoIngress socket, never in-process or through the
+  general Executive control socket. Installed App research calls retain
+  their originating HTTP lifetime through that socket's existing Session
+  Bridge foreground owner; other calls use the admission-only adapter.
 * ``POST /v1/tools/submit_ceo_intent/reconcile`` — the ONLY legal follow-up
   to an ``effect_unknown`` outcome: a v2 status read keyed by the same
   ``request_ref``, never a resubmission.
@@ -45,6 +46,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
 from integrations.business_mcp_auth.metadata import mcp_auth_error_result, protected_resource_metadata
+from integrations.executive_mcp.e1_http import strict_json_loads
 from integrations.executive_mcp.schemas import GatewayError, refuse_production_path
 from integrations.mastermind_executive_app.admission import (
     STATUS_ACCEPTED,
@@ -155,6 +157,12 @@ class AppSettings:
     #: Each variant must be identical to ``policies`` except for ``resource``.
     #: The tuple is host/operator configuration; request data never reaches it.
     additional_policies: tuple[AppPolicies, ...] = ()
+    #: Optional dedicated audience for the public Streamable HTTP ``/mcp``
+    #: entrypoint (#1656).  It differs from ``policies`` only by ``resource``
+    #: and ``resource_metadata_url`` and keeps the primary policy ids, so audit
+    #: routing is unchanged.  The inner app verifies it like any other variant;
+    #: the MCP transport alone decides which variants each outer route admits.
+    public_policies: AppPolicies | None = None
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -187,6 +195,25 @@ class AppSettings:
                 ) != primary_policy:
                     raise ValueError(
                         "additional Executive policies may differ only by resource"
+                    )
+        if self.public_policies is not None:
+            public = self.public_policies
+            if type(public) is not AppPolicies:
+                raise ValueError("public_policies must be AppPolicies")
+            _metadata_policy_and_path(public)
+            if public.read.resource in resources:
+                raise ValueError("Executive OAuth resources must be unique")
+            for name in ("read", "submit"):
+                primary_policy = getattr(self.policies, name)
+                public_policy = getattr(public, name)
+                if dataclasses.replace(
+                    public_policy,
+                    resource=primary_policy.resource,
+                    resource_metadata_url=primary_policy.resource_metadata_url,
+                ) != primary_policy:
+                    raise ValueError(
+                        "public Executive policies may differ only by resource "
+                        "and resource metadata URL"
                     )
         if type(self.read_only) is not bool:
             raise ValueError("read_only must be a bool")
@@ -320,7 +347,7 @@ async def _read_body_arguments(request: Request) -> dict[str, Any] | JSONRespons
     if not body:
         return {}
     try:
-        parsed = json.loads(body.decode("utf-8"))
+        parsed = strict_json_loads(body)
     except (UnicodeDecodeError, ValueError):
         return JSONResponse(
             {"ok": False, "error": {"code": "invalid_input", "message": "request body must be JSON"}},
@@ -422,6 +449,7 @@ def _create_profile_app(
     read_gateway_builder: Callable[..., Any],
     prereply_reverify: bool = False,
     release_control_profile: bool = False,
+    foreground_session_client: Any | None = None,
 ) -> Any:
     """Build one stateless ASGI app from one compile-time selected profile.
 
@@ -439,10 +467,17 @@ def _create_profile_app(
 
     if release_control_profile and (settings.read_only or not settings.read_from_ceo_ingress):
         raise ValueError("release controls require the installed authenticated ingress")
+    if foreground_session_client is not None:
+        from integrations.session_bridge.installed import InstalledSessionBridgeClient
+        if (type(foreground_session_client) is not InstalledSessionBridgeClient
+                or settings.read_only or not settings.read_from_ceo_ingress
+                or Path(foreground_session_client._socket_path) != Path(settings.ceo_ingress_socket_path)):
+            raise ValueError("foreground admission requires this installed ingress owner")
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
     authenticator_variants = make_jwt_authenticator_variants(
         settings.policies,
-        settings.additional_policies,
+        settings.additional_policies
+        + ((settings.public_policies,) if settings.public_policies is not None else ()),
         primary_jwks_cache=settings.jwks_cache,
     )
     if len(authenticator_variants) == 1:
@@ -521,6 +556,20 @@ def _create_profile_app(
         arguments = await _read_body_arguments(request)
         if isinstance(arguments, JSONResponse):
             return arguments
+        from integrations.session_bridge.http_foreground import request_source_present
+        if (foreground_session_client is not None
+                and arguments.get("execution_profile") == "research_only"
+                and request_source_present(request.scope)):
+            from integrations.mastermind_executive_app.foreground_admission import compose_foreground_admission
+            try:
+                outcome = await compose_foreground_admission(
+                    request, principal, arguments, foreground_session_client, clock=settings.clock)
+            except AdmissionError as exc:
+                return JSONResponse(
+                    {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                    status_code=403 if exc.code == "authority_refused" else 400,
+                )
+            return _outcome_response(outcome)
         admission_request = AdmissionRequest(
             payload=arguments,
             principal=principal,
@@ -676,7 +725,8 @@ def create_web_ceo_v2_app(settings: AppSettings) -> Any:
     )
 
 
-def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
+def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any,
+                          foreground_session_client: Any | None = None) -> Any:
     """Installed Web-CEO v3 with direct Session Bridge + local MDM observation."""
 
     if not settings.read_from_ceo_ingress:
@@ -698,6 +748,7 @@ def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
         ingress_gateway_type=gateway,
         read_gateway_builder=build_web_ceo_v2_read_gateway,
         prereply_reverify=True,
+        foreground_session_client=foreground_session_client,
     )
 
 

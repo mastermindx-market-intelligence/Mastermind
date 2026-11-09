@@ -1,0 +1,55 @@
+name: Experiential Attempt SDK
+
+on:
+  pull_request:
+    paths:
+      - 'control_plane/experiential_harness_endpoint.py'
+      - 'tests/test_experiential_harness_endpoint.py'
+      - '.github/workflows/experiential-attempt-sdk.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'control_plane/experiential_harness_endpoint.py'
+      - 'tests/test_experiential_harness_endpoint.py'
+      - '.github/workflows/experiential-attempt-sdk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: experiential-attempt-sdk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk-compatibility:
+    name: Attempt-owned SDK, stream and fail-stop qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tested OpenAI SDK and isolated pytest
+        run: |
+          python -m pip install --disable-pip-version-check \
+            'openai==2.54.0' 'pytest>=8,<10'
+      - name: Require real OpenAI SDK, not an importorskip
+        run: python -c 'from openai import OpenAI; import openai; print("SDK", openai.__version__)'
+      - name: Run entire Attempt client suite with zero skips
+        run: |
+          python -m compileall -q control_plane/experiential_harness_endpoint.py tests/test_experiential_harness_endpoint.py
+          # These tests use an in-process loopback gateway, not the vendor or production credentials.
+          # --noconftest avoids unrelated Macro application fixtures.
+          python -m pytest --noconftest -q -o addopts='' --junitxml=experiential-attempt-sdk.xml tests/test_experiential_harness_endpoint.py
+          python - <<'PY'
+          from xml.etree import ElementTree
+          root = ElementTree.parse('experiential-attempt-sdk.xml').getroot()
+          suites = list(root.iter('testsuite'))
+          assert suites, 'SDK test report missing'
+          totals = {k: sum(int(s.get(k, '0')) for s in suites) for k in ('tests', 'skipped', 'failures', 'errors')}
+          assert totals['tests'] > 0, totals
+          assert totals['skipped'] == totals['failures'] == totals['errors'] == 0, totals
+          print('SDK test gate PASS', totals)
+          PY

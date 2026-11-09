@@ -1,0 +1,23 @@
+{
+  "dependency_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "log_sha256": "fe9dca0451129aaabdd76ea13e310b61a52091a146a1f9fe5b72b851eb33547f",
+  "returncode": 0,
+  "seconds": 7.21,
+  "state": "TESTS_FINISHED",
+  "summary": [
+    {
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "14",
+      "time": "4.933"
+    }
+  ],
+  "tests": [
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_accepted_primary_profile_refuses_mixed_eval_before_credentials",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_mixed_eval_release_refuses_before_directory_or_renderer",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_mixed_eval_config_refuses_before_filesystem_read",
+    "integrations/hermes_harness/tests/test_native_mcp_install.py"
+  ]
+}

@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
 from pathlib import Path
 
 from . import contract
@@ -48,6 +49,28 @@ _SLUG_FOLD_RE = re.compile(r"[^A-Za-z0-9-]")
 #: Native CLI handoff into Desktop was introduced in Claude Code 2.1.285.
 MINIMUM_DESKTOP_HANDOFF_VERSION = (2, 1, 285)
 _CLAUDE_VERSION_RE = re.compile(r"(?<![0-9])(\d+)\.(\d+)\.(\d+)(?![0-9])")
+
+
+def _has_multiple_parall_claude_wrappers() -> bool:
+    """Detect ambiguous native Desktop routing on a multi-account macOS host.
+
+    This detects application wrappers, not Claude Code CLI sessions. No app is
+    started, selected, killed or inspected for credentials. Each Parall wrapper
+    has a distinct outer app identity but shares the underlying Anthropic app
+    identity and claude:// handler with other accounts.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        applications = Path("/Applications")
+        wrappers = (
+            app for app in applications.glob("Claude *.app")
+            if re.fullmatch(r"Claude [0-9]+\.app", app.name) and app.is_dir()
+        )
+        return sum(1 for _ in wrappers) >= 2
+    except OSError:
+        # Unknown handler selection is not proof of a safe single-account host.
+        return True
 
 
 def _parsed_claude_version(text: object) -> tuple[int, int, int] | None:
@@ -212,6 +235,13 @@ def open_claude_code_in_desktop(
             "the Claude Desktop handoff runtime does not meet the required version",
         )
 
+    if _has_multiple_parall_claude_wrappers():
+        return contract.refused(
+            "claude_code", binding_id, "ambiguous",
+            "Multiple Claude Desktop accounts have shared native handlers; "
+            "an exact Parall account is required before Desktop handoff",
+        )
+
     # Once the runner is invoked, an exception or missing acknowledgement is
     # not proof of non-delivery. Never replay the handoff from this adapter.
     try:
@@ -265,6 +295,13 @@ def open_claude_desktop(binding: dict, runner) -> dict:
     url = locator.get("url")
     if not isinstance(url, str) or not url:
         return contract.refused("claude_desktop", binding_id, "invalid_binding", "the bound URL is missing")
+
+    if url.lower().startswith("claude://") and _has_multiple_parall_claude_wrappers():
+        return contract.refused(
+            "claude_desktop", binding_id, "ambiguous",
+            "Multiple Claude Desktop accounts share the native URL handler; "
+            "navigate with an exact Parall account instead",
+        )
 
     result = runner(["/usr/bin/open", url])
     if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:

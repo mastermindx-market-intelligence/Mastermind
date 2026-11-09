@@ -1,4 +1,6 @@
 /** Read-only presentation of the existing authenticated service's collection receipt. */
+import { projectDeclaredDependencies } from "./office-dependencies";
+import type { OfficeProgramsValue } from "./projection";
 import { programsFromControlRoom } from "../mission";
 import type { ProgramsObservation } from "../programs-observation";
 import { decodeOwnerObservation } from "../workspace-contract";
@@ -6,7 +8,7 @@ import { sameTarget, type ProjectionContext, type ReadSnapshot, type SourceClaim
 
 export interface PendingProgramsOfficeRead { readonly context: ProjectionContext }
 export type ProgramsOfficeObservation =
-  | { kind: "observed"; context: ProjectionContext; snapshot: ReadSnapshot<ReturnType<typeof programsFromControlRoom>>; reasonCodes: readonly string[] }
+  | { kind: "observed"; context: ProjectionContext; snapshot: ReadSnapshot<OfficeProgramsValue>; reasonCodes: readonly string[] }
   | { kind: "discarded"; state: "WITHHELD" | "UNASSOCIATED" | "STALE"; reason: string };
 
 /** Capture the actual host generation before its single fixed Programs acquisition. */
@@ -41,7 +43,7 @@ export function completeProgramsOfficeRead(
   const validTime = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(localAcquiredAt) && Number.isFinite(Date.parse(localAcquiredAt));
   let state: SourceState = "UNAVAILABLE";
   let reasonCodes: readonly string[] = document?.reasonCodes ?? ["PROGRAM_SOURCE_UNAVAILABLE"];
-  let value: ReturnType<typeof programsFromControlRoom> | null = null;
+  let value: OfficeProgramsValue | null = null;
   let revision: string | null = null;
   if (document?.availability === "AVAILABLE") {
     if (observation?.state !== "SAME" || !control) {
@@ -56,7 +58,9 @@ export function completeProgramsOfficeRead(
         reasonCodes = [...reasonCodes, "LOCAL_ACQUISITION_TIME_INVALID"];
       } else {
         state = "CURRENT";
-        value = programs;
+        value = { ...programs, dependencies: projectDeclaredDependencies(
+          (document.controlRoom as {work: unknown}).work, programs.programs,
+        ) };
         // A presentation identity for the collection receipt; not a new owner revision.
         revision = "programs-owner-observation:v1:" + JSON.stringify([
           observation.schema, observation.selection,

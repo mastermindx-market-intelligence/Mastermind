@@ -1004,6 +1004,7 @@ def _complete_planner(runtime, dispatch, plan_body, sealed, epoch, generation, p
 
 def _workers(
     runtime: Runtime,
+    *, extra_available_quota: bool = False,
 ) -> tuple[
     tuple[str, str, str, dict[str, object]],
     tuple[str, str, str, dict[str, object]],
@@ -1025,7 +1026,9 @@ def _workers(
                     "provider": "openai-codex",
                     "capabilities": ["read"],
                     "cost_class": "small",
-                }
+                },
+                **({"idle-other": {"provider": "openai-codex", "capabilities": ["read"],
+                    "cost_class": "small"}} if extra_available_quota else {}),
             },
         )
 

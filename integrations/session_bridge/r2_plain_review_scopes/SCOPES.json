@@ -1,0 +1,40 @@
+{
+  "r2-events-composition-review-20261015-01a13315": {
+    "root": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+    "parent": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+    "host": "ubuntu3",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/1362-composition-review-packet.md",
+    "packet_sha256": "9289b43965dca0d11a8e38f8a112124b0bf990515bf4dc717d4e22bd38647f7a",
+    "support_digest": "df14b5db0788c7417b48d253b92a331aa147e6c80573a47ad998e561d7421740",
+    "source_pins": {
+      "log": "8e76307669db6493c7eb0a54f51ba29fd71445d2fd84edddb67daa1510935747",
+      "support": "c2e4d3faf5bb1c821565988a602bdbaa7384400d79c9dfc951b017e39f72ada0"
+    },
+    "lease_witness": {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/r2-events-composition-review-20261015-01a13315.lease.KQ8T0E",
+      "sha256": "e6f0b1d171e1453897f16c274f44fa21dc7c5503a4f7a05de34008a7877c093c"
+    },
+    "destination": "/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/retained-returns/r2-events-composition-review-20261015-01a13315-collection-v1"
+  },
+  "r2-events-aead-current-review-20261015-01a13315": {
+    "root": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+    "parent": "01a13315-332b-7102-b7c8-0c7fc01fa92c",
+    "host": "mb",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/1362-aead-review-packet.md",
+    "packet_sha256": "ec671493af948e49d8e4ceca5d91c64b8084e31c525be0bf948a51d455fc8c56",
+    "support_digest": "5fc2034ca5e4b16a8d30a802beb5fa5c4697c44a0a2e10aa09d56f57ec722f62",
+    "source_pins": {
+      "log": "c485b8578f3f1071e7279fe36a5a1602bb7a012d40ef61cb2dcc4fffd0448c71",
+      "support": "12750ade68e8b53b142e816eae58fa3633ec9a8f0410ae2d006e3cad5b0f930d"
+    },
+    "lease_witness": {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/r2-events-aead-current-review-20261015-01a13315.lease.VDxqSz",
+      "sha256": "cde62d8f07e38b9583362717fbc0e63d0b0f383e1e89fda8ccdec00038735fa1"
+    },
+    "destination": "/Volumes/Mastermind/evidence/meta-ceo-r2-20261012-01a13315/retained-returns/r2-events-aead-current-review-20261015-01a13315-collection-v1"
+  }
+}

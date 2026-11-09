@@ -1,0 +1,73 @@
+{
+  "scope": "prospective controller correlation only; no lease settlement or historical reconstruction",
+  "candidate": {
+    "remote_sub.sh": "c88b16b32bc3ce826ea0624ed46966dc94c95f53fae789eb7fd657277c8705de",
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+  },
+  "checks": {
+    "CANDIDATE-v3.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "26",
+        "time": "0.096",
+        "timestamp": "2026-10-15T00:12:23.042109-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "CONTROLLER.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "2",
+        "time": "0.168",
+        "timestamp": "2026-10-15T00:15:19.753019-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "COMPAT-BASELINE-v3.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "40",
+        "time": "18.839",
+        "timestamp": "2026-10-15T00:15:09.107354-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "COMPAT-CANDIDATE-v3.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "40",
+        "time": "17.917",
+        "timestamp": "2026-10-15T00:15:57.054904-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "CANDIDATE-FINAL.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "30",
+        "time": "0.225",
+        "timestamp": "2026-10-15T00:20:13.616740-07:00",
+        "hostname": "m2studio"
+      }
+    ]
+  },
+  "test_fixture_correction": "Public source-only compatibility copy takes pools.yaml from existing orch/fabric location, matching installed layout; no routing guard or production policy changed. Initial unsealed/copied-policy and missing-file fixture failures retained in local logs.",
+  "initial_candidate_limitation": "Initial tests used SSD directory hierarchy rejected by private evidence guard; failures retained, all checks rerun with disposable private local fixture data. No production guard weakened.",
+  "independent_review": "Consumed exact paid review928587a9 once; output-bound violation NOT_ACCEPTED. Parent adjudicated and repaired its actual-launch binding finding; see review-adjudication.json.",
+  "installed": false
+}

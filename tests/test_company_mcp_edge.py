@@ -180,7 +180,7 @@ def test_failed_python_owner_prevents_any_runtime_mutation(tmp_path, monkeypatch
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("command,child_command", [("stdio", "sdk-stdio"), ("native-stdio", "native-sdk-stdio")])
+@pytest.mark.parametrize("command,child_command", [("stdio", "sdk-stdio"), ("native-stdio", "native-sdk-stdio"), ("acceptance-stdio", "acceptance-sdk-stdio")])
 def test_sdk_exec_uses_only_exact_venv_isolated_interpreter(runtime, monkeypatch, command, child_command):
     root, config, _ = runtime
     monkeypatch.setattr(edge, "read_config", lambda: config)

@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "../planning/plan-observation.fixture";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { MetaCeoOffice } from "./MetaCeoOffice";
+import { canNavigateForAutomaticSignIn } from "../auth-navigation-guard";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "./projection";
 import { decodeMission } from "../mission";
 import currentMission from "../fixtures/mission-v2-current-128c46f6.json";
+import v3Fixture from "../fixtures/mission-v3-owner-current-operator-harness.json";
+import type { Missionv3Document, ChildCard } from "../mission";
 
 afterEach(cleanup);
 const context: ProjectionContext = { authGeneration: 1, selection: { workRef: "WS:ONE", rootJobId: "JOB-1" }, sessionRef: null, bindingGeneration: null, revisions: { mission: "rev:1", programs: null, result: null, conversation: null } };
@@ -20,21 +24,67 @@ function input(): OfficeInput {
 }
 
 describe("Daily Office consumer", () => {
+  it("keeps unattended login navigation out of a live Chairman draft", () => {
+    const office = (text: string) => <MetaCeoOffice projection={projectOffice(input(), context)}
+      draft={{ text, context }} onDraftChange={() => {}} />;
+    const view = render(office("Preserve an exact private draft."));
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.rerender(office(""));
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   it.each(["current", "stale", "unknown"] as const)("requires current owner receipts for Chairman attention: %s", freshness => {
     const reads = input();
     reads.mission!.value!.principal.owed_turn = { seat: "chairman", reason: "Reserved decision from owner.",
       source_refs: [{ owner: "EXECUTIVE_OS", ref: "decision:one", observed_at: "2026-10-04T08:00:00Z", freshness }] };
     render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
-    const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Chairman attention is not established." });
+    const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Decisions not yet known." });
     expect(attention.textContent.includes("Reserved decision from owner.")).toBe(freshness === "current");
+  });
+  it("passes only a current owner's exact worker result reference to the existing reader callback", () => {
+    const ctx: ProjectionContext = { ...context, selection: { workRef: "WS:ONE", rootJobId: "JOB-001" } };
+    const values = input();
+    const mission = structuredClone(v3Fixture) as unknown as Missionv3Document;
+    const ref = mission.result_refs.refs[0];
+    const child: ChildCard = {
+      job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED", depth: 1,
+      orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
+      attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
+      worker_id: "observed-worker",
+      latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
+        started_at: null, finished_at: null, exit_code: 0,
+        has_result: true, error_present: false, error_class: null },
+    };
+    mission.children.items = [child];
+    values.mission = { context: ctx, source: { ...values.mission!.source, ref: "mission:JOB-001", state: "CURRENT" }, value: mission };
+    const opened = vi.fn();
+    const projection = projectOffice(values, ctx);
+    expect(projection.mission.source.state).toBe("CURRENT");
+    const view = render(<MetaCeoOffice projection={projection} draft={{ text: "", context: ctx }}
+      onDraftChange={() => {}} onInspectWorkerResult={opened} />);
+    fireEvent.click(screen.getByText("Subagent Fabric · inspect execution"));
+    const panel = within(screen.getByRole("region", { name: "Inside this mission" }));
+    fireEvent.click(panel.getByRole("button", { name: /^JOB-002 ·/ }));
+    fireEvent.click(panel.getByRole("button", { name: "Inspect indexed result" }));
+    expect(opened).toHaveBeenCalledWith({
+      workRef: "WS:ONE", rootJobId: "JOB-001", jobId: ref.job_id,
+      attemptId: ref.attempt_id, resultEnvelopeDigest: ref.result_envelope_digest,
+    });
+    opened.mockClear();
+    values.mission.source.state = "STALE";
+    view.rerender(<MetaCeoOffice projection={projectOffice(values, ctx)} draft={{ text: "", context: ctx }}
+      onDraftChange={() => {}} onInspectWorkerResult={opened} />);
+    expect(panel.queryByRole("button", { name: "Inspect indexed result" })).toBeNull();
+    expect(opened).not.toHaveBeenCalled();
   });
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Keep the whole company moving with intention." })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Meta-CEO" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("One");
     expect(screen.getByText(/Company total is not established/)).toBeTruthy();
     expect(screen.getByText(/Work details are unavailable/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send unavailable" }).hasAttribute("disabled")).toBe(true);
   });
 
   it.each<SourceState>(["CURRENT", "STALE", "UNKNOWN", "UNAVAILABLE", "WITHHELD", "UNASSOCIATED"])("renders %s by name without substituting a healthy empty state", (state) => {
@@ -226,5 +276,61 @@ describe("Daily Office consumer", () => {
     render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
     expect(screen.getByRole("alert").textContent).toContain("Reconcile the original operation");
     expect(screen.queryByRole("button", { name: /resend|retry|switch account/i })).toBeNull();
+  });
+});
+
+describe("Meta-CEO admitted-plan live host wiring", () => {
+  it("renders the selected authenticated plan, retains it on draft rerender, and clears it after identity rotation", async () => {
+    const { bindMissionHost } = await import("../host");
+    const selected = { work_ref: "WS:ONE", root_job_id: "JOB-1" };
+    let signedIn = true, reads = 0;
+    const raw = {
+      getState: () => ({ status: signedIn ? "signed_in" : "signed_out",
+        acquisition: signedIn, content: false, reason: null }),
+      invalidationGeneration: () => signedIn ? 3 : 4,
+      subscribe: () => () => {},
+      signIn: async () => {}, signOut: async () => { signedIn = false; },
+      readPrograms: async () => null, readWork: async () => null,
+      readMission: async () => null, readCurrentWindow: async () => null,
+      readAdmittedPlan: async () => {
+        reads++;
+        return { schema: "mastermind.workspace_admitted_execution_plan.v1",
+          selection: selected, availability: "AVAILABLE", reason_codes: [],
+          source_observation: planObservationFixture(selected),
+          plan: { schema: "mastermind.admitted_execution_plan_view.v1",
+            root_job_id: selected.root_job_id, plan_attempt_id: "ATT-1",
+            plan_schema_version: "mastermind.execution_plan/v3",
+            admission_schema_version: "mastermind.coo_plan_admission/v2",
+            policy_sha: "a".repeat(64), plan_digest: "b".repeat(64),
+            reservation_digest: "c".repeat(64), admission_state: "ADMITTED",
+            steps: [{ ordinal: 0, step_id: "step-0",
+              objective: "Review canonical output before acceptance",
+              business_impact: "material", review_required: true,
+              prerequisite_step_ids: [] }],
+          },
+        };
+      },
+    };
+    const original = window.MastermindMissionHost;
+    window.MastermindMissionHost = bindMissionHost(raw as any);
+    try {
+      const office = (ctx: ProjectionContext, draftText: string) =>
+        <MetaCeoOffice projection={projectOffice(input(), ctx)}
+          draft={{ text: draftText, context: ctx }} onDraftChange={() => {}} />;
+      const { rerender } = render(office(context, "Original direction"));
+      const inspector = screen.getByRole("region", { name: "Admitted execution plan" });
+      fireEvent.click(within(inspector).getByRole("button", { name: "Inspect plan" }));
+      expect(await screen.findByText("Review canonical output before acceptance")).toBeTruthy();
+      expect(reads).toBe(1);
+      rerender(office(context, "Revised direction"));
+      expect(screen.getByText("Review canonical output before acceptance")).toBeTruthy();
+      expect(reads).toBe(1);
+      await window.MastermindMissionHost!.auth!.signOut();
+      rerender(office({ ...context, authGeneration: context.authGeneration + 1 }, "Revised direction"));
+      expect(screen.queryByText("Review canonical output before acceptance")).toBeNull();
+      expect(reads).toBe(1);
+    } finally {
+      window.MastermindMissionHost = original;
+    }
   });
 });

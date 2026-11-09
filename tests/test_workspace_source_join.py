@@ -12,6 +12,7 @@ from control_plane.workspace_read_service import WorkspaceReadService
 from tests.test_executive_runtime_bounded_read import ObservationNamespace
 from tests.test_workspace_programs_qualification import empty_inputs
 from tests.test_workspace_read_service import STAMP, cache_fixture, frame, run
+from tests.test_installed_source_git_identity import identity
 from scripts import chairman_control_room as publisher
 
 
@@ -78,7 +79,7 @@ def test_actual_sqlite_to_canonical_program_and_partial_mission(tmp_path,actual,
 
 def test_unsupported_root_never_becomes_complete_empty_mapping(actual):
     writer,bound,namespace,job=actual
-    writer.jobs.create_job('unsupported fixture root')
+    writer.jobs.create_job('unsupported fixture root', provenance={'schema': 'unknown-origin'})
     inputs=join._bounded_runtime_inputs(bound())
     assert inputs[0] is None and inputs[1] is None and inputs[4]
     assert namespace.entries==namespace.exits
@@ -164,24 +165,70 @@ def test_configured_publisher_failure_never_falls_back(tmp_path, monkeypatch, fa
         publisher._compose_state_doc(config)
 
 
-@pytest.mark.parametrize('with_boot', [True, False])
-def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monkeypatch, with_boot):
+@pytest.mark.parametrize('with_boot,source_publication', [(True,False),(False,False),(True,True)])
+def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monkeypatch, with_boot, source_publication, identity):
+    import os
     from scripts import executive_os_phase1c as cli
     from tests.test_c1_ceo_ingress_composition import _raw
     from tests.test_workspace_read_app import _workspace_policy
+    from tests.executive_installed_control_fixture import unix_listener
     from integrations.executive_mcp.installed import InstalledBootPacketCollector
+    import control_plane.workspace_control_room_lifecycle as lifecycle_mod
     from control_plane import executive_worker_broker
     raw = _raw(tmp_path)
     authority = {'schema': 'mastermind.workspace_acquisition_bindings.v1', 'profiles': {
         key: {'enabled': False, 'binding': None} for key in ('web', 'mac')}}
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path/'macro', workspace_control_room={'port':8787},
+        ceo_ingress_app_macro_root=tmp_path/'macro',
+        workspace_control_room={'transport': 'unix',
+                                'socket_path': '/var/run/mastermind-executive/workspace-control-room.sock',
+                                'launchd_socket_name': 'WorkspaceControlRoom',
+                                'allowed_peer_uids': [raw['control_uid']]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))))
+    git_identity=None
+    if source_publication:
+        from tests.test_workspace_project_authoring_grant import project_bindings
+        from integrations.mastermind_workspace_app.project_authoring_grant import SCHEMA_V5
+        policy,authority=project_bindings(selected=None)
+        authority['schema']=SCHEMA_V5
+        for slot in authority['profiles'].values():
+            slot.update(enabled=False,binding=None,project_plan_proposal_publish=None,project_canonical_data_read=None)
+            slot['control_room_actions']={key:None for key in slot['control_room_actions']}
+            for key in tuple(slot):
+                if key.startswith('project_') or key=='instruction_admission_suspend':slot[key]=None
+        raw['workspace_resource_policy']=json.loads(json.dumps(dataclasses.asdict(policy)))
+        git_identity=identity[0]
+        raw['workspace_source_publication']=identity[3]
     if with_boot:
         raw['ceo_ingress_app_boot_python'] = tmp_path/'sealed-python'
+    monkeypatch.setattr(lifecycle_mod, '_TRUSTED_SOCKET_PARENT_UID', os.geteuid())
     monkeypatch.setattr(cli, '_attest_app_boot_runtime', lambda p: p)
-    monkeypatch.setattr(cli, 'activate_launchd_socket', lambda name: object())
+    from tests.executive_installed_control_fixture import spawn_workspace_room_listener
+    room_listener, room_path = spawn_workspace_room_listener(monkeypatch)
+    raw['workspace_control_room'] = {'transport': 'unix',
+                                      'socket_path': room_path,
+                                      'launchd_socket_name': 'WorkspaceControlRoom',
+                                      'allowed_peer_uids': [raw['control_uid']]}
+    fake_sockets = {'WorkspaceControlRoom': room_listener}
+    def activated(name):
+        if name not in fake_sockets:
+            listener, _path = unix_listener()
+            fake_sockets[name] = listener
+        return fake_sockets[name]
+    monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
     monkeypatch.setattr(executive_worker_broker, 'WorkerBrokerClient', lambda *a, **k: object())
+    try:
+        _run_source_join_test(tmp_path, monkeypatch, raw, with_boot, authority,git_identity=git_identity)
+    finally:
+        for listener in fake_sockets.values():
+            listener.close()
+
+
+def _run_source_join_test(tmp_path, monkeypatch, raw, with_boot, authority,git_identity=None):
+    from scripts import executive_os_phase1c as cli
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+    from control_plane import workspace_source_join as join
+    from scripts import chairman_control_room as ccr
     captured = {}
     def composer(**kwargs):
         captured.update(kwargs)
@@ -197,7 +244,8 @@ def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monk
             cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority, workspace_bindings_path=bindings)
         assert captured == {}
         return
-    service = cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority, workspace_bindings_path=bindings)
+    service = cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority, workspace_bindings_path=bindings,
+        source_git_identity=git_identity)
     assert isinstance(captured['packet_collector'], InstalledBootPacketCollector)
     assert captured['repo_root'] == raw['proof_source_repository']
     assert captured['bindings_path'] == bindings
@@ -209,3 +257,10 @@ def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monk
     service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: calls.append(actual) or facade)
     assert calls == []
     assert captured['bounded_runtime']() is facade and calls == [actual_runtime]
+    app_binding=service.kwargs['ceo_ingress_app_binding']
+    if git_identity is None:
+        assert app_binding.source_operation_provider_factory is None
+    else:
+        from integrations.mastermind_workspace_app.installed_source_operations import InstalledWorkspaceSourceOperations
+        assert type(app_binding.source_operation_provider_factory) is InstalledWorkspaceSourceOperations
+        assert app_binding.source_operation_provider_factory._git is git_identity

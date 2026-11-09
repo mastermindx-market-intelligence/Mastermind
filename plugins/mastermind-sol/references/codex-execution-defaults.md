@@ -59,24 +59,34 @@ the currently working, admitted route; readonly Executive ingress or unfinished
 native host integration does not disable the approved attended Fabric adapter.
 Do not freeze unrelated projects behind an optional integration milestone.
 
-Native children are permitted with a configured ceiling of 16 concurrently open
-children, excluding the primary, when the exposed tools and account admit them.
-Sol (`gpt-6.1-sol`) is the default; Astra (`gpt-6-astra`) coordinators are optional
-for useful concentrated judgment. The former cap of zero, one-child exception
-and blanket ban on native grandchildren are superseded by the Chairman's current
-instruction. Support up to four useful levels where the runtime allows it, for
-example Astra parent -> Astra coordinator -> Sol coordinator -> workers. A
-coordinator may delegate; a leaf stays within its assigned outcome. Each level
-must do useful coordination, not relay messages or multiply a root's allowance.
-Configured capacity does not prove tool availability or change Fabric's shared
-root/provider/host limits. Preserve the original root and effective grant at
-every level. Fabric remains preferred because local Codex capacity is scarcer.
+Native Codex Sol/Astra coordinators are for genuine reasoning, decomposition and integration.
+Claude uses its separately admitted Opus binding under its own native routing rules.
+Eligible routine implementation, tests, research and repair use admitted paid Fabric; do not
+select native Sol labor because its spawn tool is convenient. Configured native depth and
+concurrency are ceilings, not verified capability or extra root budget; Codex V2 does not
+enforce the configured max_depth. A full-history fork inherits its parent model/effort and
+is not an economical worker substitute.
 
-Prefer Sol or another qualified economical worker for routine implementation,
-tests and bounded review. Keep expensive principals on decisions and integration.
-Use the shallowest useful structure; no mandatory Astra-to-Sol relay. Delegate an
-outcome with scope, inputs and acceptance, then keep working on an independent
-part. Do not send the whole transcript or require permission for every worker step.
+Management layers are optional per task. A CEO may assign bounded work directly to an
+eligible Fabric operator or worker; a native coordinator may assign directly to an
+eligible worker or operator; an operator may execute its own assignment. Add a manager
+only for useful decomposition, context isolation, review or integration. Preserve useful
+deeper routes within actual admission; never manufacture an operator to relay one packet.
+A worker stays a leaf unless its existing owner explicitly grants delegation capability.
+
+Conserve the original root, scope and budget at every level. A native child uses the
+verified original root from its parent's commission and its own verified native identity
+as the immediate parent of its Fabric child; it must not mint a new root from its thread
+ID. Verify actual ancestry as well as the commission. Native session IDs are not Runtime
+Job IDs. Transport labels do not authenticate a caller or grant admission. Consume the
+retained result in the actual assigning parent and return a compact accepted summary
+upward. Keep the Codex root-only Stop hook restricted to its original root; a coordinator
+uses its supported foreground inspect-and-consume path unless another return owner is
+independently qualified. Missing idle Wake does not block that admitted foreground path.
+
+Give children compact scope, exact inputs, acceptance and return location. Preserve actual
+admission, source custody and required independent review. No new dispatcher, role registry,
+lifecycle or memory system is needed to omit an unnecessary manager.
 
 If no eligible worker is available before execution, do useful bounded work
 directly. Missing delegation is not a universal stop. Do not create sidebar chats,

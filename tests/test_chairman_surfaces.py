@@ -38,6 +38,13 @@ from integrations.chairman_surfaces import (
 )
 from integrations.chairman_surfaces import runner as runner_module
 
+
+@pytest.fixture(autouse=True)
+def _unambiguous_claude_desktop_by_default(monkeypatch):
+    # Existing adapter tests model the formerly supported single-account host.
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: False)
+
+
 PACKAGE_DIR = Path(runner_module.__file__).resolve().parent
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "chairman_surfaces"
 
@@ -1302,3 +1309,63 @@ def test_open_binding_dispatches_chatgpt(tmp_path):
     assert outcome["verified"] is False
     assert outcome["provider"] == "chatgpt"
     assert fake.calls == []
+
+
+
+# Multi-Parall exact-account guard — no actual Desktop app or CLI is launched.
+def test_multi_parall_deeplink_refuses_before_native_handler(monkeypatch):
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: True)
+    fake = FakeRunner()
+    binding = _claude_desktop_binding(url="claude://open/a-private-session")
+    outcome = claude.open_claude_desktop(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "ambiguous"
+    assert outcome["verified"] is False
+    assert "private-session" not in outcome["detail"]
+    assert fake.calls == []
+
+
+def test_multi_parall_https_navigation_keeps_browser_path(monkeypatch):
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: True)
+    fake = FakeRunner()
+    binding = _claude_desktop_binding(url="https://claude.ai/chat/session-beta")
+    outcome = claude.open_claude_desktop(binding, fake)
+    assert outcome["ok"] is True
+    assert fake.calls[0][0] == ["/usr/bin/open", "https://claude.ai/chat/session-beta"]
+
+
+def test_multi_parall_native_handoff_refuses_without_desktop_effect(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: True)
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "projects"
+    binding = _claude_code_binding(project_dir=str(project))
+    _write_claude_transcript(store, str(project), binding["locator"]["session_id"])
+    cli = _bridge_cli(tmp_path)
+    normal = FakeRunner(default={
+        "code": 0, "stdout": "2.1.285 (Claude Code)\n", "stderr": "", "timed_out": False,
+    })
+    handoff = FakePTYRunner()
+    outcome = contract.open_binding(
+        binding, normal, claude_projects_dir=str(store),
+        target_surface="desktop", claude_desktop_cli=str(cli),
+        claude_desktop_handoff_runner=handoff,
+    )
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "ambiguous"
+    assert normal.calls == [([str(cli), "--version"], 5.0)]
+    assert handoff.calls == []
+
+
+def test_multi_parall_keeps_plain_claude_code_resume(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: True)
+    project = tmp_path / "project"
+    project.mkdir()
+    store = tmp_path / "projects"
+    binding = _claude_code_binding(project_dir=str(project))
+    _write_claude_transcript(store, str(project), binding["locator"]["session_id"])
+    fake = FakeRunner()
+    outcome = contract.open_binding(binding, fake, claude_projects_dir=str(store))
+    assert outcome["ok"] is True
+    assert outcome["action"] == "launched"
+    assert len(fake.calls) == 1

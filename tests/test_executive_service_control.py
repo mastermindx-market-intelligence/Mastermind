@@ -344,6 +344,31 @@ def test_start_confirms_registration_after_kickstart(tmp_path: Path) -> None:
     assert f"service={CONTROL_LABEL} state = running" in out
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_start_drains_large_registration_output(tmp_path: Path, registered: bool) -> None:
+    # launchctl can print a large environment after the first state line.
+    # An early-exiting reader SIGPIPEs /bin/echo under production pipefail.
+    _script, control_plist, worker_plist = _prepare_script(tmp_path)
+    plan = (
+        _start_via_kickstart(WORKER_LABEL) + _start_via_kickstart(CONTROL_LABEL)
+        if registered else
+        _start_via_bootstrap(WORKER_LABEL, worker_plist)
+        + _start_via_bootstrap(CONTROL_LABEL, control_plist)
+    )
+    large_output = "state = running\n" + "environment entry = value\n" * 16000 + "state = ignored\n"
+    for index in (3, 7):
+        key, status, _out, err = plan[index]
+        plan[index] = (key, status, large_output, err)
+    code, out, err, log, remaining, *_ = _run(tmp_path, "start", plan)
+    assert code == 0, err
+    assert out.splitlines() == [
+        f"service={WORKER_LABEL} state = running",
+        f"service={CONTROL_LABEL} state = running",
+    ]
+    assert log == [key for key, *_ in plan]
+    assert remaining == ""
+
+
 def test_start_fails_when_bootstrap_claims_success_but_registration_absent(
     tmp_path: Path,
 ) -> None:
@@ -627,8 +652,9 @@ def test_start_readside_is_idempotent_for_already_running_read_services(
     assert "existing=1" in out
 
 
+@pytest.mark.parametrize("large_output", [False, True])
 def test_start_readside_preserves_running_worker_without_mutating_it(
-    tmp_path: Path,
+    tmp_path: Path, large_output: bool,
 ) -> None:
     plan = (
         _readside_preflight(worker_pid=4242)
@@ -636,6 +662,10 @@ def test_start_readside_preserves_running_worker_without_mutating_it(
         + _ensure_running_already(CONTROL_LABEL)
         + _readside_postflight(worker_pid=4242)
     )
+    if large_output:
+        plan = [(key, status, out + "\n" + "environment entry = value\n" * 16000
+                 + "pid = 9999\n" if "pid = 4242" in out else out, err)
+                for key, status, out, err in plan]
     code, out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
     assert code == 0, err
     assert remaining == ""
@@ -1015,10 +1045,15 @@ def test_stop_agent_relay_refuses_unresolved_disable_without_bootout(
     assert not any(call.startswith("bootout ") for call in log)
 
 
+@pytest.mark.parametrize("large_output", [False, True])
 def test_status_agent_relay_is_read_only_and_reports_exact_state(
-    tmp_path: Path,
+    tmp_path: Path, large_output: bool,
 ) -> None:
     plan = _agent_relay_disabled("disabled") + _observe_absent(AGENT_RELAY_LABEL)
+    if large_output:
+        key, status, out, err = plan[0]
+        plan[0] = (key, status, out + "\n" + '"other.service" => enabled\n' * 16000
+                   + f'"{AGENT_RELAY_LABEL}" => enabled\n', err)
 
     code, out, err, log, remaining, *_ = _run(
         tmp_path, "status-agent-relay", plan
@@ -1709,3 +1744,239 @@ def test_gateway_malformed_json_refuses_before_lifecycle(tmp_path, native_plutil
     assert "gateway release qualification failed" in err
     assert calls == []
     assert remaining == ""
+
+
+
+def test_a2_restored_readside_rejects_noninstalled_source_before_launchctl(tmp_path):
+    # This fixture executes the real case with all *valid* witness flags and
+    # simulated root/Darwin, but the controller bytes remain in a test checkout,
+    # not the canonical sealed release directory.
+    from tests.test_executive_autonomy_control import SHA
+    args = (
+        "--expected-sha", SHA,
+        "--expected-control-sha256", "a" * 64,
+        "--expected-previous-release-sha", "b" * 40,
+        "--expected-previous-tree-sha", "c" * 40,
+        "--expected-previous-config-sha256", "d" * 64,
+        "--expected-previous-plist-sha256", "e" * 64,
+        "--expected-bot-user-id", "U0BT71H4FQE",
+    )
+    assert len(args) == 14
+    rc, out, err, calls, remaining, *_ = _run(
+        tmp_path, "start-restored-a2-readside", [], extra_args=args,
+    )
+    assert rc == 65, (out, err)
+    assert not calls and not remaining
+    assert "usage:" not in err
+
+
+# MCP component-update verbs. The controller only validates a closed argv, binds
+# the exact sealed release, and execs the release's own updater. No launchctl,
+# root, or installed-state effect occurs: the preflight python is a recorder.
+COMPONENT_SHA = "d" * 40
+COMPONENT_PLAN = "e" * 64
+COMPONENT_VERBS = ("plan-mcp-component", "apply-mcp-component", "reconcile-mcp-component")
+
+
+def _component_run(tmp_path, verb, extra_args, *, controller_from_release=True,
+                   fake_uid="0", helper_exit=0, helper_kind="file"):
+    release_root = tmp_path / "releases"
+    expected_dir = release_root / COMPONENT_SHA / "ops" / "executive_os"
+    record = tmp_path / "component-argv.txt"
+
+    def prepare(script):
+        text = script.read_text()
+        text = text.replace(
+            f'MCP_RELEASE_ROOT="{GATEWAY_RELEASE_ROOT}"',
+            f'MCP_RELEASE_ROOT="{release_root}"',
+        )
+        assert f'MCP_RELEASE_ROOT="{release_root}"' in text
+        if controller_from_release:
+            controller = expected_dir / "service-control.sh"
+            source = (
+                'SCRIPT_SOURCE="${BASH_SOURCE[0]}"\n'
+                'SCRIPT_DIR="$(builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"\n'
+                'SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"'
+            )
+            replacement = (
+                f'SCRIPT_SOURCE="{controller}"\n'
+                f'SCRIPT_DIR="{expected_dir}"\n'
+                f'SCRIPT_PATH="{controller}"'
+            )
+            text = text.replace(source, replacement)
+            assert source not in text
+        script.write_text(text)
+        expected_dir.mkdir(parents=True, exist_ok=True)
+        if controller_from_release:
+            (expected_dir / "service-control.sh").write_text(text, encoding="utf-8")
+        helper = expected_dir / "mcp_component_update.py"
+        if helper_kind == "file":
+            helper.write_text("# disposable component updater\n", encoding="utf-8")
+            (expected_dir / "autonomy_control.py").write_text(
+                "# disposable Control owner\n", encoding="utf-8")
+        elif helper_kind == "symlink":
+            target = tmp_path / "elsewhere-updater.py"
+            target.write_text("# a different file\n", encoding="utf-8")
+            helper.symlink_to(target)
+        else:
+            assert helper_kind == "missing"
+        recorder = tmp_path / "native-shims" / "gateway-preflight-python"
+        recorder.write_text(
+            "#!/bin/bash\n"
+            f"printf '%s\\n' \"$@\" > '{record}'\n"
+            f"exit {int(helper_exit)}\n",
+            encoding="utf-8",
+        )
+        recorder.chmod(0o755)
+
+    result = _run(tmp_path, verb, [], fake_uid=fake_uid, extra_args=extra_args,
+                  prepare=prepare)
+    argv = record.read_text(encoding="utf-8").splitlines() if record.exists() else None
+    return result, argv, expected_dir
+
+
+@pytest.mark.parametrize("verb,args,expected", [
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA),
+     ["plan", "--release-sha", COMPONENT_SHA]),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "--set-public-mcp-resource"),
+     ["plan", "--release-sha", COMPONENT_SHA, "--set-public-mcp-resource"]),
+    ("plan-mcp-component", ("--set-public-mcp-resource", "--expected-sha", COMPONENT_SHA),
+     ["plan", "--release-sha", COMPONENT_SHA, "--set-public-mcp-resource"]),
+    ("apply-mcp-component",
+     ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN),
+     ["apply", "--release-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN]),
+    ("apply-mcp-component",
+     ("--plan-sha256", COMPONENT_PLAN, "--set-public-mcp-resource",
+      "--expected-sha", COMPONENT_SHA),
+     ["apply", "--release-sha", COMPONENT_SHA, "--set-public-mcp-resource",
+      "--plan-sha256", COMPONENT_PLAN]),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA),
+     ["reconcile", "--release-sha", COMPONENT_SHA]),
+])
+def test_component_verbs_exec_the_sealed_release_updater_with_fixed_argv(
+        tmp_path, verb, args, expected):
+    (code, out, err, log, remaining, *_), argv, expected_dir = _component_run(
+        tmp_path, verb, args)
+    assert code == 0, err
+    assert argv == ["-I", "-S", "-B", str(expected_dir / "mcp_component_update.py"), *expected]
+    assert log == [] and remaining == ""
+
+
+@pytest.mark.parametrize("verb,args", [
+    ("plan-mcp-component", ()),
+    ("plan-mcp-component", ("--expected-sha",)),
+    ("plan-mcp-component", ("--set-public-mcp-resource", "--expected-sha")),
+    ("plan-mcp-component", ("--set-public-mcp-resource",)),
+    ("plan-mcp-component", ("--expected-sha", "d" * 39)),
+    ("plan-mcp-component", ("--expected-sha", "D" * 40)),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "--expected-sha", COMPONENT_SHA)),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA,
+                            "--set-public-mcp-resource", "--set-public-mcp-resource")),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN)),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "--release-sha", COMPONENT_SHA)),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "--config", "/tmp/x")),
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA, "extra")),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", "e" * 63)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", "E" * 64)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN,
+                             "--plan-sha256", COMPONENT_PLAN)),
+    ("apply-mcp-component", ("--plan-sha256", COMPONENT_PLAN)),
+    ("reconcile-mcp-component", ()),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA, "--set-public-mcp-resource")),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN)),
+])
+def test_component_verbs_refuse_any_open_argv_before_the_updater(tmp_path, verb, args):
+    (code, out, err, log, remaining, *_), argv, _expected_dir = _component_run(
+        tmp_path, verb, args)
+    assert code == 64, (out, err)
+    assert "usage:" in err
+    assert argv is None
+    assert log == [] and remaining == ""
+
+
+def test_usage_lists_the_component_verbs(tmp_path):
+    (code, _out, err, *_), argv, _expected_dir = _component_run(tmp_path, "unknown-verb", ())
+    assert code == 64
+    assert argv is None
+    for verb in COMPONENT_VERBS:
+        assert verb in err
+
+
+@pytest.mark.parametrize("verb,args", [
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN)),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+])
+def test_component_verbs_require_root_before_the_updater(tmp_path, verb, args):
+    (code, _out, err, log, *_), argv, _expected_dir = _component_run(
+        tmp_path, verb, args, fake_uid="501")
+    assert code == 77
+    assert "root" in err
+    assert argv is None and log == []
+
+
+@pytest.mark.parametrize("verb,args", [
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN)),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+])
+def test_component_verbs_refuse_a_controller_outside_the_target_release(tmp_path, verb, args):
+    (code, _out, _err, log, *_), argv, _expected_dir = _component_run(
+        tmp_path, verb, args, controller_from_release=False)
+    assert code == 65
+    assert argv is None and log == []
+
+
+@pytest.mark.parametrize("helper_kind", ["symlink", "missing"])
+@pytest.mark.parametrize("verb,args", [
+    ("plan-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+    ("apply-mcp-component", ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN)),
+    ("reconcile-mcp-component", ("--expected-sha", COMPONENT_SHA)),
+])
+def test_component_verbs_refuse_a_helper_that_is_not_a_regular_release_file(
+        tmp_path, verb, args, helper_kind):
+    (code, _out, _err, log, *_), argv, _expected_dir = _component_run(
+        tmp_path, verb, args, helper_kind=helper_kind)
+    assert code == 65
+    assert argv is None and log == []
+
+
+@pytest.mark.parametrize("helper_exit", [1, 2, 3, 64])
+def test_component_verbs_return_the_updater_status_unchanged(tmp_path, helper_exit):
+    (code, *_), argv, _expected_dir = _component_run(
+        tmp_path, "apply-mcp-component",
+        ("--expected-sha", COMPONENT_SHA, "--plan-sha256", COMPONENT_PLAN),
+        helper_exit=helper_exit)
+    assert argv is not None
+    assert code == helper_exit
+
+
+def test_control_resume_wrapper_binds_recovery_release_and_original_identity(tmp_path):
+    original_target = "a" * 40
+    txn = "autonomy-123456789abc"
+    args = ("--expected-sha", COMPONENT_SHA, "--target-sha", original_target,
+            "--transaction-id", txn, "--plan-sha256", COMPONENT_PLAN)
+    result, argv, expected_dir = _component_run(
+        tmp_path, "resume-control-component", args)
+    code, out, err, calls, remaining, *_ = result
+    assert code == 0, (out, err)
+    assert argv == ["-I", "-S", "-B", str(expected_dir / "autonomy_control.py"),
+                    "resume-control-component", "--expected-sha", original_target,
+                    "--recovery-sha", COMPONENT_SHA,
+                    "--transaction-id", txn, "--plan-sha256", COMPONENT_PLAN]
+    assert not calls and not remaining
+
+
+@pytest.mark.parametrize("extra", [
+    (), ("--expected-sha", COMPONENT_SHA),
+    ("--expected-sha", COMPONENT_SHA, "--target-sha", "a" * 40,
+     "--transaction-id", "wrong", "--plan-sha256", COMPONENT_PLAN),
+    ("--expected-sha", COMPONENT_SHA, "--target-sha", "a" * 40,
+     "--transaction-id", "autonomy-123456789abc", "--plan-sha256", COMPONENT_PLAN,
+     "--unknown", "value"),
+])
+def test_control_resume_wrapper_rejects_incomplete_or_unbound_argv(tmp_path, extra):
+    result, argv, _ = _component_run(tmp_path, "resume-control-component", extra)
+    code, _, _, calls, remaining, *_ = result
+    assert code == 64 and argv is None and not calls and not remaining

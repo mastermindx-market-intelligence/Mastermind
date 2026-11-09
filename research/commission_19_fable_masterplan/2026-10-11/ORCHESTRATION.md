@@ -1,6 +1,6 @@
-# Fable -> native Opus -> Fabric operator -> optional worker
+# Adaptive C19 delegation with optional management layers
 
-## 1. The requested topology
+## 1. One useful expanded topology, not a mandatory ladder
 
 ```text
 FABLE PRINCIPAL - one integration responsibility in existing C19
@@ -21,6 +21,8 @@ FABLE PRINCIPAL - one integration responsibility in existing C19
              +-- eligible optional worker(s): separable authorized subtasks
 ```
 
+Fable may commission a worker or self-executing operator directly; a native Opus coordinator may commission a worker directly. Keep a domain coordinator only when it owns meaningful integration or decisions. Workers return to their actual assigning parent, which can be Fable, a coordinator or an operator.
+
 Eight logical seats do not require eight simultaneous processes. The graph may have four responsibility levels, but that is not a claim that any particular installed native/Fabric runtime has proven four-level nesting. Every node retains the original root/grant/capacity lineage. Coordinator nesting does not multiply allowances, source writers, or permissions.
 
 ## 2. Native Opus setup using existing definitions
@@ -33,7 +35,7 @@ No new global agent-team system, orchestration service, memory directory, broad 
 
 ## 3. Observe each important edge before depending on it
 
-Fable records the actual native child ID/model selection, loaded method, relevant tool capabilities and continuation path. The native Opus coordinator discovers the **existing** admitted Fabric operator action and its exact contract, or consumes the principal's already-observed binding. Source docs for an unarmed stage are not evidence that all alternate existing lanes are unavailable, and a working unrelated lane does not prove this task's eligibility.
+Fable records the actual native child ID/model selection, loaded method, relevant tool capabilities and continuation path. The native Opus coordinator discovers the **existing** admitted Fabric worker or operator action and its exact contract, or consumes the principal's already-observed binding. Source docs for an unarmed stage are not evidence that all alternate existing lanes are unavailable, and a working unrelated lane does not prove this task's eligibility.
 
 First use a harmless authorized read or readiness inspection. A dummy write is not a capability probe. A real operator task is admitted only when the exact source scope, available tools, task class, budget and return path are valid. Do not guess provider identifiers, host/account names or launch schemas.
 
@@ -45,11 +47,11 @@ An operator may spawn workers only through its actually supported admitted mecha
 
 **Fable principal:** product thesis, exact C19 mission, cross-domain rulings, conflict arbitration, scope/priority, scarce-capacity allocation, independent review selection and final acceptance. Keeps a compact whole-program frontier and actively integrates useful returns.
 
-**Native Opus coordinator:** one domain's technical judgment and continuity. Decomposes only after reading the relevant accepted contract, freezes task interfaces, commissions/relays Fabric operator packets, adjudicates bounded returns, preserves domain dependencies and proposes the next useful task. Does not grind bulk census, logs, ordinary implementation or repeated tests in expensive context.
+**Native Opus coordinator:** one domain's technical judgment and continuity. Decomposes only after reading the relevant accepted contract, freezes task interfaces, commissions bounded Fabric worker or operator packets, adjudicates bounded returns, preserves domain dependencies and proposes the next useful task. Does not grind bulk census, logs, ordinary implementation or repeated tests in expensive context.
 
 **Fabric operator:** owns an admitted task from exact source inspection through edits/tests and the permitted delivery boundary. Uses isolated source workspace and actual tool/resource grants. Chooses direct execution versus optional workers by separability and economics. An operator must not silently expand into a new program or merge another worker's conflicting changes.
 
-**Optional worker:** narrow task and explicit output/evidence contract. Reads only needed material. No inherited root-level authority, extra budget, unrestricted secrets or independent source publication. Returns to the actual operator parent; the operator integrates before returning upward.
+**Optional worker:** narrow task and explicit output/evidence contract. Reads only needed material. No inherited root-level authority, extra budget, unrestricted secrets or independent source publication. Returns to its actual assigning parent; that parent adjudicates and integrates before returning upward.
 
 One writer controls every shared source seam, worktree and final artifact. Fable arbitrates conflicts on composer/auth/CI/release files; disjoint domain workers do not independently edit these shared seams. A reviewer must be independent where required: excluding the builder identity and providing underlying evidence is more meaningful than asking the same model to agree with itself.
 
@@ -69,7 +71,7 @@ Fable uses observed current capacity and the approved root economic envelope. Do
 
 Start with the smallest useful active set for the ready dependency graph; increase only when operators can execute independently and the parent can review returns. Backpressure from review, shared CI or a single browser may justify fewer live coordinators than domains. Pause or release idle admitted resources through their existing owners; never create a polling daemon to appear continuously busy.
 
-Use the least-scarce qualified operators and workers after Opus freezes ambiguity. C0/C1 mechanical/routine tasks do not deserve Opus merely because C19 is important. Escalate a difficult bounded task on actual counterexample or ambiguity, preserving the same effect/custody rules. Do not route across accounts or providers to get a refused effect through.
+Use the least-scarce qualified operators and workers once the assigning parent has resolved any material ambiguity. C0/C1 mechanical/routine tasks do not deserve Opus merely because C19 is important. Escalate a difficult bounded task on actual counterexample or ambiguity, preserving the same effect/custody rules. Do not route across accounts or providers to get a refused effect through.
 
 ## 7. Measure efficiency rather than claim it
 

@@ -2,6 +2,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 import inspect
+import json
 import signal
 
 import pytest
@@ -223,6 +224,51 @@ class _QuiesceCliHost:
 
     def require_service_uids_quiescent(self):
         pytest.fail("post-quiescence proof must not run after refusal")
+
+
+@pytest.mark.parametrize("effective_uid", [0, 450, 451, 501])
+def test_control_uid_quiesce_cli_uses_production_host_uid_before_admission(
+    monkeypatch, capsys, effective_uid
+):
+    calls = []
+
+    def uid():
+        calls.append("effective_uid")
+        return effective_uid
+
+    def gate(name, result=None):
+        def checked(_self, *_args):
+            calls.append(name)
+            return result
+        return checked
+
+    monkeypatch.setattr(control.os, "geteuid", uid)
+    monkeypatch.setattr(
+        control.os, "kill", lambda *_args: pytest.fail("CLI fixture must not signal")
+    )
+    expected_gates = [
+        ("require_exact_install", "a" * 40),
+        ("validate_acceptance", "accepted"),
+        ("load_unarmed_configs", object()),
+        ("require_runtime_quiescent", None),
+        ("require_services_already_stopped", None),
+        ("require_transaction_absent", None),
+        ("quiesce_control_uid_for_arm", (123,)),
+        ("require_service_uids_quiescent", None),
+    ]
+    for name, result in expected_gates:
+        monkeypatch.setattr(control.ProductionArmHost, name, gate(name, result))
+
+    # Use main's real production-host construction, not an injected fake host.
+    code = control.main(["arm-quiesce-control-uid", "--expected-sha", "a" * 40])
+    document = json.loads(capsys.readouterr().out)
+    if effective_uid == 0:
+        assert code == 0
+        assert document["code"] == "control_uid_quiesced"
+        assert calls == ["effective_uid"] + [name for name, _ in expected_gates]
+    else:
+        assert code == 2
+        assert calls == ["effective_uid"]
 
 
 def test_control_uid_quiesce_cli_refuses_loaded_service_before_any_quiesce(capsys):

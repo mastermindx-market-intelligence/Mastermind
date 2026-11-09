@@ -1,0 +1,99 @@
+{
+  "additions": {
+    "ext/byteplus_coding_plan.py": {
+      "bytes": 13144,
+      "sha256": "4a359b5a534524623c436d0ac801651084308c11c7c10525ae177f9da73fa6d4",
+      "source": "candidate/byteplus_coding_plan.py"
+    },
+    "ext/codex_provider_realm.py": {
+      "bytes": 50896,
+      "sha256": "07367ea8db85df09414a7668af8c3c2cfc9fae705a457816071da8177b232623",
+      "source": "../../../control_plane/codex_provider_realm.py"
+    },
+    "ext/experiential_bridge.py": {
+      "bytes": 35442,
+      "sha256": "1e364feec281b731293f1dcc05ed4f71ab4221433e0ba2dd8c5684f0098ad36e",
+      "source": "../experiential_native_bridge/experiential_bridge.py"
+    },
+    "ext/experiential_host_context.py": {
+      "bytes": 9606,
+      "sha256": "129f2fa556499fac57b4388dfd1ab8edfc0c127c67e3047a81bd9accd5a824c7",
+      "source": "../experiential53/experiential_host_context.py"
+    },
+    "ext/experiential_pin.py": {
+      "bytes": 19232,
+      "sha256": "f65b1f3f56afe4f3ad7d1d7538545c9a68b23e52176e205d42d1482f91e57a44",
+      "source": "../experiential53/experiential_pin.py"
+    },
+    "ext/experiential_plan_policy.py": {
+      "bytes": 14328,
+      "sha256": "f7242f6bcfe0227fc6a7374430c101a845903c8ff4e2da9a9fa42b43d75d81cc",
+      "source": "../../../control_plane/experiential_plan_policy.py"
+    },
+    "ext/experiential_transport.py": {
+      "bytes": 61369,
+      "sha256": "47bb544363435c5bfe6f4773a856ee20cd016c34ba1dac4840952bc078c3b291",
+      "source": "../experiential53/experiential_transport.py"
+    },
+    "ext/fs_security.py": {
+      "bytes": 20085,
+      "sha256": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
+      "source": "../../../control_plane/fs_security.py"
+    },
+    "ext/native_plan_worker.py": {
+      "bytes": 25960,
+      "sha256": "ef27796c353e408aaaa8df89fa66c3332175007d6b1cfd6354a644a2d23bbef0",
+      "source": "candidate/native_plan_worker.py"
+    }
+  },
+  "application_manifest_sha256": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
+  "manifest_sha256": "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d",
+  "provider_manifest_sha256": "41fad97dedbf2f09389e89890418d262fca31ebc20a8de97cefadf23ba203ddd",
+  "provider_profile_sha256": "b9248ed0ee912adb9c5a908d4517cc63d752396d0c97e9d635ff8a63c005484d",
+  "provider_profile_source": "../provider_plans/profile.json",
+  "replacements": {
+    "ext/fabric_task.py": {
+      "bytes": 123029,
+      "patch_sha256": "cd659d5ca939cc58f55c0059a5081df876257f08d6cbd6aea1a290a4a63adfb6",
+      "preimage_sha256": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+      "sha256": "75022b66b87d7443fb95d6753ae9503526df3f42b407cec1c7818436e0ec3c2e",
+      "source": "rollout/provider_application/fabric_task.py.patch"
+    },
+    "ext/lease_broker.py": {
+      "bytes": 212133,
+      "patch_sha256": "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b",
+      "preimage_sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+      "sha256": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+      "source": "rollout/provider_application/lease_broker.py.patch"
+    },
+    "ext/pick.py": {
+      "bytes": 177514,
+      "patch_sha256": "0e7d50e37581cdf5ade41b855ab2da35989ec2d13d2c325831cfeecca17d3223",
+      "preimage_sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+      "sha256": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+      "source": "rollout/provider_application/pick.py.patch"
+    },
+    "ext/remote_sub.sh": {
+      "bytes": 117639,
+      "patch_sha256": "08d082007e3f19e47d2e7ddadbdbf6bee177c2fe8e9c028b04d3c56a725a41d0",
+      "preimage_sha256": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+      "sha256": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+      "source": "rollout/provider_application/remote_sub.sh.patch"
+    },
+    "ext/slot.py": {
+      "bytes": 60196,
+      "patch_sha256": "6cd8523a79813a6e5134061df1277555fc4a4b7ce97d673d8f373381e1225457",
+      "preimage_sha256": "85c8c2140d314241d8d8e324cf07428672f842ecacfc126570c25400affe406f",
+      "sha256": "32809dd831e20711d30e07b956aa843de85edde5dc3965c002e522b4824d6ea7",
+      "source": "rollout/provider_application/slot.py.patch"
+    },
+    "ext/sub.sh": {
+      "bytes": 44515,
+      "patch_sha256": "ee2f17f0178de29ed4fae042868530f1b80f0efbaba2ed4d7f96890a1460ec8f",
+      "preimage_sha256": "4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f",
+      "sha256": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
+      "source": "rollout/provider_application/sub.sh.patch"
+    }
+  },
+  "schema": "native-provider-application-composition.v1"
+}

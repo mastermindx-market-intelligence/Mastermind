@@ -1,0 +1,10 @@
+--- a/ext/remote_sub_exec.py
++++ b/ext/remote_sub_exec.py
+@@ -163,6 +163,7 @@
+     ("core.untrackedCache", "false"), ("core.useReplaceRefs", "false"),
+     ("maintenance.auto", "false"), ("gc.auto", "0"),
+     ("protocol.allow", "never"),
++    ("advice.sparseIndexExpanded", "false"),
+ )
+ 
+ 

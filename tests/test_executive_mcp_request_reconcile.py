@@ -207,7 +207,9 @@ def test_status_outcomes_preserve_identity_without_retry(settings, rsa_key, monk
     async def run():
         async with connection(settings) as client:
             response, payload = await reconcile(client, fixture._submit_token(rsa_key))
-            assert response.json()["result"]["isError"] is True
+            result = response.json()["result"]
+            assert result["isError"] is True
+            assert result.get("structuredContent") == payload
             assert payload["status"] == status
             assert payload["request_ref"] == REF
             assert payload["error"]["code"] == code
@@ -263,7 +265,9 @@ def test_damaged_app_reply_is_same_request_unknown_after_one_status(settings, rs
     async def run():
         async with connection(settings) as client:
             response, payload = await reconcile(client, fixture._submit_token(rsa_key))
-            assert response.json()["result"]["isError"] is True
+            result = response.json()["result"]
+            assert result["isError"] is True
+            assert result.get("structuredContent") == payload
             assert payload["status"] == "effect_unknown"
             assert payload["request_ref"] == REF
             assert "private" not in json.dumps(response.json())
@@ -397,3 +401,50 @@ def test_real_committed_request_is_recovered_without_new_job_or_attempt(settings
             await readers.aclose()
     asyncio.run(run())
     assert calls == ["/v1/tools/submit_ceo_intent", PATH]
+
+
+def test_structured_error_growth_preserves_original_request_at_wire_limit(
+    settings, rsa_key, monkeypatch,
+):
+    frames = capture_status(monkeypatch)
+    real_create = app_module.create_web_ceo_v3_app
+    budget = 3000
+    failure = {
+        "ok": False, "status": "refused", "request_ref": REF,
+        "error": {"code": "not_found", "message": "public status detail " * 85},
+    }
+    assert len(json.dumps(failure).encode()) < budget
+    monkeypatch.setattr(
+        transport, "MAX_RESPONSE_BYTES", transport.MAX_REQUEST_BYTES + 4096 + budget,
+    )
+
+    def oversized_structured_result(configured, **kwargs):
+        app = real_create(configured, **kwargs)
+
+        async def wrapped(scope, receive, send):
+            async def discard(event):
+                pass
+
+            await app(scope, receive, discard)
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": json.dumps(failure).encode()})
+
+        wrapped.aclose = app.aclose
+        return wrapped
+
+    monkeypatch.setattr(app_module, "create_web_ceo_v3_app", oversized_structured_result)
+
+    async def run():
+        async with connection(settings) as client:
+            response, payload = await reconcile(client, fixture._submit_token(rsa_key))
+            result = response.json()["result"]
+            assert result["isError"] is True
+            assert result["structuredContent"] == payload
+            assert payload["status"] == "effect_unknown"
+            assert payload["request_ref"] == REF
+            assert payload["error"]["code"] == "effect_unknown"
+            assert "does not authorize resubmission" in payload["error"]["message"]
+            assert len(json.dumps(result).encode()) < budget
+
+    asyncio.run(run())
+    assert_one_status(frames, settings)

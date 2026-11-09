@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA,
     CAPABILITY_POLICY_SCHEMA_V3,
     CAPABILITY_POLICY_SCHEMA_V4,
+    CAPABILITY_POLICY_SCHEMA_V5,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     adapter_supports_execution_surface,
@@ -17,6 +19,7 @@ from control_plane.executive_agent_capabilities import (
     observed_mcp_tool_schema_digest,
     claude_security_config_digest,
     claude_security_config_projection,
+    supports_supervisor_validation_resources,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -136,7 +139,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-11.native-return-host-source"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -299,11 +302,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -453,6 +461,7 @@ def test_native_helper_profile_compiles_a_hidden_depth_one_parent_ceiling():
     assert projection["features"]["multi_agent"] is False
     assert projection["features"]["multi_agent_v2"] == {
         "enabled": True,
+        "disable_direct_message": True,
         "hide_spawn_agent_metadata": True,
         "max_concurrent_threads_per_session": 2,
         "non_code_mode_only": False,
@@ -683,42 +692,65 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
 
 
 def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
-    """Freeze the V3 policy after the disabled Company edge addition.
-
-    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
-    Company stdio grant rotates the global policy identity; the incumbent
-    Browser B1 and docs profile digests remain unchanged. Company stays
-    disabled until its installed native admission owner is qualified.
-    """
-
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
-    registry = ExecutionCapabilityRegistry.load()
-    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert registry.capability_packages == {}
-    # Preserve the previous ratified generation's identity independently of
-    # the new inert declaration, which necessarily rotates the policy digest.
-    raw = _raw_policy()
-    del raw["profiles"]["operator.browser.isolated.v1"]
-    del raw["resources"]["worker-browser-isolated"]
-    del raw["profiles"]["operator.appserver.interactive.native-return.v1"]
-    del raw["mcp_servers"]["native-return-mcp-v1"]
-    raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
-    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
-    assert registry.policy_digest != previous.policy_digest
-    registry = previous
-    assert registry.policy_digest == (
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
+    root = Path(__file__).resolve().parents[1]
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
+    )
+    candidate = ExecutionCapabilityRegistry.load(
+        root / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=root,
+    )
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.readonly.docs-mcp.native-helper.sol61.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
+    del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["fabric.paid.glm.sealed-input.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    # The new ACP read-only generation is independent of the frozen
+    # predecessor too; remove it only for this historical digest assertion.
+    # Default policy still tests both the protected attended and ACP profiles.
+    del protected_raw["profiles"]["worker.acp.providerfree.readonly.v1"]
+    del protected_raw["mcp_servers"]["mastermind-acp-workspace-read-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
         "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
     )
-    assert registry.resolve(
+    assert older.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
-
-    for profile in registry.profiles.values():
+    for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}
 
@@ -828,3 +860,570 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
         messages.add(str(excinfo.value))
 
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+# The policy source has a 2 MiB raw acquisition budget, independently of the
+# schema's object/cardinality limits and of retained Runtime SQLite budgets.
+_BOUNDED_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _record_capability_policy_source_reads(monkeypatch, selected):
+    original_open = Path.open
+    requests, handles = [], []
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            value = self.handle.read(size)
+            requests.append((size, len(value)))
+            return value
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path != selected:
+            return handle
+        handles.append(handle)
+        return Reader(handle)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    return requests, handles
+
+
+@pytest.mark.parametrize("relative", [
+    "config/executive_agent_capabilities.json",
+    "config/candidates/claude_principal_rg1.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json",
+])
+def test_bounded_policy_source_capability_exact_limit_preserves_registry(
+    tmp_path, monkeypatch, relative,
+):
+    import dataclasses
+    root = Path(__file__).resolve().parent.parent
+    expected = ExecutionCapabilityRegistry.load(root / relative, source_root=root)
+    raw = (root / relative).read_bytes()
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    assert len(raw) < limit
+    selected = tmp_path / "bounded-capabilities.json"
+    selected.write_bytes(raw + b" " * (limit - len(raw)))
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+    actual = ExecutionCapabilityRegistry.load(selected, source_root=root)
+    for field in dataclasses.fields(expected):
+        if field.name != "source_path":
+            assert getattr(actual, field.name) == getattr(expected, field.name)
+    assert actual.source_path == selected
+    assert requests == [(limit + 1, limit)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("fault", ["valid", "invalid_utf8", "multibyte"])
+def test_bounded_policy_source_capability_overflow_precedes_decode_and_parse(
+    tmp_path, monkeypatch, fault,
+):
+    from types import SimpleNamespace
+    import control_plane.executive_agent_capabilities as policy_module
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    raw += b" " * (limit + 1 - len(raw))
+    if fault == "invalid_utf8":
+        raw = b"\xff" + raw[1:]
+    elif fault == "multibyte":
+        raw = ('"' + 'é' * (limit // 2) + '"').encode("utf-8")
+        assert len(raw.decode("utf-8")) < limit < len(raw)
+    selected = tmp_path / "over-limit-capabilities.json"
+    selected.write_bytes(raw)
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+
+    def forbidden_parse(*_args, **_kwargs):
+        pytest.fail("over-limit capability source reached the JSON parser")
+
+    # Replace only this owner's JSON reference, never the shared json module.
+    monkeypatch.setattr(policy_module, "json", SimpleNamespace(
+        loads=forbidden_parse, JSONDecodeError=json.JSONDecodeError,
+    ))
+    with pytest.raises(CapabilityPolicyError, match="source exceeds byte limit"):
+        ExecutionCapabilityRegistry.load(selected)
+    assert requests == [(limit + 1, limit + 1)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+def test_bounded_policy_source_capability_preserves_universal_newlines(tmp_path):
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    selected = tmp_path / "mixed-newlines.json"
+    lines = raw.split(b"\n")
+    mixed = b"".join(line + (b"\r\n" if i % 2 else b"\r")
+                     for i, line in enumerate(lines))
+    selected.write_bytes(mixed)
+    expected = ExecutionCapabilityRegistry.load()
+    actual = ExecutionCapabilityRegistry.load(selected)
+    assert actual.policy_digest == expected.policy_digest
+    assert actual.profiles == expected.profiles
+
+    # A bare CR is invisible to JSONDecodeError's own newline counter. This
+    # distinguishes the former read_text translation from raw decode alone.
+    malformed = b'{\r\n"schema_version": 1,\r"profiles": }'
+    selected.write_bytes(malformed)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    cause = caught.value.__cause__
+    assert isinstance(cause, json.JSONDecodeError)
+    expected_text = '{\n"schema_version": 1,\n"profiles": }'
+    assert cause.doc == expected_text
+    assert cause.lineno == 3 and cause.colno == 13
+
+
+@pytest.mark.parametrize("raw, cause", [
+    (b"\xff", UnicodeDecodeError),
+    (b"\xef\xbb\xbf{}", json.JSONDecodeError),
+    ("{}".encode("utf-16"), UnicodeDecodeError),
+    ("{}".encode("utf-32"), UnicodeDecodeError),
+])
+def test_bounded_policy_source_capability_keeps_encoding_refusals(tmp_path, raw, cause):
+    selected = tmp_path / "bad-encoding.json"
+    selected.write_bytes(raw)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    assert isinstance(caught.value.__cause__, cause)
+
+
+def test_bounded_policy_source_capability_missing_path_keeps_resolve_exception(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        ExecutionCapabilityRegistry.load(tmp_path / "missing-capabilities.json")
+
+
+def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
+    from control_plane.executive_agent_capabilities import (
+        ACP_EXECUTION_SURFACE,
+        ACP_PROVIDER_FREE_AUTH_REALM,
+        ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        ACP_WORKSPACE_READ_MCP_COMMAND,
+        ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST,
+    )
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    assert profile.enabled is True
+    assert profile.execution_surface == ACP_EXECUTION_SURFACE == "acp-agent"
+    assert profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM == "dedicated-worker-no-auth"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.skills == profile.plugins == profile.resource_grants == ()
+    assert len(profile.mcp_server_grants) == 1
+    grant = profile.mcp_server_grants[0]
+    assert grant.capability_id == ACP_WORKSPACE_READ_MCP_CAPABILITY_ID
+    assert grant.transport == "stdio"
+    assert grant.command == ACP_WORKSPACE_READ_MCP_COMMAND
+    assert grant.args == ()
+    assert grant.auth_status == "unsupported"
+    assert grant.enabled_tools == ("read_file", "search_text")
+    assert grant.tool_schema_digest == ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST
+    projection = profile.acp_config_projection()
+    assert projection["execution_surface"] == "acp-agent"
+    assert projection["auth_realm"] == "dedicated-worker-no-auth"
+    assert projection["mcp_servers"] == [{
+        "capability_id": ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        "grant_digest": grant.grant_digest,
+    }]
+    assert profile.expected_config_digest == hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    assert registry.production_armed is False
+
+
+def test_acp_projection_refuses_non_acp_surface():
+    profile = ExecutionCapabilityRegistry.load().profiles["operator.appserver.readonly.v1"]
+    with pytest.raises(CapabilityPolicyError, match="not an ACP profile"):
+        profile.acp_config_projection()
+
+
+# ---------------------------------------------------------------------------
+# V5 supervisor-private validation resources (Codespaces validation C0a)
+# ---------------------------------------------------------------------------
+
+_V5_RESOURCE_ID = "codespace-devbox-sandbox-v1"
+_V5_IMAGE_DIGEST = "519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
+_V4_FIXTURE_PATH = Path(
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json"
+)
+_DEFAULT_POLICY_PATH = Path("config/executive_agent_capabilities.json")
+_V5_SEALED_PROFILE_ID = "sealed.worker.write.no-extensions.v1"
+_V5_OPERATOR_PROFILE_ID = "operator.appserver.readonly.v1"
+_V5_SKILL_PROFILE_ID = "operator.appserver.readonly.mastermind-operator.v1"
+_V5_PAID_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
+_V5_ACP_PROFILE_ID = "worker.acp.providerfree.readonly.v1"
+_V5_CLAUDE_PROFILE_ID = "operator.claude.readonly.v1"
+
+# Frozen pre-Sol61 V3 and accepted V4 identities remain stable under V5
+# parsing. The current V3 default adds only the explicitly qualified Sol61
+# profile, so its complete policy identity is recorded separately.
+_V3_PRE_SOL61_POLICY_DIGEST = (
+    "8e26d2d6cd0ca04b1fae93ae64b87c58d0b5d005467a095fcb9585dafd0807ad"
+)
+_V3_DEFAULT_POLICY_DIGEST = (
+    "2afebde77e277c6c5d63b279e883c2590eb7e34d891127e1a46c5de86790164d"
+)
+_V3_PAID_PROFILE_DIGEST = (
+    "ba1e883c749a1bd237b197141f9c4e83a206b70ea45cdee64ddbaf53f00739f7"
+)
+_V4_FIXTURE_POLICY_DIGEST = (
+    "dee789035df3e2acf3578995722f7dc41c5c1a31abed2e489de588497ff9e438"
+)
+_V4_SEALED_PROFILE_DIGEST = (
+    "21c106c5a981ffcc8a19785060061596c2ff02e7e095f0fc9bcbe59b54b7298d"
+)
+
+
+def _v5_validation_resource() -> dict:
+    return {
+        "kind": "codespace-devbox-sandbox-v1",
+        "recipes": ["compileall"],
+        "image_digest": _V5_IMAGE_DIGEST,
+        "network": "none",
+        "cpu_millis": 1000,
+        "memory_bytes": 512 * 1024 * 1024,
+        "pids_limit": 64,
+        "workspace_tmpfs_bytes": 256 * 1024 * 1024,
+        "tmp_tmpfs_bytes": 64 * 1024 * 1024,
+        "timeout_seconds": 120,
+        "max_stdout_bytes": 4 * 1024 * 1024,
+        "max_stderr_bytes": 1024 * 1024,
+        "max_snapshot_files": 4096,
+        "max_snapshot_bytes": 64 * 1024 * 1024,
+    }
+
+
+def _v5_policy() -> dict:
+    """Build an opt-in V5 document from the preserved V4 fixture.
+
+    The V4 fixture file itself is never rewritten: it stays the accepted V4
+    package-identity receipt.  The V5 document inherits its exact
+    capability-package/Skill-generation plane and adds only the opt-in
+    supervisor-private validation-resource plane.
+    """
+
+    raw = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    default = json.loads(_DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    raw["schema_version"] = CAPABILITY_POLICY_SCHEMA_V5
+    raw["policy_version"] = "2026-11-06.codespaces-validation-c0a-composition"
+    raw["validation_resources"] = {_V5_RESOURCE_ID: _v5_validation_resource()}
+
+    # The current provider-free ACP profile and its exact reviewed MCP grant
+    # are carried in unchanged so the V5 document can prove the ACP projection
+    # still carries no validation field.
+    raw["mcp_servers"]["mastermind-acp-workspace-read-v1"] = default[
+        "mcp_servers"
+    ]["mastermind-acp-workspace-read-v1"]
+    for profile_id in (_V5_PAID_PROFILE_ID, _V5_ACP_PROFILE_ID):
+        raw["profiles"][profile_id] = dict(default["profiles"][profile_id])
+        raw["profiles"][profile_id]["skill_capabilities"] = []
+    # The current restricted Claude operator candidate: disabled, no server.
+    raw["profiles"][_V5_CLAUDE_PROFILE_ID] = {
+        **default["profiles"][_V5_OPERATOR_PROFILE_ID],
+        "enabled": False,
+        "execution_surface": "claude-agent-sdk",
+        "skill_capabilities": [],
+    }
+
+    for profile in raw["profiles"].values():
+        profile["validation_resource_grants"] = []
+    raw["profiles"][_V5_SEALED_PROFILE_ID]["validation_resource_grants"] = [
+        _V5_RESOURCE_ID
+    ]
+    return raw
+
+
+def test_v5_validation_resource_is_supervisor_private_and_v4_plus(tmp_path):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _v5_policy()))
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V5
+    assert tuple(registry.validation_resources) == (_V5_RESOURCE_ID,)
+    grant = registry.validation_resources[_V5_RESOURCE_ID]
+    assert grant.kind == "codespace-devbox-sandbox-v1"
+    assert grant.recipes == ("compileall",)
+    assert grant.image_digest == _V5_IMAGE_DIGEST
+    assert grant.network == "none"
+    assert grant.cpu_millis == 1000
+    assert grant.memory_bytes == 512 * 1024 * 1024
+    assert grant.pids_limit == 64
+    assert grant.timeout_seconds == 120
+    assert len(grant.grant_digest) == 64
+
+    sealed = registry.resolve(_V5_SEALED_PROFILE_ID)
+    assert sealed.validation_resource_grants == (grant,)
+    # Supervisor validation capacity is not a provider/worker capability.
+    assert sealed.required_capability_names == ()
+    manifest = sealed.capability_manifest(harness_binary_digest="a" * 64)
+    assert manifest.required == ()
+    assert manifest.allowed_ambient == ()
+    # No worker projection carries the grant.
+    projection = json.dumps(sealed.app_server_config_projection(), sort_keys=True)
+    assert "validation" not in projection
+    assert _V5_RESOURCE_ID not in projection
+
+    # V5 inherits the complete V4 Skill-package plane instead of forking it.
+    skill_profile = registry.resolve(_V5_SKILL_PROFILE_ID)
+    assert skill_profile.skill_grants
+    assert skill_profile.validation_resource_grants == ()
+    assert registry.capability_packages
+
+
+def test_v5_validation_resource_changes_only_v5_identity(tmp_path):
+    baseline = _v5_policy()
+    changed = _v5_policy()
+    changed["validation_resources"][_V5_RESOURCE_ID]["max_snapshot_bytes"] += 1024
+
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    a = ExecutionCapabilityRegistry.load(_write(a_dir, baseline))
+    b = ExecutionCapabilityRegistry.load(_write(b_dir, changed))
+    assert a.policy_digest != b.policy_digest
+    assert (
+        a.resolve(_V5_SEALED_PROFILE_ID).profile_digest
+        != b.resolve(_V5_SEALED_PROFILE_ID).profile_digest
+    )
+
+    # An unrelated V5 profile with no validation grant remains unchanged when
+    # only the resource contract changes.
+    assert (
+        a.resolve(_V5_OPERATOR_PROFILE_ID).profile_digest
+        == b.resolve(_V5_OPERATOR_PROFILE_ID).profile_digest
+    )
+
+
+def test_v3_and_v4_do_not_accept_validation_resource_fields(tmp_path):
+    v3 = _raw_policy()
+    v3["validation_resources"] = {}
+    v3_dir = tmp_path / "v3"
+    v3_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="root fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v3_dir, v3))
+
+    v4 = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    v4["validation_resources"] = {}
+    v4_root_dir = tmp_path / "v4-root"
+    v4_root_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="root fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v4_root_dir, v4))
+
+    v4 = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    v4["profiles"][_V5_SEALED_PROFILE_ID]["validation_resource_grants"] = []
+    v4_profile_dir = tmp_path / "v4-profile"
+    v4_profile_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="profile .* fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v4_profile_dir, v4))
+
+
+def test_v3_and_v4_keep_their_exact_normalized_digests(tmp_path):
+    """V5 preserves historical identities; Sol61 is one explicit V3 addition."""
+
+    v3 = ExecutionCapabilityRegistry.load(_DEFAULT_POLICY_PATH)
+    assert v3.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert v3.policy_digest == _V3_DEFAULT_POLICY_DIGEST
+    assert (
+        v3.profiles[_V5_PAID_PROFILE_ID].profile_digest == _V3_PAID_PROFILE_DIGEST
+    )
+    assert v3.validation_resources == {}
+    assert all(
+        not profile.validation_resource_grants for profile in v3.profiles.values()
+    )
+
+    # Recover only the documented predecessor; retain every old profile and
+    # every top-level policy field under its original normalized identity.
+    historical_raw = _raw_policy()
+    sol61_profile = "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1"
+    del historical_raw["profiles"][sol61_profile]
+    historical = ExecutionCapabilityRegistry.load(_write(tmp_path, historical_raw))
+    assert historical.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert historical.policy_digest == _V3_PRE_SOL61_POLICY_DIGEST
+    assert set(v3.profiles) == set(historical.profiles) | {sol61_profile}
+    assert all(
+        profile.profile_digest == v3.profiles[profile_id].profile_digest
+        for profile_id, profile in historical.profiles.items()
+    )
+    assert historical.validation_resources == {}
+    assert all(
+        not profile.validation_resource_grants
+        for profile in historical.profiles.values()
+    )
+
+    v4 = ExecutionCapabilityRegistry.load(_V4_FIXTURE_PATH)
+    assert v4.schema_version == CAPABILITY_POLICY_SCHEMA_V4
+    assert v4.policy_digest == _V4_FIXTURE_POLICY_DIGEST
+    assert (
+        v4.profiles[_V5_SEALED_PROFILE_ID].profile_digest
+        == _V4_SEALED_PROFILE_DIGEST
+    )
+    assert v4.validation_resources == {}
+    assert all(
+        not profile.validation_resource_grants for profile in v4.profiles.values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("network", "default", "network must be none"),
+        ("recipes", ["pytest"], "recipes are unsupported"),
+        ("image_digest", "latest", "lowercase SHA-256"),
+        ("cpu_millis", True, "integer from"),
+        ("cpu_millis", 5000, "integer from"),
+        ("memory_bytes", 1, "integer from"),
+        ("pids_limit", 1024, "integer from"),
+        ("timeout_seconds", 0, "integer from"),
+        ("max_stdout_bytes", 8 * 1024 * 1024, "integer from"),
+        ("max_stderr_bytes", 2 * 1024 * 1024, "integer from"),
+        ("max_snapshot_files", 9000, "integer from"),
+        ("max_snapshot_bytes", 300 * 1024 * 1024, "integer from"),
+    ],
+)
+def test_v5_validation_resource_refuses_unsafe_contract_drift(
+    tmp_path, field, value, match
+):
+    raw = _v5_policy()
+    raw["validation_resources"][_V5_RESOURCE_ID][field] = value
+    with pytest.raises(CapabilityPolicyError, match=match):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize(
+    "dynamic_field",
+    ["codespace_name", "url", "token", "host", "path", "repository", "machine"],
+)
+def test_v5_validation_resource_has_no_model_selectable_dynamic_target(
+    tmp_path, dynamic_field
+):
+    raw = _v5_policy()
+    raw["validation_resources"][_V5_RESOURCE_ID][dynamic_field] = "attacker-value"
+    with pytest.raises(CapabilityPolicyError, match="fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_v5_validation_resource_profile_reference_is_closed(tmp_path):
+    raw = _v5_policy()
+    raw["profiles"][_V5_SEALED_PROFILE_ID]["validation_resource_grants"] = [
+        "missing-resource"
+    ]
+    unknown_dir = tmp_path / "unknown"
+    unknown_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="unknown validation resources"):
+        ExecutionCapabilityRegistry.load(_write(unknown_dir, raw))
+
+    raw = _v5_policy()
+    raw["profiles"][_V5_OPERATOR_PROFILE_ID]["validation_resource_grants"] = [
+        _V5_RESOURCE_ID
+    ]
+    operator_dir = tmp_path / "operator"
+    operator_dir.mkdir()
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="supervisor-private sealed-worker grants",
+    ):
+        ExecutionCapabilityRegistry.load(_write(operator_dir, raw))
+
+
+def test_v5_paid_glm_closed_profile_refuses_a_validation_grant(tmp_path):
+    """A generic sealed predicate must not authorize paid-model validation.
+
+    The paid model-only surface joins the sealed-worker fence, but the exact
+    ``fabric.paid.glm.sealed-input.v1`` profile is an accepted closed ceiling
+    with no field widening.  An empty validation grant stays inert; a nonempty
+    one refuses.
+    """
+
+    assert supports_supervisor_validation_resources("glm-model-only") is False
+    assert supports_supervisor_validation_resources("codex-exec") is True
+    assert supports_supervisor_validation_resources("claude-code") is True
+    assert supports_supervisor_validation_resources("codex-app-server") is False
+
+    inert = _v5_policy()
+    assert inert["profiles"][_V5_PAID_PROFILE_ID][
+        "validation_resource_grants"
+    ] == []
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, inert))
+    paid = registry.resolve(_V5_PAID_PROFILE_ID)
+    assert paid.validation_resource_grants == ()
+    assert paid.required_capability_names == ()
+    assert paid.capability_manifest(harness_binary_digest="a" * 64).required == ()
+    # The closed tuple itself is unchanged by the V5 generation.
+    assert paid.execution_surface == "glm-model-only"
+    assert paid.auth_realm == "paid-lease-bound-account"
+    assert paid.sandbox_policy == "read-only"
+    assert paid.approval_policy == "never"
+    assert paid.network_policy == "disabled"
+    assert paid.write_capable is False
+    assert paid.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert paid.native_helper is None
+    assert paid.skills == ()
+    assert paid.skill_grants == ()
+    assert paid.mcp_server_grants == ()
+    assert paid.resource_grants == ()
+    assert paid.plugins == ()
+    assert paid.forbidden == ()
+
+    refused = _v5_policy()
+    refused["profiles"][_V5_PAID_PROFILE_ID]["validation_resource_grants"] = [
+        _V5_RESOURCE_ID
+    ]
+    refused_dir = tmp_path / "paid-refused"
+    refused_dir.mkdir()
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="closed paid model-only sealed-input profile",
+    ):
+        ExecutionCapabilityRegistry.load(_write(refused_dir, refused))
+
+
+def test_v5_keeps_the_current_special_projects_free_of_validation_fields(tmp_path):
+    """The ACP and Claude projections are unchanged under V5."""
+
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _v5_policy()))
+
+    acp = registry.resolve(_V5_ACP_PROFILE_ID)
+    assert acp.validation_resource_grants == ()
+    assert acp.mcp_servers == ("mastermind-acp-workspace-read-v1",)
+    assert acp.required_capability_names == ("mastermindAcpWorkspaceRead",)
+    acp_projection = json.dumps(acp.acp_config_projection(), sort_keys=True)
+    assert "validation" not in acp_projection
+    assert _V5_RESOURCE_ID not in acp_projection
+
+    # The Claude operator candidate is disabled by design, so it is read
+    # directly rather than through resolve().
+    claude = registry.profiles[_V5_CLAUDE_PROFILE_ID]
+    assert claude.validation_resource_grants == ()
+    assert claude.required_capability_names == ()
+    claude_projection = json.dumps(
+        claude.claude_sdk_config_projection(), sort_keys=True
+    )
+    assert "validation" not in claude_projection
+    assert _V5_RESOURCE_ID not in claude_projection
+
+
+def test_v5_default_schema_and_checked_in_policy_remain_v3():
+    assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
+    assert CAPABILITY_POLICY_SCHEMA_V5 == "mastermind.executive_agent_capabilities/v5"
+    registry = ExecutionCapabilityRegistry.load()
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert registry.production_armed is False
+    assert registry.lifecycle_authority == "executive_os"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
+    assert registry.validation_resources == {}
+    assert all(
+        not profile.validation_resource_grants
+        for profile in registry.profiles.values()
+    )

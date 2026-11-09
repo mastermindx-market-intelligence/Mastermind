@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationWindow } from "./ConversationWindow";
+import { canNavigateForAutomaticSignIn } from "../auth-navigation-guard";
 import { emptyDrafts, readDraft, writeDraft } from "./drafts";
 import { decodeMissionv3 } from "../mission";
 import { decodeWindow } from "../workspace-contract";
@@ -10,6 +11,12 @@ import { decodeResultEnvelope } from "../result";
 import { projectOffice, type OfficeInput, type OfficeProjection, type ProjectionContext, type SourceState } from "../meta-ceo/projection";
 import fixture from "../fixtures/window-mission-association-producer.json";
 import resultFixture from "../fixtures/result-design-available-reject-unicode.json";
+
+vi.mock("./ResultSourceReader", () => ({
+  // Only the edit-return callback is mocked here; reader identity/after-await
+  // and Add/Undo behavior remain covered by its separate actual-source suite.
+  ResultSourceReader: ({ onEditDraft }: { onEditDraft: () => void }) => <button onClick={onEditDraft}>Edit retained notes</button>,
+}));
 
 afterEach(cleanup);
 async function input() {
@@ -32,6 +39,34 @@ function Harness({ projection }: { projection: OfficeProjection }) {
 }
 
 describe("Atelier observed conversation window", () => {
+  it("keeps an already-written note copyable but read-only when Content is withheld", async () => {
+    const original = (await input()).projection;
+    const noContent = structuredClone(original);
+    noContent.conversation.source.state = "WITHHELD";
+    noContent.conversation.value = null;
+    const note = "Private conversation note must remain copyable.";
+    const view = render(<ConversationWindow projection={noContent} draft={note}
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    const field = screen.getByRole("textbox", { name: "Unsent notes" }) as HTMLTextAreaElement;
+    expect(field.value).toBe(note);
+    expect(field.readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    view.rerender(<ConversationWindow projection={noContent} draft=""
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    expect(screen.queryByRole("textbox", { name: "Unsent notes" })).toBeNull();
+  });
+  it("holds unattended redirects while conversation notes are unsent", async () => {
+    const view = render(<Harness projection={(await input()).projection} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "Do not lose these notes." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   it.each([false, true])("attaches result evidence only to the observed Job/Attempt, exact=%s", async exact => {
     const { reads, context } = await input();
     const result = decodeResultEnvelope(structuredClone(resultFixture), {
@@ -72,7 +107,7 @@ describe("Atelier observed conversation window", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
     expect(!!screen.queryByText("Only the exact returned result.")).toBe(exact);
     expect(!!screen.queryByText("private:other-result")).toBe(exact);
-    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window. Review and acceptance remain separate.")).toBeTruthy();
+    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window")).toBeTruthy();
   });
   it("renders the decoded owner window without inventing a session or transcript", async () => {
     const { projection } = await input();
@@ -105,7 +140,7 @@ describe("Atelier observed conversation window", () => {
     expect(screen.getByText(state)).toBeTruthy();
     const text = reads.conversation!.value!.view.items.find(item => item.text)!.text!;
     if (state !== "STALE") expect(screen.queryByText(text)).toBeNull();
-    if (state === "STALE") expect(screen.getByText("Retained window; current conversation state is not established.")).toBeTruthy();
+    if (state === "STALE") expect(screen.getByText("Showing an earlier view. Newer replies may be missing.")).toBeTruthy();
     if (state === "WITHHELD") { expect(document.body.textContent).not.toContain("private:"); expect(screen.queryByRole("textbox")).toBeNull(); }
   });
   it.each(["auth", "target", "revision", "session", "binding"])("withdraws inspected content synchronously at a %s boundary", async boundary => {
@@ -126,8 +161,73 @@ describe("Atelier observed conversation window", () => {
   it("keeps unknown effect and independent receipts visible without a resend control", async () => {
     const { reads, context } = await input(); reads.mission!.value!.transport.dispatch_state = "EFFECT_UNKNOWN";
     render(<Harness projection={projectOffice(reads, context)} />);
-    expect(screen.getByRole("alert").textContent).toContain("original operation");
+    expect(screen.getByRole("alert").textContent).toContain("Don’t send it again");
     expect(screen.getByRole("region", { name: "Independent receipts" }).textContent).toContain("acceptanceNOT_PROJECTED");
     expect(screen.queryByRole("button", { name: /retry|resend|failover|stop/i })).toBeNull();
+  });
+});
+
+
+describe("FE-01 additive conversation composition", () => {
+  it("renders the supplied slot exactly once and preserves it across passive read revisions", async () => {
+    const { reads, context, projection } = await input();
+    let mounts = 0;
+    function Continuation() {
+      const [text, setText] = useState("");
+      useEffect(() => { mounts++; }, []);
+      return <textarea aria-label="Owner Session payload" value={text} onChange={e => setText(e.target.value)} />;
+    }
+    const slot = <Continuation key="same-owner-epoch" />;
+    const { rerender } = render(<ConversationWindow projection={projection} draft="notes" onDraftChange={() => {}} continuation={slot} notesPresentation="collapsed" />);
+    expect(screen.getAllByRole("textbox", { name: "Owner Session payload" })).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Owner Session payload"), { target: { value: "Keep exact Session text. 继续" } });
+    const nextContext = structuredClone(context); nextContext.revisions.conversation = "w2";
+    const nextReads = structuredClone(reads); nextReads.conversation!.context = nextContext; nextReads.conversation!.source.revision = "w2";
+    rerender(<ConversationWindow projection={projectOffice(nextReads, nextContext)} draft="notes" onDraftChange={() => {}} continuation={slot} notesPresentation="collapsed" />);
+    expect((screen.getByLabelText("Owner Session payload") as HTMLTextAreaElement).value).toBe("Keep exact Session text. 继续");
+    expect(mounts).toBe(1);
+  });
+  it("starts notes closed, opens accessibly, and returns focus on Escape without changing the draft", async () => {
+    const onDraftChange = () => { throw new Error("navigation must not edit notes"); };
+    render(<ConversationWindow projection={(await input()).projection} draft="Exact notes 继续" onDraftChange={onDraftChange} notesPresentation="collapsed" />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Unsent notes" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    const notes = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" });
+    expect(notes.value).toBe("Exact notes 继续"); notes.focus();
+    fireEvent.keyDown(notes, { key: "Escape", isComposing: true, keyCode: 229 });
+    expect(screen.getByRole("textbox")).toBe(notes);
+    fireEvent.keyDown(notes, { key: "Escape" });
+    expect(screen.queryByRole("textbox")).toBeNull(); expect(document.activeElement).toBe(trigger);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  });
+  it("localizes static chrome without translating owner text, reasons, identifiers or notes", async () => {
+    const { projection } = await input();
+    const ownerText = projection.conversation.value!.view.items.find(item => item.text)!.text!;
+    render(<ConversationWindow projection={projection} locale="zh-CN" draft="Unchanged user notes" onDraftChange={() => {}} notesPresentation="collapsed" />);
+    expect(screen.getByRole("button", { name: "上下文" })).toBeTruthy();
+    expect(screen.getByText(ownerText)).toBeTruthy(); expect(screen.getByText("CURRENT")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "未发送的笔记" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "未发送的笔记" }).value).toBe("Unchanged user notes");
+  });
+});
+
+
+describe("FE-01 source detour return", () => {
+  it("opens collapsed notes then focuses the actual textarea after source-reader edit return", async () => {
+    const { reads, context } = await input();
+    const window = reads.conversation!.value!;
+    const mission = reads.mission!.value!;
+    if (window.schema !== "mastermind.workspace.window_read_candidate.v2" || mission.schema !== "mastermind.mission_workspace.v3") throw new Error("typed fixtures required");
+    mission.result_refs.refs = [{ root_job_id: context.selection!.rootJobId, job_id: window.observation_binding.job_id,
+      attempt_id: window.observation_binding.attempt_id, result_envelope_digest: "c".repeat(64), orchestration_role: "work", validation: "UNVALIDATED" }];
+    render(<ConversationWindow projection={projectOffice(reads, context)} draft="Original revision-safe notes" onDraftChange={vi.fn()} readResult={vi.fn()} notesPresentation="collapsed" />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read exact result source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit retained notes" }));
+    const notes = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" });
+    expect(notes.value).toBe("Original revision-safe notes"); expect(document.activeElement).toBe(notes);
   });
 });

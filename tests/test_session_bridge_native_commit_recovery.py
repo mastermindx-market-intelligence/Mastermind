@@ -1,6 +1,7 @@
 """Parent recovery remains strict after a bound native reply admission."""
 import copy
 import dataclasses
+import asyncio
 
 import pytest
 
@@ -65,6 +66,59 @@ def test_native_unknown_remains_sticky_and_continue_cannot_recommit(setup):
     s.service.items.pop()  # Now the original CONTINUE is absent too.
     with pytest.raises(BridgeError):
         reconcile(s)
+
+
+@pytest.mark.parametrize('reply_visible', [False, True])
+def test_original_parent_reads_committed_result_without_reviving_retired_writer(setup, monkeypatch, reply_visible):
+    from integrations.session_bridge.native_read import NativeReplyReader
+    s = setup
+    binding, reply = prepare(s)
+    admit(s, binding, reply)
+    if not reply_visible:
+        s.service.items.pop()
+    def retired(*_args, **_kwargs):
+        pytest.fail('canonical result read consulted retired session authority')
+    monkeypatch.setattr(s.owner, '_target', retired)
+    monkeypatch.setattr(type(s.runtime), 'current_harness_binding_source', retired)
+    reader = NativeReplyReader(s.owner, socket_path=s.owner.socket_path,
+        service_call=s.service, projected_principal=True)
+    before = s.runtime.events.list_events()
+    sends = sum(c['operation'] == 'send_message' for c in s.service.calls)
+    if reply_visible:
+        result = asyncio.run(reader(s.projection, {'operation_key': s.args['operation_key']}))
+        assert result['fingerprint'] == reply['fingerprint']
+        assert result['text'] == reply['body']['completed']
+        assert result['parent_consumed'] is False
+    else:
+        with pytest.raises(BridgeError):
+            asyncio.run(reader(s.projection, {'operation_key': s.args['operation_key']}))
+    assert s.runtime.events.list_events() == before
+    assert sum(c['operation'] == 'send_message' for c in s.service.calls) == sends
+
+
+@pytest.mark.parametrize('fault', [None, 'missing_reply', 'retired_writer', 'changed_reply'])
+def test_service_cleanup_requires_exact_visible_commit_and_current_writer(setup, monkeypatch, fault):
+    s = setup
+    binding, reply = prepare(s)
+    admit(s, binding, reply)
+    prior_calls = len(s.service.calls)
+    if fault == 'missing_reply':
+        s.service.items.pop()
+    elif fault == 'retired_writer':
+        def retired(*_args, **_kwargs):
+            raise module.BridgeError('binding_unavailable', 'retired writer')
+        monkeypatch.setattr(type(s.runtime), 'current_harness_binding_source', retired)
+    elif fault == 'changed_reply':
+        s.service.items[-1]['message']['body']['completed'] = 'Foreign result.'
+    before = s.runtime.events.list_events()
+    if fault is None:
+        result = asyncio.run(s.owner.require_committed_native_reply(read_ref=bind(s)))
+        assert result == reply
+    else:
+        with pytest.raises(BridgeError):
+            asyncio.run(s.owner.require_committed_native_reply(read_ref=bind(s)))
+    assert s.runtime.events.list_events() == before
+    assert all(call['operation'] == 'read_thread' for call in s.service.calls[prior_calls:])
 
 
 @pytest.mark.parametrize('fault', [

@@ -24,7 +24,16 @@ class RepositoryWorkspaceInstallTests(unittest.TestCase):
         value = self.configuration(True)
         self.assertEqual(value["repositoryWorkspaces"], {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]})
-        self.assertEqual(value["gitPublish"]["sourceRepository"], "/owned/home/Documents/GitHub/Mastermind")
+        self.assertNotIn("sourceRepository", value["gitPublish"])
+        self.assertEqual(
+            [p["repository"] for p in value["gitPublish"]["repositories"]],
+            ["mastermind", "macro", "terminal"],
+        )
+        self.assertNotIn("repositories", self.configuration(False)["gitPublish"])
+        self.assertEqual(
+            self.configuration(False)["gitPublish"]["sourceRepository"],
+            "/owned/home/Documents/GitHub/Mastermind",
+        )
         with self.assertRaises((ValueError, SystemExit)):
             self.configuration("true")
 
@@ -78,13 +87,22 @@ class RepositoryWorkspaceLifecycleTests(unittest.TestCase):
                 paths = native._build_runtime_roots("test-account")
                 fixtures._seed_node_modules(paths)
                 enabled = {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                original = json.loads(paths["config"].read_text())
+                self.assertEqual(original["repositoryWorkspaces"], enabled)
+                self.assertEqual(
+                    [p["repository"] for p in original["gitPublish"]["repositories"]],
+                    ["mastermind", "macro", "terminal"],
+                )
                 args.enable_repository_workspaces = False
                 fixtures._capture_stdout(lambda: native.cmd_stage(args))
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                restaged = json.loads(paths["config"].read_text())
+                self.assertEqual(restaged["repositoryWorkspaces"], enabled)
+                self.assertEqual(restaged["gitPublish"], original["gitPublish"])
                 upgraded = fixtures._make_upgrade_source(root)
                 fixtures._capture_stdout(lambda: native.cmd_upgrade(fixtures._stage_args(upgraded, node, backend)))
-                self.assertEqual(json.loads(paths["config"].read_text())["repositoryWorkspaces"], enabled)
+                installed = json.loads(paths["config"].read_text())
+                self.assertEqual(installed["repositoryWorkspaces"], enabled)
+                self.assertEqual(installed["gitPublish"], original["gitPublish"])
                 manifest = json.loads(paths["manifest"].read_text())
                 self.assertEqual(manifest["configHash"], native._sha256_file(paths["config"]))
                 self.assertIn("workspace-access.mjs", manifest["files"])

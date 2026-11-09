@@ -39,7 +39,72 @@ def test_native_job_is_independent_and_failure_enforcing():
 def test_existing_frontend_gate_is_preserved():
     job = workflow()["jobs"]["frontend"]
     assert job["runs-on"] == "ubuntu-latest"
-    assert commands(job) == ["npm ci", "npm run typecheck", "npm test", "npm run build"]
+    assert commands(job)[:3] == ["npm ci", "npm run typecheck", "npm test"]
+    assert "npm run build" in commands(job)[3]
+    assert all("continue-on-error" not in step for step in job["steps"])
+
+
+def test_frontend_build_uses_exact_app_only_production_source_closure():
+    job = workflow()["jobs"]["frontend"]
+    build = next(step for step in job["steps"]
+                 if step.get("name") == "Build exact app-only release archive")
+    assert build["working-directory"] == "."
+    command = build["run"]
+    for required in (
+        'release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"',
+        'git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"',
+        'cd "$release_root/app/mastermind_os"',
+        "npm ci --ignore-scripts",
+        "npm run build",
+        'test -s "$release_root/app/mastermind_os/dist/index.html"',
+        'PYTHONPATH="$GITHUB_WORKSPACE" python3 -c',
+        'from ops.executive_os.executive_mcp_entry import build_os_asset_manifest',
+        'build_os_asset_manifest(Path(sys.argv[1]))',
+        'rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
+        'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
+    ):
+        assert required in command
+    assert command.index('test -s "$release_root/app/mastermind_os/dist/index.html"') < command.index(
+        'build_os_asset_manifest(Path(sys.argv[1]))'
+    ) < command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"')
+    assert command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"') < command.index(
+        'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"'
+    )
+    assert "|| true" not in command
+    assert not any("continue-on-error" in step for step in job["steps"])
+
+
+def test_compiled_browser_evidence_is_separate_bounded_and_source_bound():
+    job = workflow()["jobs"]["frontend"]
+    runs = commands(job)
+    assert len(runs) == 7
+    assert runs[4] == "npx vite build --config vite.browser-proof.config.ts"
+    receipt = runs[6]
+    for field in (
+        'schema: "mastermind.os.compiled_test_receipt.v1"',
+        "source_revision: process.env.GITHUB_SHA",
+        "run_id: process.env.GITHUB_RUN_ID",
+        "run_attempt: process.env.GITHUB_RUN_ATTEMPT",
+        "live_acceptance: false",
+        '["dist", "dist-browser-proof"]',
+    ):
+        assert field in receipt
+    uploads = [step for step in job["steps"]
+               if step.get("uses", "").startswith("actions/upload-artifact@")]
+    assert {step["with"]["path"] for step in uploads} == {
+        "app/mastermind_os/dist", "app/mastermind_os/dist-browser-proof",
+        "${{ runner.temp }}/mastermind-app-control-proof",
+    }
+    assert len(uploads) == 3
+    receipt_index = next(i for i, step in enumerate(job["steps"])
+                         if step.get("run") == receipt)
+    for step in uploads:
+        assert step["uses"] == "actions/upload-artifact@v4"
+        assert step["with"]["name"].endswith("-${{ github.sha }}")
+        assert step["with"]["if-no-files-found"] == "error"
+        assert 1 <= int(step["with"]["retention-days"]) <= 7
+        assert job["steps"].index(step) > receipt_index
+        assert "if" not in step and "continue-on-error" not in step
 
 
 def test_node_pin_supports_the_locked_dependency_engines():
@@ -60,7 +125,13 @@ def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():
     assert set(config["on"]) == {"pull_request", "merge_group", "push", "workflow_dispatch"}
     for event in ("pull_request", "push"):
         assert set(config["on"][event]["paths"]) == {
-            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH
+            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH,
+            "integrations/worker_browser_runtime/app-control/**",
+            "integrations/workbench_browser_mcp/**",
+            "integrations/workbench_action_mcp/service.py",
+            "control_plane/browser_resource_contract.py",
+            "tests/test_os_app_control_profile.py",
+            "tests/test_workbench_browser_port.py",
         }
     assert config["on"]["push"]["branches"] == ["master"]
     assert config["on"]["merge_group"]["types"] == ["checks_requested"]
@@ -100,6 +171,21 @@ def test_native_assets_precede_locked_rust_checks_and_tests():
         assert assets < runs.index(command)
 
 
+def test_opt_in_native_rotation_executes_in_ci_and_package_stays_default_off():
+    job = native_job()
+    runs = commands(job)
+    standard = "cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml"
+    enabled_check = "MM_NATIVE_REFRESH_ENABLED=1 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml"
+    enabled_test = "MM_NATIVE_REFRESH_ENABLED=1 cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml"
+    package = "./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked"
+    assert runs.count(standard) == 1
+    assert runs.count(enabled_check) == 1
+    assert runs.count(enabled_test) == 1
+    assert runs.index(standard) < runs.index(enabled_check) < runs.index(enabled_test) < runs.index(package)
+    assert "MM_NATIVE_REFRESH_ENABLED" not in job["env"]
+    assert "MM_NATIVE_CLIENT_ID" not in job["env"]
+
+
 def test_package_is_unsigned_locked_verified_and_not_published():
     job = native_job()
     runs = commands(job)
@@ -120,4 +206,5 @@ def test_package_is_unsigned_locked_verified_and_not_published():
     assert "MM_NATIVE_CLIENT_ID" not in job["env"]
     raw = (ROOT / WORKFLOW_PATH).read_text()
     assert "secrets." not in raw
-    assert not any(token in raw for token in ("upload-artifact", "tauri-action", "gh release", "notarytool"))
+    assert not any(token in raw for token in ("tauri-action", "gh release", "notarytool"))
+    assert "upload-artifact" not in yaml.safe_dump(job)

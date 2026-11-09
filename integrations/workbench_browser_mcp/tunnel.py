@@ -23,7 +23,7 @@ from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, ServerResult, TextContent
 
 from common.bounded_sync_executor import SyncExecutionTimeout
-from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS
+from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS, WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
 from control_plane.executive_agent_capabilities import (
     McpServerGrant,
     observed_mcp_tool_schema_digest,
@@ -146,6 +146,8 @@ def _host_config(value: BrowserServiceConfig) -> BrowserHostConfig:
         home_dir=value.home_dir,
         tmp_dir=value.tmp_dir,
         startup_timeout_seconds=value.startup_timeout_seconds,
+        app_control_origin=value.app_control_origin,
+        expected_tool_schema_digest=value.app_control_tool_schema_digest or WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
     )
 
 
@@ -229,7 +231,7 @@ def create_browser_tunnel_server(
         browser_config.tool_catalog_file,
         maximum=MAX_BROWSER_CATALOG_BYTES,
     )
-    surface = build_browser_tool_surface(catalog)
+    surface = build_browser_tool_surface(catalog, expected_tool_schema_digest=browser_config.app_control_tool_schema_digest or WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST)
     allowed_names = frozenset(surface.validators)
     if mcp_grant is not None:
         if (
@@ -268,6 +270,13 @@ def create_browser_tunnel_server(
     project_ref = services.project_ref
     ports: BrowserPorts = create_browser_ports(
         resolve_binding=current_binding,
+        # For a worker-selected grant, read recovery must also verify the
+        # original durable BrowserResourcePort APPLIED start/process claim.
+        # A same-key signed BrowserRef without that claim grants no read.
+        # Attended/ungranted Workbench remains under its existing owner law.
+        resolve_recovery_binding=current_binding if mcp_grant is not None else None,
+        # Fresh mutating tools must not bypass the same durable start claim.
+        require_resource_claim_for_fresh=mcp_grant is not None,
         clock_ms=services.clock_ms,
         action_token_key=services.action_token_key,
         artifact_store=services.artifact_store,
@@ -351,6 +360,22 @@ def create_browser_tunnel_server(
             except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("CHANNEL_ADMISSION_REFUSED")
+        # A worker's read-only tool grant is never an implicit artifact-write
+        # authority. Snapshot, console and network reads may accept a filename;
+        # screenshots also write a default image even without that argument.
+        # The separately governed attended Browser port remains unchanged.
+        if (mcp_grant is not None
+                and name in READ_ONLY_BROWSER_TOOLS
+                and (name == "browser_take_screenshot"
+                     or "filename" in request)):
+            try:
+                await emit_channel_audit(
+                    code="request_refused", accepted=False,
+                    tool=name, digest=digest,
+                )
+            except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
+                return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            return _error("BROWSER_ARTIFACT_NOT_GRANTED")
         # run_browser_action is a generic dispatcher. Merely filtering its
         # name would let a token prepared under a broader grant bypass the
         # worker's native-tool ceiling. Reconciliation remains read-only.
@@ -415,7 +440,7 @@ def create_browser_tunnel_server(
                         caller, request["start_ref"]
                     ),
                 )
-            elif name in READ_ONLY_BROWSER_TOOLS:
+            elif name in surface.read_tools:
                 native_args = dict(request)
                 browser_ref = native_args.pop("browser_ref")
                 direct_native = await _run_existing(

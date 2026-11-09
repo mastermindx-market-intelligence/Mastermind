@@ -24,6 +24,20 @@ function observed(result: ReturnType<typeof complete>) {
 }
 
 describe("Programs collection owner receipt to Office", () => {
+  it("preserves the qualified collection receipt while withholding private display prose", () => {
+    const raw = envelope(), unsafe = "token=synthetic-fixture";
+    raw.control_room.work[0].agent_os.next_action = unsafe;
+    const result = observed(complete(decodeProgramsObservation(raw)));
+    expect(result.snapshot.source.state).toBe("CURRENT");
+    expect(result.snapshot.source.ref).toBe(raw.source_observation.control_room.document_digest);
+    expect(result.snapshot.value?.programs).toHaveLength(2);
+    expect(result.snapshot.value?.programs[0]).toMatchObject({
+      nextAction: null, nextActionWithheld: true, workRef: "WS:ALPHA", rootJobId: "JOB-A",
+    });
+    expect(JSON.stringify(result)).not.toContain(unsafe);
+    expect(result.context.selection).toBeNull();
+    expect(result.context.revisions.mission).toBe("mission:unchanged");
+  });
   it("qualifies only the supplied collection, keeping Mission revision and target unchanged", () => {
     const doc = document(), result = observed(complete(doc));
     const source = result.snapshot.source;
