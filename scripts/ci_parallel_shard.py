@@ -21,6 +21,14 @@ from scripts import ci_pytest
 _REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
 _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
 
+# Only positively identified title/body edits are irrelevant to source CI.
+# A base change (even an incomplete one) or unknown edited payload stays checked.
+_METADATA_EDIT = "github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)"
+_REQUIRED_PR_SCOPE_IF = "${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}"
+_REQUIRED_GATE_IF = "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}"
+_REQUIRED_GATE_NAME = "${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}"
+_REQUIRED_CONCURRENCY = {"group": "ci-${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && '-metadata' || '' }}", "cancel-in-progress": True}
+
 _EXPECTED_SHARD_SOURCE_STEPS = [
     {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
      "with": {"ref": "edd30b4686d3aaf358b4ca6ebd9485b04d15751d", "fetch-depth": 1,
@@ -111,7 +119,7 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         raise ci_pytest.PolicyError("PR scope and fast CI jobs must be mappings")
     if (
         scope.get("name") != "PR test scope"
-        or scope.get("if") != "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}"
+        or scope.get("if") != _REQUIRED_PR_SCOPE_IF
         or scope.get("needs") is not None
         or scope.get("permissions") != {"contents": "read"}
         or scope.get("runs-on") != "ubuntu-latest"
@@ -242,6 +250,8 @@ def validate_parallel_workflow(text: str) -> None:
     payload = yaml.load(text, Loader=ci_pytest._WorkflowYAMLLoader)
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
+    if payload.get("concurrency") != _REQUIRED_CONCURRENCY:
+        raise ci_pytest.PolicyError("metadata edits must not cancel source/base qualification")
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pytest_shards", "test"}:
         raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, shards, and test gate")
@@ -270,9 +280,9 @@ def validate_parallel_workflow(text: str) -> None:
     ):
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if (
-        gate.get("name") != "test"
+        gate.get("name") != _REQUIRED_GATE_NAME
         or gate.get("needs") != ["pr_scope", "pr_fast", "pytest_shards"]
-        or gate.get("if") != "${{ always() }}"
+        or gate.get("if") != _REQUIRED_GATE_IF
         or gate.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")

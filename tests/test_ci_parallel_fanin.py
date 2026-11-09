@@ -21,7 +21,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
 
     data = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
     assert data["on"] == {
-        "pull_request": None,
+        "pull_request": {"types": ["opened", "synchronize", "reopened", "edited"]},
         "merge_group": {"types": ["checks_requested"]},
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
@@ -36,7 +36,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert 45 <= shards["timeout-minutes"] <= 75
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
-    assert data["jobs"]["test"]["name"] == "test"
+    assert data["jobs"]["test"]["name"] == fan._REQUIRED_GATE_NAME
     assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
 
 
@@ -144,7 +144,7 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
         ("needs: [pr_scope, pr_fast, pytest_shards]", "needs: []"),
-        ("if: ${{ always() }}", "if: false"),
+        ("if: " + fan._REQUIRED_GATE_IF, "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
         ("exit 1", "exit 0"),
@@ -342,7 +342,7 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
         "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
     }
     assert "env" not in shard_step  # Do not expose the Actions token to pytest.
-    assert data["jobs"]["test"]["if"] == "${{ always() }}"
+    assert data["jobs"]["test"]["if"] == fan._REQUIRED_GATE_IF
     fan.validate_parallel_workflow(_WORKFLOW.read_text())
 
 
