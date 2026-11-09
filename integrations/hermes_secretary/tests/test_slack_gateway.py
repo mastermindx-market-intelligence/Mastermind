@@ -460,6 +460,42 @@ class InThreadRoleSwitchTests(unittest.TestCase):
         self.assertEqual(len(turn_run_ids), 3)
         self.assertEqual(len(set(turn_run_ids)), 3)
 
+    def test_failed_update_never_posts_duplicate_slack_answer(self):
+        from unittest.mock import Mock
+        self.conf["dispatch"]["placeholder"] = True
+        self.fleet.say = Mock(return_value="1794180009.123456")
+        self.fleet.sender = Mock()
+        self.fleet.sender.update.return_value = False
+        with patch.object(gateway, "dispatch", return_value=(True, "native answer", "sid-native-1")):
+            self.fleet.work({"channel": "C0CBC6AEAQZ",
+                             "ts": "1794180000.123456", "text": "please respond"},
+                            "secretary", "test", [])
+        self.assertEqual(self.fleet.say.call_count, 1)  # placeholder only
+        self.assertEqual(self.fleet.sender.update.call_count, 1)
+        self.assertFalse(gateway.audit.call_args.kwargs["slack_delivery_ok"])
+
+    def test_placeholder_post_unavailable_refuses_before_native_model(self):
+        from unittest.mock import Mock
+        self.conf["dispatch"]["placeholder"] = True
+        self.fleet.say = Mock(return_value=None)
+        with patch.object(gateway, "dispatch") as model:
+            self.fleet.work({"channel": "C0CBC6AEAQZ",
+                             "ts": "1794180000.123456", "text": "please respond"},
+                            "secretary", "test", [])
+        model.assert_not_called()
+        self.assertEqual(self.fleet.say.call_count, 1)
+
+    def test_slash_without_thread_root_refuses_instead_of_sharing_empty_key(self):
+        from unittest.mock import Mock
+        self.fleet.say = Mock()
+        with patch.object(gateway, "dispatch") as model:
+            self.fleet.work({"channel": "C0CBC6AEAQZ", "ts": "",
+                             "text": "slash request"},
+                            "secretary", "slash:/mx-secretary", [])
+        self.assertEqual(self.fleet.say.call_count, 0)
+        model.assert_not_called()
+        self.assertEqual(self.fleet.state["sessions"], {})
+
     def test_failed_native_turn_does_not_advance_resume_pointer(self):
         root = "1794180000.123456"
         channel = "C0CBC6AEAQZ"
