@@ -92,7 +92,7 @@ The initial stacked unavailable message clipped its footer in the fixed 432×340
 
 ### Proof and release
 
-All **42 portfolio operations**, including explicit final release of the six affected artboards, returned APPLIED_RESPONSE_OBSERVED. Operation IDs are listed below. Source-map, atlas-card, all four phone and updated full Start Here screenshots were inspected. Final map height is 1296 at y−3200; next board starts y−1800, leaving104px. New phone boards retain at least80px native placement clearance. No overlapping original board was moved.
+All **42 portfolio operations**, including explicit final release of the six affected artboards, returned APPLIED_RESPONSE_OBSERVED. Operation IDs are listed below. Source-map, atlas-card, all four phone and updated full Start Here screenshots were inspected. Final map height is 1296 at y−3200; next board starts y−1800, leaving 104px. New phone boards retain at least 80px native placement clearance. No overlapping original board was moved.
 
 - `paper-portfolio-migrated-map-scope-20261108-c4`
 - `paper-portfolio-unknown-submission-copy-20261108-c4`
@@ -139,19 +139,19 @@ All **42 portfolio operations**, including explicit final release of the six aff
 
 ## Breadth work in progress and reconciled interruption
 
-Native copies of `XZ-0` were created as `17W-0` (constituents) and `1HC-0` (receipts); both duplicate responses were APPLIED_RESPONSE_OBSERVED. Original selected-session header became `1QS-0` and body `1QZ-0`. The headline now states the exact normalized-level comparison: A/D108.7 minus index106.2 =2.5 normalized points, rather than implying predictive or temporal leadership.
+Native copies of `XZ-0` were created as `17W-0` (constituents) and `1HC-0` (receipts); both duplicate responses were APPLIED_RESPONSE_OBSERVED. Original selected-session header became `1QS-0` and body `1QZ-0`. The headline now states the exact normalized-level comparison: A/D108.7 minus index 106.2 =2.5 normalized points, rather than implying predictive or temporal leadership.
 
 The first headline attempt `paper-breadth-summary-headline-20261108-c4` was refused DOCUMENT_CHANGED. An exact original-body read showed the requested headline absent; no call was replayed. The reconciled, newly qualified headline operation applied. Counts operation returned APPLIED_RESPONSE_OBSERVED; the later execution cell's return path disappeared. Original-target readback then found the requested extremes row `2BS-0` and drivers header `2C3-0` present. They were not replayed.
 
-That readback also showed additional changes beyond this session's observed calls: completed driver/coverage/action rows,44px tabs, and advancing headers/bodies on the two copies. Those changes are not claimed as this session's operation receipts. The known live overlap is protected; no blind completion or overwrite of those nodes is authorized by this record. Continue independent portfolio/Bonds work, then inspect exact current Breadth targets and reconcile custody before any further mutation. The original-copy/source-hold boundaries remain intact.
+That readback also showed additional changes beyond this session's observed calls: completed driver/coverage/action rows, 44px tabs, and advancing headers/bodies on the two copies. Those changes are not claimed as this session's operation receipts. The known live overlap is protected; no blind completion or overwrite of those nodes is authorized by this record. Continue independent portfolio/Bonds work, then inspect exact current Breadth targets and reconcile custody before any further mutation. The original-copy/source-hold boundaries remain intact.
 
 ## Bonds production-source recovery — verified native design
 
-File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5), page `p-2-0`. New native artboard `3PO-0`, “R33 · Source publication recovery · EN and ZH390”, was duplicated from the existing index and placed at x2090/y−6207, 1440px wide, beyond the existing right edge with80px clearance. Owned body `3QM-0` was composed incrementally.
+File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5), page `p-2-0`. New native artboard `3PO-0`, “R33 · Source publication recovery · EN and ZH390”, was duplicated from the existing index and placed at x2090/y−6207, 1440px wide, beyond the existing right edge with 80px clearance. Owned body `3QM-0` was composed incrementally.
 
 ### User-facing recovery and build routing
 
-- Desktop English panel `3QT-0` and390px Chinese panel `3RB-0` show publication-service unavailability, unavailable source values, and the unchanged Bonds page. Close, Choose JSON and Reload site publication have44px-or-larger controls. JSON is explicitly local to this tab.
+- Desktop English panel `3QT-0` and 390px Chinese panel `3RB-0` show publication-service unavailability, unavailable source values, and the unchanged Bonds page. Close, Choose JSON and Reload site publication have 44px-or-larger controls. JSON is explicitly local to this tab.
 - Pending specimen `3RX-0` shows source values unavailable until validation completes. Existing Choose JSON and explicit reload remain available; this is not an invented automatic retry loop.
 - Build binding `3S8-0` specifies current reader entry, selection behavior, distinct failure classes, and cancellation/focus return. These are source-derived requirements, not executed prototype wiring or runtime acceptance.
 - Existing Start Here indexes `1-0` and `1T0-0` now point to `p-2-0 /3PO-0`, retaining their accepted reference chips and explicitly separating runtime/release acceptance.
@@ -161,15 +161,15 @@ File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/f
 
 Root read [Macro#9578](https://github.com/mastermindx-market-intelligence/macro/pull/9578) at head `34a32ff08b9e8296863668440adb208feac126f2`: open, not draft; current returned mergeability was null. Existing BUILT_NOT_PROVEN and merge/release holds remain. Root read `templates/_bonds_source_inspector.js.j2` in full, blob `09000dc5416b7027f4cd27f761a1b86395691743`, at that same head.
 
-The existing inspector uses the same-origin GET `/macro-context-data/decision_workspaces.json`, same-origin credentials, no-store cache, redirect rejection, AbortController,12s timeout,1.5MB limit and strict decoding/schema checks. A new read cancels/supersedes the prior read, clears the inspector source model and field, and resets its section to Overview while retaining query and language. It does not clear the host Bonds page. Explicit reload is the source action; Choose JSON remains a distinct local import with unverified publisher identity.
+The existing inspector uses the same-origin GET `/macro-context-data/decision_workspaces.json`, same-origin credentials, no-store cache, redirect rejection, AbortController, 12s timeout, 1.5MB limit and strict decoding/schema checks. A new read cancels/supersedes the prior read, clears the inspector source model and field, and resets its section to Overview while retaining query and language. It does not clear the host Bonds page. Explicit reload is the source action; Choose JSON remains a distinct local import with unverified publisher identity.
 
 401,403,404,service,timeout/network,format and schema failures remain distinguishable. No captured/prior source-value fallback, save, monitor, trade, identity, storage or retry owner was added. Close/Escape cancels the pending read and restores focus to Transmission sources. Late/superseded reads are ignored. Reopening an unavailable model reads the site; reopening a valid model does not automatically refresh.
 
 ### Verification and release
 
-Root inspected full native screenshots of the finished1440px recovery board, both individual language panels, both modified indexes and the local-study card. All message/action rows fit, with readable text and no added accent rails. This was static/native inspection; no protected-route request or prior denied action was replayed and no browser/runtime tests were rerun. Explicit `finish_working_on_nodes` released only `3PO-0`, `1-0`, `1T0-0`, `2M0-0`.
+Root inspected full native screenshots of the finished 1440px recovery board, both individual language panels, both modified indexes and the local-study card. All message/action rows fit, with readable text and no added accent rails. This was static/native inspection; no protected-route request or prior denied action was replayed and no browser/runtime tests were rerun. Explicit `finish_working_on_nodes` released only `3PO-0`, `1-0`, `1T0-0`, `2M0-0`.
 
-All20 phase operations returned APPLIED_RESPONSE_OBSERVED:
+All 20 phase operations returned APPLIED_RESPONSE_OBSERVED:
 
 - `paper-bonds-publication-recovery-copy-20261108-c4`
 - `paper-bonds-publication-recovery-heading-20261108-c4`
@@ -192,17 +192,17 @@ All20 phase operations returned APPLIED_RESPONSE_OBSERVED:
 - `paper-bonds-publication-recovery-name-20261108-c4`
 - `paper-bonds-publication-recovery-finish-20261108-c4`
 
-## Government Revenue320px result returns — verified
+## Government Revenue 320px result returns — verified
 
-File [Government Revenue — R5 and Builder Contracts](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF), page `p-1-0`, component atlas `2G-0`. Exact existing320px result panels lacked the local return controls already available in their390px equivalents.
+File [Government Revenue — R5 and Builder Contracts](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF), page `p-1-0`, component atlas `2G-0`. Exact existing 320px result panels lacked the local return controls already available in their 390px equivalents.
 
-- Confirmed funding-watch panel `7A-0`: native duplicate of existing light320px return component `ED-0` appended as `3U8-0`, text `3U9-0` localized to “返回我的研究”. The48px control uses the existing light tokens and stays within the280px content width.
-- Unconfirmed save panel `7J-0`: native duplicate of existing return component `52-0` appended as `3UA-0`, text `3UB-0` “Back to my research”. The44px-or-larger control follows the existing dark pattern.
+- Confirmed funding-watch panel `7A-0`: native duplicate of existing light 320px return component `ED-0` appended as `3U8-0`, text `3U9-0` localized to “返回我的研究”. The 48px control uses the existing light tokens and stays within the 280px content width.
+- Unconfirmed save panel `7J-0`: native duplicate of existing return component `52-0` appended as `3UA-0`, text `3UB-0` “Back to my research”. The 44px-or-larger control follows the existing dark pattern.
 - Both preserve confirmed/unknown result state, original request, selected contract, conditions and delivery preference. Return is local dismissal to the retained research origin. It does not retry, save, activate, reconcile or claim delivery. Existing contract `6A-0` already binds precise origin/focus and assigns activation/reconciliation to shared My Alerts; that contract remains unchanged.
 
-Root read exact current JSX and existing component patterns, then inspected full screenshots of both finished320px panels. All text/actions fit. The fit-content parent atlas remains clear of its only neighboring artboard; no fixed-height clipping was introduced. Existing financial/example figures and source/permission/runtime boundaries at `6B-0` are preserved. Root released only atlas `2G-0` with explicit finish.
+Root read exact current JSX and existing component patterns, then inspected full screenshots of both finished 320px panels. All text/actions fit. The fit-content parent atlas remains clear of its only neighboring artboard; no fixed-height clipping was introduced. Existing financial/example figures and source/permission/runtime boundaries at `6B-0` are preserved. Root released only atlas `2G-0` with explicit finish.
 
-All3 phase operations returned APPLIED_RESPONSE_OBSERVED:
+All 3 phase operations returned APPLIED_RESPONSE_OBSERVED:
 
 - `paper-government-320-result-returns-20261108-c4`
 - `paper-government-320-confirmed-return-zh-20261108-c4`
@@ -215,14 +215,14 @@ File [Forex Guided Intelligence — Source Revisions](https://app.paper.design/f
 ### Changes and native verification
 
 - Seven review variants `64Y-0`, `66F-0`, `67Z-0`, `69K-0`, `6B7-0`, `6D1-0`, `6EI-0` no longer say a condition is already saved before the user keeps it. Their notice states that it is not saved to the account and monitoring is inactive. Six actions say “Keep prepared in this tab”; the structural case says “Keep case in this tab”, remaining a future/manual case specification.
-- The first390px screenshot caught overflow in the old fixed-width action. All seven owned action rows were replaced with responsive Back/Keep controls,44px minimum height and wrapping-safe text. Native390px and expanded desktop verification showed the complete labels without clipping. New action-row roots are `B17-0`, `B1D-0`, `B1J-0`, `B1P-0`, `B1V-0`, `B21-0`, `B27-0`.
-- Prepared-result panel `87R-0` now says “Prepared in this tab · Not saved to your account”. Its former arbitrary saved “Revision1” is replaced by “Account save / Not created”. The unrelated valuation paragraph was replaced with the useful next step: review in My watches and explicitly save to the account. Its existing rail was not added or restyled by this phase.
+- The first 390px screenshot caught overflow in the old fixed-width action. All seven owned action rows were replaced with responsive Back/Keep controls, 44px minimum height and wrapping-safe text. Native 390px and expanded desktop verification showed the complete labels without clipping. New action-row roots are `B17-0`, `B1D-0`, `B1J-0`, `B1P-0`, `B1V-0`, `B21-0`, `B27-0`.
+- Prepared-result panel `87R-0` now says “Prepared in this tab · Not saved to your account”. Its former arbitrary saved “Revision 1” is replaced by “Account save / Not created”. The unrelated valuation paragraph was replaced with the useful next step: review in My watches and explicitly save to the account. Its existing rail was not added or restyled by this phase.
 - Execution review `6B7-0` now shows UTC4H calendar, unavailable closing prices, inactive monitoring and no created account save. The collapsed/expanded exact-rule editors `9RG-0` and `9SF-0` retain the sample condition/expiry while identifying an unavailable feed, unavailable monitoring and the requirement for a future UTC expiry when actually saving. Unsupported activation/re-evaluation/pause assertions were removed from these current preparation paths.
 - About-reference panel `8DK-0` states that prepared drafts stay in this tab and reloading clears them. Its separate illustrative/reference and runtime qualification remains.
-- A native duplicated artboard `AZ5-0`, “R26 · Current account saving ·390px states and source contract”, is placed at x6588/y10229,1440×1837,80px to the right of the existing builder index. Body `B11-0` contains six390px cards: local draft `B2E-0`, pending save `B2T-0`, unconfirmed result `B38-0`, account-confirmed inactive revision example `B3K-0`, revision conflict `B3X-0`, and account change `B4A-0`. The illustrative USD/JPY rule uses the existing145.60 threshold with two completed consecutive4H closes and a clearly labeled example expiry16Nov2026,16:00UTC. It is no market observation or account record.
+- A native duplicated artboard `AZ5-0`, “R26 · Current account saving ·390px states and source contract”, is placed at x6588/y10229,1440×1837,80px to the right of the existing builder index. Body `B11-0` contains six 390px cards: local draft `B2E-0`, pending save `B2T-0`, unconfirmed result `B38-0`, account-confirmed inactive revision example `B3K-0`, revision conflict `B3X-0`, and account change `B4A-0`. The illustrative USD/JPY rule uses the existing 145.60 threshold with two completed consecutive 4H closes and a clearly labeled example expiry 16Nov2026,16:00UTC. It is no market observation or account record.
 - Contract `B4J-0` binds scope, confirmation, uncertain save, exact edit/delete, account boundary, return and inventory semantics. The implementation index `AV5-0` links `AZ5-0` through `B5C-0`, before supporting/future references. Current My watches routing now ends in inactive saving. The old exact design-count badge was replaced by a descriptive reference label, avoiding a stale total after extension. Future-owner watch lifecycle `AWW-0`/`AWX-0`/`AWY-0` and the design/runtime boundary at `AX0-0` remain explicit.
 
-Root inspected the full1837px gallery, updated index,390px review, expanded execution review, prepared result, About-reference panel, and collapsed/expanded exact-rule editor screenshots. All new gallery text/actions fit; no accent rails were added. The index is1440×1188; its next column begins80px beyond its right edge. Explicit finish released only the13 completed review/reference/artboard targets. Main-screen `4Z4-0` and `97H-0` have the initial local-wording correction but their foreground Pause/Resume and account-section integration remain a separate active phase below.
+Root inspected the full 1837px gallery, updated index, 390px review, expanded execution review, prepared result, About-reference panel, and collapsed/expanded exact-rule editor screenshots. All new gallery text/actions fit; no accent rails were added. The index is 1440×1188; its next column begins 80px beyond its right edge. Explicit finish released only the 13 completed review/reference/artboard targets. Main-screen `4Z4-0` and `97H-0` have the initial local-wording correction but their foreground Pause/Resume and account-section integration remain a separate active phase below.
 
 ### Current source, accepted scope and limits
 
@@ -234,9 +234,9 @@ Root read the following exact files at Macro `aec7f387badcdf69c9a947fafbc73b4c68
 | [`templates/forex_watch_client.js`](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/forex_watch_client.js) | `89fd276a93949e7e03fb30196eb251aca517f173` |
 | [`templates/forex_r26_workspace.html.j2`](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/forex_r26_workspace.html.j2) | `f4674707662fe8f6ca087a41490ce6a8ba39d6f8` |
 
-The current client accepts supported pairs with literal `price_close`,4H/`fx-utc-4h/v1`,null feed, a valid comparison/positive threshold,1–10 consecutive closes and a valid future UTC expiry for writes. New local preparation has null condition ID/revision, saved:false, active:false and only enters the in-memory prepared array. Keeping it closes the editor, navigates to `#forex/my_watches` and focuses its tab.
+The current client accepts supported pairs with literal `price_close`,4H/`fx-utc-4h/v1`,null feed, a valid comparison/positive threshold, 1–10 consecutive closes and a valid future UTC expiry for writes. New local preparation has null condition ID/revision, saved:false, active:false and only enters the in-memory prepared array. Keeping it closes the editor, navigates to `#forex/my_watches` and focuses its tab.
 
-Account saving uses the existing owner and exact ID/user/expected revision; accepted records must be validated, rule-matching and inactive. The matching local draft is removed only after confirmation/reconciliation. Saved revision1 is valid only as an explicitly account-confirmed example. Inventory loading, unavailable, confirmed empty, saved inactive and pending operation remain distinct.
+Account saving uses the existing owner and exact ID/user/expected revision; accepted records must be validated, rule-matching and inactive. The matching local draft is removed only after confirmation/reconciliation. Saved revision 1 is valid only as an explicitly account-confirmed example. Inventory loading, unavailable, confirmed empty, saved inactive and pending operation remain distinct.
 
 Check status reconciles the original condition/request. An absent row or failed reconciliation read does not settle an uncertain SAVE. Inventory refresh is not mutation reconciliation. Delete has its own existing exact-ID semantics: a successful absence read can confirm deletion. A revision conflict requires Reload saved version for that exact record, with Save changes held until reloaded/reviewed. Actual account changes/sign-out invalidate prior-epoch replies and clear the former account’s local editor/drafts/pending UI; same-user sign-in confirmation does not. The pending map and local drafts make no reload/restart durability guarantee.
 
@@ -244,9 +244,9 @@ Event, exposure and structural-condition lifecycles, activation, finalized monit
 
 ### Transport recovery and effect reconciliation
 
-After16 observed Forex mutations through Mastermind Paper, the NEXT action’s get_basic_info preflight timed out before any edit call was issued. Exact-node read, Paper inspection and Executive session-target discovery also timed out. This was a transport failure, not a permission denial or unknown mutation. Studio Direct liveness and its existing Paper adapter were independently healthy. Its catalog had the same `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb` hash and accepted tool-scoped write schema. Exact-file read verified the same Forex identity/write readiness, and exact row `B3J-0` showed the two previously confirmed cards and no account-change card. No prior mutation was replayed or re-homed. New subsequent actions used the existing Studio Direct adapter with fresh exact-file guards and their own operation IDs. No host placement, app focus transition, service restart, account change or new transport was created.
+After 16 observed Forex mutations through Mastermind Paper, the NEXT action’s get_basic_info preflight timed out before any edit call was issued. Exact-node read, Paper inspection and Executive session-target discovery also timed out. This was a transport failure, not a permission denial or unknown mutation. Studio Direct liveness and its existing Paper adapter were independently healthy. Its catalog had the same `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb` hash and accepted tool-scoped write schema. Exact-file read verified the same Forex identity/write readiness, and exact row `B3J-0` showed the two previously confirmed cards and no account-change card. No prior mutation was replayed or re-homed. New subsequent actions used the existing Studio Direct adapter with fresh exact-file guards and their own operation IDs. No host placement, app focus transition, service restart, account change or new transport was created.
 
-All33 phase operations returned APPLIED_RESPONSE_OBSERVED (16 Mastermind Paper;17 Studio Direct):
+All 33 phase operations returned APPLIED_RESPONSE_OBSERVED (16 Mastermind Paper; 17 Studio Direct):
 
 - `paper-forex-tab-account-copy-20261108-c4`
 - `paper-forex-current-account-board-copy-20261108-c4`
@@ -284,23 +284,23 @@ All33 phase operations returned APPLIED_RESPONSE_OBSERVED (16 Mastermind Paper;1
 
 ## Forex My watches foreground integration — verified
 
-The same exact source pin and owner contract above now inform current main screens `4Z4-0` (1440×1050) and `97H-0` (390×844). The prior phone put its local-only explanation below both rows and outside the initial viewport, while exposing unsupported32px Pause/Resume controls. This phase corrects that foreground journey in place; no extra main-screen or state-store surface was created.
+The same exact source pin and owner contract above now inform current main screens `4Z4-0` (1440×1050) and `97H-0` (390×844). The prior phone put its local-only explanation below both rows and outside the initial viewport, while exposing unsupported 32px Pause/Resume controls. This phase corrects that foreground journey in place; no extra main-screen or state-store surface was created.
 
 ### Final behavior represented by the design
 
 - Account inventory and local preparations are visibly separate. Compact account-status components `B5T-0` and `B5Y-0` precede the draft heading/list. Their layer names explicitly identify a signed-in, inventory-unavailable fixture. Reload watches is a read action; unavailable is not rendered as zero saved conditions and does not reconcile a pending write.
 - Draft headings `B5H-0` and `B5N-0` say “Prepared in this tab”, “2 in this tab”, and that the conditions are not saved/active. The phone shows this qualification before its first draft.
-- Desktop list `B63-0` and phone list `B6H-0` retain the two original illustrative price-close conditions: USD/JPY below145.60 and EUR/USD above1.0960, each for two consecutive completed4H closes. Both rows now have current-source Review condition, Save to account and Remove draft controls, each at least44px high. Unsupported foreground Paused, Pause and Resume states were removed; the explicitly future lifecycle references remain unchanged elsewhere.
-- The original23Oct2026,16:00UTC rule values are explicitly labeled sample EXPIRY. The16Oct2026,16:00UTC footer is labeled context sample. No price, threshold, date, source event, market observation or account-owned count was changed. The top preview retained its compact existing date text after a longer replacement wrapped poorly.
+- Desktop list `B63-0` and phone list `B6H-0` retain the two original illustrative price-close conditions: USD/JPY below 145.60 and EUR/USD above 1.0960, each for two consecutive completed 4H closes. Both rows now have current-source Review condition, Save to account and Remove draft controls, each at least 44px high. Unsupported foreground Paused, Pause and Resume states were removed; the explicitly future lifecycle references remain unchanged elsewhere.
+- The original 23Oct2026,16:00UTC rule values are explicitly labeled sample EXPIRY. The 16Oct2026,16:00UTC footer is labeled context sample. No price, threshold, date, source event, market observation or account-owned count was changed. The top preview retained its compact existing date text after a longer replacement wrapped poorly.
 - Source-dependent variants remain in `AZ5-0`: signed-out uses Sign in/Sign in to save, account checking/unavailable disables saving, pending write preserves its original-operation state, and confirmed inventory shows owned saved-inactive records. The present main-screen fixture assumes auth is ready with inventory read unavailable; it does not represent a live user/account or promise successful persistence.
 
 ### Verification
 
-Root inspected full desktop and390px first-viewport screenshots after the changes. The phone now exposes account status, local draft qualification, and all three first-draft controls before its bottom navigation. A final width correction keeps Reload watches on one line without reducing its44px target. The second row and existing Changes/Data & sources content remain in the existing scroll-content structure.
+Root inspected full desktop and 390px first-viewport screenshots after the changes. The phone now exposes account status, local draft qualification, and all three first-draft controls before its bottom navigation. A final width correction keeps Reload watches on one line without reducing its 44px target. The second row and existing Changes/Data & sources content remain in the existing scroll-content structure.
 
-Native tree checks confirm the desktop list is1168×224 within the existing1232×879 main frame. The phone list is354×368 within the existing390×1155 scroll-content frame. Existing pagehead, Changes section and source footer remain. The phone viewport continues to clip scroll content by design; a whole-scroll-child screenshot respects that ancestor clip, so it is not claimed as full scrolled-browser proof. Native structure and dimensions were checked, and real scrolling, keyboard/focus, authenticated saving and runtime delivery remain separate acceptance work.
+Native tree checks confirm the desktop list is 1168×224 within the existing 1232×879 main frame. The phone list is 354×368 within the existing 390×1155 scroll-content frame. Existing pagehead, Changes section and source footer remain. The phone viewport continues to clip scroll content by design; a whole-scroll-child screenshot respects that ancestor clip, so it is not claimed as full scrolled-browser proof. Native structure and dimensions were checked, and real scrolling, keyboard/focus, authenticated saving and runtime delivery remain separate acceptance work.
 
-Explicit finish released only `4Z4-0` and `97H-0`. All14 phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct:
+Explicit finish released only `4Z4-0` and `97H-0`. All 14 phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct:
 
 - `paper-forex-main-desktopintro-20261108-c4-sd`
 - `paper-forex-main-mobileintro-20261108-c4-sd`
@@ -323,7 +323,7 @@ The Chairman's current continuation assignment remains with this session. The tw
 
 This is a bounded continuation of the root-created copies, not a takeover of the improved Summary or a file-wide lock. Proceed with new constituent children below the preserved tabs in `2GJ-0`, and a Receipts-only reflow of `1HI-0`, retaining headers `2FL-0`/`2GC-0`, dates and Close controls. A separate later step may copy the existing improved chart into the two stale left contexts `1BU-0`/`1LA-0` without changing source `10M-0`. Use current snapshots, read back each target, and preserve/re-plan any fresh content rather than overwriting it. The old requested extremes/drivers effects were already read back present and must never be replayed. No actual historical receipt API, per-member contribution amounts, reader implementation or production proof is inferred.
 
-Durable predecessor for this decision: [verified Forex and prior-phase record at8bab3126](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8bab3126fa8dd48998ce68163cc8dc48e3c7d9cd/research/paper_migrated_journeys_2026-11-08/AUDIT_AND_DELIVERY.md). Native target: [Breadth file/page](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0).
+Durable predecessor for this decision: [verified Forex and prior-phase record at 8bab3126](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8bab3126fa8dd48998ce68163cc8dc48e3c7d9cd/research/paper_migrated_journeys_2026-11-08/AUDIT_AND_DELIVERY.md). Native target: [Breadth file/page](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0).
 
 ## Verified Breadth selected-session continuation — 2026-11-09
 
@@ -351,7 +351,7 @@ Two new native 1440×960 boards sit to the right of the inspector copies with 80
 
 The failed-read specimen keeps Sep 24 selected, labels original source time, membership vintage and receipt coverage unavailable, and offers Close and Return to Summary. It is specifically a failed evidence read, not confirmed absence, a denied read, or a valid empty result. No retry action is invented before an exact-session reader and retry contract are established.
 
-The chart-data specimen exposes the existing selected row: Sep 24, 2026, A/D index108.7 and NYSE Composite index106.2. Both displayed series are explicitly normalized to start100. A visible-focus Inspect Sep 24 session action is48px; Back to chart is44px. Builder notes require Enter/Space to match chart click/tap and require every available plotted session in the implemented table. This single-row specimen does not imply additional historical rows or implemented keyboard behavior.
+The chart-data specimen exposes the existing selected row: Sep 24, 2026, A/D index 108.7 and NYSE Composite index 106.2. Both displayed series are explicitly normalized to start 100. A visible-focus Inspect Sep 24 session action is 48px; Back to chart is 44px. Builder notes require Enter/Space to match chart click/tap and require every available plotted session in the implemented table. This single-row specimen does not imply additional historical rows or implemented keyboard behavior.
 
 The selection contract carries session/calendar, universe/cohort revision, chart period, price basis and supplied source/version/knowledge cutoff through the existing page state. It requires explicit user selection for a different date/version, restores the original trigger on Close and preserves the selected date on Return to Summary. Selected session, original source time, known time and display time remain distinct. It introduces no selection store, history service, poller, watch or retry layer.
 
@@ -378,14 +378,14 @@ The fresh PR read was open, not merged, not draft, with merge-on-green and merge
 
 ### Visual proof, repair and effect reconciliation
 
-Root inspected the complete native Constituents and Receipts boards at1440×960, both400×680 evidence panels, the390px failure specimen, and both complete final1440×960 builder boards. Final tree readback shows the interaction body is1440×907 within its960px frame, and the reader-contract body is1440×922 within its960px frame. All sections and footer references are visible without clipping.
+Root inspected the complete native Constituents and Receipts boards at 1440×960, both 400×680 evidence panels, the 390px failure specimen, and both complete final 1440×960 builder boards. Final tree readback shows the interaction body is 1440×907 within its 960px frame, and the reader-contract body is 1440×922 within its 960px frame. All sections and footer references are visible without clipping.
 
 Two concrete issues were corrected during native QA:
 
-1. An initially empty flex container was represented by Paper as Rectangle `2ZK-0`. Attempting insert-children returned EFFECT_UNKNOWN with “Rectangle cannot have children.” Exact node readback showed childCount0 and no children; exact parent readback showed only the original header and empty Rectangle. The error receipt is preserved historically. These reads established no specimen effect at the target before a new, materially different same-carrier replace operation created Frame `2ZM-0` with the specimen. No blind retry or carrier swap occurred.
-2. The first combined builder body was1664px tall inside the inherited960px artboard. The oversized body was not accepted. A second owned native duplicate was made, its copied body was replaced with a compact header, and the existing source-outcome matrix and route/proof nodes were moved into it. Both final bodies fit their frames. Schema-held update_styles/create_artboard were not used.
+1. An initially empty flex container was represented by Paper as Rectangle `2ZK-0`. Attempting insert-children returned EFFECT_UNKNOWN with “Rectangle cannot have children.” Exact node readback showed childCount 0 and no children; exact parent readback showed only the original header and empty Rectangle. The error receipt is preserved historically. These reads established no specimen effect at the target before a new, materially different same-carrier replace operation created Frame `2ZM-0` with the specimen. No blind retry or carrier swap occurred.
+2. The first combined builder body was 1664px tall inside the inherited 960px artboard. The oversized body was not accepted. A second owned native duplicate was made, its copied body was replaced with a compact header, and the existing source-outcome matrix and route/proof nodes were moved into it. Both final bodies fit their frames. Schema-held update_styles/create_artboard were not used.
 
-Explicit finish released only `17W-0`, `1HC-0`, `2TV-0` and `32X-0`. All33 successful phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. The one failed Rectangle insertion is reconciled above and is not counted as an applied design change.
+Explicit finish released only `17W-0`, `1HC-0`, `2TV-0` and `32X-0`. All 33 successful phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. The one failed Rectangle insertion is reconciled above and is not counted as an applied design change.
 
 Operation receipts:
 
@@ -430,7 +430,7 @@ Operation receipts:
 
 Root changed only those four labels to **Save a review level**: desktop dark `US-0` on `1-0`, phone `VX-0` on `3F-0`, desktop light `WZ-0` on `6F-0`, and Government shared shell `Y7-0` on `EV-0`. This aligns entry wording with the existing manual-review destination without asserting local-storage implementation or introducing a monitoring feature. The price levels, fictional-company labels, broader navigation and p-2 integration contract were retained.
 
-Root inspected the complete390px phone and all four theme/context button readbacks; the new text fits. The save-condition specimen was inspected before editing. Operations `paper-catalyst-manual-review-entry-copy-20261109-c4-sd` and `paper-catalyst-manual-review-entry-finish-20261109-c4-sd` returned APPLIED_RESPONSE_OBSERVED. Finish targeted only the four affected boards.
+Root inspected the complete 390px phone and all four theme/context button readbacks; the new text fits. The save-condition specimen was inspected before editing. Operations `paper-catalyst-manual-review-entry-copy-20261109-c4-sd` and `paper-catalyst-manual-review-entry-finish-20261109-c4-sd` returned APPLIED_RESPONSE_OBSERVED. Finish targeted only the four affected boards.
 
 ## Verified D06 timing, illustration and classification meaning — 2026-11-09
 
@@ -438,20 +438,20 @@ Root inspected the complete390px phone and all four theme/context button readbac
 
 ### Market range timing and first-reading qualification
 
-Desktop `GG-0` and Chinese phone `K5-0` displayed a weekly estimate locked on2026-07-11 beside a separate dealer observation dated2026-10-30, but supplied no covered-week start/end. The phone called the estimate “this week,” and both claimed a generic Friday lock. The fixture does not justify either a current or expired phase.
+Desktop `GG-0` and Chinese phone `K5-0` displayed a weekly estimate locked on 2026-07-11 beside a separate dealer observation dated 2026-10-30, but supplied no covered-week start/end. The phone called the estimate “this week,” and both claimed a generic Friday lock. The fixture does not justify either a current or expired phase.
 
 - `IO-0` is now **Dated weekly range**; `IP-0` explicitly says week timing is unverified, reference only, and the estimate is not a price boundary.
 - `MN-0` is now **周度参考区间**; `MO-0` says **时间未核实 · 模型估算，并非价格边界。**
 - `GI-0` and `KH-0` put the illustrative-design qualification in the opening reading. `KJ-0` no longer calls the range “this week.”
 - Dealer-chart captions `IM-0`/`ML-0`, modeled-position captions `J2-0`/`N1-0`, and correlation captions `JK-0`/`NJ-0` identify the schematic shapes at the point of interpretation.
 
-All financial fixture values and clocks remain: inner band7,364–7,662; lock close7,513.1; lock date2026-07-11; unavailable outer band; independent dealer observation2026-10-30. No missing SPX, switch-level or covered-week value was synthesized from the lock close or diagram.
+All financial fixture values and clocks remain: inner band 7,364–7,662; lock close 7,513.1; lock date 2026-07-11; unavailable outer band; independent dealer observation 2026-10-30. No missing SPX, switch-level or covered-week value was synthesized from the lock close or diagram.
 
 ### Stage currentness and idealized arc
 
 Desktop `O4-0` now labels table header `RP-0` **Classification recency** and DELT cell `TL-0` **Week unverified**. The prior “Unresolved” label could imply no stage value, although the source discriminator means classification currentness is neither true nor false. DELT's stage and all five illustrative rows remain intact.
 
-The opening `O6-0` now says illustrative design; arc title `OC-0` explicitly says **idealized stage sketch**. The existing classified population remains1,300 with its original300/580/240/180 split and proportions. The arc is not relabeled as a historical price series or forecast.
+The opening `O6-0` now says illustrative design; arc title `OC-0` explicitly says **idealized stage sketch**. The existing classified population remains 1,300 with its original 300/580/240/180 split and proportions. The arc is not relabeled as a historical price series or forecast.
 
 ### Exact source and preserved holds
 
@@ -465,7 +465,7 @@ The existing S&P incomplete-migration references `WB-0`/`WG-0` and the completed
 
 ### Verification and receipts
 
-Root inspected full native screenshots of1440×1723 Market desktop,390×1802 Market phone and1440×1443 Stage desktop. The additional copy fits without extending the existing phone panels; all financial figures, five rows, population counts and final footers remain visible. Operations returned APPLIED_RESPONSE_OBSERVED:
+Root inspected full native screenshots of 1440×1723 Market desktop, 390×1802 Market phone and 1440×1443 Stage desktop. The additional copy fits without extending the existing phone panels; all financial figures, five rows, population counts and final footers remain visible. Operations returned APPLIED_RESPONSE_OBSERVED:
 
 - `paper-d06-week-timing-fixture-recurrency-20261109-c4-sd`
 - `paper-d06-stage-arc-example-qualification-20261109-c4-sd`
@@ -475,7 +475,7 @@ Explicit finish targeted only `GG-0`, `K5-0` and `O4-0`.
 
 ## Successor native delivery
 
-[PR #2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337) was opened ready, authored by `mastermidx4`, with exactly one changed report path. Creation head `08975c8fd95c5a3c4f639b010d23a70021e786ef` had the normal CI run42542660165 in progress when observed. Native metadata reported mergeable/behind, no requested reviewers and no auto-merge. The basic protected-branch read exposed required check `test`; the detailed branch-protection endpoint returned403 integration access denied and was not retried or bypassed. No self-approval, merge, hold clearing or alternate-account operation was attempted. Later report increments retain this same owned PR and require their own head-specific native check evidence.
+[PR #2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337) was opened ready, authored by `mastermidx4`, with exactly one changed report path. Creation head `08975c8fd95c5a3c4f639b010d23a70021e786ef` had the normal CI run 42542660165 in progress when observed. Native metadata reported mergeable/behind, no requested reviewers and no auto-merge. The basic protected-branch read exposed required check `test`; the detailed branch-protection endpoint returned 403 integration access denied and was not retried or bypassed. No self-approval, merge, hold clearing or alternate-account operation was attempted. Later report increments retain this same owned PR and require their own head-specific native check evidence.
 
 ## Verified Confluence protected-list read-failure states — 2026-11-09
 
@@ -485,18 +485,18 @@ Explicit finish targeted only `GG-0`, `K5-0` and `O4-0`.
 
 | Board | Native position and specimen | Result |
 | --- | --- | --- |
-| `23C-0` — 33 · R2 STATE · Protected list unavailable · Dark EN | 720×640, x40/y−3820;390px product-state panel `249-0`; body `243-0` | “Matching stocks unavailable” preserves public combination evidence and filters, withholds stock names/links/identity-specific actions, and offers44px Continue with public evidence. |
+| `23C-0` — 33 · R2 STATE · Protected list unavailable · Dark EN | 720×640, x40/y−3820;390px product-state panel `249-0`; body `243-0` | “Matching stocks unavailable” preserves public combination evidence and filters, withholds stock names/links/identity-specific actions, and offers 44px Continue with public evidence. |
 | `250-0` — 34 · R2 STATE · 股票列表暂不可用 · Dark ZH | 720×640, x840/y−3820;390px product-state panel `25I-0`; body `251-0` | Chinese parity for the same failure, retained context and local-return behavior. |
 
-Both are explicitly proposed390px state specimens with no live/protected identities. They supply no ticker names, invented counts, inferred entitlement, paid-unlock confirmation or false no-matches result. The local Continue action retains current universe, query/filter and disclosure context; it does not change account state, refresh the list or grant access.
+Both are explicitly proposed 390px state specimens with no live/protected identities. They supply no ticker names, invented counts, inferred entitlement, paid-unlock confirmation or false no-matches result. The local Continue action retains current universe, query/filter and disclosure context; it does not change account state, refresh the list or grant access.
 
 The adjacent builder binding requires the configured protected payload and existing auth/hydration owner. Failed reads, explicit server access decisions and genuinely empty results must remain distinct. Existing public data is retained only when supplied/available. Protected identity reveal still belongs to the server. The inspected controller has no manual Retry action, so none was added to these specimens or claimed implemented.
 
 ### Route and authority integration
 
 Updated only existing state-map/authority text:
-- `20M-0` lists33/34 after the original30–32 state exemplars.
-- `21D-0` and `221-0` show30–34.
+- `20M-0` lists 33/34 after the original 30–32 state exemplars.
+- `21D-0` and `221-0` show 30–34.
 - `222-0` explains protected-list failure and EN/ZH390px coverage without claiming every variant exists.
 - `20Q-0` binds failed reads to retained public context, withheld identities and the existing source/auth owners, with implementation and browser proof still required.
 
@@ -510,9 +510,9 @@ The current `attemptHydrate()` uses the configured protected payload, same-origi
 
 ### Native verification and receipts
 
-Root inspected both complete720×640 specimen boards, the complete updated1440px flow map and current-authority board. EN and ZH product panels retain390px widths, all text/actions fit, and no protected values appear. Native root positions show80px horizontal gaps between the existing map and state33 and between states33/34. The new states end at y−3180, above the discovery row at y−2220.
+Root inspected both complete 720×640 specimen boards, the complete updated 1440px flow map and current-authority board. EN and ZH product panels retain 390px widths, all text/actions fit, and no protected values appear. Native root positions show 80px horizontal gaps between the existing map and state 33 and between states 33/34. The new states end at y−3180, above the discovery row at y−2220.
 
-All8 operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. Explicit finish released only the two new states and two updated map/authority boards.
+All 8 operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. Explicit finish released only the two new states and two updated map/authority boards.
 
 - `paper-confluence-protected-read-state-copy-20261109-c4-sd`
 - `paper-confluence-protected-read-state-english-20261109-c4-sd`
@@ -523,7 +523,7 @@ All8 operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. Explic
 - `paper-confluence-read-failure-route-binding-20261109-c4-sd`
 - `paper-confluence-protected-read-states-finish-20261109-c4-sd`
 
-At the preceding report head `a5a44643ea803ac8e57671d63159239475bba0e1`, normal CI run42543262455 completed successfully. That is exact-head repository evidence only, not production acceptance and not evidence for a later report head.
+At the preceding report head `a5a44643ea803ac8e57671d63159239475bba0e1`, normal CI run 42543262455 completed successfully. That is exact-head repository evidence only, not production acceptance and not evidence for a later report head.
 
 ## Verified D06 first reading and exact chart-data parity — 2026-11-09
 
@@ -547,35 +547,35 @@ Root fetched these sources at candidate #10734 head `4690c9e9e3bd32943f4d5513182
 | [templates/market_structure.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/templates/market_structure.html.j2) | `c2f3a4f2d2bd58d5fb2bedd4b4d5ef87d968480d` |
 | [scripts/build_market_structure_page.py](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/scripts/build_market_structure_page.py) | `a37edfdf600dd8238f59bf113b5ac7eb5319dde3` |
 
-Root parsed the committed embedded MSP_GAMMA_HIST as JSON without executing the page. Its78 supplied date/GEX/SPX/switch/regime records match all78 raw source rows exactly. The rendered geometry contains102 NYSE session slots, including24 explicit missing sessions. The selected1M state takes the final21 projected slots:13 supplied observations and8 missing sessions,2026-10-09 through2026-11-06. Source default remains6M; this is a deliberately selected interaction state.
+Root parsed the committed embedded MSP_GAMMA_HIST as JSON without executing the page. Its 78 supplied date/GEX/SPX/switch/regime records match all 78 raw source rows exactly. The rendered geometry contains 102 NYSE session slots, including 24 explicit missing sessions. The selected 1M state takes the final 21 projected slots: 13 supplied observations and 8 missing sessions, 2026-10-09 through 2026-11-06. Source default remains 6M; this is a deliberately selected interaction state.
 
-The source snapshot is display_only/is_context_only, asof2026-11-06, built2026-11-08T06:28:20.894983+00:00, with incomplete history. No present-market, production-freshness or source-admission conclusion is inferred from that dated artifact.
+The source snapshot is display_only/is_context_only, as of 2026-11-06, built 2026-11-08T06:28:20.894983+00:00, with incomplete history. No present-market, production-freshness or source-admission conclusion is inferred from that dated artifact.
 
 ### First reading and linked chart/table window
 
-Desktop hero `112-0` and phone hero `1CO-0` show the source-rounded supplied SPX7,376.9 and modeled switch7,616.6, with **Hedging may amplify swings** / **对冲可能放大波动** and the source explanation that hedging can reinforce both rises and falls. Both retain the6Nov observation and incomplete-history qualification. The earlier7,513.1 weekly lock close was not reused as SPX.
+Desktop hero `112-0` and phone hero `1CO-0` show the source-rounded supplied SPX 7,376.9 and modeled switch 7,616.6, with **Hedging may amplify swings** / **对冲可能放大波动** and the source explanation that hedging can reinforce both rises and falls. Both retain the 6Nov observation and incomplete-history qualification. The earlier 7,513.1 weekly lock close was not reused as SPX.
 
-Desktop chart `11F-0` / SVG `11V-0` and phone chart `1D0-0` / SVG `1DE-0` were generated from the same21 source slots. Bars use dealer exposure in $bn; SPX and switch lines use the separately labelled points axis. Supplied points remain in order, missing slots are shaded, lines break across gaps and absent bars are omitted. No source record, classification or model value was recalculated.
+Desktop chart `11F-0` / SVG `11V-0` and phone chart `1D0-0` / SVG `1DE-0` were generated from the same 21 source slots. Bars use dealer exposure in $bn; SPX and switch lines use the separately labelled points axis. Supplied points remain in order, missing slots are shaded, lines break across gaps and absent bars are omitted. No source record, classification or model value was recalculated.
 
-Desktop exact disclosure `141-0` and phone `1FE-0` preserve all21 rows and five fields: Date, Dealer exposure ($bn), SPX (points), Switch level (points), Record. The native design shows a simulated bottom viewport containing the final10 rows; both boards explicitly describe that viewport. Phone table width636 within its308px viewport preserves all five columns and shows the horizontal-scroll cue and instruction. Native scrolling itself is not claimed implemented by Paper.
+Desktop exact disclosure `141-0` and phone `1FE-0` preserve all 21 rows and five fields: Date, Dealer exposure ($bn), SPX (points), Switch level (points), Record. The native design shows a simulated bottom viewport containing the final 10 rows; both boards explicitly describe that viewport. Phone table width 636 within its 308px viewport preserves all five columns and shows the horizontal-scroll cue and instruction. Native scrolling itself is not claimed implemented by Paper.
 
-The table retains raw source precision, while the hero retains source one-decimal formatting. For example, the final row remains `2026-11-06 / -86.252961 / 7376.8599 / 7616.595015 / Supplied`; the27–29Oct slots retain unavailable numeric fields and Missing session labels. No true zero exists in the supplied gamma history. The undated reading key explains zero semantics without attaching a fabricated zero to a historical date.
+The table retains raw source precision, while the hero retains source one-decimal formatting. For example, the final row remains `2026-11-06 / -86.252961 / 7376.8599 / 7616.595015 / Supplied`; the 27–29Oct slots retain unavailable numeric fields and Missing session labels. No true zero exists in the supplied gamma history. The undated reading key explains zero semantics without attaching a fabricated zero to a historical date.
 
-Source CSV behavior is documented accurately: same selected window, all21 slots, five columns, unavailable numeric fields blank and genuine zero as0; English headings remain in the Chinese export. The design shows the existing candidate's Download CSV affordance, but no browser download was executed or claimed.
+Source CSV behavior is documented accurately: same selected window, all 21 slots, five columns, unavailable numeric fields blank and genuine zero as 0; English headings remain in the Chinese export. The design shows the existing candidate's Download CSV affordance, but no browser download was executed or claimed.
 
 ### Discoverability and original-board preservation
 
-Original desktop footer `K4-0` now points to board05 as a **6Nov SPX/switch and exact-values example**. Original Chinese footer `O3-0` points to06 with the same dated qualification. These are Paper design references, not proof of clickable runtime navigation. Original source/method links and all older observations/values remain intact, so an unqualified data control does not falsely bind the old schematic to the newer snapshot.
+Original desktop footer `K4-0` now points to board 05 as a **6Nov SPX/switch and exact-values example**. Original Chinese footer `O3-0` points to 06 with the same dated qualification. These are Paper design references, not proof of clickable runtime navigation. Original source/method links and all older observations/values remain intact, so an unqualified data control does not falsely bind the old schematic to the newer snapshot.
 
-Readback confirms original GG/K5 remain1440×1723 and390×1802; footer heights stay18/36px. The new phone begins80px below the original phone. Existing Stage boards and incomplete-migration references remain untouched.
+Readback confirms original GG/K5 remain 1440×1723 and 390×1802; footer heights stay 18/36px. The new phone begins 80px below the original phone. Existing Stage boards and incomplete-migration references remain untouched.
 
 ### Visual and data verification
 
-Root inspected complete native desktop and390px phone screenshots, the chart component and final trees. All captions, selected-window counts, missing states, source dates and final footers fit. Disclosure/download and range controls are44px.
+Root inspected complete native desktop and 390px phone screenshots, the chart component and final trees. All captions, selected-window counts, missing states, source dates and final footers fit. Disclosure/download and range controls are 44px.
 
-Root then read back data-only native JSX from desktop `14F-0` and phone `1FS-0`. Each contained exactly105 cells (21×5). Every cell matched its pinned expected source/locale value:105/105 for English and105/105 for Chinese, with zero mismatches. This is native design data-fidelity proof, not an implementation unit test or a deployed-browser result.
+Root then read back data-only native JSX from desktop `14F-0` and phone `1FS-0`. Each contained exactly 105 cells (21×5). Every cell matched its pinned expected source/locale value: 105/105 for English and 105/105 for Chinese, with zero mismatches. This is native design data-fidelity proof, not an implementation unit test or a deployed-browser result.
 
-All19 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only new companions X8/18K and the two original Market boards whose reference footers changed.
+All 19 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only new companions X8/18K and the two original Market boards whose reference footers changed.
 
 - `paper-d06-source-data-companion-copy-20261109-c4-sd`
 - `paper-d06-source-data-companion-header-20261109-c4-sd`
@@ -615,7 +615,7 @@ The migrated Returns file remains SOURCE / PARTIAL REHOME and explicitly directs
 | `terminal/lib/returnsCalendarStudy.ts` | `ffdfd2efecea20e76a5ce147e493b695732939ab` |
 | `terminal/components/ReturnsCalendar.tsx` | `1cb66a106acf3323dea3ec01f232b11c6f96cd80` |
 
-The contract expressly supersedes the historical early-close20:00 specimen. The server supplies `regular_session_window {start_minute,end_minute,post_end_minute}`; the current early-close post-session boundary is17:00. Session membership and displayed hours use the same supplied bounds. A missing/invalid window means unavailable hours, not a known closure.
+The contract expressly supersedes the historical early-close 20:00 specimen. The server supplies `regular_session_window {start_minute,end_minute,post_end_minute}`; the current early-close post-session boundary is 17:00. Session membership and displayed hours use the same supplied bounds. A missing/invalid window means unavailable hours, not a known closure.
 
 The existing selected-date request owns the preceding evening as well as the selected day. Source does not implement a separate morning fetch, same-date retry action, or session expansion control. It renders four session cards. Obsolete requests are aborted and result display requires the current symbol/date key. Calendar focus alone does not request evidence; activation changes the selection.
 
@@ -625,11 +625,11 @@ The helper withholds the full overnight return even when qualified observed pric
 
 | Board | Design content | Native bounds and position |
 | --- | --- | --- |
-| `28BZ-0` /07 | Early-close desktop clock: overnight20:00–04:00, premarket04:00–09:30, regular09:30–13:00, after-hours13:00–17:00 | 900×620, x470/y2950 |
+| `28BZ-0` /07 | Early-close desktop clock: overnight 20:00–04:00, premarket 04:00–09:30, regular 09:30–13:00, after-hours 13:00–17:00 | 900×620, x470/y2950 |
 | `28FS-0` /08 | 390px phone with the same four visible sessions, observed price/count fields and source qualification | 390×1290, x0/y3620 |
 | `28LZ-0` /09 | Four source outcomes: client loading, returned acquisition pending, confirmed closure, exchange-hours unavailable | 900×620, x1450/y2950 |
 
-The selected27Nov2026 date is explicitly illustrative. No qualified price/bar fixture was supplied for the corrected interval. New returns, observed prices and counts remain neutral dashes; the old +0.42% overnight and −0.31% after-hours figures were not transplanted to the new candidate semantics.
+The selected 27Nov2026 date is explicitly illustrative. No qualified price/bar fixture was supplied for the corrected interval. New returns, observed prices and counts remain neutral dashes; the old +0.42% overnight and −0.31% after-hours figures were not transplanted to the new candidate semantics.
 
 The companions explicitly identify **unknown count as unavailable** as a design clarification. The current component has a `session?.barCount ?? 0` rendering fallback; the new unknown-count dash is therefore not claimed as literal implemented UI parity. Zero should be reserved for an actually qualified observed count. Source session boundaries, return withholding and outcome distinctions are pinned; implementation/browser acceptance remains separate.
 
@@ -637,19 +637,19 @@ The outcomes reference does not add a retry button, new route, request owner or 
 
 ### Existing references now identify their scope
 
-- Historical early-close `1B3F-0` is visibly labeled as the superseded20:00 fixture, with a reference to current07. All original dates, hours, returns and high/low values remain attached to the historical scenario.
+- Historical early-close `1B3F-0` is visibly labeled as the superseded 20:00 fixture, with a reference to current 07. All original dates, hours, returns and high/low values remain attached to the historical scenario.
 - Recovery board `1BAE-0` is labeled historical. It now describes illustrative evening observations and unverified coverage/price basis, without claiming a separate failed morning request. Its old button reads **Retry concept · not implemented**. Its source note states one selected-date load and matching symbol/date evidence.
-- Dossier desktop `1AVD-0` and phone `1AZW-0` now explain unavailable versus withheld values and the permanently withheld full overnight percentage. New disclosure nodes `28ON-0` and `28OA-0` use12px/18px text; the phone disclosure was previously8px.
+- Dossier desktop `1AVD-0` and phone `1AZW-0` now explain unavailable versus withheld values and the permanently withheld full overnight percentage. New disclosure nodes `28ON-0` and `28OA-0` use 12px/18px text; the phone disclosure was previously 8px.
 - Mobile study `1B5I-0` now identifies the historical fixture and expansion concept. Its valid Not configured overnight state and all numeric examples remain.
-- START `1BBQ-0` routes to07–09 and identifies older fixture/concept references. Its original six-moved-designs migration proof and held-desktop explanation remain intact. The three added companions are not represented as additional migrated originals.
+- START `1BBQ-0` routes to 07–09 and identifies older fixture/concept references. Its original six-moved-designs migration proof and held-desktop explanation remain intact. The three added companions are not represented as additional migrated originals.
 
 ### Verification and release
 
-Root inspected complete native screenshots of all three companions and every changed original board. The source outcome grid, phone sessions, disclosure footers and entry map fit without clipping. New horizontal/vertical sibling gaps are80px. The original historical recovery/expansion examples remain visually usable.
+Root inspected complete native screenshots of all three companions and every changed original board. The source outcome grid, phone sessions, disclosure footers and entry map fit without clipping. New horizontal/vertical sibling gaps are 80px. The original historical recovery/expansion examples remain visually usable.
 
-An exact native JSX comparison checked every original text leaf outside the authorized changed captions:18 early-close,24 recovery,93 mobile-study,81 phone-dossier and103 desktop-dossier leaves. **All319 unchanged leaves matched; zero mismatches.** This preserves the financial fixtures, rather than merely asserting no numerical changes.
+An exact native JSX comparison checked every original text leaf outside the authorized changed captions: 18 early-close, 24 recovery, 93 mobile-study, 81 phone-dossier and 103 desktop-dossier leaves. **All 319 unchanged leaves matched; zero mismatches.** This preserves the financial fixtures, rather than merely asserting no numerical changes.
 
-All14 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released the three new boards and six changed originals only.
+All 14 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released the three new boards and six changed originals only.
 
 - `paper-returns-current-clock-copy-20261109-c4-sd`
 - `paper-returns-current-clock-body-20261109-c4-sd`
@@ -671,7 +671,7 @@ No source implementation, live data request, browser interaction, provider confi
 
 ## T47 ranked search — make Clear restore the prior view
 
-[Ranked Search and Discovery / T47 Draft](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) contains eight existing1440/390, EN/ZH, light/dark variants. Its native contract already requires that a rank21–50 match opens the existing disclosure and that Clear restores the exact pre-search open/closed choice with focus returned to the input. Existing drawings showed initial rest, compact match, no match and no emitted rows, but omitted both required post-Clear outcomes.
+[Ranked Search and Discovery / T47 Draft](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) contains eight existing 1440/390, EN/ZH, light/dark variants. Its native contract already requires that a rank 21–50 match opens the existing disclosure and that Clear restores the exact pre-search open/closed choice with focus returned to the input. Existing drawings showed initial rest, compact match, no match and no emitted rows, but omitted both required post-Clear outcomes.
 
 Root read the native desktop contract `2N-0`, restoration/focus text `2U-0`/`2X-0`, phone counterparts `FD-0`/`FG-0`, and the unchanged Draft qualifications. No incumbent T47 implementation or current PR was established by the bounded authority lookup. This phase clarifies an existing **draft design contract**; it does not claim source or runtime implementation.
 
@@ -682,26 +682,26 @@ Root read the native desktop contract `2N-0`, restoration/focus text `2U-0`/`2X-
 | `P9-0` /09 | Light English | 1440×908, x−900/y695 |
 | `UV-0` /10 | Dark Chinese | 1440×874, x620/y695 |
 
-Each companion contains two390px cases:
+Each companion contains two 390px cases:
 
-1. Originally closed: empty focused field,50 matching restored, ranks21–50 closed.
-2. Originally open: empty focused field,50 matching restored, ranks21–50 open.
+1. Originally closed: empty focused field, 50 matching restored, ranks 21–50 closed.
+2. Originally open: empty focused field, 50 matching restored, ranks 21–50 open.
 
-The explicit synthetic50-emitted-row assumption is retained. BTC rank01, ETH rank02 and the open-case XMR rank21 preview retain their identities; financial metrics remain unavailable dashes. The preview is expressly abbreviated. The existing snapshot date/provider/coverage strip stays below the rows without fabricated dates, providers or receipts.
+The explicit synthetic 50-emitted-row assumption is retained. BTC rank 01, ETH rank 02 and the open-case XMR rank 21 preview retain their identities; financial metrics remain unavailable dashes. The preview is expressly abbreviated. The existing snapshot date/provider/coverage strip stays below the rows without fabricated dates, providers or receipts.
 
-The complete field focus outline is visible in both cases. Native readback confirms each search input, Clear button and disclosure target is44px high. All four cases show empty placeholder fields and restored50-matching counts; each language has exactly one closed and one open disclosure state, with XMR visible only in the open preview.
+The complete field focus outline is visible in both cases. Native readback confirms each search input, Clear button and disclosure target is 44px high. All four cases show empty placeholder fields and restored 50-matching counts; each language has exactly one closed and one open disclosure state, with XMR visible only in the open preview.
 
 The adjacent build reference makes the existing rule concrete: preserve the original choice at the start of a nonempty query; temporary auto-opening must not overwrite it; Clear ends that search and returns focus; a later search starts from the reader's then-current choice. This is local component-state clarification, not a new store, route, reader or provider request. The native Escape, Enter, no-JavaScript and unchanged-rank/date/source requirements remain.
 
 ### Original variants and proof boundary
 
-All eight original headers now point to09/P9 or10/UV. Original interaction contracts, no-match/no-emitted-row distinctions, financial placeholders and RIG/current-source/runtime qualifications remain unchanged. Each original had62 text leaves outside its edited reference sentence; **all496 unchanged leaves matched exactly** after the update.
+All eight original headers now point to 09/P9 or 10/UV. Original interaction contracts, no-match/no-emitted-row distinctions, financial placeholders and RIG/current-source/runtime qualifications remain unchanged. Each original had 62 text leaves outside its edited reference sentence; **all 496 unchanged leaves matched exactly** after the update.
 
-Root inspected complete native screenshots of both companions and the changed390px English/Chinese header treatments. The original board bounds remain unchanged; the new companions fit without clipping and sit80.5px below the preceding1440px row, with80px horizontal separation.
+Root inspected complete native screenshots of both companions and the changed 390px English/Chinese header treatments. The original board bounds remain unchanged; the new companions fit without clipping and sit 80.5px below the preceding 1440px row, with 80px horizontal separation.
 
 The existing qualification is retained in substance and visibly in both languages: RIG approval, genuine baseline/current-source captures and runtime fit remain unqualified; original R4 boards, application source and data contracts are outside this edit. Focus appearance is static Paper proof, not keyboard/browser execution.
 
-All7 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the two new boards and the eight original headers touched.
+All 7 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the two new boards and the eight original headers touched.
 
 - `paper-t47-clear-return-english-copy-20261109-c4-sd`
 - `paper-t47-clear-return-english-body-20261109-c4-sd`
@@ -716,7 +716,7 @@ The Shared Market Tools and Research Launcher file remains Reference. The bounde
 
 ## Market Memory — visible identity for the inspected saved case
 
-The [migrated Evidence Workspace R1](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0) remains a design reference. Its comparison fixture displayed42/58/Q1/Neutral/Mid cycle in the source panel without naming the inspected case. The Sep25 capture and evidence cutoff above are comparison-query controls, not the identity of a historical neighbor. On mobile, the source panel followed all three case rows, making this omission especially ambiguous.
+The [migrated Evidence Workspace R1](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0) remains a design reference. Its comparison fixture displayed 42/58/Q1/Neutral/Mid cycle in the source panel without naming the inspected case. The Sep 25 capture and evidence cutoff above are comparison-query controls, not the identity of a historical neighbor. On mobile, the source panel followed all three case rows, making this omission especially ambiguous.
 
 This phase touches four comparison treatments in that separate file. Accepted revision-evidence/exact-version recovery work in the current revision file, its newer R3 period chooser/copy outcomes, and the U2 outcome-inspection boards remain untouched.
 
@@ -737,15 +737,15 @@ The design amendment therefore exposes identity belonging to the **committed ins
 | Light ZH phone `58-0` | `G6-0`, `G7-0`, `G8-0` | `6P-0` 已保存的内部输出 · 正在核对 | 390×1866 |
 | Dark ZH phone `81-0` | `GA-0`, `GB-0`, `GC-0` | `9I-0` same selected text | 390×1866 |
 
-The fixture now explicitly designates the existing Sep18 case as inspected. Its panel reads **Inspecting saved case · Sep18,2026**, or **正在核对 · 2026年9月18日**, above the retained exact-values/original-context description. The five financial/category values remain unchanged. The original illustrative/non-live qualification, unauthenticated-underlying-facts notice, source-reference disclosure and query/cutoff controls remain.
+The fixture now explicitly designates the existing Sep 18 case as inspected. Its panel reads **Inspecting saved case · Sep 18,2026**, or **正在核对 · 2026年9月18日**, above the retained exact-values/original-context description. The five financial/category values remain unchanged. The original illustrative/non-live qualification, unauthenticated-underlying-facts notice, source-reference disclosure and query/cutoff controls remain.
 
 The date is an illustrative case identity, not a newly authenticated event/capture/known-at timestamp. This is a proposed visible-header refinement to the inspected source, not a claim that the deployed panel already includes it.
 
 ### Verification and release
 
-Root inspected complete native screenshots of all four treatments. The identity is legible beside the source values on desktop and inside the separate phone panel. The phone frames expand from1840 to1866px so their final fixture disclosures remain visible; desktop bounds are unchanged.
+Root inspected complete native screenshots of all four treatments. The identity is legible beside the source values on desktop and inside the separate phone panel. The phone frames expand from 1840 to 1866px so their final fixture disclosures remain visible; desktop bounds are unchanged.
 
-Exact native JSX comparison preserved54 unchanged leaves per desktop and49 per phone: **all206 leaves matched**, including every original value, date, cutoff, unaffected case and qualification. All6 phase operations returned APPLIED_RESPONSE_OBSERVED, and explicit finish released only the four amended comparison boards.
+Exact native JSX comparison preserved 54 unchanged leaves per desktop and 49 per phone: **all 206 leaves matched**, including every original value, date, cutoff, unaffected case and qualification. All 6 phase operations returned APPLIED_RESPONSE_OBSERVED, and explicit finish released only the four amended comparison boards.
 
 - `paper-memory-inspected-case-dark-desktop-20261109-c4-sd`
 - `paper-memory-inspected-case-light-desktop-20261109-c4-sd`
@@ -759,20 +759,20 @@ No source implementation, runtime reader, URL/selection ownership, exact-version
 
 ## Intraday Flow — distinguish nominal delay from actual source age
 
-The [Intraday Flow R1 discovery workspace](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) remains explicitly DRAFT. Its filtered-empty390px board `9F-0` displayed “≈15-min delayed” beside a build timestamp, immediately below “Current prices unavailable.” That wording could imply the age of current evidence even though the adjacent price source is unavailable.
+The [Intraday Flow R1 discovery workspace](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) remains explicitly DRAFT. Its filtered-empty 390px board `9F-0` displayed “≈15-min delayed” beside a build timestamp, immediately below “Current prices unavailable.” That wording could imply the age of current evidence even though the adjacent price source is unavailable.
 
 Root read the existing source contract at Macro `7d98b3b469f42219a742d6aea35c3ffc9554dbc5`:
 
-- `research/INTRADAY_FLOW_TRACKER_DESIGN.md`, blob `a769d2314ed6cca54f41c15647e18c80c5703f9d`: identifies the nominal15-minute delayed intraday-bar source, requires provider delay to be labeled separately, and distinguishes actual source age from polling cadence or unavailable/last-session source stamps.
+- `research/INTRADAY_FLOW_TRACKER_DESIGN.md`, blob `a769d2314ed6cca54f41c15647e18c80c5703f9d`: identifies the nominal 15-minute delayed intraday-bar source, requires provider delay to be labeled separately, and distinguishes actual source age from polling cadence or unavailable/last-session source stamps.
 - `agentos/workstreams/WS-INTRADAY-FLOW-P0-RECOVERY.md`, blob `59764b7dd35952700fd35d0b92840ea7ccf161d9`: build/deployment/response recency cannot establish source health; quote, pulse and options-flow health remain independent.
 
 Changed only `A0-0` to:
 
 > Board built 2 Nov 10:21 UTC · Nominal price delay ≈15m
 
-Adjacent `A1-0` retains the unavailable price source and27Jul22:32UTC volume source. The historical session badge, recorded-classification warning, filtered query, counts, Clear/Reset actions, loading state, source-details states and R4 recorded-evidence guides remain unchanged. This is a meaning correction to the existing nominal-delay information; it makes no new source-freshness claim and adds no reader or feature.
+Adjacent `A1-0` retains the unavailable price source and 27Jul22:32UTC volume source. The historical session badge, recorded-classification warning, filtered query, counts, Clear/Reset actions, loading state, source-details states and R4 recorded-evidence guides remain unchanged. This is a meaning correction to the existing nominal-delay information; it makes no new source-freshness claim and adds no reader or feature.
 
-Root inspected the complete native screenshot and exact text node. The revised label fits the existing354×12px node; the390×844px board remains unclipped. All19 other text leaves match the original exactly. Both operations returned APPLIED_RESPONSE_OBSERVED, with explicit finish limited to `9F-0`.
+Root inspected the complete native screenshot and exact text node. The revised label fits the existing 354×12px node; the 390×844px board remains unclipped. All 19 other text leaves match the original exactly. Both operations returned APPLIED_RESPONSE_OBSERVED, with explicit finish limited to `9F-0`.
 
 - `paper-intraday-nominal-delay-meaning-20261109-c4-sd`
 - `paper-intraday-nominal-delay-finish-20261109-c4-sd`
@@ -796,7 +796,7 @@ Only the ambiguous dismissal sentence in `7J-0` changed:
 
 Validation, field errors, input preservation, Saving feedback, repeat-submission prevention, focus behavior and loading resolution remain verbatim around that sentence. The later R9 states and original data, source identities, owners, routes and unknown-result behavior were not modified.
 
-Root inspected the affected native panel screenshot and measured its neighboring layout. The text remains1328×69px, parent `7I-0` remains1376×109px, and following section `7K-0` retains its24px gap. The full atlas remains1440×6810; its final section ends32px above the bottom. Exact replacement readback confirms every other character in the behavior paragraph is unchanged.
+Root inspected the affected native panel screenshot and measured its neighboring layout. The text remains 1328×69px, parent `7I-0` remains 1376×109px, and following section `7K-0` retains its 24px gap. The full atlas remains 1440×6810; its final section ends 32px above the bottom. Exact replacement readback confirms every other character in the behavior paragraph is unchanged.
 
 Both operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `40-0`.
 
@@ -807,9 +807,9 @@ This resolves a design-contract contradiction. It does not claim new application
 
 ### Government Revenue — verified no additional amendment
 
-A separate bounded read-only audit found the inspected Government Revenue workflows already covered their apparent gaps. Root independently read `1JC-0`: the Since Last Close view visibly names **Demo close19 →20** and its completed-sample/non-live qualification. Root also read `6A-0`, which already requires the prior completed regular-session baseline, current accepted as-of, timezone, comparable scope and unavailable-baseline behavior.
+A separate bounded read-only audit found the inspected Government Revenue workflows already covered their apparent gaps. Root independently read `1JC-0`: the Since Last Close view visibly names **Demo close 19 →20** and its completed-sample/non-live qualification. Root also read `6A-0`, which already requires the prior completed regular-session baseline, current accepted as-of, timezone, comparable scope and unavailable-baseline behavior.
 
-The initial missing-baseline hypothesis came from an extraction that omitted inline line-break content; exact JSX resolved it. No design edit was warranted. The reviewed Funding Bridge and R13 integration contract remain unchanged, and their runtime/source integrations were not recertified. The completed7A/7J mobile return actions remain accepted.
+The initial missing-baseline hypothesis came from an extraction that omitted inline line-break content; exact JSX resolved it. No design edit was warranted. The reviewed Funding Bridge and R13 integration contract remain unchanged, and their runtime/source integrations were not recertified. The completed 7A/7J mobile return actions remain accepted.
 
 
 ## MedTech — separate timing precision from conflict and acceleration
@@ -819,7 +819,7 @@ The [MedTech R13 Design References / R14 boards](https://app.paper.design/file/0
 Root read the exact native binding:
 
 - Watchdesk `12O-0` / `12P-0`: Launch window narrowed / October replaces Q4.
-- Change review `GP-0`: guidance narrowed from Q4; first commercial use remains unconfirmed. Its previous/current records remain29Sep/Q4 2026 and1Oct/October 2026.
+- Change review `GP-0`: guidance narrowed from Q4; first commercial use remains unconfirmed. Its previous/current records remain 29Sep/Q4 2026 and 1Oct/October 2026.
 - Build contract `XF-0` / `XG-0`: distinguish dates, guided windows and no announced date; preserve publication, first-observed, event/effective dates and knowledge cutoff.
 - `Y5-0` expressly identifies all issuers, devices, dates and source records as fictional sample data. This work does not authenticate those examples or change the reference file's status.
 
@@ -833,7 +833,7 @@ Three text edits resolve the inconsistency without inventing a contradictory sou
 
 The existing clarification heading, October/Q4 values, both source labels, Compare sources action and all other examples remain. This is an honest review state, not a claim that a genuine conflict has been established or a conflict-state implementation has been proved.
 
-Root inspected complete native screenshots of both amended boards. The revised card copy fits, and the research-note prompt remains legible. Exact native JSX comparison preserved30 unaffected leaves on the state board and47 on the change-review board: **all77 matched**. Both operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1F0-0` and `DU-0`.
+Root inspected complete native screenshots of both amended boards. The revised card copy fits, and the research-note prompt remains legible. Exact native JSX comparison preserved 30 unaffected leaves on the state board and 47 on the change-review board: **all 77 matched**. Both operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1F0-0` and `DU-0`.
 
 - `paper-medtech-window-precision-meaning-20261109-c4-sd`
 - `paper-medtech-window-precision-finish-20261109-c4-sd`
@@ -842,12 +842,12 @@ No medical or market conclusion, source record, research save, alert delivery, r
 
 ### Policy Monitor — preserve later completed work
 
-The bounded read-only Policy audit found no justified new amendment in the inspected navigation, evidence/date semantics, source-note counts, missing-data treatment or responsive disclosures. It identified later documented changes beyond the accepted PR2302 work, including the [saved design/build packet](https://github.com/mastermindx-market-intelligence/macro/blob/0e9ccf41a0bb62ba0c0b28fd716b39017afd468e/research/design_candidates/production_design_20261108/CONTINUED_IMPROVEMENTS.md), mobile control sizing and narrow chart reflow. Those later writers' work and the existing release/source/unknown-effect boundaries remain intact. This successor made no Policy mutation and does not recertify its runtime integrations.
+The bounded read-only Policy audit found no justified new amendment in the inspected navigation, evidence/date semantics, source-note counts, missing-data treatment or responsive disclosures. It identified later documented changes beyond the accepted PR 2302 work, including the [saved design/build packet](https://github.com/mastermindx-market-intelligence/macro/blob/0e9ccf41a0bb62ba0c0b28fd716b39017afd468e/research/design_candidates/production_design_20261108/CONTINUED_IMPROVEMENTS.md), mobile control sizing and narrow chart reflow. Those later writers' work and the existing release/source/unknown-effect boundaries remain intact. This successor made no Policy mutation and does not recertify its runtime integrations.
 
 
 ## Stage Universe — complete the populated phone path
 
-The [Market Structure, Stages and Allocation file](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) had a populated desktop screener at `O4-0`, while its390px Stage board `U9-0` covered unavailable, loading and empty states only. Root also inspected the migrated Terminal destination, file `01M3NSZGE8JWN2EZCSF0DT05RM`, page `p-18-0`: its Complete board `1XGS-0` retained the same degraded-state coverage. Neither inspected destination supplied a populated phone counterpart.
+The [Market Structure, Stages and Allocation file](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) had a populated desktop screener at `O4-0`, while its 390px Stage board `U9-0` covered unavailable, loading and empty states only. Root also inspected the migrated Terminal destination, file `01M3NSZGE8JWN2EZCSF0DT05RM`, page `p-18-0`: its Complete board `1XGS-0` retained the same degraded-state coverage. Neither inspected destination supplied a populated phone counterpart.
 
 ### Incumbent source and scope
 
@@ -859,33 +859,33 @@ The candidate runtime has additional table columns and formats ATR/price as a pe
 
 ### Native populated view
 
-New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390**, is now390×2780 after the product/build separation below, at x4545/y−901, with an80px horizontal gap from the existing source-data companion. It reuses the existing dark phone shell, with content-sized sections and20px side padding.
+New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390**, is now390×2780 after the product/build separation below, at x4545/y−901, with an80px horizontal gap from the existing source-data companion. It reuses the existing dark phone shell, with content-sized sections and 20px side padding.
 
 | Section | Native node | Delivered behavior and meaning |
 | --- | --- | --- |
 | Header | `1NO-0` | Classification week2026-10-30 and price-data session2026-11-02 are separately labeled; the design is illustrative. |
 | Population | `1NX-0` |1,300 classified names, presented in a2×2 grid: Basing300/23.1%, Advancing580/44.6%, Topping240/18.5%, Declining180/13.8%. Unresolved names are excluded from the proportions; zero differs from unavailable. |
-| Navigation | `1OQ-0` | Six existing domain tabs reflow into two rows of44px targets. |
-| Screener controls | `1P6-0` | US, All stages, labeled company/ticker search and Export current view have44px targets. The five displayed samples are distinct from the1,300-name population. |
-| Five cards | `1PO-0` | Every original company, stage, last value, stored rating, ATR multiple, raw ATR/price fraction, recency and watch marker is preserved. Each watch target is44×44. |
+| Navigation | `1OQ-0` | Six existing domain tabs reflow into two rows of 44px targets. |
+| Screener controls | `1P6-0` | US, All stages, labeled company/ticker search and Export current view have 44px targets. The five displayed samples are distinct from the 1,300-name population. |
+| Five cards | `1PO-0` | Every original company, stage, last value, stored rating, ATR multiple, raw ATR/price fraction, recency and watch marker is preserved. Each watch target is 44×44. |
 | Reading limits | `1T7-0` | Explains stored illustrative ratings, stale/unverified exclusion from current ranks, raw fraction versus ATR multiple, and browser-local watch scope. The implementation binding is in the separate build reference below. |
 | Closing disclosure | `1JQ-0` | Retains the illustrative companies/values and classification-as-research-context qualification. |
 
-The five card roots are `1PP-0`, `1QE-0`, `1R3-0`, `1RS-0` and `1SH-0`. CHAR retains **Stale ·2026-10-23**; DELT retains **Week unverified**. ALFA, BRAV and ECHO retain their2026-10-30 current classification labels. BRAV alone retains the filled watch star. The precise0.020 fraction and0.0 ATR zero remain distinct from unavailable evidence.
+The five card roots are `1PP-0`, `1QE-0`, `1R3-0`, `1RS-0` and `1SH-0`. CHAR retains **Stale ·2026-10-23**; DELT retains **Week unverified**. ALFA, BRAV and ECHO retain their 2026-10-30 current classification labels. BRAV alone retains the filled watch star. The precise0.020 fraction and 0.0 ATR zero remain distinct from unavailable evidence.
 
 The desktop footer `U8-0` now points to **07 /1JP-0** and preserves its specimen qualification. The original desktop data, recovery atlas `U9-0`, existing source-data companions, base phone, Terminal destination, reference holds and incomplete-migration status remain unchanged.
 
 ### Verification and release
 
-Root inspected native screenshots of the header, population grid, navigation, controls, all five complete cards, reading contract and desktop reference footer. Initial native bounds verified the footer20px above the2892px frame bottom; the separated final layout below retains that20px bottom padding; all child sections fit the350px content width. No accent rail was added.
+Root inspected native screenshots of the header, population grid, navigation, controls, all five complete cards, reading contract and desktop reference footer. Initial native bounds verified the footer20px above the 2892px frame bottom; the separated final layout below retains that20px bottom padding; all child sections fit the 350px content width. No accent rail was added.
 
 Exact native text comparison passed:
 
-- All **40 of40 row data cells** match the original desktop fixture.
-- All **12 of12 population values** match the original fixture.
+- All **40 of 40 row data cells** match the original desktop fixture.
+- All **12 of 12 population values** match the original fixture.
 - All **83 unaffected desktop text leaves** remain identical.
 
-All10 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `1JP-0` and `O4-0`.
+All 10 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `1JP-0` and `O4-0`.
 
 - `paper-stage-populated-phone-copy-20261109-c4-sd`
 - `paper-stage-populated-phone-header-20261109-c4-sd`
@@ -905,11 +905,11 @@ This phase completes the missing populated phone design. It does not prove brows
 
 A subsequent clarity pass found that the new phone's candidate SHA, source ownership and unexecuted implementation notes belonged outside the product frame. Moved the existing binding frame `1TC-0` from the reading panel to new **BUILD · Stage populated phone · Source and interaction binding**, `1ZE-0`. Both original text nodes `1TD-0` / `1TE-0` and their exact text are preserved; this is relocation, not deletion of a requirement.
 
-The720×852 builder reference sits at x5015/y−901,80px to the right of the phone. It names the product, desktop and recovery targets; records the same immutable candidate; and explains the existing loaded-row, local-watch and current-view CSV owners, raw-fraction versus runtime-percentage difference, static proof and remaining browser obligations. It introduces no new owner or implementation claim.
+The 720×852 builder reference sits at x5015/y−901,80px to the right of the phone. It names the product, desktop and recovery targets; records the same immutable candidate; and explains the existing loaded-row, local-watch and current-view CSV owners, raw-fraction versus runtime-percentage difference, static proof and remaining browser obligations. It introduces no new owner or implementation claim.
 
-The phone now contains only the user-facing reading limits in `1T7-0`. Its height contracts from2892 to2780px; its final disclosure remains20px above the bottom. Root inspected the complete builder screenshot and the revised reading panel, verified native geometry, and compared both moved text nodes byte-for-byte. The row values, population values and desktop data were not touched by this relocation.
+The phone now contains only the user-facing reading limits in `1T7-0`. Its height contracts from 2892 to 2780px; its final disclosure remains 20px above the bottom. Root inspected the complete builder screenshot and the revised reading panel, verified native geometry, and compared both moved text nodes byte-for-byte. The row values, population values and desktop data were not touched by this relocation.
 
-All5 follow-up operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1JP-0` and `1ZE-0`.
+All 5 follow-up operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1JP-0` and `1ZE-0`.
 
 - `paper-stage-build-reference-copy-20261109-c4-sd`
 - `paper-stage-build-reference-content-20261109-c4-sd`
@@ -926,7 +926,7 @@ The read-only News Intelligence audit found later Activity, count-window and pub
 
 ## Watchlist save recovery — browser retention failure before dispatch
 
-The [Shared Market Watchlists file](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) already separated its22 historical Reference boards from four Proposed D23 boards covering exact-list return, read outcomes, account/chooser changes and unbound destinations. The bounded whole-file audit found no specimen for the existing browser-retention barrier. The older local-storage mentions described prohibited fallback stores, not this save owner's required unresolved-request record.
+The [Shared Market Watchlists file](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) already separated its 22 historical Reference boards from four Proposed D23 boards covering exact-list return, read outcomes, account/chooser changes and unbound destinations. The bounded whole-file audit found no specimen for the existing browser-retention barrier. The older local-storage mentions described prohibited fallback stores, not this save owner's required unresolved-request record.
 
 ### Exact incumbent implementation
 
@@ -939,11 +939,11 @@ Root read these immutable Terminal sources at `aafc16cef1635e851a9cbb95966c5cfbe
 
 Root independently fetched CompanyWatchSave at D23's original `b38d93c2cc8d05f9f5c29598a3691304330ffee6` pin and verified **identical component content and blob**. This design follows an already-present owner behavior.
 
-`recoverFence()` only reads current retention and, when it finds a held request, restores that exact operation as unknown and reconciles its membership through the same owner. A successful check does not send a save. If storage is available and no operation remains held, a new save still needs the user's explicit action and the existing eligibility/owner checks. Timeout, malformed, network and5xx results do not authorize replay.
+`recoverFence()` only reads current retention and, when it finds a held request, restores that exact operation as unknown and reconciles its membership through the same owner. A successful check does not send a save. If storage is available and no operation remains held, a new save still needs the user's explicit action and the existing eligibility/owner checks. Timeout, malformed, network and 5xx results do not authorize replay.
 
 ### Editable proposed states
 
-New gallery `2RP-0`, **05–06 · PROPOSED · Browser retention blocks new save · EN390 + ZH320**, is on the existing Proposed page at x3895/y−3547. Its native rendered capture is900×1595. The original four Proposed boards and all Reference boards retain their IDs, content and status.
+New gallery `2RP-0`, **05–06 · PROPOSED · Browser retention blocks new save · EN390 + ZH320**, is on the existing Proposed page at x3895/y−3547. Its native rendered capture is 900×1595. The original four Proposed boards and all Reference boards retain their IDs, content and status.
 
 | Frame | Rendered size | Important nodes |
 | --- | --- | --- |
@@ -964,11 +964,11 @@ The sheet composition is proposed; the actual component's current inline present
 
 ### Verification and release
 
-Root inspected both complete phone screenshots, the separate builder panel and the complete paired gallery. The controls use the existing44px close/return/select targets and48px Save/recovery targets. All text remains visible at320px and390px. Native JSX confirms the exact bilingual source status/action, selected company and existing translated list labels. Both original templates were re-read: **all28 original text leaves remain identical**.
+Root inspected both complete phone screenshots, the separate builder panel and the complete paired gallery. The controls use the existing 44px close/return/select targets and 48px Save/recovery targets. All text remains visible at 320px and 390px. Native JSX confirms the exact bilingual source status/action, selected company and existing translated list labels. Both original templates were re-read: **all 28 original text leaves remain identical**.
 
 Native cross-page tree reads returned unknown computed heights for several offscreen nodes. Height claims above therefore come from the exact native JPEG dimensions and inspected captures, rather than fabricated geometry values. The native tree still establishes parent/child identity, widths and separation of the builder guide from product frames.
 
-All9 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the new gallery and its two phone frames.
+All 9 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the new gallery and its two phone frames.
 
 - `paper-watch-storage-phone-copies-20261109-c4-sd`
 - `paper-watch-storage-phone-en-20261109-c4-sd`
@@ -984,7 +984,7 @@ This closes a missing design state. No account endpoint was called, no save was 
 
 ### Shared Search and Comparison — no extra amendment warranted
 
-The bounded read-only audit of file `01M6Y31C449F02KGRNPGK94Q8D` found its Reference discovery, local refinement, applied/no-match states, unavailable reads and return behavior already coherent. Its illustrative Atlas8.4%, theme5.8% and2.6-percentage-point difference match the retained comparison scale. It remains distinct from both T47 and the current F01 exact-company picker. No reference promotion, replacement search service or mutation was made in that file.
+The bounded read-only audit of file `01M6Y31C449F02KGRNPGK94Q8D` found its Reference discovery, local refinement, applied/no-match states, unavailable reads and return behavior already coherent. Its illustrative Atlas8.4%, theme5.8% and 2.6-percentage-point difference match the retained comparison scale. It remains distinct from both T47 and the current F01 exact-company picker. No reference promotion, replacement search service or mutation was made in that file.
 
 
 
@@ -1009,7 +1009,7 @@ Root inspected these files at the immutable Terminal head:
 
 ### Two native phone moments, one retained identity
 
-New gallery `3OH-0`, **SS17–18 · PROPOSED · Exact company search and browser return · Phone**, contains two390×844 frames and an adjacent build binding.
+New gallery `3OH-0`, **SS17–18 · PROPOSED · Exact company search and browser return · Phone**, contains two 390×844 frames and an adjacent build binding.
 
 | Frame | Scenario | Exact values and key nodes |
 | --- | --- | --- |
@@ -1017,17 +1017,17 @@ New gallery `3OH-0`, **SS17–18 · PROPOSED · Exact company search and browser
 | `3NF-0` / SS18 | Returned through browser Back, with valid origin marker and the same listing still eligible | Query `3O1-0`, selected symbol `3NW-0`, preview `3NQ-0`, unavailable fields `3NP-0` / `3NO-0`, selected-query line `3NM-0`, enabled Open Analysis `3NK-0` / `3NL-0`. All corresponding values are identical. |
 | `3OR-0` | Separate Build binding | Existing source, exact generated example destination, history validity, query/cancel/late-metadata rules, qualification and unchanged holds. |
 
-The existing SS05 NVIDIA/NVDA example is reused; its NASDAQ/USD data is not silently copied into the new unavailable-metadata case. A selected result remains visually distinct from the preview's deliberate Open action. The44px search input and Close target and48px Open target fit the390px phone composition. No new Tools tab, tool-search retry, account action or global-search service is inferred from this company-only source.
+The existing SS05 NVIDIA/NVDA example is reused; its NASDAQ/USD data is not silently copied into the new unavailable-metadata case. A selected result remains visually distinct from the preview's deliberate Open action. The 44px search input and Close target and 48px Open target fit the 390px phone composition. No new Tools tab, tool-search retry, account action or global-search service is inferred from this company-only source.
 
 The builder reference shows the incumbent helper's example result, `/analysis?symbol=NVDA&company_query=NVIDIA`. It does not introduce a new return route or persistence store. The return scenario is expressly conditional: invalid/mismatched history cannot reopen search, query edits clear the preview, cancellation clears the marker, and a no-longer-eligible result is not promised. Arbitrary filters, result ordering, scroll and focus restoration are not fabricated.
 
 ### Visual and preservation proof
 
-Root inspected both complete phone captures and the complete900×1546 gallery. The two phone captures are **byte-identical**, and all **17 corresponding text elements match**, establishing static before/return identity parity. This is deliberate design parity; it is not an executed browser Back test.
+Root inspected both complete phone captures and the complete 900×1546 gallery. The two phone captures are **byte-identical**, and all **17 corresponding text elements match**, establishing static before/return identity parity. This is deliberate design parity; it is not an executed browser Back test.
 
-The gallery sits at x2030/y−2658. Its native screenshot ends at y−1112, leaving254px above the next existing row at y−858. Offscreen native tree reads report unknown computed gallery height; the rendered dimensions come from the actual native JPEG, while native node information establishes the canvas position and child identities.
+The gallery sits at x2030/y−2658. Its native screenshot ends at y−1112, leaving 254px above the next existing row at y−858. Offscreen native tree reads report unknown computed gallery height; the rendered dimensions come from the actual native JPEG, while native node information establishes the canvas position and child identities.
 
-Exact readback of the untouched source boards preserved **118 text leaves**:50 on SS05 `1VT-0`,13 on the phone template `2FM-0`, and55 on the integration map `2WG-0`. All8 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `3OH-0`, `3JH-0` and `3NF-0`.
+Exact readback of the untouched source boards preserved **118 text leaves**:50 on SS05 `1VT-0`,13 on the phone template `2FM-0`, and 55 on the integration map `2WG-0`. All 8 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `3OH-0`, `3JH-0` and `3NF-0`.
 
 - `paper-f01-company-phone-and-guide-copies-20261109-c4-sd`
 - `paper-f01-company-phone-navigation-20261109-c4-sd`
@@ -1042,7 +1042,7 @@ Browser navigation, eligibility changes, request counts, metadata races, keyboar
 
 ### Prepared Research and Reading — preserve coherent references
 
-The bounded read-only audit of file `01M6Y2Z642VN20X8WDSWV07M0M` found its Reference comparison → evidence → return journey internally consistent: Atlas8.4% versus theme5.8% remains a2.6-percentage-point difference, with five-session period,25Sep date, fictional fixture, basket limitations and preserved return context. Its synthetic NVDA setup keeps listing identity, intraday horizon, inspection and watchlist choice distinct. The existing PARTIAL/reference status was preserved; no exact current implementation-owner binding was established in that bounded lookup, and no new state or owner was invented.
+The bounded read-only audit of file `01M6Y2Z642VN20X8WDSWV07M0M` found its Reference comparison → evidence → return journey internally consistent: Atlas8.4% versus theme5.8% remains a2.6-percentage-point difference, with five-session period, 25Sep date, fictional fixture, basket limitations and preserved return context. Its synthetic NVDA setup keeps listing identity, intraday horizon, inspection and watchlist choice distinct. The existing PARTIAL/reference status was preserved; no exact current implementation-owner binding was established in that bounded lookup, and no new state or owner was invented.
 
 
 ## Expectation Surface — separate unavailable ticker search from no match
@@ -1068,7 +1068,7 @@ All four native product fragments are **390×432**, retain the existing no-match
 | `4EH-0` | Chinese list loading: “正在读取已采集代码…”; retain and later evaluate the current query. | 清空搜索 only. |
 | `4EV-0` | Chinese unavailable list: “暂时无法搜索代码”; the captured-ticker list could not be read. | 重试代码搜索, plus 清空搜索. |
 
-Inputs and action targets are at least44px high. English uses the established dark tokens; Chinese uses the established light tokens. Root inspected each full native product fragment, the1110×454 build binding and the complete1160×1610 module. Text and actions fit, with no clipped edge or accidental overflow.
+Inputs and action targets are at least 44px high. English uses the established dark tokens; Chinese uses the established light tokens. Root inspected each full native product fragment, the 1110×454 build binding and the complete 1160×1610 module. Text and actions fit, with no clipped edge or accidental overflow.
 
 Separate build reference `4F9-0` records the implementation obligations:
 
@@ -1083,7 +1083,7 @@ The acceptance matrix still requires delayed response, failed/malformed index, s
 
 ### Preservation, operation readback and bounded diagnostics
 
-Exact full-root JSX readback preserved **all244 pre-existing text leaves** with their node IDs and values unchanged. The new module adds42 text leaves. All four query leaves remain MUU. Root observed four APPLIED_RESPONSE_OBSERVED actions:
+Exact full-root JSX readback preserved **all 244 pre-existing text leaves** with their node IDs and values unchanged. The new module adds42 text leaves. All four query leaves remain MUU. Root observed four APPLIED_RESPONSE_OBSERVED actions:
 
 - `paper-expectation-finder-availability-content-20261109-c4-sd`
 - `paper-expectation-finder-availability-place-20261109-c4-sd`
@@ -1092,7 +1092,7 @@ Exact full-root JSX readback preserved **all244 pre-existing text leaves** with 
 
 Explicit `finish_working_on_nodes` released only `3UR-0` and `4DE-0`. Two read attempts included unsupported `pageId` arguments and were rejected before execution; the catalog's exact file/node schemas were then used successfully. A call to nonexistent catalog action `finish` was rejected as TOOL_NOT_ALLOWED. Catalog inspection and the preceding successful operation ledger established the reviewed action name `finish_working_on_nodes`; that action completed on the same carrier with the same explicit node scope. There was no uncertain mutation or alternate-carrier replay.
 
-A separate read-only layout check found no defect in existing state specimen `QN-0`: its native JPEG is1160×1987 and all nine children are visible; the reported904px tree height is stale intrinsic metadata. Current JSX has no fixed height, maximum height, clipping or absolute child placement, and the next module remains in normal parent flow. No speculative QN layout edit was made.
+A separate read-only layout check found no defect in existing state specimen `QN-0`: its native JPEG is 1160×1987 and all nine children are visible; the reported904px tree height is stale intrinsic metadata. Current JSX has no fixed height, maximum height, clipping or absolute child placement, and the next module remains in normal parent flow. No speculative QN layout edit was made.
 
 ### Other bounded reviews: preserve existing coverage
 
@@ -1122,7 +1122,7 @@ The thirteen mobile boards and twenty-three loading/filter/locale boards match t
 
 ### Native result and preservation
 
-Root inspected the original1440×783 and final1440×948 native captures. The existing row design is preserved, with two matching content-sized rows between locale coverage and Held. Long descriptions wrap cleanly; all status labels and the final held row fit.
+Root inspected the original 1440×783 and final 1440×948 native captures. The existing row design is preserved, with two matching content-sized rows between locale coverage and Held. Long descriptions wrap cleanly; all status labels and the final held row fit.
 
 Only seven existing text leaves changed, exactly as planned: `5ED-0`, `5ES-0`, `5ET-0`, `5F0-0`, `5F1-0`, `5FG-0`, `5FH-0`. All **31 other original text leaves** remain identical, including hidden transfer/provenance notes and the AXON hold. The two added rows contribute ten text leaves.
 
@@ -1138,9 +1138,9 @@ Explicit finish released only `5E9-0`. Product views, source-bound build contrac
 
 ### Bounded preservation decisions
 
-A separate read-only Crypto audit found that later saved-case amendment `3IP-0` and states09–16 already address failed collection reads, missing saved versions, horizon preservation, parent return, explicit save/remove intent and semantic focus. The inspected Macro #9580 candidate remains Draft and unmerged at `5e496c24c962e85a4f7f514dd43dc61443b95cab`; template blob `ff46d4408d243bcebb8e6cac95167b4a6ef933c4`. No duplicate Crypto state was added.
+A separate read-only Crypto audit found that later saved-case amendment `3IP-0` and states 09–16 already address failed collection reads, missing saved versions, horizon preservation, parent return, explicit save/remove intent and semantic focus. The inspected Macro #9580 candidate remains Draft and unmerged at `5e496c24c962e85a4f7f514dd43dc61443b95cab`; template blob `ff46d4408d243bcebb8e6cac95167b4a6ef933c4`. No duplicate Crypto state was added.
 
-The canonical Product Design System audit likewise found current F02 authority, unavailable/access distinctions, uncertain-write protection, conditional focus restoration and44px house hit targets already covered. Its later build companion remains a task tree, not an execution queue or permission grant. Historical G15 and `9SE-0`/`9SM-0` uncertainties remain intact. No token or system-contract mutation was made.
+The canonical Product Design System audit likewise found current F02 authority, unavailable/access distinctions, uncertain-write protection, conditional focus restoration and 44px house hit targets already covered. Its later build companion remains a task tree, not an execution queue or permission grant. Historical G15 and `9SE-0`/`9SM-0` uncertainties remain intact. No token or system-contract mutation was made.
 
 ## Bonds decision workspace — preserve the current read during duration review
 
@@ -1150,7 +1150,7 @@ The canonical Product Design System audit likewise found current F02 authority, 
 
 Current entry `Z3-0` identifies the R10 desktop `2H1-0`, phone `GJ-0` and tablet `JP-0` as the active curve journey. Their corrected headline says **Real yields rose. Credit spreads widened.** Both Policy / real-rate tightening and Growth / cut repricing are **UNCONFIRMED**.
 
-The R12 contract on [Build page `p-2-0`](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-2-0), `3FC-0` / `3NL-0`, explicitly binds the illustrative five-session inputs: 3M/2Y−2bp, nominal10Y+18bp, real10Y+12bp, and high-yield spread+6bp. It says these explanation grades remain unconfirmed until actual rules are defined and verified.
+The R12 contract on [Build page `p-2-0`](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-2-0), `3FC-0` / `3NL-0`, explicitly binds the illustrative five-session inputs: 3M/2Y−2bp, nominal 10Y+18bp, real10Y+12bp, and high-yield spread+6bp. It says these explanation grades remain unconfirmed until actual rules are defined and verified.
 
 The existing duration reviews—desktop `2Z9-0`, phone `2QG-0`, tablet `2UW-0`—still retained the old stronger headline, a rising-front-end explanation, SUPPORTED policy tightening and CONTRADICTED growth/cut repricing. The desktop screenshot showed the old hero behind an inspector that explicitly promises the current rate read will remain visible and only the scenario-dependent result is under review.
 
@@ -1164,11 +1164,11 @@ Root read the exact native origin, review and R12 trees and content, then confir
 | Phone `2QG-0` | `HA-0`, `HB-0`, `J3-0`, and current grades `J2-0`/`J6-0`. | `2R7-0`, `2R8-0`, `2T0-0`; grade `2SZ-0` replaced by `3P5-0`, `2T3-0` by `3P7-0`. |
 | Tablet `2UW-0` | `KG-0`, `KH-0`, `M9-0`, and current grades `M8-0`/`MC-0`. | `2VN-0`, `2VO-0`, `2XG-0`; grade `2XF-0` replaced by `3P9-0`, `2XJ-0` by `3PB-0`. |
 
-Ten existing text elements were updated directly, preserving the headline line break. Six qualification leaves were replaced with the current origins' neutral muted styling and typography, removing the obsolete green/red support/contradiction meanings. Desktop grade width remains124px. Phone/tablet grades size naturally to75px; native node bounds confirm all six fit inside their existing parent rows. The earlier61px phone SUPPORTED width was measured content, not an applied fixed-width style; no unnecessary parent resizing was introduced.
+Ten existing text elements were updated directly, preserving the headline line break. Six qualification leaves were replaced with the current origins' neutral muted styling and typography, removing the obsolete green/red support/contradiction meanings. Desktop grade width remains 124px. Phone/tablet grades size naturally to 75px; native node bounds confirm all six fit inside their existing parent rows. The earlier 61px phone SUPPORTED width was measured content, not an applied fixed-width style; no unnecessary parent resizing was introduced.
 
 ### Verification and preserved behavior
 
-All **16 corrected elements match their respective current origins exactly**. The three reviews preserve346 unaffected text leaves: desktop180, phone84, tablet82. The unchanged origin boards and R12 contract preserve another366 leaves:162+62+62+80. There are no unintended text changes among those **712 preserved leaves**.
+All **16 corrected elements match their respective current origins exactly**. The three reviews preserve 346 unaffected text leaves: desktop 180, phone 84, tablet 82. The unchanged origin boards and R12 contract preserve another 366 leaves: 162+62+62+80. There are no unintended text changes among those **712 preserved leaves**.
 
 Root inspected the final full desktop review and the phone/tablet hero captures. The corrected desktop headline remains legible behind the intended scrim. Phone/tablet foreground overlays continue to cover their backing layers as before; the underlying hero captures and measured grade geometry verify the retained layout. Lower backing-row captures outside the clipped review viewport were not treated as visual proof.
 
@@ -1180,7 +1180,7 @@ Most directly, all three foreground inspector captures are **byte-for-byte ident
 | Phone | `2TM-0` | 390×1006 |
 | Tablet | `2Y3-0` | 768×790 |
 
-The +50bp shock,5.0/14.8-year modified durations,$10,000 examples,−$250/−$740 results,−300 to+300bp entry bounds, missing-convexity/cash-flow disclosures, accuracy qualifications, return/edit controls and independent evidence remain unchanged. Invalid-input state `39U-0`, R12 coverage `3C6-0`, read-input evidence `3I2-0` and contract `3FC-0` were not modified.
+The +50bp shock, 5.0/14.8-year modified durations, $10,000 examples, −$250/−$740 results, −300 to +300bp entry bounds, missing-convexity/cash-flow disclosures, accuracy qualifications, return/edit controls and independent evidence remain unchanged. Invalid-input state `39U-0`, R12 coverage `3C6-0`, read-input evidence `3I2-0` and contract `3FC-0` were not modified.
 
 All eight phase operations returned APPLIED_RESPONSE_OBSERVED: context-copy, desktop-policy, desktop-growth, phone-policy, phone-growth, tablet-policy, tablet-growth and context-finish under prefix `paper-bonds-duration-` and suffix `-20261109-c4-sd`. Explicit finish released only `2Z9-0`, `2QG-0` and `2UW-0`.
 
@@ -1211,7 +1211,7 @@ The query, category labels, three destination rows, matching-field rule, Close/C
 
 Root inspected both complete **390×844** native phone captures. The clarified note wraps to two lines, the three-row result list flows below it, and the matching rule remains visible with clear bottom space. Both count labels fit in their existing header rows.
 
-Exact readback preserves73 unaffected leaves in each phone specimen and all71 leaves in the Research directory: **217 unchanged text leaves**. Only the four intended leaves changed.
+Exact readback preserves 73 unaffected leaves in each phone specimen and all 71 leaves in the Research directory: **217 unchanged text leaves**. Only the four intended leaves changed.
 
 Both operations returned APPLIED_RESPONSE_OBSERVED:
 
@@ -1251,13 +1251,13 @@ New `1D4-0`, **00 · START HERE · Migrated references + F02 Candidate 2**, is f
 - `1DF-0` preserves unverified production behavior, joint F01/F02 acceptance HOLD, repository law and each product's existing owners.
 - `1DG-0` maps the local starters, retained foundations and separately Proposed CAGR period/recovery page.
 
-Root inspected the complete **1440×431** native capture. The source link, status and local-page pointers fit without clipping. Native placement is x2320/y−1590, with80px of horizontal clearance after starter `2U-0`; it overlaps no original board. The native canvas retains the duplication placement even though the replacement HTML supplied another position, so only the observed position is claimed here.
+Root inspected the complete **1440×431** native capture. The source link, status and local-page pointers fit without clipping. Native placement is x2320/y−1590, with 80px of horizontal clearance after starter `2U-0`; it overlaps no original board. The native canvas retains the duplication placement even though the replacement HTML supplied another position, so only the observed position is claimed here.
 
 ### Preservation and effects
 
 The nine original starter IDs retain their exact dimensions, canvas coordinates and relative order. The final board order is the new guide followed by those same nine originals.
 
-Exact text readback preserved all30 leaves of the copied source starter `1-0`, plus charter `A6-0` and dark/light atlas lineage `BH-0`/`E3-0`: **33 sampled original leaves unchanged**. No existing board was rewritten. The original Figma identity `IKqTiq7jeVBJusBfoHnPsH`, original Paper projection `01M2WGNCX9475G79JRKJTCM08P`, STARTER ONLY limits and the separately Proposed CAGR work remain intact.
+Exact text readback preserved all 30 leaves of the copied source starter `1-0`, plus charter `A6-0` and dark/light atlas lineage `BH-0`/`E3-0`: **33 sampled original leaves unchanged**. No existing board was rewritten. The original Figma identity `IKqTiq7jeVBJusBfoHnPsH`, original Paper projection `01M2WGNCX9475G79JRKJTCM08P`, STARTER ONLY limits and the separately Proposed CAGR work remain intact.
 
 All five operations returned APPLIED_RESPONSE_OBSERVED:
 
@@ -1273,11 +1273,11 @@ The source starter was duplicated; only the duplicate was replaced with the guid
 
 A bounded read-only audit of `01M6Y39WH7QVTH07RTWHTSRP65` found an explicit primary entry to the current Terminal Returns Calendar. Its later build contract `197-0` already points to accepted Terminal session states `28BZ-0`, `28FS-0` and `28LZ-0`, and labels `LV-0` historical.
 
-The contract distinguishes requested and actual endpoints, selected sessions,21 intervals versus22 closes, price/coverage/adjustment limits, exact symbol/date/basis identity and superseded responses. AAPL historical dossier and NVDA newer studies retain their separate identities. No additional amendment was justified. All retained historical prices/clocks and held `AD-0` remain unchanged.
+The contract distinguishes requested and actual endpoints, selected sessions, 21 intervals versus 22 closes, price/coverage/adjustment limits, exact symbol/date/basis identity and superseded responses. AAPL historical dossier and NVDA newer studies retain their separate identities. No additional amendment was justified. All retained historical prices/clocks and held `AD-0` remain unchanged.
 
 ## Active continuation
 
-The successor covers21 design files. All concrete findings from the latest bounded reviews—Expectation finder availability, Hub directory drift, Bonds duration-review parity, tool-search example completeness and the foundations handoff—are implemented and verified in Paper. Later Crypto, Risk, OS sharing, canonical F02 and Returns dossier coverage was preserved where another amendment would duplicate existing work. Remaining runtime, account, source-integration, held-target and release obligations retain their existing owners; static design proof does not close them.
+The successor covers 21 design files. All concrete findings from the latest bounded reviews—Expectation finder availability, Hub directory drift, Bonds duration-review parity, tool-search example completeness and the foundations handoff—are implemented and verified in Paper. Later Crypto, Risk, OS sharing, canonical F02 and Returns dossier coverage was preserved where another amendment would duplicate existing work. Remaining runtime, account, source-integration, held-target and release obligations retain their existing owners; static design proof does not close them.
 
 ## Acceptance boundary
 
