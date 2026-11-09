@@ -1,5 +1,7 @@
 # Mastermind OS: Team, T3 Code, Hermes and Capacity Fabric integration
 
+> **Current design amendment — 9 November 2026:** Sections 14–15 record the Chairman's design-only refinement continuation. Section 15 governs the current frame map, Resources terminology, Teamlink contracts, two distinct T3 execution paths and interaction targets wherever earlier design assumptions differ. Earlier implementation packets remain unexecuted by this session.
+
 Date: 2026-11-08 (America/Vancouver); research and design session continued into 2026-11-09 UTC.
 Operation: `t3-hermes-os-team-design-20261108-c3`.
 Status: **architecture and Paper design package complete; application implementation and runtime activation pending**.
@@ -424,3 +426,110 @@ DONE_WHEN: cohesive editable Paper primary journeys across all five named integr
 The current task has no app/runtime writes, provider calls, bot launches, merge or release action. Root retains canvas edits for PRINCIPAL_JUDGMENT and UNIQUE_APPROVED_ACCESS; one bounded native reasoning advisor may critique cross-system semantics with no modifying authority. This advisory role is not paid implementation labor or a new runtime principal. WHY NOT FABLE: bounded architecture critique and direct design composition need no separate principal takeover.
 
 Integration invalidator discovered before edits: the newer native T3 Capacity Fabric provider path and the DSH-backed ACP coding path are distinct; the earlier T3-to-DSH drawing must not be read as a universal path. The live router and the authenticated OS capacity projection also have separate proof boundaries. Further exact source reconciliation is recorded with the design results below.
+## 15. Completed Paper refinement — 9 November 2026
+
+**Outcome: PROVEN_OUTCOME for the design-only continuation in Section 14.** D1–D4 are complete. The editable primary journey now runs from Today through Team, the original conversation and Code to the returned result, with Capacity Fabric and source-qualified route details alongside it. This is design acceptance against the scoped DONE_WHEN, not installed application, runtime integration, measured performance or production acceptance.
+
+### 15.1 Authority, source pins and precedence
+
+The Chairman's current instruction explicitly narrowed this continuation to improving the existing Paper design and reconciling Capacity Fabric, Teamlink, Hermes, T3 Code and DeepSeek Harness. Work stayed on the existing Paper file and this existing PR/branch. No application code, service configuration, provider activation, bot launch, external message, merge or deployment was performed.
+
+Procedure and product pins remain those in Section 14. Governing Mastermind documents were read at the same protected revision, not reconstructed from memory.
+
+| Source | Exact observation | Design consequence |
+|---|---|---|
+| [Capacity Fabric OS integration](https://github.com/mastermindx-market-intelligence/Mastermind/blob/ecbbbc0563c74db0945972ac4cd4481f0853a55f/docs/CAPACITY_FABRIC_OS_INTEGRATION.md) | PR #2351 head ecbbbc0563c74db0945972ac4cd4481f0853a55f | Reuse the authenticated Resources projection; preserve physical allowance scope, independent windows, reset/freshness and consumer evidence. A read preview is not admission. |
+| [Native T3 Capacity Fabric wiring](https://github.com/mastermindx-market-intelligence/Mastermind/blob/ecbbbc0563c74db0945972ac4cd4481f0853a55f/docs/T3_CAPACITY_FABRIC_WIRING.md) | Same #2351 head | Native T3 can use the Capacity Fabric provider directly. Company-admitted DSH through ACP remains a distinct path; T3 is not universally a DSH launcher. |
+| [Team conversation design source](https://github.com/mastermindx-market-intelligence/Mastermind/blob/ec06a1d70eef254f928bdc7b963a90322efa2b6e/docs/plans/2026-11-08-hermes-team-conversations-paper.md) | PR #2358 head ec06a1d70eef254f928bdc7b963a90322efa2b6e | Preserve the existing conversation, bot creation, group, routine, coding and return designs. Refine the named frames below in place; add HC17 for the separate native provider. |
+| Teamlink primary local census | Read-only observation of /Users/chriswong/.hermes/profiles/engineering/mmos/TEAMLINK_CENSUS.md, dated 9 November, forensic window 00:08–00:30 MST; census cites Mastermind source 2f3deba2 | Same-host Hermes Bot Mode DM was observed through queue/ack/execution. Cross-host registration and the Hermes-to-T3 OAuth roundtrip were not established by this census. The twelve-person design roster is illustrative, not the fourteen-profile census or production membership. |
+| Teamlink handoff contract | Read-only observation of the same directory's T3_HANDOFF_V2.md, Section 8, on 9 November UTC | TeamLinkMessage.v1 retains operation correlation, idempotency, informational/actionable distinction and hop limits. ContextPacket.v1 contains references with expiry. Compose existing Executive/decision-ledger and T3 MCP transport, without adding a bus. |
+| Teamlink refresh | A bounded later check found TEAMLINK_DESIGN.md absent at that exact engineering directory | No adapter-completion or installed return-path claim was inferred from the missing file. Existing observed contracts and explicit capability gates define the design. |
+
+These are exact source/observation boundaries. Branch-head source is not a merge receipt, and a local census is not proof of a later installed generation. The current design uses example labels and keeps implementation validation separate.
+
+### 15.2 Product composition and visual decisions
+
+The existing Noir Atelier identity remains: near-black surfaces, ivory text, restrained champagne emphasis, fine neutral separators and consistent typography. No colored container-edge accents were introduced.
+
+The main Team view was recomposed from twelve equal cards into a scanable roster and a selected teammate inspector. The roster answers who needs input, what each teammate is doing and where to continue. The inspector joins the selected Hermes teammate, project, original conversation, coding session and model route. The page's strongest action is Give direction; the inspector's Open conversation is secondary. Maintenance, the existing Meta-CEO office and project navigation remain reachable.
+
+Today now shares the Team/Code/Resources navigation and makes its composer recipient explicit. It retains the Terminal brief review and projects, and adds a compact team-work entry that leads back to the original conversation. Search remains visible. The former Today navigation is preserved as a reference before replacement.
+
+Capacity is now a purposeful Resources view: one physical allowance per row, independent five-hour/weekly/monthly observations, a concrete limiting allowance, provider reset evidence, consumers and route preview. The old hosts/maintenance content was copied to its named detail reference before recomposition. No percentage was created by adding or averaging different account allowances.
+
+Conversation, coding and return designs use the same Teamlink adapter example and the same OS launch team destination. Explicit recipients, shared visibility and next-turn intent replace an ambiguous send action. Result delivery remains distinct from review, merge, deployment and overall project acceptance. New-bot controls in the primary room and returned-result view are secondary to the conversation action.
+
+The desktop settings retain the DSH-backed ACP path. A separate native Capacity Fabric provider screen explains the alternative T3 engine, exact-model versus automatic policy selection, and the fact that new defaults apply to new threads. Existing threads retain their own route.
+
+### 15.3 Exact frame map
+
+All IDs below are native editable Paper nodes in file 01M3NRCX55B452A12819WNE1RH. Six focused boards were added, sixteen existing boards were refined, and two prior surfaces were preserved as references.
+
+| Page | Frame / native ID | Result |
+|---|---|---|
+| [Start here](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0) | Design map A2Q-0 | Current page links, 13 Team & Delivery product frames, Teamlink/state/build descriptions and example-data notice. |
+| [Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0) | Today LNV-0; narrow Today N27-0 | Unified primary navigation, explicit Mastermind CEO recipient, retained brief review and projects, linked team activity. |
+| [Team & Delivery product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-O-0) | TD01 ZQN-0 | Roster plus Engineering inspector; Needs you / Working / Ready vocabulary and one page-primary action. |
+| Same product page | TD05 10WB-0 | Capacity Fabric shared pools, independent allowance windows, unknown observations, concrete limit and reset, consumer examples and detail navigation. |
+| Same product page | TD06 117C-0 | Exact source/return context, proposed host, T3 workspace, DSH ACP engine, exact GLM 5.3 model and account route; preview remains non-admitting. |
+| Same product page | TD08 11ZB-0; TD10 128B-0 | Rebuilt narrow Team layouts in English dark and Chinese light, with touch-sized tabs/actions and a deliberate information order. |
+| Same product page | TD09 123Z-0 | Narrow Code with Conversation / Changes / Tools, route, next-turn composer, separate Stop turn, changes/checks and original return destination. |
+| Same product page | **New TD11 18LP-0** | Narrow Capacity: limiting-window overview and access to all allowance details. |
+| Same product page | **New TD12 193T-0** | Narrow allowance detail: all three windows, independent resets, observation/expiry and evidence entry. |
+| Same product page | **New TD13 19EJ-0** | Narrow teammate detail: Engineering mission, persistent conversation, coding session and exact model route. |
+| [Team conversations product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-R-0) | HC01 12UW-0 | Teamlink linked coding card; message-delivered versus session-working states; explicit next-turn recipient and shared visibility. |
+| Same conversation page | HC07 14MJ-0 | Engine/model/provider separation, current-turn versus next-turn behavior, exact session/original-room links and return-pending state. Existing changes/browser/terminal/worktree tools remain. |
+| Same conversation page | HC08 14V7-0 | Returned result with original conversation, source/checks/review/release separation, aligned role/status labels and explicit room-message destination. |
+| Same conversation page | HC11 15QF-0 | Existing DSH provider settings retained; Capacity Fabric is discoverable as another provider path. |
+| Same conversation page | HC14 16CD-0; HC15 16FT-0 | English dark / Chinese light narrow rooms with linked handoff, explicit recipient/next-turn semantics and 44px controls. |
+| Same conversation page | **New HC17 18ZE-0** | Native T3 Capacity Fabric provider, automatic Balanced policy, exact-model explanation and existing-thread route retention. |
+| [Team & Delivery build](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-Q-0) | TB01 12DE-0 | Reconciled owner boundaries, Teamlink transport composition and two distinct coding paths. |
+| Same build page | **New TB03 18IB-0** | Motion, focus/draft/scroll continuity, responsive composition, render targets and required implementation proof. |
+| [Team & Delivery states](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-P-0) | **New TS02 18JN-0** | Sending, delivered, queued-next, uncertain delivery, capacity wait, starting, working, stopping, return-pending, returned and reconnect states. |
+| Same states page | Preserved TD05H 1815-0 | Original hosts/maintenance detail retained before the Capacity redesign. |
+| [Noir reference/history](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-2-0) | Preserved navigation 195I-0 | Original Today navigation, native children retained before shell replacement. |
+
+Final page readback: p-O-0 has 13 product boards; p-R-0 has 17 product boards; p-Q-0 has three build boards; p-P-0 has two state boards plus the preserved host-detail reference. Counts describe those pages, not new boards created by this continuation. Other accepted creation/routine/project/build designs were retained.
+
+### 15.4 Integration contracts for implementation
+
+**Hermes and company continuity.** A teammate is a persistent profile/session identity. Its conversation and project survive a coding delegation. The roster derives from authenticated membership; the example count of twelve must never become a product limit, filter or live-read fallback.
+
+**Teamlink.** The composer declares recipient, visibility and intent. Informational room messages do not silently become actionable assignments. Busy T3 send queues the next turn; interrupt/stop is a separate supported action. Delivery, acknowledgement, execution and return have different evidence and states. Uncertain delivery retains the original operation and offers status reconciliation; reconnect does not resend or launch another attempt. Context is reference-based and expiry-aware, with the original project/conversation carried through the return path.
+
+At the observed census, T3 MCP challenged with OAuth and exposed read/operate scope; an authenticated Hermes-to-T3 roundtrip had not been executed. Result return was pull-based through existing T3 reads/wait behavior, without proven push delivery into Hermes. The designed return experience must be implemented through supported existing owners and qualified with a real original-parent receipt. It is not a claim that a new push adapter already exists. Cross-host routes stay unavailable until their actual registration/auth/capability proof exists.
+
+**Capacity Fabric.** Keep account identity, physical/shared allowance identity, model and execution host separate. Five-hour, weekly and monthly windows have their own evidence, reset and freshness. Missing/stale/future/unqualified usage stays null, with no empty progress bar implying zero remaining. An exhausted observed window is an actual zero. Admission requires headroom in every window required for that provider/plan, together with the existing permission, budget and reservation gates. At the pinned source, GLM/MiniMax require five-hour and weekly; Go also requires monthly. The example GLM monthly unknown is not a fabricated exhaustion or a universal third-window requirement.
+
+An exact-model request may be pooled across eligible accounts without substituting another model. An automatic policy such as Balanced can resolve a model through the router's policy; the UI must display the resolved model when known. Do not silently equate the two. Native T3, Hermes and DSH consumer labels are illustrative until qualified runtime receipts establish their actual state. Showing a provider or registered consumer is not RESULT_PROVEN.
+
+**Two T3 paths.** The native T3 Capacity Fabric provider is a direct provider/router path. The existing company-admitted DSH path is T3 plus DSH through ACP with its owner-fenced admission, launch and return contract. Section 7's single T3-to-DSH launch rule applies to the latter path only. It must not be used to route every native provider thread through DSH or to install another router. Refusal or unknown effects keep the original operation; neither path is a replay fallback for the other.
+
+**Return and acceptance.** The result view links the original thread, changed files, checks and project outcome. Returned means the result reached the identified destination with evidence; it does not imply human/project acceptance, GitHub approval, merge or deployment. A partial team result leaves the parent outcome open.
+
+The earlier implementation packet sequence remains a proposed future execution sequence. GLM-00 must add current Teamlink/auth/transport and native-versus-DSH capability reconciliation; GLM-03/04 must preserve both coding paths; GLM-05 uses the existing authenticated Resources projection; GLM-06 must prove the original-parent return and relevant negative cases. No packet was started by this continuation.
+
+### 15.5 Responsive and performance design
+
+Narrow layouts were recomposed at 390×844 rather than scaled from desktop. Team opens a teammate detail, Code separates Conversation/Changes/Tools, and Capacity shows the limiting window first with a dedicated full-allowance detail. English dark and representative Chinese light counterparts were visually checked. This is not a claim that every legacy board has been fully translated or every intermediate breakpoint implemented.
+
+The new/refined narrow tabs and primary controls use 44px hit areas. Long names, IME composition, keyboard focus, focus return, reduced motion and scroll restoration remain implementation acceptance requirements.
+
+TB03 records 160ms state transitions and 200ms reveals, with reduced motion removing travel. Draft, cursor, selection, filter, scroll and focus survive navigation and reconnect. Incoming updates do not steal focus or jump the conversation away from the reader. Loading and live updates keep layout stable.
+
+Proposed runtime targets are local input feedback at or below 100ms p95 and a warm detail reveal at or below 200ms p95. These are design budgets, not measured performance results. Verify cold/warm navigation, typing while streaming, long histories, reconnect and reduced-motion behavior on actual target devices. Reuse current cache/subscriptions and virtualize long lists when justified; do not add a second observer, queue or polling service to make the design appear live.
+
+### 15.6 Verification, receipts and closure
+
+The direct approved Paper carrier was used throughout. Each mutation refreshed the exact file binding/snapshot before the write, used a stable operation ID and received APPLIED_RESPONSE_OBSERVED. The continuation contains 183 confirmed design mutations plus one confirmed finish acknowledgement; operation prefix is mmos-os-design-20261109-c4. First operation: capacity-names-01. Final design operation: return-destination-19. Finish operation: mmos-os-design-20261109-c4-finish-20, acknowledged OK on 9 November 2026 UTC.
+
+Visual review covered the primary desktop journey, all six new boards and representative narrow/light/Chinese counterparts. Final passes checked Team, Capacity, Today, returned result, mobile Team/Code/Capacity, explicit recipient controls, 44px touch updates, text fit and neutral edge treatment. Native JSX/node/page reads confirmed editable structure, the final frame map and both preserved references. The final returned-result composer is native node 19JX-0 under HC08, with visible destination/visibility and retained reply controls.
+
+Paper's screenshot renderer intermittently omitted inherited shell content immediately after edits; original-node/JSX reads and subsequent serial captures reconciled the view. Confirmed writes were not replayed on that basis. Two read-argument/node lookup errors were corrected as read-only schema/target diagnosis; they produced no mutation. There is no unresolved effect for this continuation. Historical Knowledge-only uncertain effects were outside the scope and left untouched.
+
+Working indicators were released only for the 24 authored/refined/preserved target boards listed above. Existing users/writers and unrelated pages were not displaced. A bounded reasoning advisor's semantic findings were consumed; its role did not constitute GitHub APPROVED or a new review gate.
+
+The final source update stays in PR #2345 on sol/t3-hermes-os-team-design-20261108-c3, with exact content/commit readback. The PR remains an open design/documentation carrier. Prior GitHub release restrictions are not waived, and no denied control read was repeated through another carrier.
+
+**DO_NOT_REDO:** the six added boards, refined primary journey, retained references and accepted visual fixes. Reopen them only for a material source/product change or concrete feedback. The current design-only DONE_WHEN is met. Broader application, installed Teamlink return, consumer qualification, performance measurements and release acceptance remain with the incumbent implementation programme and its original proof requirements.
+
