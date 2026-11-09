@@ -689,7 +689,8 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e14333cf9fdddfcc6625357498813fadc0d0f45abc403d0ef9743e3eb87bdf3b', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
+# Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '6eb8e085971a44eef40f68cc6192479c8ac47981cf886fdae72cb41aeb7eb8e5', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -804,7 +805,8 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f42e9664f61b44c34bf4200193ba3210aef27acbff05e617c68031ee4b402b19', 'sites': ((3710, 68, 71, 'int', '503'), (3715, 69, 72, 'int', '503'), (3719, 67, 70, 'int', '503'))}
+# Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture function.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6592b76edb1d58dab83ef905de596919b58995c13e099d8ca9437b35b9b1a040', 'sites': ((3739, 68, 71, 'int', '503'), (3744, 69, 72, 'int', '503'), (3748, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -816,6 +818,54 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
+
+# Prospective evaluation candidate: exact fixed UID/private-mode checks and HTTP
+# status constants; no new principal, mode grant or scanner exemption. Inherited
+# c2 protected primitives retain their accepted scoped review; changed issuer
+# code and these exact postimages require the one consequence review.
+REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '988c7407b08bc005ad608092ffdd90e46a04bc5f3a8254682154f27a63e82130',
+                                                      'sites': [[61, 33, 36, 'int', '501'],
+                                                                [141, 25, 28, 'int', '450']]},
+ 'control_plane/protected_memory_evaluation_assignment.py': {'sha256': '58050d8abbcd7dbbc73e00f2374aac39eab00a3852a79cdc51b5025e3e978557',
+                                                             'sites': [[442, 82, 85, 'int', '450'],
+                                                                       [443, 34, 37, 'int', '450'],
+                                                                       [462, 82, 85, 'int', '450'],
+                                                                       [462, 108, 111, 'int', '450']]},
+ 'control_plane/protected_memory_evaluation_execution.py': {'sha256': '45c977d0b73c8fc6632c6775934e0131413504e3b381e70b1f62f1406ceb408e',
+                                                            'sites': [[118, 35, 38, 'int', '450'],
+                                                                      [118, 61, 64, 'int', '450']]},
+ 'control_plane/protected_memory_evaluation_source.py': {'sha256': '2194b98269bd10e7f8e3dfac655db1ffe9a7d45af6b67b059904c09193c26aee',
+                                                         'sites': [[56, 55, 58, 'int', '450'],
+                                                                   [59, 99, 102, 'int', '450'],
+                                                                   [96, 81, 84, 'int', '450']]},
+ 'control_plane/protected_memory_execution.py': {'sha256': '90dee86e669f6606a68da3640aa2964dde75d98fb1d2bd46481cda92ca7c15bf',
+                                                 'sites': [[70, 68, 71, 'int', '450'],
+                                                           [73, 20, 23, 'int', '450'],
+                                                           [73, 55, 60, 'int', '0o700'],
+                                                           [248, 36, 39, 'int', '450']]},
+ 'control_plane/protected_memory_peer.py': {'sha256': '921228bd2ee266da35ace6c4ed445c61475542764d4e2a90456a2e322201e9ca',
+                                            'sites': [[46, 20, 23, 'int', '450'],
+                                                      [120, 23, 26, 'int', '450']]},
+ 'control_plane/protected_memory_profile.py': {'sha256': '0c695423e3fa30be313a65727d40de09d5bb37f1a9a4be79aa014744fbcdf24f',
+                                               'sites': [[28, 46, 49, 'int', '450'],
+                                                         [61, 81, 84, 'int', '450'],
+                                                         [79, 81, 84, 'int', '450'],
+                                                         [114, 93, 96, 'int', '443'],
+                                                         [121, 23, 26, 'int', '450']]},
+ 'integrations/mastermind_executive_app/coo.py': {'sha256': '0be32b8bdd843c4667d153254c4369ed6921eb9323bea43baf1b77d18be8fd7b',
+                                                  'sites': [[198, 75, 78, 'int', '400'],
+                                                            [208, 93, 96, 'int', '503'],
+                                                            [324, 37, 40, 'int', '400'],
+                                                            [334, 54, 57, 'int', '503'],
+                                                            [349, 54, 57, 'int', '503'],
+                                                            [359, 56, 59, 'int', '503']]},
+ 'scripts/protected_memory_economic_helper.py': {'sha256': 'b8c2c01b07c1f8dff7d6352fade6142258ef3a8ecc1ec0775869cd21e6aef4c8',
+                                                 'sites': [[18, 21, 24, 'int', '501'],
+                                                           [40, 58, 61, 'int', '501']]},
+ 'scripts/protected_memory_model_runner.py': {'sha256': '4a90ff3c92b5cfe6e2c2a73aac3eaeb556e12627924b23f3ae94a5d00eb5a57a',
+                                              'sites': [[32, 43, 46, 'int', '450'],
+                                                        [76, 21, 24, 'int', '450'],
+                                                        [82, 48, 51, 'int', '450']]}})
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
@@ -909,6 +959,16 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (183, 19, 22, 'int', '460'),
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
+# Material protected320 context composition: only line locations/file digest
+# move for the same six accepted Memory HTTP-status operands; no new mask.
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
+ 'sites': [(245, 75, 78, 'int', '400'),
+           (255, 93, 96, 'int', '503'),
+           (636, 37, 40, 'int', '400'),
+           (657, 54, 57, 'int', '503'),
+           (677, 54, 57, 'int', '503'),
+           (687, 56, 59, 'int', '503')]}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.
@@ -1087,3 +1147,117 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
     "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
     "sites": ((128, 72, 75, "int", "512"),),
 }
+
+# Content-continuation source union independently qualified at282140ec5,
+# exact final treee9b3984c (review6eb650a8). Only two synthetic600-second
+# token lifetimes and six fixed HTTP400/403 response tokens are qualified.
+# No principal/UID/callee or arbitrary nearby literal is exempted; changed
+# bytes invalidate the whole pin, preserving the generic topology guard.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': 'cb629df9ba989ea38bc278acc938e4241ef03f6358e9c56de7b629f407fcdb11', 'sites': ((537, 58, 61, 'int', '600'), (538, 66, 69, 'int', '600'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/native_authorization_identity.py'] = {'sha256': 'db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', 'sites': ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))}
+# Fixed explicit Memory owner source: closed Control helper dependency paths;
+# same private mkdir, turn/CPU/reference/HTTP bounds, incumbent TTL and full
+# APPLICATION recipe limits. Source/path/token identity remains exact. The
+# Broker/task postimages are the full current-native preserving transplants.
+# No identity scanner, runtime grant, timeout or budget rule changes.
+REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '431a4a36f12ebaff25ee681aaf45635a0a6820b7b117bae18aa6b52393e19221',
+                                                      'sites': [(74,
+                                                                 33,
+                                                                 36,
+                                                                 'int',
+                                                                 '501'),
+                                                                (154,
+                                                                 25,
+                                                                 28,
+                                                                 'int',
+                                                                 '450')]},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py': {'sha256': 'ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a',
+                                                                                  'sites': ((1397,
+                                                                                             28,
+                                                                                             33,
+                                                                                             'int',
+                                                                                             '0o700'),)},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/fabric_task.py': {'sha256': 'c0f12526bb13cbef6be6b766232e31dc520fffc38e1353923ae97e8ff5c521d1',
+                                                                            'sites': ((1031,
+                                                                                       51,
+                                                                                       54,
+                                                                                       'int',
+                                                                                       '400'),
+                                                                                      (1316,
+                                                                                       59,
+                                                                                       62,
+                                                                                       'int',
+                                                                                       '400'),
+                                                                                      (1869,
+                                                                                       79,
+                                                                                       82,
+                                                                                       'int',
+                                                                                       '400'))},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/lease_broker.py': {'sha256': '7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd',
+                                                                             'sites': ((106,
+                                                                                        80,
+                                                                                        83,
+                                                                                        'int',
+                                                                                        '512'),
+                                                                                       (275,
+                                                                                        67,
+                                                                                        70,
+                                                                                        'int',
+                                                                                        '900'),
+                                                                                       (475,
+                                                                                        87,
+                                                                                        90,
+                                                                                        'int',
+                                                                                        '599'),
+                                                                                       (755,
+                                                                                        52,
+                                                                                        55,
+                                                                                        'int',
+                                                                                        '900'),
+                                                                                       (768,
+                                                                                        45,
+                                                                                        48,
+                                                                                        'int',
+                                                                                        '512'))},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py': {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70',
+                                                                                          'sites': ((40,
+                                                                                                     21,
+                                                                                                     24,
+                                                                                                     'int',
+                                                                                                     '501'),
+                                                                                                    (212,
+                                                                                                     78,
+                                                                                                     81,
+                                                                                                     'int',
+                                                                                                     '660'))},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py': {'sha256': 'eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b',
+                                                                                 'sites': ((202,
+                                                                                            51,
+                                                                                            54,
+                                                                                            'int',
+                                                                                            '599'),
+                                                                                           (204,
+                                                                                            43,
+                                                                                            46,
+                                                                                            'int',
+                                                                                            '429'))},
+ 'scripts/protected_memory_economic_helper.py': {'sha256': 'cb49f73b511ca8905b35b4486572ee8304cac21e01b97e3add375298bb312b19',
+                                                 'sites': [(18,
+                                                            21,
+                                                            24,
+                                                            'int',
+                                                            '501'),
+                                                           (40,
+                                                            58,
+                                                            61,
+                                                            'int',
+                                                            '501')]}})
+# Exact accepted Memory native-owner namespace; same reviewed bytes/sites as
+# accepted dc79/55e/b87, no generic path or literal exception.
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py'] = {'sha256': 'ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a', 'sites': ((1397, 28, 33, 'int', '0o700'),)}
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py'] = {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70', 'sites': ((40, 21, 24, 'int', '501'), (212, 78, 81, 'int', '660'))}
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py'] = {'sha256': 'eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b', 'sites': ((202, 51, 54, 'int', '599'), (204, 43, 46, 'int', '429'))}
+
+# Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
+# Complete source hash plus typed spans; any byte drift restores the guard.
+REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}

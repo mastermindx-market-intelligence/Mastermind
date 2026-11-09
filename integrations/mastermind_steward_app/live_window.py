@@ -82,9 +82,9 @@ class LiveWindowDispatch:
     Dispatch requires all of: an HTTP scope, the GET method, the exact
     canonical raw path, no query string and no ``root_path``. Every other
     request, and every non-HTTP scope, reaches the original stack with the same
-    scope/receive/send. There is no prefix match, redirect, second path,
-    fallback route or generated response here, and the Reader is never
-    constructed or called for a request this class does not dispatch.
+    scope/receive/send. The one optional native identity metadata path is
+    issued only by the same actual Content owner and never reads source bytes.
+    There is no prefix match, redirect, arbitrary route or permission fallback.
     """
 
     def __init__(
@@ -99,8 +99,15 @@ class LiveWindowDispatch:
         self.reader = reader
         self.path = path
         self.canonical_raw_path = canonical_raw_path
+        from integrations.mastermind_steward_app.installed_profiles import native_content_identity_app
+        self.native_identity = native_content_identity_app(reader)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        from common.native_authorization_identity_contract import ROUTES
+        if (self.native_identity is not None and scope.get("type") == "http"
+            and scope.get("raw_path") == ROUTES["CONTENT"].encode("ascii")):
+            await self.native_identity(scope, receive, send)
+            return
         if (
             scope.get("type") == "http"
             and scope.get("method") == "GET"
@@ -111,6 +118,11 @@ class LiveWindowDispatch:
             await self.reader(scope, receive, send)
             return
         await self.app(scope, receive, send)
+
+
+def supports_native_content_identity(app: Any) -> bool:
+    """Only the actual fixed Content dispatch can register the outer route."""
+    return type(app) is LiveWindowDispatch and app.native_identity is not None
 
 
 def live_window_reader(
