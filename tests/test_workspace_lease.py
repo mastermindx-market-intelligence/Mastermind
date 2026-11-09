@@ -365,3 +365,37 @@ def test_attach_factory(tmp_path):
         assert store.read(lease.lease_id).lease_status == "active"
     finally:
         store.close()
+
+
+def test_attach_workspace_lease_refusals_are_typed_and_pure(tmp_path):
+    """REVIEW_C_E_OPUS_20261109 A3, module-level (no runtime): expired,
+    foreign-assignment and different-lease rebinds refuse with typed codes;
+    the same lease re-attaches idempotently; inputs are never mutated."""
+    from control_plane.child_execution_contracts import ExecutionBinding
+    from control_plane.workspace_lease import attach_workspace_lease
+
+    binding = ExecutionBinding(
+        root_run_ref="root-1", immediate_parent_run_ref="parent-1",
+        logical_child_key="child-1", request_digest="b" * 64,
+        effective_complexity="C1_ROUTINE_BOUNDED", attempt_ref="ATT-1",
+    )
+    store = _open(tmp_path, "attach.sqlite")
+    record = store.acquire_single_writer(
+        repo_ref=REPO, host_ref=HOST, native_workspace_owner="t3-native",
+        workspace_ref="ws-attach", base_revision=REV, writer_ref="writer-1",
+        active_assignment_refs=("ATT-1",), now_ms=NOW, expires_ms=NOW + 10,
+    )
+    joined = attach_workspace_lease(binding, record, now_ms=NOW)
+    assert (joined.lease_ref, joined.workspace_ref) == (record.lease_id, "ws-attach")
+    assert attach_workspace_lease(joined, record, now_ms=NOW + 9) == joined
+    assert binding.lease_ref == "" and binding.workspace_ref == ""
+    cases = [
+        (binding, record, NOW + 10, "LEASE_EXPIRED"),
+        (dataclasses.replace(binding, attempt_ref="ATT-2"), record, NOW, "LEASE_ASSIGNMENT_MISMATCH"),
+        (joined, dataclasses.replace(record, lease_id="lease-2"), NOW, "LEASE_REBIND_REFUSED"),
+    ]
+    for candidate, lease, now, reason in cases:
+        with pytest.raises(WorkspaceLeaseConflict) as caught:
+            attach_workspace_lease(candidate, lease, now_ms=now)
+        assert caught.value.reason == reason
+    store.close()

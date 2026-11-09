@@ -155,7 +155,9 @@ class WorkspaceLeaseRecord:
     released_ms: int | None = None
 
 
-def attach_workspace_lease(binding: Any, record: WorkspaceLeaseRecord) -> Any:
+def attach_workspace_lease(
+    binding: Any, record: WorkspaceLeaseRecord, *, now_ms: int
+) -> Any:
     """Stamp an ``ExecutionBinding``'s v1.1 workspace-containment block from
     one REAL lease record (Rev 5 §4 / change order §3E join; Director C).
 
@@ -167,8 +169,22 @@ def attach_workspace_lease(binding: Any, record: WorkspaceLeaseRecord) -> Any:
     containment. ``t3_workspace_id`` stays a lease-side native join field
     (this module never fabricates it): the T3 lane fills it when the real
     native workspace exists, and the binding reaches it through
-    ``lease_ref``. A lease that is not ``active`` refuses; the binding is
-    returned as a NEW record (input unchanged).
+    ``lease_ref``. The binding is returned as a NEW record (input
+    unchanged). Refusals (REVIEW_C_E_OPUS_20261109 A3), all typed
+    ``WorkspaceLeaseConflict``:
+
+    * ``LEASE_NOT_ACTIVE`` — the lease is not ``active``;
+    * ``LEASE_EXPIRED`` — an active lease whose ``expires_ms`` is at or
+      before the injected ``now_ms`` (module time convention: callers pass
+      epoch-ms; ``expires_ms=None`` never expires);
+    * ``LEASE_ASSIGNMENT_MISMATCH`` — the lease's ``active_assignment_refs``
+      do not name the binding's ``attempt_ref`` (a lease with no assignment
+      contains nobody);
+    * ``LEASE_REBIND_REFUSED`` — the binding already carries containment
+      (any of ``lease_ref``/``workspace_ref``/``base_ref``/``writer_epoch``)
+      that differs from this lease: a DIFFERENT lease, or the same
+      ``lease_ref`` with drifted values. Re-attaching the SAME lease is
+      idempotent.
     """
     from control_plane.child_execution_contracts import ExecutionBinding
 
@@ -180,18 +196,41 @@ def attach_workspace_lease(binding: Any, record: WorkspaceLeaseRecord) -> Any:
         raise WorkspaceLeaseConflict(
             "LEASE_TYPE_INVALID", field=type(record).__name__
         )
+    if type(now_ms) is not int or now_ms < 0:
+        raise WorkspaceLeaseConflict("INVALID_VALUE", field="now_ms")
     if record.lease_status != STATUS_ACTIVE:
         raise WorkspaceLeaseConflict(
             "LEASE_NOT_ACTIVE", lease_id=record.lease_id,
             lease_status=record.lease_status,
         )
-    return dataclasses.replace(
+    if record.expires_ms is not None and record.expires_ms <= now_ms:
+        raise WorkspaceLeaseConflict(
+            "LEASE_EXPIRED", lease_id=record.lease_id,
+            expires_ms=record.expires_ms, now_ms=now_ms,
+        )
+    if binding.attempt_ref not in record.active_assignment_refs:
+        raise WorkspaceLeaseConflict(
+            "LEASE_ASSIGNMENT_MISMATCH", lease_id=record.lease_id,
+            attempt_ref=binding.attempt_ref or None,
+            active_assignment_refs=list(record.active_assignment_refs),
+        )
+    joined = dataclasses.replace(
         binding,
         workspace_ref=record.workspace_ref,
         base_ref=record.base_revision,
         writer_epoch=record.writer_epoch,
         lease_ref=record.lease_id,
     )
+    already_contained = bool(
+        binding.lease_ref or binding.workspace_ref or binding.base_ref
+        or binding.writer_epoch is not None
+    )
+    if already_contained and binding != joined:
+        raise WorkspaceLeaseConflict(
+            "LEASE_REBIND_REFUSED", lease_id=record.lease_id,
+            bound_lease_ref=binding.lease_ref,
+        )
+    return joined
 
 
 def host_cache_key(*, lockfiles: list[str], platform: str, toolchain: str) -> str:
