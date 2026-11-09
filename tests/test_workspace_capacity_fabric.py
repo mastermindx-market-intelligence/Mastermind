@@ -108,6 +108,37 @@ def test_frontend_fixture_is_the_exact_public_projection_of_incumbent_h2():
     assert json.loads(fixture.read_text()) == projected()
 
 
+@pytest.mark.parametrize("invalid", [object(), {}, lambda: None, "subclass"])
+def test_installed_capacity_source_refuses_wrong_type_before_startup(tmp_path, monkeypatch, invalid):
+    from scripts import executive_os_phase1c as cli
+
+    if invalid == "subclass":
+        class OtherCapacitySource(projection.ExistingCapacityFabricSource):
+            pass
+        invalid = OtherCapacitySource(tmp_path / "not-created.json", current_revision=lambda: None)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid capacity source reached a listener or service constructor")
+
+    monkeypatch.setattr(cli, "activate_launchd_socket", forbidden)
+    monkeypatch.setattr(cli, "ExecutiveControlService", forbidden)
+    with pytest.raises(cli.ServiceError, match="exact installed Workspace composition"):
+        cli._service_from_config({"workspace_acquisition": {}}, capacity_fabric_source=invalid)
+
+
+def test_installed_capacity_source_requires_workspace_before_read_or_startup(tmp_path, monkeypatch):
+    from scripts import executive_os_phase1c as cli
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("unbound capacity source was read or started")
+
+    source = projection.ExistingCapacityFabricSource(tmp_path / "not-created.json", current_revision=forbidden)
+    monkeypatch.setattr(cli, "activate_launchd_socket", forbidden)
+    monkeypatch.setattr(cli, "ExecutiveControlService", forbidden)
+    with pytest.raises(cli.ServiceError, match="exact installed Workspace composition"):
+        cli._service_from_config({}, capacity_fabric_source=source)
+
+
 @pytest.mark.parametrize("mutation", ["expired", "future", "reset", "refresh_failed", "generation", "foreign_account", "duplicate", "non_authoritative"])
 def test_one_unqualified_window_cannot_be_hidden_by_another_fresh_window(mutation):
     preview, views = fixture_inputs()
