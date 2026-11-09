@@ -17,6 +17,7 @@ import importlib
 import weakref
 from typing import Protocol, Sequence, runtime_checkable
 
+from control_plane.child_execution_contracts import DESCENDANT_POLICIES
 from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
@@ -37,21 +38,94 @@ class AdapterBindingError(ValueError):
     """Reviewed adapter identity or required capability failed to bind."""
 
 
+#: Rev 5 D1 (§6 "Descendant policy"): the tri-state capability vocabulary
+#: of the descriptor contract.  UNKNOWN is a lawful, fail-closed value —
+#: unproven capabilities are never advertised as supported (unknown is
+#: unknown, mirroring the economics doctrine).
+CAPABILITY_STATUSES = ("SUPPORTED", "UNSUPPORTED", "UNKNOWN")
+
+#: Canonical capability names descriptors may map.  Open vocabulary — a
+#: descriptor may declare capabilities outside this tuple; the names
+#: exist so lanes use one spelling.  Core protocol floor =
+#: launch/status_read/collect_result/cancel (adapter/v1 minimum).
+ADAPTER_CAPABILITY_NAMES = (
+    "launch",
+    "status_read",
+    "collect_result",
+    "cancel",
+    "reattach",
+    "steer",
+    "interrupt_restart",
+    "resume",
+    "session_import",
+    "descendant_admission",
+    "per_call_yield_hook",
+    "usage_reporting",
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class AdapterCapability:
+    """One declared capability of a runtime descriptor, with its status.
+
+    ``evidence_ref`` names where the status was proven (test pin, census
+    entry, upstream source pin).  SUPPORTED without evidence is a claim
+    the review path must reject.
+    """
+
+    capability: str
+    status: str = "UNKNOWN"
+    evidence_ref: str = ""
+
+    def __post_init__(self) -> None:
+        if not str(self.capability).strip():
+            raise ValueError("capability must be a non-empty string")
+        if self.status not in CAPABILITY_STATUSES:
+            raise ValueError(
+                f"status must be one of {CAPABILITY_STATUSES}, got {self.status!r}")
+
+
+def _cap_map(**overrides: str) -> tuple[AdapterCapability, ...]:
+    """A full capability map over :data:`ADAPTER_CAPABILITY_NAMES`;
+    unmentioned capabilities default to UNKNOWN (fail-closed)."""
+    return tuple(
+        AdapterCapability(name, overrides.get(name, "UNKNOWN"))
+        for name in ADAPTER_CAPABILITY_NAMES)
+
+
 @dataclasses.dataclass(frozen=True)
 class AdapterDescriptor:
-    """Non-secret facts about one reviewed execution interface."""
+    """Non-secret facts about one reviewed execution interface.
+
+    Rev 5 D1 extension (all OPTIONAL so existing constructors are
+    unchanged): every descriptor additionally declares its
+    ``runtime_kind`` (KNOWN_RUNTIME_KINDS vocabulary in
+    ``control_plane.child_execution_contracts``), its enforceable
+    ``descendant_policy``, and a capability map with SUPPORTED /
+    UNSUPPORTED / UNKNOWN statuses.  A descriptor that has not declared
+    them reports problems via :func:`descriptor_problems`; the union
+    tests keep the registry complete as lanes add descriptors.
+    """
 
     adapter_id: str
     interface_version: str = ADAPTER_INTERFACE_VERSION
     structured_output: bool = True
     implemented: bool = False
     implementation: str | None = None
+    # --- Rev 5 v1.1 extension (optional; '' / () = not yet declared) ---
+    runtime_kind: str = ""
+    descendant_policy: str = ""
+    descendant_enforcement_ref: str = ""
+    capabilities: tuple[AdapterCapability, ...] = ()
 
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     "canonical-paid-fabric": AdapterDescriptor(
         adapter_id="canonical-paid-fabric", implemented=True,
         implementation="control_plane.executive_paid_fabric_adapter.CanonicalPaidFabricWorkerAdapter",
+        runtime_kind="fabric-native", descendant_policy="fabric_per_child",
+        capabilities=_cap_map(launch="SUPPORTED", status_read="SUPPORTED",
+                              collect_result="SUPPORTED", cancel="SUPPORTED"),
     ),
     # The retained facade exists; its concrete qualified host backend is not
     # installed. Catalogue source must not imply worker admission.
@@ -59,11 +133,19 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         adapter_id="attended-fabric",
         implemented=False,
         implementation="control_plane.executive_fabric_adapter.AttendedFabricWorkerAdapter",
+        runtime_kind="fabric-native", descendant_policy="fabric_per_child",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     "codex-cli": AdapterDescriptor(
         adapter_id="codex-cli",
         implemented=True,
         implementation="control_plane.codex_worker.CodexWorkerAdapter",
+        # Codex native descendants have no proven shared-admission hook
+        # yet: fail closed to native_fanout_disabled until one lands.
+        runtime_kind="codex-cli", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="SUPPORTED", status_read="SUPPORTED",
+                              collect_result="SUPPORTED", cancel="SUPPORTED"),
     ),
     "claude-compatible-subscription": AdapterDescriptor(
         adapter_id="claude-compatible-subscription",
@@ -71,11 +153,17 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
             "control_plane.claude_subscription_worker"
             ".ClaudeSubscriptionWorkerAdapter"
         ),
+        runtime_kind="claude-code", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     "claude-code": AdapterDescriptor(
         adapter_id="claude-code",
         implemented=False,
         implementation="control_plane.claude_worker.ClaudeCodeWorkerAdapter",
+        runtime_kind="claude-code", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
@@ -84,14 +172,25 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     "anthropic-api-principal": AdapterDescriptor(
         adapter_id="anthropic-api-principal", implemented=False,
         implementation="control_plane.fable_api_principal.FableApiPrincipal",
+        runtime_kind="api-direct", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     "openai-compatible": AdapterDescriptor(
-        adapter_id="openai-compatible", implemented=False
+        adapter_id="openai-compatible", implemented=False,
+        runtime_kind="api-direct", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     "acp": AdapterDescriptor(
         adapter_id="acp",
         implemented=False,
         implementation="integrations.acp_worker.installed.InstalledAcpWorkerAdapter",
+        # Generic ACP does not prove visibility or admission of native
+        # children (Rev 5 §6): fail closed until a real hook exists.
+        runtime_kind="acp", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
     ),
     # WO-10 (MMOS V1, Rev 4 §S3.D): closed Hermes-native seam.  BUILT but
     # UNSELECTED — the incumbent runtime must select it before any routing
@@ -101,6 +200,11 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     "hermes-native": AdapterDescriptor(
         adapter_id="hermes-native", implemented=True,
         implementation="control_plane.hermes_worker_adapter.HermesWorkerAdapter",
+        # Hermes children route through the shared admission boundary
+        # (mmx-router native child propagation, WO-10/WO-13 parity).
+        runtime_kind="hermes-native", descendant_policy="fabric_per_child",
+        capabilities=_cap_map(launch="SUPPORTED", status_read="SUPPORTED",
+                              collect_result="SUPPORTED", cancel="SUPPORTED"),
     ),
     # WO-18 (MMOS V1, OQ-11/OQ-7): the scoped V1 DeepSeek route's adapter
     # identity — the incumbent DeepSeek lane is OpenCodeWorkerAdapter
@@ -113,8 +217,81 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     # route selects nothing and launches nothing.
     "opencode-free-cli": AdapterDescriptor(
         adapter_id="opencode-free-cli", implemented=False,
+        runtime_kind="opencode-free-cli", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(launch="UNSUPPORTED", status_read="UNSUPPORTED",
+                              collect_result="UNSUPPORTED", cancel="UNSUPPORTED"),
+    ),
+    # Rev 5 D1/D3 seam, owned by the T3 integration lane: the T3 native
+    # execution adapter's descriptor.  Registered NAMED-but-NOT-IMPLEMENTED
+    # so the shared contract can reference the runtime kind now; the T3
+    # lane flips implemented=True + implementation= when
+    # T3ExecutionAdapter lands with its admission seams (D3/D4).  All
+    # capabilities UNKNOWN — upstream source capability is not
+    # installed-fleet proof (change order evidence note).
+    "t3-native": AdapterDescriptor(
+        adapter_id="t3-native", implemented=False,
+        runtime_kind="t3-native", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(),
+    ),
+    # Rev 5 D1/D5 seam, owned by the DSH integration lane: DeepSeek Harness
+    # under ACP (literal args `dsh --profile acp`).  Deliberately
+    # native_fanout_disabled until a real native descendant-admission hook
+    # is proven (change order §3C); the DSH lane may move to
+    # bounded_native_fanout ONLY with descendant_enforcement_ref set.
+    "dsh-acp": AdapterDescriptor(
+        adapter_id="dsh-acp", implemented=False,
+        runtime_kind="dsh-acp", descendant_policy="native_fanout_disabled",
+        capabilities=_cap_map(),
     ),
 }
+
+
+def _capability_status_in(descriptor: AdapterDescriptor, capability: str) -> str:
+    for entry in descriptor.capabilities:
+        if entry.capability == capability:
+            return entry.status
+    return "UNKNOWN"
+
+
+def capability_status(adapter_id: str, capability: str) -> str:
+    """The declared status of one capability for a reviewed adapter id.
+
+    Fail-closed: an undeclared capability reads UNKNOWN, never a guess;
+    an unknown adapter id raises (reviewed ids only)."""
+    return _capability_status_in(adapter_descriptor(adapter_id), capability)
+
+
+def descriptor_problems(descriptor: AdapterDescriptor) -> tuple[str, ...]:
+    """Invariants of a complete Rev 5 descriptor; empty tuple when complete.
+
+    Deliberately NOT enforced at import time: a lane landing a partial
+    descriptor mid-merge must not brick module import.  The union tests
+    run this over the whole registry, so an incomplete descriptor fails
+    CI instead of the interpreter.
+    """
+    found: list[str] = []
+    if not descriptor.runtime_kind.strip():
+        found.append(f"{descriptor.adapter_id}: runtime_kind is not declared")
+    if descriptor.descendant_policy not in DESCENDANT_POLICIES:
+        found.append(
+            f"{descriptor.adapter_id}: descendant_policy must declare one of "
+            f"{DESCENDANT_POLICIES}")
+    if not descriptor.capabilities:
+        found.append(
+            f"{descriptor.adapter_id}: capability map is not declared")
+    if (descriptor.descendant_policy == "bounded_native_fanout"
+            and not descriptor.descendant_enforcement_ref.strip()):
+        found.append(
+            f"{descriptor.adapter_id}: bounded_native_fanout requires "
+            "descendant_enforcement_ref naming the native control")
+    if descriptor.implemented:
+        for name in ("launch", "status_read", "collect_result", "cancel"):
+            status = _capability_status_in(descriptor, name)
+            if status != "SUPPORTED":
+                found.append(
+                    f"{descriptor.adapter_id}: implemented descriptor must "
+                    f"declare {name} SUPPORTED, got {status}")
+    return tuple(found)
 
 
 def adapter_descriptor(adapter_id: str) -> AdapterDescriptor:
@@ -306,12 +483,17 @@ class RecoverableWorkerExecutionAdapter(WorkerExecutionAdapter, Protocol):
 __all__ = [
     "ADAPTER_DESCRIPTORS",
     "ADAPTER_INTERFACE_VERSION",
+    "ADAPTER_CAPABILITY_NAMES",
+    "CAPABILITY_STATUSES",
     "AdapterBindingError",
+    "AdapterCapability",
     "AdapterDescriptor",
     "WorkerExecutionAdapter",
     "RecoverableWorkerExecutionAdapter",
     "adapter_descriptor",
     "adapter_implementation",
     "bind_reviewed_adapter",
+    "capability_status",
     "construct_reviewed_adapter",
+    "descriptor_problems",
 ]
