@@ -84,7 +84,7 @@ DEFAULT_CONF = {
         "reliability": {"profile": "reliability", "display_name": "Reliability & Capacity Lead", "emoji": ":satellite:", "slack_user_id": None, "user_token_file": None, "channels": [], "dm": True},
         "chief-of-staff": {"profile": "chief-of-staff", "display_name": "Chief of Staff", "emoji": ":clipboard:", "slack_user_id": None, "user_token_file": None, "channels": [], "dm": True},
         "secretary": {"profile": "secretary", "display_name": "Secretary", "emoji": ":memo:", "slack_user_id": None, "user_token_file": None, "channels": [], "dm": True},
-        "meta-ceo": {"profile": "hermes", "display_name": "Meta-CEO", "emoji": ":crown:", "slack_user_id": None, "user_token_file": None, "channels": [], "dm": True},
+        "meta-ceo": {"profile": "meta-ceo-uncensored", "display_name": "Meta-CEO", "emoji": ":crown:", "slack_user_id": None, "user_token_file": None, "channels": [], "dm": True},
     },
     "mention_aliases": {
         "engineering": "engineering", "cto": "engineering", "eng": "engineering",
@@ -412,7 +412,10 @@ def dispatch(profile: str, prompt: str, session_id: str | None, timeout: int,
     ) as prompt_file:
         qfile = Path(prompt_file.name)
         prompt_file.write(prompt)
-    cmd = ["hermes", "chat", "--query-file", str(qfile), "--oneshot", "-Q"]
+    # Hermes selects its actual memory/credentials through --profile/HERMES_HOME.
+    # HERMES_PROFILE alone is only an agent label and can silently use the
+    # default home for every Slack role. Resolve via the native strict CLI.
+    cmd = ["hermes", "--profile", profile, "chat", "--query-file", str(qfile), "--oneshot", "-Q"]
     if session_id:
         cmd += ["--resume", session_id]
     if model:
