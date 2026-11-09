@@ -266,3 +266,132 @@ def test_execute_installs_archive_and_preserves_previous(lane, capsys):
     old_receipt = mr.observe_bundle(old)
     assert old_receipt["source_revision"]["value"] == REV_A  # previous bundle retained
     assert (dest_a / "receipt.digest").read_text().strip() == old_receipt["receipt_digest"]
+
+
+# ---------------------------------------------------------------------------
+# install (place a freshly built .app at the install location)
+# ---------------------------------------------------------------------------
+
+def _built_source(lane: Lane, revision: str, identity: str) -> Path:
+    staging = lane.apps.parent / "build-output"
+    staging.mkdir(exist_ok=True)
+    return make_fake_app(staging, revision=revision, identity=identity, marker=True)
+
+
+def test_install_refused_without_flag(lane, capsys):
+    current = lane.install(REV_A, IDENT_A)
+    source = _built_source(lane, REV_B, IDENT_B)
+    apps_hash, archive_hash = tree_hash(lane.apps), tree_hash(lane.archive)
+    rc = rb.main(lane.args(current, "install", "--from", str(source)))
+    assert rc == rb.EXIT_REFUSED_DRY_RUN
+    out = capsys.readouterr().out
+    for needle in (
+        "INSTALL PLAN",
+        "NOTHING has been changed",
+        "HUMAN STEP",
+        "Quit Mastermind OS",
+        "install-tmp-",
+        "mmos_installed_receipt.py",
+        "Build details",
+        REV_B,
+        IDENT_B,
+    ):
+        assert needle in out, needle
+    assert "INSTALL REFUSED" in out and "--execute" in out
+    assert tree_hash(lane.apps) == apps_hash
+    assert tree_hash(lane.archive) == archive_hash  # dry-run does not even snapshot
+
+
+def test_install_dry_run_allowed_even_while_app_running(lane, capsys, monkeypatch):
+    current = lane.install(REV_A, IDENT_A)
+    source = _built_source(lane, REV_B, IDENT_B)
+    exe = current / "Contents" / "MacOS" / "mastermind-os"
+    monkeypatch.setattr(mr, "ps_snapshot", lambda: [(4242, str(exe))])
+    apps_hash, archive_hash = tree_hash(lane.apps), tree_hash(lane.archive)
+    rc = rb.main(lane.args(current, "install", "--from", str(source)))
+    assert rc == rb.EXIT_REFUSED_DRY_RUN
+    assert "INSTALL REFUSED" in capsys.readouterr().out
+    assert tree_hash(lane.apps) == apps_hash
+    assert tree_hash(lane.archive) == archive_hash
+
+
+def test_install_refused_when_app_runs_from_current_bundle(lane, capsys, monkeypatch):
+    current = lane.install(REV_A, IDENT_A)
+    source = _built_source(lane, REV_B, IDENT_B)
+    exe = current / "Contents" / "MacOS" / "mastermind-os"
+    monkeypatch.setattr(mr, "ps_snapshot", lambda: [(4242, str(exe))])
+    apps_hash, archive_hash = tree_hash(lane.apps), tree_hash(lane.archive)
+    rc = rb.main(lane.args(current, "install", "--from", str(source), "--execute"))
+    assert rc == rb.EXIT_REFUSED_RUNNING
+    out = capsys.readouterr().out
+    assert "HUMAN STEP" in out and "quit" in out.lower()
+    assert tree_hash(lane.apps) == apps_hash
+    assert tree_hash(lane.archive) == archive_hash
+
+
+def test_install_refused_on_self_install(lane, capsys):
+    current = lane.install(REV_A, IDENT_A)
+    nested = current / "Contents" / "Nested.app"
+    nested.mkdir()
+    apps_hash = tree_hash(lane.apps)
+    assert rb.main(lane.args(current, "install", "--from", str(current))) == rb.EXIT_ARGS
+    assert rb.main(lane.args(current, "install", "--from", str(nested))) == rb.EXIT_ARGS
+    capsys.readouterr()
+    assert tree_hash(lane.apps) == apps_hash
+
+
+def test_install_missing_or_non_app_source_is_args_error(lane, capsys):
+    current = lane.install(REV_A, IDENT_A)
+    assert rb.main(lane.args(current, "install", "--from",
+                             str(lane.apps.parent / "ghost.app"))) == rb.EXIT_ARGS
+    staging = lane.apps.parent / "not-an-app"
+    staging.mkdir()
+    assert rb.main(lane.args(current, "install", "--from", str(staging))) == rb.EXIT_ARGS
+    capsys.readouterr()
+
+
+def test_install_executes_snapshots_preserves_and_verifies(lane, capsys):
+    current = lane.install(REV_A, IDENT_A)  # currently installed: A
+    source = _built_source(lane, REV_B, IDENT_B)  # fresh build: B
+    source_receipt = mr.observe_bundle(source)
+
+    rc = rb.main(lane.args(current, "install", "--from", str(source), "--execute"))
+    assert rc == rb.EXIT_OK
+    out = capsys.readouterr().out
+    assert source_receipt["receipt_digest"] in out
+    assert "HUMAN" in out
+
+    # Install location now carries the source bytes under the source digest.
+    fresh = mr.observe_bundle(current)
+    assert fresh["receipt_digest"] == source_receipt["receipt_digest"]
+    assert fresh["source_revision"]["value"] == REV_B
+    assert fresh["build_identity"]["value"] == IDENT_B
+
+    # The previous bundle was snapshotted (digest-named rollback anchor)…
+    snapshot_dir = _only_entry(lane.archive, f"{IDENT_A}-{REV_A[:12]}")
+    assert (snapshot_dir / "receipt.digest").read_text().strip() \
+        == mr.observe_bundle(snapshot_dir / "Mastermind OS.app")["receipt_digest"]
+    # …and also preserved under install-tmp-<ts>.
+    preserved = sorted(lane.archive.glob("install-tmp-*"))
+    assert len(preserved) == 1
+    old = mr.observe_bundle(preserved[0] / "Mastermind OS.app")
+    assert old["source_revision"]["value"] == REV_A
+    assert old["receipt_digest"] == (snapshot_dir / "receipt.digest").read_text().strip()
+
+    # The source build output is untouched by the install.
+    assert mr.observe_bundle(source)["receipt_digest"] == source_receipt["receipt_digest"]
+
+
+def test_install_fresh_without_current_bundle(lane, capsys):
+    target = lane.apps / "Mastermind OS.app"  # nothing installed yet
+    source = _built_source(lane, REV_B, IDENT_B)
+    rc = rb.main(lane.args(target, "install", "--from", str(source)))
+    assert rc == rb.EXIT_REFUSED_DRY_RUN
+    assert "fresh install" in capsys.readouterr().out
+
+    rc = rb.main(lane.args(target, "install", "--from", str(source), "--execute"))
+    assert rc == rb.EXIT_OK
+    fresh = mr.observe_bundle(target)
+    assert fresh["receipt_digest"] == mr.observe_bundle(source)["receipt_digest"]
+    assert not list(lane.archive.glob("install-tmp-*"))  # nothing to preserve
+    assert not list(lane.archive.iterdir())  # nothing was snapshotted either
