@@ -449,9 +449,57 @@ Explicit finish targeted only `GG-0`, `K5-0` and `O4-0`.
 
 [PR #2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337) was opened ready, authored by `mastermidx4`, with exactly one changed report path. Creation head `08975c8fd95c5a3c4f639b010d23a70021e786ef` had the normal CI run42542660165 in progress when observed. Native metadata reported mergeable/behind, no requested reviewers and no auto-merge. The basic protected-branch read exposed required check `test`; the detailed branch-protection endpoint returned403 integration access denied and was not retried or bypassed. No self-approval, merge, hold clearing or alternate-account operation was attempted. Later report increments retain this same owned PR and require their own head-specific native check evidence.
 
+## Verified Confluence protected-list read-failure states — 2026-11-09
+
+[Current Confluence R2 page](https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0). Governed historical p-1 references were left unchanged. Current R2 already distinguished global zero, entitled hydration and honesty disclosure, but lacked a concrete protected-list read-failure state. Root's accepted-report check found no prior Confluence correction to repeat.
+
+### New English and Chinese specimens
+
+| Board | Native position and specimen | Result |
+| --- | --- | --- |
+| `23C-0` — 33 · R2 STATE · Protected list unavailable · Dark EN | 720×640, x40/y−3820;390px product-state panel `249-0`; body `243-0` | “Matching stocks unavailable” preserves public combination evidence and filters, withholds stock names/links/identity-specific actions, and offers44px Continue with public evidence. |
+| `250-0` — 34 · R2 STATE · 股票列表暂不可用 · Dark ZH | 720×640, x840/y−3820;390px product-state panel `25I-0`; body `251-0` | Chinese parity for the same failure, retained context and local-return behavior. |
+
+Both are explicitly proposed390px state specimens with no live/protected identities. They supply no ticker names, invented counts, inferred entitlement, paid-unlock confirmation or false no-matches result. The local Continue action retains current universe, query/filter and disclosure context; it does not change account state, refresh the list or grant access.
+
+The adjacent builder binding requires the configured protected payload and existing auth/hydration owner. Failed reads, explicit server access decisions and genuinely empty results must remain distinct. Existing public data is retained only when supplied/available. Protected identity reveal still belongs to the server. The inspected controller has no manual Retry action, so none was added to these specimens or claimed implemented.
+
+### Route and authority integration
+
+Updated only existing state-map/authority text:
+- `20M-0` lists33/34 after the original30–32 state exemplars.
+- `21D-0` and `221-0` show30–34.
+- `222-0` explains protected-list failure and EN/ZH390px coverage without claiming every variant exists.
+- `20Q-0` binds failed reads to retained public context, withheld identities and the existing source/auth owners, with implementation and browser proof still required.
+
+These remain states of the same discovery route. Original eight presentation variants, original global-zero/hydration/disclosure boards and historical references were preserved. Existing styling on the authority board was not altered; no accent rails were added.
+
+### Current-source finding
+
+Root independently read [templates/confluence_screener.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/07977b85ab171ee9aad3e4a04bb80566642878a9/templates/confluence_screener.html.j2), blob `8e18461db98d7141d573cd047aa8637189ad4250`.
+
+The current `attemptHydrate()` uses the configured protected payload, same-origin credentials and no-store. Non-success responses throw “locked”; network, JSON and schema failures enter the same catch and leave the server-rendered trial wall in place. It runs after auth settles and on mdx-auth events. This is a source-observed state distinction gap, not evidence of a production outage or a particular user's access status. The new Paper specimens specify a clearer state; the source implementation was not modified.
+
+### Native verification and receipts
+
+Root inspected both complete720×640 specimen boards, the complete updated1440px flow map and current-authority board. EN and ZH product panels retain390px widths, all text/actions fit, and no protected values appear. Native root positions show80px horizontal gaps between the existing map and state33 and between states33/34. The new states end at y−3180, above the discovery row at y−2220.
+
+All8 operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. Explicit finish released only the two new states and two updated map/authority boards.
+
+- `paper-confluence-protected-read-state-copy-20261109-c4-sd`
+- `paper-confluence-protected-read-state-english-20261109-c4-sd`
+- `paper-confluence-protected-read-source-binding-20261109-c4-sd`
+- `paper-confluence-protected-read-chinese-copy-20261109-c4-sd`
+- `paper-confluence-protected-read-chinese-copytext-20261109-c4-sd`
+- `paper-confluence-protected-read-state-names-20261109-c4-sd`
+- `paper-confluence-read-failure-route-binding-20261109-c4-sd`
+- `paper-confluence-protected-read-states-finish-20261109-c4-sd`
+
+At the preceding report head `a5a44643ea803ac8e57671d63159239475bba0e1`, normal CI run42543262455 completed successfully. That is exact-head repository evidence only, not production acceptance and not evidence for a later report head.
+
 ## Active continuation
 
-The five original migrated-file phases, Catalyst manual-review entry and D06 timing/meaning corrections are verified as static designs. Continue the disjoint current-R2 Confluence protected-list failure state using its existing hydration and entitlement owners; preserve governed p-1 references and existing success/zero specimens. The source candidate's fuller D06 data-inspection parity remains a separate useful design phase. Preserve native PR controls, source limits and previous accepted work.
+Eight current Paper files now have verified additions/corrections in this successor: Portfolio, Bonds, Government Revenue, Forex, Breadth, Catalyst, Market Structure/Stages and Confluence. Preserve those accepted static designs. Continue the remaining D06 first-reading and exact-values/CSV Paper parity using its held source candidate, with no fabricated values or duplicate reader. Retain native PR controls, existing source/production holds and all prior uncertainty boundaries.
 
 ## Acceptance boundary
 
