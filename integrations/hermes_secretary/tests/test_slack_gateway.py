@@ -121,5 +121,59 @@ class InstalledGatewayRoutingTests(unittest.TestCase):
         self.assertEqual(len(self.conf["apps"]), 1)
 
 
+
+class InboundAdmissionSafetyTests(unittest.TestCase):
+    """Check the original Socket Mode owner without opening a socket or token."""
+
+    def setUp(self):
+        import copy
+        import threading
+        self.conf = copy.deepcopy(gateway.DEFAULT_CONF)
+        self.conf["allowed_users"] = ["U0BRET6191C"]
+        self.conf["max_dispatches_per_minute"] = 1
+        self.fleet = gateway.Fleet.__new__(gateway.Fleet)
+        self.fleet.conf = self.conf
+        self.fleet.state = {"recent": {}, "bindings": {}, "outbound": {}}
+        self.fleet.lock = threading.Lock()
+        self.fleet.bot_user_id = "U0BT71H4FQE"
+        self.fleet.our_bot_users = {"U0BT71H4FQE"}
+        self.logging = patch.object(gateway, "log", return_value=None)
+        self.logging.start()
+        self.addCleanup(self.logging.stop)
+
+    def event(self, *, text, user="U0BRET6191C", ts="1794180011.111111",
+              thread_ts=None):
+        out = {"type": "message", "channel_type": "channel",
+               "channel": "C0CBC6AEAQZ", "user": user, "ts": ts, "text": text}
+        if thread_ts:
+            out["thread_ts"] = thread_ts
+        return out
+
+    def test_unrelated_human_mention_is_inert_and_does_not_spend_limit(self):
+        other = self.event(text="<@U0UNRELATE9> hello unrelated person")
+        self.assertIsNone(self.fleet.admit(other, []))
+        self.assertEqual(self.fleet.state["recent"], {})
+        addressed = self.event(text="<@U0BT71H4FQE> engineering: help")
+        self.assertEqual(self.fleet.admit(addressed, []), ("engineering", "alias:engineering"))
+
+    def test_nonallowlisted_user_cannot_exhaust_budget(self):
+        attack = self.event(text="<@U0BT71H4FQE> delivery: do this", user="U0OUTSIDER9")
+        self.assertIsNone(self.fleet.admit(attack, []))
+        self.assertEqual(self.fleet.state["recent"], {})
+        self.assertEqual(
+            self.fleet.admit(self.event(text="<@U0BT71H4FQE> delivery: do this"), []),
+            ("delivery", "alias:delivery"))
+
+    def test_bound_thread_continues_without_mention(self):
+        self.fleet.state["bindings"]["C0CBC6AEAQZ:1794180000.123456"] = "secretary"
+        self.assertEqual(self.fleet.admit(self.event(text="follow-up", thread_ts="1794180000.123456"), []),
+                         ("secretary", "thread-binding"))
+
+    def test_gateway_own_post_is_never_dispatched(self):
+        self.assertIsNone(
+            self.fleet.admit(self.event(text="<@U0BT71H4FQE> hello", user="U0BT71H4FQE"), []))
+        self.assertEqual(self.fleet.state["recent"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
