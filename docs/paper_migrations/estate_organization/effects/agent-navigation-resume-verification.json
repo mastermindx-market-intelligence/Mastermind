@@ -1,12 +1,12 @@
 {
   "schema": "paper.estate.guide_verification.v1",
-  "observed_at": "2026-11-09T12:39:16.071Z",
+  "observed_at": "2026-11-09T12:56:11.204Z",
   "validation": {
     "passed": true,
     "failures": [],
     "files": 83,
     "routes": 196,
-    "guides": 29
+    "guides": 36
   },
   "guide_verifications": [
     {
@@ -95,6 +95,111 @@
         "product_excluded": true
       },
       "observed_at": "2026-11-09T12:32:37.327Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+      "page_id": "p-2-0",
+      "node_id": "1HG-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:40:50.800Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+      "page_id": "p-F-0",
+      "node_id": "AHQ-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:41:32.494Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "page_id": "p-Q-0",
+      "node_id": "SME-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:42:24.479Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "page_id": "p-2-0",
+      "node_id": "1ZW-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:42:52.431Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "page_id": "p-4-0",
+      "node_id": "17I-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:43:54.589Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "page_id": "p-4-0",
+      "node_id": "1Y4-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:44:26.097Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+      "page_id": "p-5-0",
+      "node_id": "B63-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:45:18.278Z",
       "original_page_ids_preserved": true,
       "original_guide_children_preserved": true
     }
