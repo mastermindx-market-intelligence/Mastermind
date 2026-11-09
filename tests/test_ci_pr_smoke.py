@@ -505,6 +505,30 @@ def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypa
     "    REVIEWED_FILES.update({'x.py': {}})\n"
     "    return 1\n"
     "def g(q=_m()):\n    return q\n",
+    # A decorator expression is applied even without call parens: a bare
+    # @dec rooted at a same-module name executes an unchecked body.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def dec(f):\n"
+    "    REVIEWED_FILES.update({'x.py': {}})\n"
+    "    return f\n"
+    "@dec\n"
+    "def g():\n    return 1\n",
+    # Rebinding an imported registry alias — to an attribute or to a fresh
+    # literal — leaves the tracked imports mapping stale while runtime
+    # merges something else; aliases are frozen after their import.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "from side import REVIEWED_FILES as D\n"
+    "import side\n"
+    "D = side.REG\n"
+    "REVIEWED_FILES.update(D)\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "from side import REVIEWED_FILES as D\n"
+    "D = {'b.py': {}}\n"
+    "REVIEWED_FILES.update(D)\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "from side import REVIEWED_FILES as D\n"
+    "MORE = D\n"
+    "REVIEWED_FILES.update(D)\n",
 ])
 
 
@@ -523,6 +547,18 @@ def test_parametrize_style_decorator_on_test_function_still_parses(tmp_path):
         "@pytest.mark.parametrize('name', ['a', 'b'])\n"
         "def test_pins(name):\n"
         "    assert name\n",
+    )
+    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
+
+
+def test_bare_imported_decorator_on_test_function_still_parses(tmp_path):
+    """@pytest.fixture applies an imported name; only same-module roots refuse."""
+    root, sha = _git_repo_with_registry(
+        tmp_path,
+        "import pytest\n"
+        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+        "@pytest.fixture\n"
+        "def case():\n    return 1\n",
     )
     assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
 
