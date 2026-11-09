@@ -4136,3 +4136,605 @@ def test_r7_glob_and_parts_matchers_agree_with_the_regex_semantics() -> None:
             assert guard._r7_parts_match(name, parts) == bool(
                 regex.fullmatch(expected_regex, name)
             ), (name, parts)
+
+
+# =============================================================================
+# r8 (Director C6; REVIEW3 A3 S1 NEEDS_REWORK, A2 git carve-out, A1 note):
+# every armed-path scan linear or hard-bounded, a fail-closed watchdog, the
+# onFailure:"block" hook row, git optional-argument options, scope escapes
+# found while linearising r7, and the scope-roots pin.
+# =============================================================================
+
+import re as _r8_re
+
+#: r7's quadratic regexes, kept HERE only as the reference the r8 linear
+#: scans are fuzzed against (they must accept at least the same texts).
+_R7_PARAM_OPERATOR_REF = _r8_re.compile(
+    r"\$\{(?:\([^()]*\))?[#!]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])?"
+    r"(?:\[[^\]]*\])?(?::?[-=+?]|//?|/[#%]|##?|%%?|\^\^?|,,?|:)"
+)
+_R7_GLUED_OPTION_REF = _r8_re.compile(
+    r"(?<![A-Za-z0-9_.])-[A-Za-z](?:[A-Za-z0-9_./-]*/|[A-Za-z]*)"
+    r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
+    _r8_re.I,
+)
+_R7_UNOBSERVABLE_FIRST_REF = _r8_re.compile(
+    r"(?:^|[;&|(`{\n]|\$\()\s*(?:eval|source|\.)(?=\s)"
+)
+_R7_CMD_POS_REF = r"(?:^|[;&|\n(]|\b(?:do|then|else)\s)\s*"
+
+
+def test_r8_glued_option_scan_accepts_exactly_the_r7_regex_language() -> None:
+    import random
+
+    rng = random.Random(28)
+    pieces = ["pool", "po", "ol", "p", "sub.sh", "slot.py", "remote_sub.sh",
+              "-", "/", "a", "O", "x", ".", "_", " ", "=", "-O", "--", "P", "S", "'"]
+    for _ in range(40_000):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 9)))
+        assert guard._r8_glued_option(text) == bool(_R7_GLUED_OPTION_REF.search(text)), text
+
+
+def test_r8_scope_views_are_at_least_as_wide_as_r7() -> None:
+    """Every text r7's widened views (param-operator opening as a space,
+    then the name regex or the glued-option regex) put in scope is in scope
+    for r8 (which may be wider: nested ``${${x}:-pool}``, subscripts)."""
+    import random
+
+    rng = random.Random(8)
+    pieces = ["pool", "po", "ol", "p", "sub.sh", "slot.py", "${", "}", "$", "{", "[",
+              "]", "(", ")", ":", "-", ":-", "=", "x", "'", '"', "\\", " ", "/",
+              "#", "!", "@", "-O", ",", "^", "%", "+", "$\"", "a[1]"]
+    for _ in range(60_000):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 10)))
+        widened = _r8_re.sub(
+            r"[\"'\\]", "", _R7_PARAM_OPERATOR_REF.sub(" ", text).replace('$"', '"')
+        )
+        if guard._WRAPPER_NAME_RE.search(widened) or _R7_GLUED_OPTION_REF.search(widened):
+            assert guard.r6_names_wrapper(text), text
+
+
+def test_r8_newline_gap_regexes_find_what_r7_found() -> None:
+    import random
+
+    rng = random.Random(81)
+    pieces = ["\n", " ", "\t", ";", "{", "(", "$(", "eval", "source", ".", "x", "do",
+              "then", "gh", " run watch", "\r"]
+    cmd_pos_new = _r8_re.compile(guard.CMD_POS + r"gh\b")
+    cmd_pos_old = _r8_re.compile(_R7_CMD_POS_REF + r"gh\b")
+    for _ in range(30_000):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 10)))
+        old = bool(_R7_UNOBSERVABLE_FIRST_REF.search(text))
+        new = bool(guard._UNOBSERVABLE_ENV_RE.search(text))
+        assert old <= new, text  # the other alternatives are unchanged
+        if old:
+            assert new
+        assert bool(cmd_pos_old.search(text)) == bool(cmd_pos_new.search(text)), text
+
+
+def test_r8_option_cluster_equals_the_r7_fullmatch() -> None:
+    import random
+
+    rng = random.Random(3)
+    for _ in range(20_000):
+        word = "".join(rng.choice("-ciSax!Z9 ") for _ in range(rng.randint(0, 7)))
+        assert guard._r8_option_cluster(word, "c") == bool(
+            _r8_re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word)
+        ), word
+        assert guard._r8_option_cluster(word, "iS") == bool(
+            _r8_re.fullmatch(r"-[A-Za-z]*[iS][A-Za-z]*", word)
+        ), word
+
+
+def test_r8_word_literal_pieces_join_like_r7() -> None:
+    tokens, error = guard._r6_lex("a$.b$%c 'q'r$x s")
+    assert error == ""
+    words = [item for kind, item in tokens if kind == "word"]
+    assert words[0].segments == [("lit", "a$.b$%c")]
+    assert words[1].segments == [("sq", "q"), ("lit", "r"), ("param", "$x")]
+    assert words[2].segments == [("lit", "s")]
+    word = guard._R6Word()
+    word.add("lit", "a")
+    assert word.segments == [("lit", "a")]
+    word.add("lit", "b")  # a piece after a read still merges into the segment
+    assert word.segments == [("lit", "ab")] and word.value == "ab"
+
+
+def test_r8_identity_runs_are_read_once_with_an_unchanged_verdict() -> None:
+    name = "POOL_ORCHESTRATOR_ID"
+    values = guard._effective_identity_values(
+        f"pool run glm a /tmp glm-5.3 a={name}={name}=root-orch-1", name
+    )
+    # the outer value, then '' for the inner assignment (never the projection)
+    assert values[:2] == [f"{name}=root-orch-1", ""], values
+    assert guard._effective_identity_values(
+        f"{name}=root-orch-1 pool run glm a /tmp glm-5.3", name
+    ) == ["root-orch-1"]
+
+
+# --- r8: git optional-argument options (REVIEW3 A2) --------------------------
+
+_R8_GIT_REFUSED = [
+    "git log -U --output=/tmp/r8.out --grep=pool -1",
+    "git log -pU --output=/tmp/r8.out --grep=pool -1",
+    "git log --unified --output=/tmp/r8.out --grep=pool -1",
+    "git log --relative --output=/tmp/r8.out --grep=pool -1",
+    "git log --pretty --output=/tmp/r8.out --grep=pool -1",
+    "git log --format --output=/tmp/r8.out --grep=pool -1",
+    "git diff -U --output=/tmp/r8.out -- pool",
+    "git show -U --output=/tmp/r8.out -- pool",
+    "git log -U --ext-diff --grep=pool -1",
+    "git log -U --textconv --grep=pool -1",
+    "git status -u --output=/tmp/r8.out -- pool",
+    "git status --untracked-files --output=/tmp/r8.out -- pool",
+    "git log --grep=pool -- --output=/tmp/r8.out",
+    "git log --author --output=/tmp/r8.out --grep=pool",
+    "git commit -m --output=/tmp/r8.out -- pool",
+    "git grep -O pool",
+    "git log --grep=pool -O/tmp/order",
+]
+_R8_GIT_ADMITTED = [
+    "git log -U --grep=pool -1",
+    "git log -U3 --grep=pool -1",
+    "git log -pU5 --grep=pool -1",
+    "git log --unified=5 --grep=pool -1",
+    "git log --pretty=oneline --grep=pool",
+    "git log --format=%H --grep=pool",
+    "git log --relative=src --grep=pool",
+    "git diff -U5 -- pool",
+    "git show --stat -U1 -- pool",
+    "git status -uno -- pool",
+    "git status --untracked-files=no -- pool",
+    'git commit -m "fix pool"',
+]
+
+
+@pytest.mark.parametrize("command", _R8_GIT_REFUSED)
+def test_r8_git_optional_argument_options_never_hide_a_write(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    assert guard.r6_names_wrapper(command), command
+    (bound, reason, bound_gate), (nobind, _, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), reason
+    assert not bound_gate and not nobind_gate
+    assert reason.startswith("Mastermind shared-placement guard: unobservable launch")
+
+
+@pytest.mark.parametrize("command", _R8_GIT_ADMITTED)
+def test_r8_git_honest_optional_argument_forms_stay_admitted(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    assert guard.r6_names_wrapper(command), command
+    (bound, reason, bound_gate), (nobind, _, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("allow", "allow"), reason
+    assert not bound_gate and not nobind_gate
+
+
+def test_r8_git_specs_keep_exec_options_out_of_every_option_set() -> None:
+    for sub, spec in guard._R7_GIT_SPECS.items():
+        every = (set(spec[0]) | set(spec[1]) | set(spec[2]) | set(spec[3])
+                 | set(spec.short_optional) | set(spec.long_optional))
+        for option in ("--ext-diff", "--textconv", "--output", "--exec",
+                       "--open-files-in-pager", "--edit", "--interactive", "O"):
+            assert option not in every, (sub, option)
+        # an optional-argument option never consumes the next word
+        assert not ({"U", "u"} & set(spec[1])), sub
+        assert not ({"--unified", "--relative", "--pretty", "--format",
+                     "--untracked-files"} & set(spec[3])), sub
+
+
+# --- r8: scope escapes closed (found while making r7 linear) -----------------
+#
+# Each shape below RUNS the wrapper under zsh (the Bash tool's shell) — proven
+# by test_r8_zsh_runs_each_closed_scope_escape — and r7 put it OUT of scope,
+# i.e. an armed session ran it with zero binding check.
+
+_R8_SCOPE_ESCAPES = [
+    ("arith-base-bracket", "p$[[##36]24]ol", True),
+    ("arith-base-paren", "p$(([##36]24))ol", True),
+    ("split-operator-words", "${x:-p}${y:-ool}", False),
+    ("nested-param", "${${x}:-pool}", False),
+    ("nested-subscript", "${x[a[1]]:-pool}", False),
+    ("cmdsub-glue", "echo $(p${x}ool", False),
+    ("backtick-glue", "echo `p${x}ool", False),
+    ("zsh-c-body-arith", "zsh -f -c 'p$[[##36]24]ol", True),
+]
+
+
+def _r8_escape_command(word: str, args: str) -> str:
+    if word.startswith("echo $("):
+        return f"{word} {args})"
+    if word.startswith("echo `"):
+        return f"{word} {args}`"
+    if word.startswith("zsh -f -c '"):
+        return f"{word} {args}'"
+    return f"{word} {args}"
+
+
+@pytest.mark.parametrize("row", _R8_SCOPE_ESCAPES, ids=[row[0] for row in _R8_SCOPE_ESCAPES])
+def test_r8_scope_escapes_are_judged_and_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    command = _r8_escape_command(row[1], "run grok a /tmp grok-4")
+    assert guard.r6_names_wrapper(command), command
+    (bound, reason, _), (nobind, _, _) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), reason
+
+
+@pytest.mark.parametrize("command", [
+    "cd ${HOME:-/Users/me}",
+    "echo ${X:-o}",
+    "echo ${X:-s}",
+    'echo "${PORT:-8080}"',
+    "echo ${name//-/_}",
+    "$W run grok",
+    "$(printf p)$(printf ool) run",
+    "python3 *.py",
+    "git log $(git merge-base a b)..HEAD",
+    "echo $($(echo hi))",
+    "bash ${dir}/run${n}.sh",
+])
+def test_r8_scope_stays_out_for_wholly_computed_and_unrelated_words(command: str) -> None:
+    assert not guard.r6_names_wrapper(command), command
+
+
+def test_r8_zsh_runs_each_closed_scope_escape(tmp_path: Path) -> None:
+    """Ground truth for _R8_SCOPE_ESCAPES: in a sealed zsh (``env -i``,
+    ``zsh -f``, PATH = a directory of FAKE wrappers + /usr/bin:/bin — the
+    real wrappers are unreachable) every shape executes a wrapper."""
+    import shutil
+    import subprocess
+
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("no zsh")
+    bin_dir = tmp_path / "bin"
+    ran = tmp_path / "ran"
+    bin_dir.mkdir()
+    ran.mkdir()
+    for name in ("pool", "sub.sh", "slot.py"):
+        fake = bin_dir / name
+        fake.write_text(f'#!/bin/sh\ntouch "{ran}/{name}-$1"\n', encoding="utf-8")
+        fake.chmod(0o755)
+    case_insensitive = (bin_dir / "POOL").exists()
+    for row_id, word, needs_case_insensitive in _R8_SCOPE_ESCAPES:
+        if needs_case_insensitive and not case_insensitive:
+            continue  # zsh prints uppercase base digits: pOol needs APFS-style lookup
+        tag = "r8" + row_id.replace("-", "")
+        command = _r8_escape_command(word, tag)
+        subprocess.run(
+            ["/usr/bin/env", "-i", f"PATH={bin_dir}:/usr/bin:/bin", f"HOME={tmp_path}",
+             zsh, "-f", "-c", command],
+            cwd=tmp_path, capture_output=True, text=True, timeout=20, check=False,
+        )
+        assert (ran / f"pool-{tag}").exists(), (row_id, command, sorted(p.name for p in ran.iterdir()))
+        assert guard.r6_names_wrapper(command), command
+
+
+# --- r8: the watchdog (SIGALRM, armed sessions only) -------------------------
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("", 7.0), ("3", 3.0), ("2.5", 2.5), ("30", 7.0), ("7", 7.0), ("0.2", 1.0),
+    ("0", 1.0), ("-5", 1.0), ("abc", 7.0), ("nan", 7.0), ("inf", 7.0), ("-inf", 1.0),
+])
+def test_r8_watchdog_budget_is_overridable_only_downward(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: float
+) -> None:
+    monkeypatch.setenv(guard.R8_WATCHDOG_ENV, raw)
+    assert guard.r8_watchdog_seconds() == expected
+
+
+_R8_REAL_GUARD_FABRIC_LAUNCH = guard.guard_fabric_launch
+
+
+def _r8_run_main(monkeypatch, payload: dict) -> None:
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    guard.main()
+
+
+@pytest.mark.parametrize("slow_step", ["sleep", "regex"])
+def test_r8_watchdog_denies_fail_closed_when_a_step_is_slow(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    slow_step: str,
+) -> None:
+    import signal
+    import time
+
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    monkeypatch.setenv(guard.R8_WATCHDOG_ENV, "1")
+    before = signal.getsignal(signal.SIGALRM)
+
+    def slow(*_args, **_kwargs):
+        if slow_step == "sleep":
+            time.sleep(30)
+        else:  # a catastrophically backtracking regex: the engine checks signals
+            _r8_re.match(r"(a+)+$", "a" * 64 + "!")
+        raise AssertionError("the watchdog did not interrupt the slow step")
+
+    monkeypatch.setattr(guard, "guard_fabric_launch", slow)
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as exit_info:
+        _r8_run_main(monkeypatch, _payload(shared_placement, _R6_L))
+    elapsed = time.monotonic() - started
+    assert exit_info.value.code == 0
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "guard budget exceeded — fail closed" in output["permissionDecisionReason"]
+    assert 0.9 <= elapsed < 4.0, elapsed
+    assert signal.getitimer(signal.ITIMER_REAL)[0] == 0  # disarmed
+    assert signal.getsignal(signal.SIGALRM) is before  # handler restored
+
+
+def test_r8_watchdog_is_off_for_unarmed_sessions_and_after_a_verdict(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import signal
+    import time
+
+    monkeypatch.setenv(guard.R8_WATCHDOG_ENV, "1")
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT", raising=False)
+    monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+
+    def slow_but_finishes(*_args, **_kwargs):
+        time.sleep(1.4)
+
+    monkeypatch.setattr(guard, "guard_fabric_launch", slow_but_finishes)
+    _r8_run_main(monkeypatch, _payload(shared_placement, "echo hi"))
+    assert capsys.readouterr().out == ""  # unarmed: no watchdog, no decision
+    # armed, a fast verdict: the timer is disarmed before anything is written
+    monkeypatch.setattr(guard, "guard_fabric_launch", _R8_REAL_GUARD_FABRIC_LAUNCH)
+    monkeypatch.setenv("MASTERMIND_SHARED_PLACEMENT", "1")
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        _r8_run_main(monkeypatch, _payload(shared_placement, "pool </dev/null run grok a /tmp grok-4"))
+    assert "R6_REDIRECTION" in _emitted(capsys)["permissionDecisionReason"]
+    assert signal.getitimer(signal.ITIMER_REAL)[0] == 0
+
+
+def _r8_hook_env(tmp_path: Path, *, bound: bool) -> tuple[dict, Path]:
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True, exist_ok=True)
+    binding = _binding()
+    receipt = tmp_path / "placement-receipt.json"
+    receipt.write_text(json.dumps(_receipt(binding)), encoding="utf-8")
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("POOL_", "MASTERMIND_"))
+        and key not in ("BASH_ENV", "ENV", "PYTHONPATH")
+    }
+    env.update({
+        "HOME": str(home),
+        "MASTERMIND_CI_POLL_STATE_DIR": str(tmp_path / "poll"),
+        "MASTERMIND_SHARED_PLACEMENT": "1",
+        "MASTERMIND_PLACEMENT_RECEIPT": str(receipt),
+        "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS": str(os.geteuid()),
+        "POOL_ORCHESTRATOR_ID": "root-orch-1",
+        "POOL_PARENT_RUN_ID": "hermes-run-7",
+        "POOL_TASK_CLASS": "code",
+    })
+    if bound:
+        env["POOL_EXECUTION_BINDING"] = json.dumps(binding)
+    return env, cwd
+
+
+#: Owner-channel emulation for the hook process (as the in-process fixture
+#: does): the guard file is loaded and run exactly as the hook runs it, with
+#: a principal uid that does not own the receipt, so a BOUND command reaches
+#: every binding check (on a single-uid host the receipt is principal-owned).
+_R8_OWNER_SHIM = (
+    "import importlib.util, os, sys\n"
+    "spec = importlib.util.spec_from_file_location('provider_orchestrator_guard', sys.argv[1])\n"
+    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+    "m._principal_ids = lambda: (os.geteuid() + 4242, frozenset())\n"
+    "{inject}"
+    "m.main()\n"
+)
+
+
+def _r8_hook_cli(
+    tmp_path: Path, command: str, *, bound: bool, owner: bool, inject: str = "",
+    extra_env: dict | None = None,
+) -> tuple[float, int, str]:
+    """(wall seconds, exit code, stdout) of the registered hook command line
+    ``python3 "<guard>"`` (or the owner shim) with the PreToolUse JSON on stdin."""
+    import shutil
+    import subprocess
+    import time
+
+    if shutil.which("python3") is None:
+        pytest.skip("no python3 on PATH for the registered hook command")
+    module_path = os.environ.get("MASTERMIND_R6_GUARD_UNDER_TEST", "").strip() or guard.__file__
+    env, cwd = _r8_hook_env(tmp_path, bound=bound)
+    env.update(extra_env or {})
+    if owner or inject:
+        env["R8_SHIM"] = _R8_OWNER_SHIM.replace("{inject}", inject)
+        line = f'python3 -c "$R8_SHIM" "{module_path}"'
+    else:
+        line = f'python3 "{module_path}"'
+    started = time.monotonic()
+    result = subprocess.run(
+        ["/bin/sh", "-c", line], input=json.dumps(_payload(cwd, command)), env=env,
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    return time.monotonic() - started, result.returncode, result.stdout.strip()
+
+
+def test_r8_watchdog_through_the_hook_process(tmp_path: Path) -> None:
+    inject = (
+        "import time\n"
+        "def _slow(*a, **k):\n"
+        "    time.sleep(30)\n"
+        "m.guard_fabric_launch = _slow\n"
+    )
+    elapsed, code, out = _r8_hook_cli(
+        tmp_path, _R6_L, bound=True, owner=True, inject=inject,
+        extra_env={"MASTERMIND_GUARD_BUDGET_S": "1"},
+    )
+    assert code == 0
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "guard budget exceeded — fail closed" in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, elapsed
+
+
+# --- r8: the budget through the REAL hook command line ----------------------
+
+_R8_CAP = 262_144
+
+
+def _r8_filled(prefix: str, unit: str, size: int, suffix: str = "") -> str:
+    room = size - len(prefix) - len(suffix)
+    return prefix + (unit * (room // len(unit) + 1))[:room] + suffix
+
+
+_R8_BUDGET_ROWS = [
+    # (id, prefix, unit, suffix, bound, owner channel, verdict fragment)
+    # REVIEW3 A3 — no literal wrapper name (computed glue, glob, $[ padding):
+    ("rv-computed-glue-dash-path", "p${x}ool run grok a /tmp grok-4 ", "-a/", "", False, False, "R6_EXPANSION"),
+    ("rv-param-default-dash-path", "${x:-p}ool run grok a /tmp grok-4 ", "-a/", "", False, False, "R6_EXPANSION"),
+    ("rv-glob-head-dash-path", "p* run grok a /tmp grok-4 ", "-a/", "", False, False, "R6_NOT_A_PLAIN_LAUNCH"),
+    ("rv-computed-glue-double-dash", "p${x}ool run grok a /tmp grok-4 ", "--a", "", False, False, "R6_EXPANSION"),
+    ("rv-arith-padding-quoted", "p${x}ool run grok a /tmp grok-4 '", "$[", "'", False, False, "R6_EXPANSION"),
+    ("rv-subscript-run", "pool </dev/null run grok a /tmp grok-4 ", "${x[", "", False, False, "R6_TOKENIZE_FAILED"),
+    ("rv-bracket-run-no-wrapper", "", "[", "", False, False, "allow"),
+    ("rv-subscript-run-no-wrapper", "", "${x[", "", False, False, "allow"),
+    ("c5-option-path", "pool run grok a /tmp grok-4 -O", "/a", "", False, False, "missing binding"),
+    # REVIEW3 A3 BLOCKER 3 — bound identity runs (every binding check reached):
+    ("rv-bound-identity-run", "pool run grok a /tmp grok-4 a=", "POOL_ORCHESTRATOR_ID=", "", True, True, "POOL_ORCHESTRATOR_ID"),
+    ("bound-identity-run-parent", "pool run glm a /tmp glm-5.3 a=", "POOL_PARENT_RUN_ID=", "", True, True, "POOL_PARENT_RUN_ID"),
+    ("bound-identity-quoted", _R6_L + " '", "POOL_ORCHESTRATOR_ID=", "'", True, True, "POOL_ORCHESTRATOR_ID"),
+    ("bound-env-u-quoted", _R6_L + " '", "env -u ", "'", True, True, "POOL_ORCHESTRATOR_ID"),
+    ("bound-env-cluster-quoted", _R6_L + " 'env -", "i", "!'", True, True, "allow"),
+    # found by the r8 complexity probe (super-linear in r7):
+    ("nested-shell-option-cluster", "bash pool -", "c", "!", False, False, "R6_NESTED_SHELL"),
+    ("newline-run-launch", "pool run glm a /tmp glm-5.3 ", "\n", "", True, True, "allow"),
+    ("leading-newline-run", "", "\n", "pool run glm a /tmp glm-5.3", True, True, "allow"),
+    ("literal-dollar-merge", "p${x}ool run glm a /tmp glm-5.3 ", "a$.", "", False, False, "R6_EXPANSION"),
+    ("ansi-octal-escapes", "p${x}ool $'", "\\1", "'", False, False, "R6_EXPANSION"),
+    ("long-head-many-invocations", "", "a", "", False, False, "R6_NOT_A_PLAIN_LAUNCH"),
+    ("grouping-run", "p${x}ool run glm a /tmp glm-5.3 ", "))", "", False, False, "R6_GROUPING"),
+    ("nested-construct-glue", "echo ", "$(p${x}ool ", "", False, False, "R6_TOKENIZE_FAILED"),
+    # 8-char prefix + 18 724 whole 14-char units = 262 144: every construct closed
+    ("nested-construct-glue-closed", "echo    ", "$(p${x}ool x) ", "", False, False, "R6_COMMAND_SUBSTITUTION"),
+]
+
+
+@pytest.mark.parametrize("row", _R8_BUDGET_ROWS, ids=[row[0] for row in _R8_BUDGET_ROWS])
+def test_r8_budget_rows_finish_through_the_real_hook_command_line(
+    tmp_path: Path, row: tuple
+) -> None:
+    row_id, prefix, unit, suffix, bound, owner, fragment = row
+    if row_id == "long-head-many-invocations":
+        head = "A" * (_R8_CAP // 2)
+        command = head + _r8_filled("", " sub.sh x", _R8_CAP - len(head))
+    else:
+        command = _r8_filled(prefix, unit, _R8_CAP, suffix)
+    assert len(command) == _R8_CAP
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=bound, owner=owner)
+    assert code == 0
+    if fragment == "allow":
+        assert out == "", out[:300]
+    else:
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", out[:300]
+        assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
+        assert "guard budget exceeded" not in decision["permissionDecisionReason"]
+    # Registered timeout 10 s, watchdog 7 s; measured ≤ ~1.1 s on the M2 host
+    # (C6 ledger). A CI-safe bound well inside both:
+    assert elapsed < 4.0, (row_id, elapsed)
+
+
+@pytest.mark.parametrize("size", [_R8_CAP - 1, _R8_CAP, _R8_CAP + 1])
+def test_r8_cap_boundary_through_the_real_hook_command_line(tmp_path: Path, size: int) -> None:
+    command = _r8_filled("p${x}ool run grok a /tmp grok-4 ", "-a/", size)
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=False, owner=False)
+    assert code == 0
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    if size > _R8_CAP:
+        assert "refused fail-closed" in reason and f"{size} characters" in reason
+        assert elapsed < 1.0, elapsed  # judged by length alone (measured ~0.08 s)
+    else:
+        assert "R6_EXPANSION" in reason
+        assert elapsed < 4.0, elapsed
+
+
+# --- r8: the Claude hook row blocks on failure (onFailure, C6 ledger) --------
+
+
+def test_r8_claude_hook_row_blocks_on_failure_and_codex_row_does_not(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    assert verify_policy(home)["issues"] == [] or verify_policy(home)["state"] != "DRIFT"
+    claude = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    row = next(r for r in claude["hooks"]["PreToolUse"] if r.get("matcher") == "Agent|Task|Bash")
+    assert row["hooks"][0]["onFailure"] == "block"
+    assert row["hooks"][0]["timeout"] == 10
+    codex = json.loads((home / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+    codex_row = next(r for r in codex["hooks"]["PreToolUse"] if r.get("matcher") == "^Bash$")
+    assert "onFailure" not in codex_row["hooks"][0]
+    # A Claude row whose failure would not block is drift.
+    del row["hooks"][0]["onFailure"]
+    (home / ".claude" / "settings.json").write_text(json.dumps(claude), encoding="utf-8")
+    result = verify_policy(home)
+    assert result["state"] == "DRIFT" and "claude_settings.pretool" in result["issues"]
+    row["hooks"][0]["onFailure"] = "continue"
+    (home / ".claude" / "settings.json").write_text(json.dumps(claude), encoding="utf-8")
+    assert "claude_settings.pretool" in verify_policy(home)["issues"]
+
+
+# --- r8: scope roots (REVIEW3 A1 note; pre-existing, #1228) -----------------
+
+
+def test_r8_t3_worktree_cwd_is_outside_the_scope_roots_pinned_limit(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """PINS A KNOWN LIMIT, not a desired property: ``guard_bash`` returns
+    before ANY check when the payload cwd is outside the scope roots, and
+    ``~/.t3/worktrees/…`` is not a scope root — an armed T3-worktree session
+    gets no checks at all unless MASTERMIND_SCOPE_ROOTS names it (Director C7
+    owns the t3 child-session environment). If this test fails because the
+    roots now cover T3 worktrees, update the C6 ledger note and drop it."""
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    monkeypatch.delenv("MASTERMIND_SCOPE_ROOTS", raising=False)
+    home = Path(os.environ["HOME"])
+    t3_cwd = home / ".t3" / "worktrees" / "Mastermind" / "t3-r8pin"
+    t3_cwd.mkdir(parents=True)
+    command = "pool </dev/null run grok a /tmp grok-4"  # refused anywhere in scope
+    assert guard.guard_bash(_payload(t3_cwd, command), {"command": command}) is None
+    assert capsys.readouterr().out == ""  # NO check ran: the documented gap
+    monkeypatch.setenv("MASTERMIND_SCOPE_ROOTS", str(home / ".t3" / "worktrees"))
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(t3_cwd, command), {"command": command})
+    assert "R6_REDIRECTION" in _emitted(capsys)["permissionDecisionReason"]

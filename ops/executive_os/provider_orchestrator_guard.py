@@ -37,6 +37,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import sys
 import tempfile
@@ -67,7 +68,10 @@ def strip_heredocs(command: str) -> str:
     return output
 
 
-CMD_POS = r"(?:^|[;&|\n(]|\b(?:do|then|else)\s)\s*"
+#: (r8: ``[^\S\n]*``, not ``\s*``: a newline is itself a command position,
+#: so a gap spanning newlines also matches from the last one; ``\s*`` made
+#: every newline of a newline run rescan the run — quadratic.)
+CMD_POS = r"(?:^|[;&|\n(]|\b(?:do|then|else)\s)[^\S\n]*"
 CI_WATCH_RE = re.compile(
     CMD_POS
     + r"(?P<call>gh\s+(?:run\s+watch\b[^;&|\n]*"
@@ -235,8 +239,11 @@ _COMMAND_PREFIX_WORDS = frozenset({
 #: Constructs that can change the launch environment outside lexical
 #: observation: eval/source of computed text, shell startup files, and
 #: assignments through a computed variable name.
+#: (r8: ``[^\S\n]*`` after the separator, not ``\s*``: a newline is itself a
+#: separator, so a match whose gap spans newlines also starts at the last one;
+#: with ``\s*`` every newline of a newline run rescanned the whole run.)
 _UNOBSERVABLE_ENV_RE = re.compile(
-    r"(?:^|[;&|(`{\n]|\$\()\s*(?:eval|source|\.)(?=\s)"
+    r"(?:^|[;&|(`{\n]|\$\()[^\S\n]*(?:eval|source|\.)(?=\s)"
     r"|(?:^|[\s;&|(`{])(?:BASH_ENV|ENV)\+?="
     r"|(?:^|[\s;&|(`{])(?:export|declare|typeset|readonly|local)"
     r"(?:\s+-\S+)*\s+[A-Za-z0-9_]*\$"
@@ -414,22 +421,91 @@ _R7_SYSTEM_BIN_DIRS = ("/bin", "/usr/bin")
 _R7_BUILTIN_ONLY = frozenset({"exec", "command"})
 _R7_OUTPUT_REDIRECTIONS = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
 _R7_DESCRIPTOR_RE = re.compile(r"^(?:[0-9]+|-)$")
-#: ``${NAME…op`` openings (bash and zsh parameter operators, zsh ``(flags)``
-#: and the empty name ``${:-…}``): for SCOPE only, the opening is read as a
-#: space so the operator's literal word (``${x:-pool}``) is visible.
-_R7_PARAM_OPERATOR_RE = re.compile(
-    r"\$\{(?:\([^()]*\))?[#!]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])?"
-    r"(?:\[[^\]]*\])?(?::?[-=+?]|//?|/[#%]|##?|%%?|\^\^?|,,?|:)"
+#: r8 (REVIEW3 A3 BLOCKER 1 + MAJOR): r7 widened scope with two regexes that
+#: were QUADRATIC — ``_R7_PARAM_OPERATOR_RE`` (``${NAME[sub]op`` openings,
+#: the subscript ``\[[^\]]*\]`` rescanned to the end from every ``${x[``) and
+#: ``_R7_GLUED_OPTION_RE`` (a match could start at every ``-X`` inside a
+#: ``-a/-a/…`` run and scan to its end). Both are replaced by linear scans
+#: whose scope is AT LEAST as wide (the r7 regexes are kept in the test
+#: module as the reference they are fuzzed against):
+#:
+#:  * ``_r8_dash_view``: after the first ``${`` in the text every ``-`` reads
+#:    as a word boundary. r7 replaced each ``${NAME…op`` opening by a space;
+#:    the only operator character that also blocks ``_WRAPPER_NAME_RE``'s
+#:    lookbehind is ``-`` (``:-`` / ``-``), so a name visible to r7 is visible
+#:    here. Wider than r7 on purpose: nested ``${${x}:-pool}`` (zsh) and
+#:    nested subscripts ``${x[a[1]]:-pool}`` are in scope now.
+#:  * ``_r8_glued_option``: the same language as the r7 glued-option regex,
+#:    decided per ``[A-Za-z0-9_./-]+`` run in one pass.
+_R8_NAME_AT_RE = re.compile(
+    r"(?=(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-]))", re.I
 )
-#: A wrapper name glued to a short option (``git grep -O'pool run …'``,
-#: ``-Opool``): the option letter hides the name from ``_WRAPPER_NAME_RE``.
-#: (Single quantifier per alternative: linear on long words — a slow hook is
-#: killed by the provider and a killed hook does not block.)
-_R7_GLUED_OPTION_RE = re.compile(
-    r"(?<![A-Za-z0-9_.])-[A-Za-z](?:[A-Za-z0-9_./-]*/|[A-Za-z]*)"
-    r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
-    re.I,
+_R8_OPTION_RUN_RE = re.compile(r"[A-Za-z0-9_./-]+")
+_R8_LETTER_RUN_RE = re.compile(r"[A-Za-z]+")
+_R8_ASCII_LETTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
+
+
+def _r8_option_cluster(value: str, letters: str) -> bool:
+    """True when ``value`` is ``-`` followed by ASCII letters only, one of
+    them in ``letters`` (r7 used ``re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*")``,
+    which backtracks QUADRATICALLY on ``-ccc…c!``: 4.7 s at 32 KB)."""
+    if len(value) < 2 or value[0] != "-":
+        return False
+    cluster = value[1:]
+    return (
+        frozenset(cluster) <= _R8_ASCII_LETTERS
+        and any(letter in cluster for letter in letters)
+    )
+
+
+def _r8_dash_view(plain: str) -> str:
+    """``plain`` with every ``-`` after its first ``${`` read as a space
+    (scope only; linear)."""
+    opening = plain.find("${")
+    if opening < 0:
+        return plain
+    return plain[:opening] + plain[opening:].replace("-", " ")
+
+
+def _r8_glued_option(text: str) -> bool:
+    """True when a wrapper name is glued to a short option (``git grep
+    -O'pool run …'``, ``-Opool``, ``-O/x/pool``): exactly r7's
+    ``(?<![A-Za-z0-9_.])-[A-Za-z](?:[A-Za-z0-9_./-]*/|[A-Za-z]*)NAME(?![A-Za-z0-9_.-])``,
+    decided in ONE linear pass per ``[A-Za-z0-9_./-]+`` run (a match lies
+    inside one run): an option start is a ``-`` + letter at the run start or
+    after ``/`` or ``-``; form (a) needs a name right after a ``/`` at least
+    three characters past the FIRST option start; form (b) needs a name
+    inside the letter run that follows an option start's letter."""
+    for run in _R8_OPTION_RUN_RE.finditer(text):
+        word = run.group(0)
+        if "-" not in word:
+            continue
+        names = [match.start() for match in _R8_NAME_AT_RE.finditer(word)]
+        if not names:
+            continue
+        starts: list[int] = []
+        position = word.find("-")
+        while 0 <= position < len(word) - 1:
+            if (position == 0 or word[position - 1] in "/-") and (
+                word[position + 1] in _R8_ASCII_LETTERS
+            ):
+                starts.append(position)
+            position = word.find("-", position + 1)
+        if not starts:
+            continue
+        first = starts[0]
+        if any(at >= first + 3 and word[at - 1] == "/" for at in names):
+            return True  # form (a): -X…/NAME
+        for start in starts:
+            letters_end = _R8_LETTER_RUN_RE.match(word, start + 1).end()
+            found = bisect.bisect_left(names, start + 2)
+            if found < len(names) and names[found] < letters_end:
+                return True  # form (b): -XletterNAME
+    return False
+
+
 #: Armed sessions refuse a Bash command longer than this outright: the
 #: provider kills a hook after its 10 s timeout and a killed hook does not
 #: block, so the gate must finish. Every armed-path scan is linear; this cap
@@ -448,13 +524,36 @@ _R7_ZSH_NUMERIC_GLOB_RE = re.compile(r"<[0-9]*-[0-9]*>")
 def _r7_spec(
     short_flags: str = "", short_valued: str = "",
     long_flags: tuple = (), long_valued: tuple = (),
+    short_optional: str = "", long_optional: tuple = (),
 ) -> tuple:
     """A closed option grammar: (short flags, short options taking a value,
-    long flags, long options taking a value)."""
-    return (
-        frozenset(short_flags), frozenset(short_valued),
-        frozenset(long_flags), frozenset(long_valued),
+    long flags, long options taking a value, short options taking an
+    OPTIONAL attached value, long options taking an optional ``=value``).
+
+    r8 (REVIEW3 A2): an optional-argument option (``-U[<n>]``,
+    ``--unified[=<n>]``, ``--relative[=<path>]``, ``--pretty[=<fmt>]``,
+    status ``-u[<mode>]`` / ``--untracked-files[=<mode>]``) NEVER consumes
+    the next word — the tool does not either, so a "value" the grammar
+    skipped (``git log -U --output=<file>``) was parsed by git as an
+    option. Consumption may never exceed the tool's: when unsure, a word is
+    judged as an option."""
+    return _R7Spec(
+        (frozenset(short_flags), frozenset(short_valued),
+         frozenset(long_flags), frozenset(long_valued)),
+        frozenset(short_optional), frozenset(long_optional),
     )
+
+
+class _R7Spec(tuple):
+    """The four r7 option sets (unpacks as before) plus r8's optional-value
+    sets as attributes."""
+
+    def __new__(cls, required: tuple, short_optional: frozenset,
+                long_optional: frozenset) -> "_R7Spec":
+        spec = super().__new__(cls, required)
+        spec.short_optional = short_optional
+        spec.long_optional = long_optional
+        return spec
 
 
 _R7_GIT_DIFF_LONG_FLAGS = (
@@ -466,8 +565,17 @@ _R7_GIT_DIFF_LONG_FLAGS = (
     "--patch-with-stat", "--abbrev",
 )
 _R7_GIT_DIFF_LONG_VALUED = (
-    "--unified", "--stat", "--color", "--word-diff", "--diff-filter",
-    "--abbrev", "--relative",
+    "--stat", "--color", "--word-diff", "--diff-filter", "--abbrev",
+)
+#: r8: optional-argument diff options (``=value`` only, never a next word).
+_R7_GIT_DIFF_LONG_OPTIONAL = ("--unified", "--relative")
+#: r8: git arguments refused WHEREVER they appear (option, value, after
+#: ``--``): they write a file (``--output``), run a program (``--ext-diff``,
+#: ``--textconv``) or a pager (``-O``/``--open-files-in-pager``). The option
+#: grammars already omit them; this holds even where a word is read as a
+#: value (REVIEW3 A2).
+_R8_GIT_FORBIDDEN_PREFIXES = (
+    "--output", "--ext-diff", "--textconv", "-O", "--open-files-in-pager",
 )
 _R7_GIT_LOG_LONG_FLAGS = (
     "--oneline", "--graph", "--decorate", "--no-decorate", "--all",
@@ -490,33 +598,37 @@ _R7_GIT_SPECS = {
         ("--message", "--file"),
     ),
     "log": _r7_spec(
-        "pusMRwbiEFPC0123456789", "nSGUL",
+        "pusMRwbiEFPC0123456789", "nSGL",
         _R7_GIT_DIFF_LONG_FLAGS + _R7_GIT_LOG_LONG_FLAGS,
         _R7_GIT_DIFF_LONG_VALUED + (
             "--max-count", "--skip", "--since", "--after", "--until",
-            "--before", "--author", "--committer", "--grep", "--format",
-            "--pretty", "--date", "--decorate",
+            "--before", "--author", "--committer", "--grep", "--date",
+            "--decorate",
         ),
+        "U", _R7_GIT_DIFF_LONG_OPTIONAL + ("--format", "--pretty"),
     ),
     "show": _r7_spec(
-        "pusMRwb", "U",
+        "pusMRwb", "",
         _R7_GIT_DIFF_LONG_FLAGS + ("--oneline", "--abbrev-commit", "--no-notes"),
-        _R7_GIT_DIFF_LONG_VALUED + ("--format", "--pretty", "--date"),
+        _R7_GIT_DIFF_LONG_VALUED + ("--date",),
+        "U", _R7_GIT_DIFF_LONG_OPTIONAL + ("--format", "--pretty"),
     ),
     "diff": _r7_spec(
-        "pusMRwb", "U",
+        "pusMRwb", "",
         _R7_GIT_DIFF_LONG_FLAGS + (
             "--cached", "--staged", "--merge-base", "--exit-code", "--quiet",
             "--no-index", "--minimal", "--histogram", "--patience",
         ),
         _R7_GIT_DIFF_LONG_VALUED,
+        "U", _R7_GIT_DIFF_LONG_OPTIONAL,
     ),
     "status": _r7_spec(
-        "sbv", "u",
+        "sbv", "",
         ("--short", "--branch", "--porcelain", "--long", "--verbose",
          "--ignored", "--no-renames", "--ahead-behind", "--no-ahead-behind",
          "--show-stash"),
-        ("--porcelain", "--untracked-files", "--ignored"),
+        ("--porcelain", "--ignored"),
+        "u", ("--untracked-files",),
     ),
     "grep": _r7_spec(
         "niIlLcwvEFGPhHoqarWpz", "eABCmf",
@@ -604,8 +716,12 @@ _R6_ANSI_SIMPLE_ESCAPES = {
     "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
 }
 _R6_ANSI_C_RE = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
+#: r8 (REVIEW3 A3 BLOCKER 2): the ``$[…]`` alternative may not run across
+#: another ``$[`` (r7's ``\$\[[^\]]*\]`` rescanned to the end of the text
+#: from every ``$[`` when no ``]`` followed: quadratic). Nested arithmetic is
+#: unwrapped innermost-first by the repeated passes, as ``${…}``/``$(…)`` are.
 _R6_COMPUTED_RE = re.compile(
-    r"\$\{[^{}]*\}|\$\([^()]*\)|`[^`]*`|\$\[[^\]]*\]"
+    r"\$\{[^{}]*\}|\$\([^()]*\)|`[^`]*`|\$\[(?:[^\]$]|\$(?!\[))*\]"
     r"|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]"
 )
 _R6_ROUGH_WORD_SPLIT_RE = re.compile(r"[\s;&|<>()\"'\\]+")
@@ -720,6 +836,13 @@ _R7_READ_REMEDY = (
 )
 
 
+_R8_OCTAL_RE = re.compile(r"[0-7]{1,3}")
+_R8_HEX_RES = {
+    escape: re.compile(rf"[0-9A-Fa-f]{{1,{width}}}")
+    for escape, width in (("x", 2), ("u", 4), ("U", 8))
+}
+
+
 def _r6_decode_ansi_c(body: str) -> str:
     """Decode the body of a bash ``$'…'`` word (escape set of bash 5)."""
     out: list[str] = []
@@ -737,13 +860,14 @@ def _r6_decode_ansi_c(body: str) -> str:
             index += 2
             continue
         if escape in "01234567":
-            digits = re.match(r"[0-7]{1,3}", body[index + 1:]).group(0)
+            # r8: match at a position, never on a slice of the rest of the
+            # body (one copy per escape made ``$'\1\1…'`` quadratic).
+            digits = _R8_OCTAL_RE.match(body, index + 1).group(0)
             out.append(chr(int(digits, 8) & 0xFF))
             index += 1 + len(digits)
             continue
         if escape in "xuU":
-            width = {"x": 2, "u": 4, "U": 8}[escape]
-            digits_match = re.match(rf"[0-9A-Fa-f]{{1,{width}}}", body[index + 2:])
+            digits_match = _R8_HEX_RES[escape].match(body, index + 2)
             if digits_match:
                 digits = digits_match.group(0)
                 try:
@@ -776,67 +900,112 @@ def _r7_parts_match(name: str, parts: list[str]) -> bool:
     return len(name) - len(last) >= position and name.endswith(last)
 
 
-def _r7_glob_atom_matches(atom: tuple, char: str) -> bool:
-    if atom[0] == "?":
-        return True
-    if atom[0] == "lit":
-        return atom[1] == char
-    body, negate = atom[1], atom[2]
-    hit = False
+_R8_GLOB_STAR = object()
+_R8_GLOB_ANY = object()
+_R8_WRAPPER_ALPHABET = frozenset("".join(_R6_WRAPPER_BASENAMES))
+_R8_WRAPPER_NAME_LIMIT = max(len(name) for name in _R6_WRAPPER_BASENAMES)
+
+
+def _r8_set_members(body: str, alphabet: frozenset) -> frozenset:
+    """The characters of ``alphabet`` a ``[body]`` set names (fnmatch
+    semantics: ``a-z`` ranges, a ``-`` first/last is literal); one pass."""
+    if "-" not in body:
+        return alphabet & frozenset(body)
+    members: set[str] = set()
     index = 0
-    while index < len(body):
-        if index + 2 < len(body) and body[index + 1] == "-":
-            hit = hit or body[index] <= char <= body[index + 2]
+    length = len(body)
+    while index < length:
+        if index + 2 < length and body[index + 1] == "-":
+            low, high = body[index], body[index + 2]
+            members.update(char for char in alphabet if low <= char <= high)
             index += 3
         else:
-            hit = hit or body[index] == char
+            if body[index] in alphabet:
+                members.add(body[index])
             index += 1
-    return hit != negate
+    return frozenset(members)
 
 
-def _r7_glob_match(name: str, pattern: str) -> bool:
-    """fnmatch-style ``*``/``?``/``[set]`` matching by a position-set walk,
-    O(len(pattern) * len(name)). r7 replaces ``fnmatch`` here: its regex
-    translation backtracks catastrophically on patterns like ``*?*?*?…``
-    (a slow hook is killed and does not block)."""
-    atoms: list[tuple] = []
+def _r8_glob_atoms(
+    pattern: str, alphabet: frozenset, limit: int
+) -> tuple[list, int] | None:
+    """``(atoms, fixed-atom count)`` of an fnmatch pattern, each fixed atom
+    reduced to the set of ``alphabet`` characters it admits (``?`` →
+    ``_R8_GLOB_ANY``, runs of ``*`` → one ``_R8_GLOB_STAR``); None once the
+    pattern has more than ``limit`` fixed atoms (nothing of length ≤ limit
+    can match). r8: reading stops there, so a ``[[[…`` run costs at most
+    ``limit + 1`` searches for ``]`` (r7 searched once per ``[``: quadratic,
+    7 s at 256 KB), and a set body is read once, not once per position."""
+    atoms: list = []
+    fixed = 0
     index = 0
-    while index < len(pattern):
+    length = len(pattern)
+    while index < length:
         char = pattern[index]
         if char == "*":
-            if not atoms or atoms[-1] != ("*",):
-                atoms.append(("*",))
+            if not atoms or atoms[-1] is not _R8_GLOB_STAR:
+                atoms.append(_R8_GLOB_STAR)
             index += 1
             continue
+        fixed += 1
+        if fixed > limit:
+            return None
         if char == "?":
-            atoms.append(("?",))
+            atoms.append(_R8_GLOB_ANY)
             index += 1
             continue
         if char == "[":
             body_at = index + 1
-            if body_at < len(pattern) and pattern[body_at] in "!^":
+            if body_at < length and pattern[body_at] in "!^":
                 body_at += 1
-            if body_at < len(pattern) and pattern[body_at] == "]":
+            if body_at < length and pattern[body_at] == "]":
                 body_at += 1
             close = pattern.find("]", body_at)
             if close >= 0:
                 body = pattern[index + 1:close]
                 negate = body[:1] in ("!", "^")
-                atoms.append(("set", body[1:] if negate else body, negate))
+                members = _r8_set_members(body[1:] if negate else body, alphabet)
+                atoms.append(alphabet - members if negate else members)
                 index = close + 1
                 continue
-        atoms.append(("lit", char))
+        atoms.append(frozenset((char,)))
         index += 1
-    if sum(1 for atom in atoms if atom != ("*",)) > len(name):
+    return atoms, fixed
+
+
+_R8_GLOB_CACHE: dict[str, tuple[list, int] | None] = {}
+
+
+def _r7_glob_match(name: str, pattern: str) -> bool:
+    """fnmatch-style ``*``/``?``/``[set]`` matching by a position-set walk.
+    r7 replaced ``fnmatch`` here: its regex translation backtracks
+    catastrophically on patterns like ``*?*?*?…`` (a slow hook is killed and
+    does not block). r8: the pattern is read by ``_r8_glob_atoms`` — linear,
+    bounded by the name length, once per pattern for all wrapper names."""
+    if len(name) <= _R8_WRAPPER_NAME_LIMIT and frozenset(name) <= _R8_WRAPPER_ALPHABET:
+        if pattern not in _R8_GLOB_CACHE:
+            if len(_R8_GLOB_CACHE) > 64:
+                _R8_GLOB_CACHE.clear()
+            _R8_GLOB_CACHE[pattern] = _r8_glob_atoms(
+                pattern, _R8_WRAPPER_ALPHABET, _R8_WRAPPER_NAME_LIMIT
+            )
+        parsed = _R8_GLOB_CACHE[pattern]
+    else:
+        parsed = _r8_glob_atoms(pattern, frozenset(name), len(name))
+    if parsed is None:
+        return False
+    atoms, fixed = parsed
+    if fixed > len(name):
         return False
     positions = {0}
     for atom in atoms:
-        if atom == ("*",):
+        if atom is _R8_GLOB_STAR:
             positions = set(range(min(positions), len(name) + 1))
             continue
         positions = {
             position + 1 for position in positions
-            if position < len(name) and _r7_glob_atom_matches(atom, name[position])
+            if position < len(name)
+            and (atom is _R8_GLOB_ANY or name[position] in atom)
         }
         if not positions:
             return False
@@ -865,6 +1034,207 @@ def _r6_partial_wrapper(base: str) -> bool:
         )
         literal = re.sub(r"\[[^\]]*\]|[*?{}\[\]]", "", stem_pattern)
         if len(literal) >= 1:
+            return True
+    return False
+
+
+_R8_CLOSER = {"(": ")", "[": "]", "{": "}"}
+_R8_PARAM_HEAD_RE = re.compile(
+    r"(?:\([^()]*\))?[#!]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])?"
+)
+_R8_CHUNK_RE = re.compile(r"[a-z0-9_.]+")
+_R8_DOLLAR_WORD_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])")
+
+
+_R8_BRACKET_RE = re.compile(r"\$[(\[{]|[`()\[\]{}]")
+#: Construct nesting the scope reader descends into; deeper text is in scope
+#: (and then refused as computed) — r7 stopped at 32 regex passes.
+_R8_MAX_CONSTRUCT_DEPTH = 8
+
+
+def _r8_construct_spans(text: str) -> list[tuple[int, int, int]]:
+    """Maximal closed ``$(…)``/``$((…))``/``$[…]``/``${…}``/backtick spans
+    ``(start, end, opener length)``, found by ONE bracket-stack pass over the
+    bracket characters only (rough, quote-unaware like r7's regex passes; a
+    closer that does not match the innermost opener is text)."""
+    stack: list[tuple[str, int, int]] = []
+    closed: list[tuple[int, int, int]] = []
+    for match in _R8_BRACKET_RE.finditer(text):
+        token = match.group(0)
+        index = match.start()
+        if token[0] == "$":
+            stack.append((_R8_CLOSER[token[1]], index, 2))
+        elif token == "`":
+            if stack and stack[-1][0] == "`":
+                closed.append((stack.pop()[1], index + 1, 1))
+            else:
+                stack.append(("`", index, 1))
+        elif stack:
+            if token in "([{":
+                stack.append((_R8_CLOSER[token], index, 0))
+            elif stack[-1][0] == token:
+                _, start, opener = stack.pop()
+                if opener:
+                    closed.append((start, index + 1, opener))
+    closed.sort(key=lambda span: (span[0], -span[1]))
+    maximal: list[tuple[int, int, int]] = []
+    for span in closed:
+        if maximal and span[0] < maximal[-1][1]:
+            continue  # nested in the previous maximal span
+        maximal.append(span)
+    return maximal
+
+
+_R8_PARAM_OP_RE = re.compile(r"(?:\[[^\]]*\])?(:?[-=?+]|/[/#%]?|##?|%%?|\^\^?|,,?|:)?")
+
+
+def _r8_operator_word(word: str) -> list:
+    """Items of a ``${x op WORD}`` operator word as the shell yields it: a
+    plain literal word is one mandatory literal; a word with quotes removed
+    that still carries ``$``/backtick/blank is read loosely (its literal
+    chunks optional, glued to runtime text)."""
+    plain_word = re.sub(r"[\"'\\]", "", word).lower()
+    if not plain_word:
+        return []
+    if "$" in plain_word or "`" in plain_word or _R6_ROUGH_WORD_SPLIT_RE.search(plain_word):
+        return (
+            [("any", "")]
+            + [("opt", chunk) for chunk in _R8_CHUNK_RE.findall(plain_word)]
+            + [("any", "")]
+        )
+    return [("lit", plain_word)]
+
+
+def _r8_construct_items(construct: str) -> list:
+    """Scope items of one construct. Arithmetic and command substitution
+    print runtime text (``any`` — zsh ``$[[##36]24]`` prints ``O``). A
+    parameter expansion is its runtime value, except: ``${x[:]-|=|? WORD}``
+    is the value OR the literal WORD and ``${x[:]+WORD}`` is WORD or
+    nothing (an ``alt`` item); a form with no operator after the name
+    (zsh ``${${x}:-pool}``) glues its literal chunks, optional, to the
+    value."""
+    if not construct.startswith("${"):
+        return [("any", "")]
+    body = construct[2:-1]
+    head = _R8_PARAM_HEAD_RE.match(body).end()
+    if head == len(body):
+        return [("any", "")]  # a plain reference names nothing literal
+    op = _R8_PARAM_OP_RE.match(body, head)
+    operator, word = op.group(1) or "", body[op.end():]
+    if not operator and op.end() == len(body):
+        return [("any", "")]  # ``${a[i]}``: a subscripted plain reference
+    if operator in ("-", ":-", "=", ":=", "?", ":?"):
+        return [("alt", ([("any", "")], _r8_operator_word(word)))]
+    if operator in ("+", ":+"):
+        return [("alt", ([], _r8_operator_word(word)))]
+    if operator:
+        # /pat/repl, #, %, ^, ",", :offset — a transformed RUNTIME value: a
+        # replacement appears only where the value matches (r7 parity; a
+        # whole wrapper name in it is still seen by the name scan).
+        return [("any", "")]
+    # No operator after the name (zsh nested ``${${x}…}``, odd forms): the
+    # literal chunks are optional, glued to the runtime value.
+    chunks = _R8_CHUNK_RE.findall(re.sub(r"[\"'\\]", "", body[head:]).lower())
+    return [("any", "")] + [("opt", chunk) for chunk in chunks] + [("any", "")]
+
+
+def _r8_items_spell(items: list, name: str) -> bool:
+    """True when the item sequence can produce exactly ``name`` as the
+    basename of the word, using at least ONE fixed literal character (a
+    wholly computed word names nothing: the arbitrary-process limit).
+    Position-set DP (≤ len(name)+1 states), linear in the items. A ``/`` in
+    a literal starts the basename over (r7's rsplit on literal ``/``)."""
+    size = len(name)
+
+    def step(state: tuple, item: tuple) -> tuple:
+        free, fixed = state
+        kind, payload = item
+        if kind == "any":
+            return (
+                set(range(min(free), size + 1)) if free else set(),
+                set(range(min(fixed), size + 1)) if fixed else set(),
+            )
+        if kind == "alt":
+            result_free: set[int] = set()
+            result_fixed: set[int] = set()
+            for branch in payload:
+                branch_state = (set(free), set(fixed))
+                for sub in branch:
+                    branch_state = step(branch_state, sub)
+                result_free |= branch_state[0]
+                result_fixed |= branch_state[1]
+            return result_free, result_fixed
+        text = payload
+        if kind == "lit" and "/" in text:
+            free, fixed, text = {0}, set(), text.rsplit("/", 1)[1]
+            if not text:
+                return free, fixed
+        grown = {
+            position + len(text) for position in free | fixed
+            if name.startswith(text, position)
+        }
+        if kind == "lit":
+            return set(), grown
+        return free, fixed | grown
+
+    state: tuple = ({0}, set())
+    for item in items:
+        state = step(state, item)
+        if not state[0] and not state[1]:
+            return False
+    return size in state[1]
+
+
+def _r8_computed_glue(text: str, depth: int = 0) -> bool:
+    """r8 scope widening (closes r7 escapes, found while making r7 linear):
+    a rough word that glues literal text to ``$``-constructs names a wrapper
+    when SOME value of the constructs completes the name — read with real
+    bracket nesting (r7's innermost-first regex never unwrapped
+    ``$((…))``), with ``${…op WORD}`` operator words as optional literals,
+    and INSIDE every construct body too (``echo $(p${x}ool run …)`` runs
+    that launch). Linear per level: one stack pass, one item walk, a
+    ≤14-state DP; levels are disjoint and capped (deeper → in scope)."""
+    if depth > _R8_MAX_CONSTRUCT_DEPTH:
+        return True  # nested beyond any honest command: judge it (fail closed)
+    spans = _r8_construct_spans(text)
+    for start, end, opener in spans:
+        inner = text[start + opener:end - 1]
+        if ("$" in inner or "`" in inner) and _r8_computed_glue(inner, depth + 1):
+            return True  # (a body without $ or ` has no construct to glue)
+    words: list[list[tuple[str, str]]] = [[]]
+
+    def literal(piece: str) -> None:
+        parts = _R6_ROUGH_WORD_SPLIT_RE.split(piece)
+        for number, part in enumerate(parts):
+            if number:
+                words.append([])
+            if part:
+                words[-1].append(("lit", part.lower()))
+
+    def plain(segment: str) -> None:
+        position = 0
+        for match in _R8_DOLLAR_WORD_RE.finditer(segment):
+            literal(segment[position:match.start()])
+            words[-1].append(("any", ""))
+            position = match.end()
+        literal(segment[position:])
+
+    position = 0
+    for start, end, _ in spans:
+        plain(text[position:start])
+        words[-1].extend(_r8_construct_items(text[start:end]))
+        position = end
+    plain(text[position:])
+    for items in words:
+        if all(kind == "lit" for kind, _ in items):
+            continue  # literal and glob words: the other scope checks
+        compact: list = []
+        for item in items:
+            if not (item[0] == "any" and compact and compact[-1][0] == "any"):
+                compact.append(item)
+        if all(kind == "any" for kind, _ in compact):
+            continue  # wholly computed: names nothing (arbitrary-process limit)
+        if any(_r8_items_spell(compact, name) for name in _R6_WRAPPER_BASENAMES):
             return True
     return False
 
@@ -932,10 +1302,11 @@ def r6_names_wrapper(raw: str) -> bool:
     """
     text = raw.replace("\\\n", "")
     text = _R6_ANSI_C_RE.sub(lambda match: _r6_decode_ansi_c(match.group(1)), text)
-    widened = re.sub(
-        r"[\"'\\]", "", _R7_PARAM_OPERATOR_RE.sub(" ", text).replace('$"', '"')
-    )
-    if _WRAPPER_NAME_RE.search(widened) or _R7_GLUED_OPTION_RE.search(widened):
+    # r8: one quote-free view; the glued-option scan reads it as is and the
+    # name scan reads it with ``-`` after the first ``${`` as a boundary
+    # (both linear, both at least as wide as r7's regex views).
+    plain = re.sub(r"[\"'\\]", "", text.replace('$"', '"'))
+    if _WRAPPER_NAME_RE.search(_r8_dash_view(plain)) or _r8_glued_option(plain):
         return True
     if _r7_glob_head_names_wrapper(raw):
         return True
@@ -951,7 +1322,9 @@ def r6_names_wrapper(raw: str) -> bool:
     for word in _R6_ROUGH_WORD_SPLIT_RE.split(marked):
         if word and _r6_partial_wrapper(word.rsplit("/", 1)[-1]):
             return True
-    return False
+    # r8: the nesting-aware construct reading (arithmetic glue, split
+    # operator words) — additive: it can only widen scope.
+    return _r8_computed_glue(text)
 
 
 class _R6Word:
@@ -959,16 +1332,37 @@ class _R6Word:
     ``esc`` (fixed text) and ``param``/``arith``/``cmdsub``/``ansi``/
     ``locale`` (computed or re-decoded at runtime)."""
 
-    __slots__ = ("segments",)
+    __slots__ = ("_segments", "_pending")
 
     def __init__(self) -> None:
-        self.segments: list[tuple[str, str]] = []
+        self._segments: list[tuple[str, str]] = []
+        #: r8: adjacent ``lit`` pieces are collected and joined once when
+        #: the segments are read (r7 re-concatenated the growing segment on
+        #: every piece: ``a$.a$.…`` was quadratic).
+        self._pending: list[str] = []
 
     def add(self, kind: str, text: str) -> None:
-        if kind == "lit" and self.segments and self.segments[-1][0] == "lit":
-            self.segments[-1] = ("lit", self.segments[-1][1] + text)
+        if kind == "lit":
+            self._pending.append(text)
+            return
+        self._flush()
+        self._segments.append((kind, text))
+
+    def _flush(self) -> None:
+        if not self._pending:
+            return
+        text = "".join(self._pending)
+        self._pending = []
+        if self._segments and self._segments[-1][0] == "lit":
+            text = self._segments[-1][1] + text
+            self._segments[-1] = ("lit", text)
         else:
-            self.segments.append((kind, text))
+            self._segments.append(("lit", text))
+
+    @property
+    def segments(self) -> list[tuple[str, str]]:
+        self._flush()
+        return self._segments
 
     @property
     def value(self) -> str:
@@ -1524,6 +1918,8 @@ def _r7_options_problem(
     ``(problem, seen option names)``. ``--`` ends option parsing; an
     option-looking word outside the grammar is the problem."""
     short_flags, short_valued, long_flags, long_valued = spec
+    short_optional = getattr(spec, "short_optional", frozenset())
+    long_optional = getattr(spec, "long_optional", frozenset())
     seen: set[str] = set()
     index = 0
     while index < len(words):
@@ -1533,9 +1929,9 @@ def _r7_options_problem(
         if value.startswith("--"):
             name, equals, _ = value.partition("=")
             if equals:
-                if name not in long_valued:
+                if name not in long_valued and name not in long_optional:
                     return value, seen
-            elif name in long_flags:
+            elif name in long_flags or name in long_optional:
                 pass
             elif name in long_valued:
                 index += 1
@@ -1552,6 +1948,9 @@ def _r7_options_problem(
                 if char in short_flags:
                     seen.add("-" + char)
                     continue
+                if char in short_optional:
+                    seen.add("-" + char)
+                    break  # the rest of the cluster is its value; no next word
                 if char in short_valued:
                     seen.add("-" + char)
                     if position + 1 == len(cluster):
@@ -1579,6 +1978,15 @@ def _r7_glob_may_inject(word: _R6Word) -> bool:
 
 def _r7_git_problem(args: list[_R6Word]) -> str:
     values = [arg.value for arg in args]
+    forbidden = next(
+        (value for value in values if value.startswith(_R8_GIT_FORBIDDEN_PREFIXES)),
+        None,
+    )
+    if forbidden is not None:
+        return (
+            f"git with {_r6_clip(forbidden)} (writes a file or runs a program "
+            "or pager wherever it appears)"
+        )
     index = 1 if values[:1] == ["--no-pager"] else 0
     if index >= len(values):
         return "git without a subcommand"
@@ -1690,7 +2098,7 @@ def _r7_nested(
     body: _R7Parse | None = None
     body_at = next(
         (position for position, word in enumerate(args)
-         if word.literal and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word.value)),
+         if word.literal and _r8_option_cluster(word.value, "c")),
         None,
     )
     if not nested and body_at is not None and body_at + 1 < len(args):
@@ -1906,10 +2314,16 @@ def _r7_parse(text: str, *, nested: bool) -> _R7Parse:
         units.append(_R6Unit())
     if pending is not None:
         codes.append(("R6_TOKENIZE_FAILED", f"{pending!r} has no target"))
-    # Leading/trailing newlines are whitespace, not another command.
-    while separators and separators[0] == "\n" and units[0].empty():
-        units.pop(0)
-        separators.pop(0)
+    # Leading/trailing newlines are whitespace, not another command. (r8:
+    # leading ones are dropped by one slice — ``pop(0)`` per newline was
+    # quadratic on a newline run.)
+    leading = 0
+    while (leading < len(separators) and separators[leading] == "\n"
+           and units[leading].empty()):
+        leading += 1
+    if leading:
+        units = units[leading:]
+        separators = separators[leading:]
     while separators and separators[-1] == "\n" and units[-1].empty():
         units.pop()
         separators.pop()
@@ -1997,6 +2411,9 @@ def family(model: str) -> str:
 
 
 def _emit(payload: dict[str, object]) -> NoReturn:
+    # r8: the budget watchdog is disarmed BEFORE anything is written, so a
+    # late alarm can never interleave a second decision into the output.
+    _r8_disarm_watchdog()
     print(json.dumps({"hookSpecificOutput": payload}, sort_keys=True))
     raise SystemExit(0)
 
@@ -2246,7 +2663,7 @@ def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
     separators = [match.span() for match in _SIMPLE_COMMAND_SPLIT_RE.finditer(canon)]
     separator_ends = [end for _, end in separators]
     separator_starts = [start for start, _ in separators]
-    first_words: dict[int, tuple[int, int]] = {}
+    first_words: dict[int, tuple[int, int, str]] = {}
 
     def head_at(offset: int) -> str:
         count = bisect.bisect_right(separator_ends, offset)
@@ -2257,17 +2674,24 @@ def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
                 separator_starts[following]
                 if following < len(separator_starts) else len(canon)
             )
-            first_words[unit_start] = (len(canon), len(canon))
+            first_words[unit_start] = (len(canon), len(canon), "")
             for word in _SHELL_WORD_RE.finditer(canon, unit_start, unit_end):
                 text = word.group(0)
                 if text in _COMMAND_PREFIX_WORDS or _ASSIGNMENT_WORD_RE.match(text):
                     continue
-                first_words[unit_start] = word.span()
+                # r8: the whole word's basename is computed ONCE per unit;
+                # r7 re-sliced a long first word for every invocation in
+                # the unit (quadratic).
+                first_words[unit_start] = (
+                    *word.span(), text.rsplit("/", 1)[-1].lower()
+                )
                 break
-        position, end = first_words[unit_start]
+        position, end, head = first_words[unit_start]
         if position >= offset:
             return ""
-        return canon[position:min(end, offset)].rsplit("/", 1)[-1].lower()
+        if end <= offset:
+            return head
+        return canon[position:offset].rsplit("/", 1)[-1].lower()
 
     found: list[tuple[int, str, str, bool]] = []
     for match in _WRAPPER_RE.finditer(canon):
@@ -2369,7 +2793,7 @@ def _env_clear_offsets(canon: str) -> list[int]:
             if (
                 word in ("-", "--ignore-environment", "-S")
                 or word.startswith("--split-string")
-                or re.fullmatch(r"-[A-Za-z]*[iS][A-Za-z]*", word)
+                or _r8_option_cluster(word, "iS")
             ):
                 offsets.append(match.start())
                 break
@@ -2405,10 +2829,21 @@ def _effective_identity_values(command: str, name: str) -> list[str] | None:
     occurrence = re.compile(
         rf"(?:(?<![A-Za-z0-9_])|(?<=-u)){re.escape(name)}(?![A-Za-z0-9_])"
     )
+    # r8 (REVIEW3 A3 BLOCKER 3): a value is read once. An assignment that
+    # starts INSIDE the previous value's run (``a=NAME=NAME=…``) would only
+    # re-read a strict suffix of that run — quadratic, 13 s at 256 KB, and
+    # the gate ran after it. Two assignments in one run cannot both equal
+    # the projection (different lengths), so the inner one is recorded as
+    # ``''`` (never the non-empty projection): the verdict is unchanged.
+    value_end = -1
     for match in occurrence.finditer(canon):
         start, end = match.span()
         if canon.startswith("=", end):
-            value = _IDENTITY_VALUE_RE.match(canon, end).group(1)
+            if start < value_end:
+                events.append((start, ""))
+                continue
+            found = _IDENTITY_VALUE_RE.match(canon, end)
+            value, value_end = found.group(1), found.end()
             events.append((start, "" if "$" in value else value))
         elif canon[start - 1:start] == "$" or (
             canon[max(0, start - 2):start] == "${"
@@ -3003,6 +3438,11 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
                 "non-shell tool and run a short command."
             )
         guard_fabric_launch(command, command)
+        # r8: the CI-wait checks below need "gh " in the heredoc-stripped
+        # text, and stripping never creates it; skip the (super-linear)
+        # heredoc stripper for every armed command that cannot need it.
+        if "gh " not in command:
+            return
         clean = strip_heredocs(command)
     else:
         clean = strip_heredocs(command)
@@ -3116,7 +3556,93 @@ def guard_native_child(tool_input: dict[str, object]) -> None:
         )
 
 
+# --- r8: the hook-budget watchdog (REVIEW3 A3 S1, recommendation (a)) -----
+#
+# The provider kills a PreToolUse command hook at its registered timeout
+# (10 s) and, unless the row sets ``onFailure: "block"`` (see the C6 ledger
+# for the host determination), a killed hook does NOT block the tool call.
+# Every armed-path scan is linear and the command size is capped, but the
+# constant depends on the host; so an ARMED session also runs under a
+# SIGALRM watchdog that, when it fires, writes a DENY decision and exits 0
+# well inside the provider's timeout. It interrupts Python code and long
+# ``re`` searches (the regex engine checks for signals). Unarmed sessions
+# keep the previous behaviour (no watchdog).
+
+#: Default budget in seconds; the provider's timeout is 10 s.
+R8_WATCHDOG_DEFAULT_S = 7.0
+#: Hard floor: an override can never make the watchdog fire sooner than this.
+R8_WATCHDOG_FLOOR_S = 1.0
+#: Session override, honoured only DOWNWARD (a value above the default, or
+#: malformed, reads as the default; below the floor reads as the floor).
+R8_WATCHDOG_ENV = "MASTERMIND_GUARD_BUDGET_S"
+
+
+class _R8BudgetExceeded(BaseException):
+    """Raised by the watchdog's SIGALRM handler (a BaseException, so no
+    ``except Exception`` on the judging path can swallow it)."""
+
+
+def r8_watchdog_seconds() -> float:
+    raw = os.environ.get(R8_WATCHDOG_ENV, "").strip()
+    try:
+        value = float(raw) if raw else R8_WATCHDOG_DEFAULT_S
+    except ValueError:
+        value = R8_WATCHDOG_DEFAULT_S
+    if not value == value or value > R8_WATCHDOG_DEFAULT_S:  # NaN, above default
+        value = R8_WATCHDOG_DEFAULT_S
+    return max(R8_WATCHDOG_FLOOR_S, value)
+
+
+def _r8_on_alarm(_signum: int, _frame: object) -> None:
+    raise _R8BudgetExceeded()
+
+
+def _r8_arm_watchdog() -> object:
+    """Arm the watchdog; returns the previous SIGALRM handler (or None when
+    the platform has no interval timer)."""
+    if not hasattr(signal, "setitimer"):
+        return None
+    previous = signal.signal(signal.SIGALRM, _r8_on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, r8_watchdog_seconds())
+    return previous
+
+
+def _r8_disarm_watchdog() -> None:
+    if hasattr(signal, "setitimer"):
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        except (OSError, ValueError):
+            pass
+
+
+def _r8_budget_denial() -> NoReturn:
+    deny(
+        "Mastermind shared-placement guard: guard budget exceeded — fail "
+        f"closed. Judging this command took longer than {r8_watchdog_seconds():g} s "
+        "(the hook's budget inside the provider's 10 s timeout, after which a "
+        "killed hook would not block), so it is refused. Run a shorter, "
+        "plain command; write long content to a file with a non-shell tool."
+    )
+
+
 def main() -> None:
+    armed = shared_placement_armed()
+    previous = _r8_arm_watchdog() if armed else None
+    try:
+        _main_body()
+        # Disarmed inside the try: an alarm landing between the verdict and
+        # here is still a (fail-closed) budget denial, never a traceback.
+        _r8_disarm_watchdog()
+    except _R8BudgetExceeded:
+        _r8_budget_denial()
+    finally:
+        if armed:
+            _r8_disarm_watchdog()
+            if previous is not None:
+                signal.signal(signal.SIGALRM, previous)
+
+
+def _main_body() -> None:
     try:
         payload = json.load(sys.stdin)
     except Exception:
