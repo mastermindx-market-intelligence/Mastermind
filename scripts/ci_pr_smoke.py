@@ -30,17 +30,24 @@ _PAPER_STAGE_SOURCES = frozenset({
 _PAPER_STAGE_TEST = "tests/test_paper_runtime_stage.py"
 
 # Identity-reviewed sources are pinned by exact sha256/site literals, not by
-# any same-stem test. The pin registry read for selection comes from the
+# any same-stem test. The pin registries read for selection come from the
 # trusted base commit (never the candidate checkout), so a candidate cannot
 # edit its own reviewed-file set; the test modules themselves still run from
 # the checkout and verify the checkout's pins against its sources. #2365
 # (merge group 42592403849) certified a scoped group without these modules
-# while master's full pytest failed the frozen identity pins.
-_IDENTITY_PIN_REGISTRY = "tests/executive_fabric_release_identity_review.py"
-_IDENTITY_REVIEW_TESTS = (
-    "tests/test_executive_reviewed_site_identity_tokens.py",
-    "tests/test_executive_fabric_release_identity_review.py",
-    "tests/test_hermes_fabric_native_identity_review.py",
+# while master's full pytest failed the frozen identity pins. Every frozen
+# registry module is wired with the test modules that enforce its pins:
+# the fabric release review chain and the dormant incident-source review
+# (enforced through reviewed_literal_spans in tests/executive_identity_review.py).
+_IDENTITY_PIN_REGISTRIES = (
+    ("tests/executive_fabric_release_identity_review.py", (
+        "tests/test_executive_reviewed_site_identity_tokens.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_hermes_fabric_native_identity_review.py",
+    )),
+    ("tests/executive_incident_identity_review.py", (
+        "tests/test_incident_identity_review.py",
+    )),
 )
 _MAX_REGISTRY_BYTES = 256_000
 
@@ -96,12 +103,21 @@ def _registry_subscript_key(target: ast.expr) -> str | None:
 
 
 def _mentions_name(node: ast.AST, name: str) -> bool:
-    return any(isinstance(sub, ast.Name) and sub.id == name
-               for sub in ast.walk(node))
+    """True when the name is referenced, including as an exact string key.
+
+    ``globals()['REVIEWED_FILES']`` reaches the registry through a string
+    constant rather than a Name node, so both spellings count as a mention.
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id == name:
+            return True
+        if isinstance(sub, ast.Constant) and type(sub.value) is str and sub.value == name:
+            return True
+    return False
 
 
 def _registry_blob(repo: pathlib.Path, base: str, path: str) -> bytes | None:
-    """Bounded registry blob read; None when the path is absent at base."""
+    """Bounded registry blob read; None only when absent at the base."""
     try:
         done = subprocess.run(
             ["git", "-C", str(repo), "cat-file", "blob", f"{base}:{path}"],
@@ -109,16 +125,26 @@ def _registry_blob(repo: pathlib.Path, base: str, path: str) -> bytes | None:
         )
     except (subprocess.SubprocessError, OSError):
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_UNAVAILABLE") from None
-    # An absent path (or an unreadable base ref) is reported on stderr with a
-    # nonzero exit; only a zero-exit read proves the blob's presence.
     if done.returncode != 0:
+        # A nonzero exit conflates absence with an unreadable object store.
+        # Only a listing that proves the path absent at the base keeps the
+        # legacy empty mapping; every unclear case fails closed.
+        try:
+            probe = subprocess.run(
+                ["git", "-C", str(repo), "ls-tree", base, "--", path],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=12,
+            )
+        except (subprocess.SubprocessError, OSError):
+            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_UNAVAILABLE") from None
+        if probe.returncode != 0 or probe.stdout.strip():
+            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_UNREADABLE")
         return None
     if len(done.stdout) > _MAX_REGISTRY_BYTES:
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_OVER_BOUND")
     return done.stdout
 
 
-def _registry_keys(repo: pathlib.Path, base: str, path: str,
+def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
                    seen: frozenset[str]) -> set[str]:
     """Extract the reviewed-file keys from one trusted-base registry module.
 
@@ -127,26 +153,70 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str,
     is executed. The recognized vocabulary is the frozen-literal shape:
     an initial ``REVIEWED_FILES = {...}``, constant subscript assignments,
     literal named dicts, ``REVIEWED_FILES.update(...)`` of those, and
-    ``from X import REVIEWED_FILES as ALIAS`` merges. Anything else that
-    could mutate the registry fails closed.
+    ``from X import REVIEWED_FILES as ALIAS`` merges. Every other statement
+    that mentions the registry name — in any position: alias assigns,
+    multi-target assigns, dynamic subscript keys, def-time decorators,
+    defaults, annotations and base classes, or exact string constants —
+    fails closed instead of silently under-extracting the reviewed set.
     """
     if path in seen:
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-    blob = _registry_blob(repo, base, path)
-    if blob is None or not blob:
+    if not text:
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
     try:
-        tree = ast.parse(blob.decode("utf-8"), filename=path)
+        tree = ast.parse(text.decode("utf-8"), filename=path)
     except (UnicodeError, SyntaxError):
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED") from None
     keys: set[str] | None = None
     literals: dict[str, set[str]] = {}
     imports: dict[str, str] = {}
+
+    def merge(argument: ast.expr, chain: frozenset[str]) -> None:
+        nonlocal keys
+        if keys is None:
+            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+        if isinstance(argument, ast.Name) and argument.id in literals:
+            keys |= literals[argument.id]
+            return
+        if isinstance(argument, ast.Name) and argument.id in imports:
+            blob = _registry_blob(repo, base, imports[argument.id])
+            if blob is None:
+                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            keys |= _registry_keys(repo, base, imports[argument.id], blob, chain)
+            return
+        added = _registry_dict_keys(argument)
+        if added is None:
+            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+        keys |= added
+
     for node in tree.body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            continue  # module docstring
+            continue  # module docstring or stray literal: cannot mutate
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue  # never executed during registry import
+            # Bodies run only when called and cannot affect the imported
+            # registry snapshot; decorator, default, annotation and base
+            # expressions execute at import and are therefore checked.
+            edges: list[ast.expr] = [*node.decorator_list]
+            args = getattr(node, "args", None)
+            if args is not None:
+                edges.extend(args.defaults)
+                edges.extend(d for d in args.kw_defaults if d is not None)
+                annotated = (*args.posonlyargs, *args.args, *args.kwonlyargs,
+                             *(a for a in (args.vararg, args.kwarg) if a))
+                edges.extend(a.annotation for a in annotated
+                             if a.annotation is not None)
+            if isinstance(node, ast.ClassDef):
+                edges.extend(node.bases)
+                edges.extend(k.value for k in node.keywords)
+            for bound in getattr(node, "type_params", ()):
+                edge = getattr(bound, "bound", None)
+                if edge is not None:
+                    edges.append(edge)
+            if node.returns is not None:
+                edges.append(node.returns)
+            if any(_mentions_name(edge, "REVIEWED_FILES") for edge in edges):
+                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            continue
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "REVIEWED_FILES":
@@ -156,25 +226,37 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str,
             continue
         if isinstance(node, ast.Import):
             continue
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-            if isinstance(target, ast.Name) and target.id == "REVIEWED_FILES":
-                if keys is not None:
+        if isinstance(node, ast.Assign):
+            if len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name) and target.id == "REVIEWED_FILES":
+                    if keys is not None:
+                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                    keys = _registry_dict_keys(node.value)
+                    if keys is None:
+                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                    continue
+                literal = _registry_subscript_key(target)
+                if literal is not None:
+                    if keys is None:
+                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                    keys.add(literal)
+                    continue
+                if (isinstance(target, ast.Subscript)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "REVIEWED_FILES"):
                     raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                keys = _registry_dict_keys(node.value)
-                continue
-            literal = _registry_subscript_key(target)
-            if literal is not None:
-                if keys is None:
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                keys.add(literal)
-                continue
-            if isinstance(target, ast.Name):
-                named = _registry_dict_keys(node.value)
-                if named is not None:
-                    literals[target.id] = named
-                continue
-            raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                if isinstance(target, ast.Name):
+                    named = _registry_dict_keys(node.value)
+                    if named is not None:
+                        literals[target.id] = named
+                    elif _mentions_name(node, "REVIEWED_FILES"):
+                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                    continue
+                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            if _mentions_name(node, "REVIEWED_FILES"):
+                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            continue
         if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
                 and isinstance(node.value.func, ast.Attribute)
                 and node.value.func.attr == "update"
@@ -182,46 +264,52 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str,
                 and node.value.func.value.id == "REVIEWED_FILES"):
             if keys is None or len(node.value.args) != 1 or node.value.keywords:
                 raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-            argument = node.value.args[0]
-            if isinstance(argument, ast.Name) and argument.id in literals:
-                keys |= literals[argument.id]
-            elif isinstance(argument, ast.Name) and argument.id in imports:
-                keys |= _registry_keys(repo, base, imports[argument.id], seen | {path})
-            else:
-                added = _registry_dict_keys(argument)
-                if added is None:
-                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-                keys |= added
+            merge(node.value.args[0], seen | {path})
             continue
         if isinstance(node, (ast.For, ast.While, ast.If, ast.Try, ast.With,
                              ast.AugAssign, ast.AnnAssign, ast.Delete,
                              ast.Raise, ast.Assert, ast.Global, ast.Nonlocal)):
             raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
-        if isinstance(node, ast.Expr) and _mentions_name(node, "REVIEWED_FILES"):
+        if _mentions_name(node, "REVIEWED_FILES"):
             raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
     if keys is None:
         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
     return keys
 
 
-def _reviewed_sources(repo: pathlib.Path, base: str) -> frozenset[str]:
-    """Read the identity-review pin registry from the trusted base commit.
+def _reviewed_registries(
+    repo: pathlib.Path, base: str,
+) -> tuple[tuple[frozenset[str], tuple[str, ...]], ...]:
+    """Read every wired identity pin registry from the trusted base commit.
 
-    The registry is parsed with ``ast`` only; no base tree code is executed.
-    A base object predating the registry keeps the legacy selection (an
-    empty set); a present-but-unrecognized registry fails closed instead of
-    silently dropping identity-reviewed sources from smoke coverage.
+    Each registry is parsed with ``ast`` only; no base tree code is executed.
+    A base object predating a registry keeps that registry's legacy empty
+    source set (nothing was identity reviewed there, so no ownership mapping
+    can be lost); an unreadable or present-but-unrecognized registry fails
+    closed instead of silently dropping identity-reviewed sources from
+    smoke coverage.
     """
-    if _registry_blob(repo, base, _IDENTITY_PIN_REGISTRY) is None:
-        # Missing object or pre-registry trusted base: nothing was identity
-        # reviewed there, so no ownership mapping can be lost.
-        return frozenset()
-    return frozenset(_registry_keys(repo, base, _IDENTITY_PIN_REGISTRY, frozenset()))
+    out: list[tuple[frozenset[str], tuple[str, ...]]] = []
+    for path, tests in _IDENTITY_PIN_REGISTRIES:
+        blob = _registry_blob(repo, base, path)
+        sources = (frozenset() if blob is None else
+                   frozenset(_registry_keys(repo, base, path, blob, frozenset())))
+        out.append((sources, tests))
+    return tuple(out)
 
 
-def select_modules(repo: pathlib.Path, changed: Sequence[str], *,
-                   reviewed_sources: frozenset[str] = frozenset()) -> tuple[str, ...]:
-    """Pick fixed dependencies then source-proximate tests, at most 3."""
+def select_modules(
+    repo: pathlib.Path, changed: Sequence[str], *,
+    identity_registries: Sequence[tuple[frozenset[str], tuple[str, ...]]],
+) -> tuple[str, ...]:
+    """Pick fixed ownership dependencies, then capped source-proximate tests.
+
+    Fixed dependencies — the paper stage pin and the owning test modules of
+    every identity registry whose reviewed sources intersect the diff — are
+    exempt from the module cap, so a selection legitimately exceeds
+    _MAX_SELECTED_MODULES when several ownership groups fire together and
+    the cap never truncates a required owner.
+    """
     root = repo.resolve(strict=True)
     selected: set[str] = set()
     for path in changed:
@@ -241,10 +329,12 @@ def select_modules(repo: pathlib.Path, changed: Sequence[str], *,
     if _PAPER_STAGE_SOURCES.intersection(changed):
         required += (_PAPER_STAGE_TEST,)
     # Identity-reviewed ownership keeps the same fixed-dependency rule as the
-    # paper stage pin: the owning review modules cannot be lost to alphabetic
-    # ties or the module cap, and an unavailable module fails the check.
-    if reviewed_sources.intersection(changed):
-        required += _IDENTITY_REVIEW_TESTS
+    # paper stage pin: each registry contributes exactly its own owning
+    # modules, they cannot be lost to alphabetic ties or the module cap, and
+    # an unavailable module fails the check.
+    for sources, tests in identity_registries:
+        if sources.intersection(changed):
+            required += tests
     for path in required:
         file = root / path
         try:
@@ -298,18 +388,21 @@ def main() -> int:
     paths = _diff_paths(root, args.base, args.head)
     check_changed_python(root, paths)
     # args.base is the trusted-base classifier's verified base SHA; the
-    # reviewed-source registry is read from that commit, not the checkout.
+    # reviewed-source registries are read from that commit, not the checkout.
     selected = select_modules(
-        root, paths, reviewed_sources=_reviewed_sources(root, args.base),
+        root, paths, identity_registries=_reviewed_registries(root, args.base),
     )
     print(f"CI_PR_SMOKE selected_tests={len(selected)} changed_paths={len(paths)}",
           flush=True)
     try:
         # The GitHub job enforces its own overall timeout; subprocess is
-        # additionally bounded to prevent a single slow test from stalling PRs.
+        # additionally bounded to prevent a single slow test from stalling
+        # PRs. The bound also covers the fixed identity-review ownership
+        # modules (~61s warm locally on an M2; shared runners run slower),
+        # while staying inside the pr_fast job's own minutes budget.
         done = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--tb=short", *selected],
-            cwd=root, check=False, timeout=210,
+            cwd=root, check=False, timeout=330,
         )
     except subprocess.TimeoutExpired:
         print("CI_PR_SMOKE_TEST_BUDGET_EXHAUSTED", file=sys.stderr)
