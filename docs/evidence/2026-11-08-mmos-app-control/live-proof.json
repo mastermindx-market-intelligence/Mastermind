@@ -68,7 +68,6 @@
     "config_sha256": "fb85285daee8ef9fa201c7b92112c018e3103a057c207b941b87df15942f1b1a",
     "plist_sha256": "0b6313a7cfc18eeaec676a715b8450e407cc71f9696f4d0d11ed811e8e72aa91",
     "observed_pid": 56245,
-    "observed_uid": 458,
     "listener": "127.0.0.1:8443",
     "transaction_marker_absent": true,
     "network_closure_sha256": "e799725fd46fd7746d5ad6f1e17243517945ed26c2d421a8710ae31871bc0cdb",
