@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the 20 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the 21 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -34,6 +34,7 @@ Direct entry points for the 20 files amended in this successor. Each file retain
 | [Intelligence Hub](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | Updated the entry map for later current/reference work, added exact Build and Archive destinations, and distinguished provisional research-list returns. |
 | [Bonds decision workspace](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0) | Aligned the retained market read across desktop, phone and tablet duration review; preserved all scenario calculations, inputs and inspector controls. |
 | [Tools and Research Launcher](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0) | Qualified the three displayed search matches as examples in dark/light phone references, preserving the global search scope and all destinations. |
+| [Design foundations and archetypes](https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0) | Added a first-entry guide from migrated composition references to the exact F02 Candidate 2 guide, retaining historical lineage, draft status and acceptance holds. |
 
 ## Verified mobile meaning corrections
 
@@ -1219,9 +1220,64 @@ Both operations returned APPLIED_RESPONSE_OBSERVED:
 
 Explicit finish released only `ZZ-0` and `16H-0`. No implementation, route, permissions, account or release mutation occurred.
 
+## Design foundations — connect migrated references to the current candidate
+
+[File/page](https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0), **Archetype Starters · Governed**. The migrated file began directly with nine starter boards. Their STARTER ONLY footers correctly limit their role to composition grammar. On the retained foundations page, original Figma/canonical-library and original Paper projection labels remain visible, but the entry provided no pointer to the current F02 shared-system candidate.
+
+The correction adds one entry guide. It preserves the original library identity and does not declare Figma superseded, promote a candidate to approved status, rewrite a shared contract or create a new component owner.
+
+### Exact destination and source qualification
+
+Root independently read the current canonical Paper entry [`47Q-0` on `p-9-0`](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0). It explicitly identifies **F02 / 1.0.0-candidate.2**, Draft for independent review, unverified production behavior, domain ownership and joint F01/F02 acceptance/provenance holds.
+
+Root also read the relevant Macro source at immutable `4bd1948ac0d9ecf40301caf70cbf8cf1619fd2c4`:
+
+| Source | Blob | Relevant boundary |
+| --- | --- | --- |
+| [MASTER_PRODUCT_DESIGN_SYSTEM_V1.md](https://github.com/mastermindx-market-intelligence/Macro/blob/4bd1948ac0d9ecf40301caf70cbf8cf1619fd2c4/research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md) | `f8a28702767b78b2e48299f55a85e21a5c2360cd` | Repository-law precedence; an unapproved reference remains provisional. |
+| [DESIGN_DOCTRINE.md](https://github.com/mastermindx-market-intelligence/Macro/blob/4bd1948ac0d9ecf40301caf70cbf8cf1619fd2c4/docs/DESIGN_DOCTRINE.md) | `2ef014e6ccb23c23922e22291d2cfe0904c60345` | Separate Paper organization, builder guidance, implemented behavior and acceptance. |
+
+These product-source references do not replace the existing protected Mastermind law pin.
+
+### Native entry guide
+
+New `1D4-0`, **00 · START HERE · Migrated references + F02 Candidate 2**, is first in the page's layer/board order. Its key content:
+
+- `1D6-0` labels the file's material **MIGRATED COMPOSITION REFERENCES**.
+- `1D8-0` explains that the original design lineage and historical library labels remain part of the retained record.
+- `1D9-0` / `1DB-0` points to **F02 Candidate 2 · Read me & Build contract**.
+- `1DC-0` says **DRAFT CANDIDATE**.
+- `1DD-0` names entry board `47Q-0`; `1DE-0` contains the exact canonical Paper page URL.
+- `1DF-0` preserves unverified production behavior, joint F01/F02 acceptance HOLD, repository law and each product's existing owners.
+- `1DG-0` maps the local starters, retained foundations and separately Proposed CAGR period/recovery page.
+
+Root inspected the complete **1440×431** native capture. The source link, status and local-page pointers fit without clipping. Native placement is x2320/y−1590, with80px of horizontal clearance after starter `2U-0`; it overlaps no original board. The native canvas retains the duplication placement even though the replacement HTML supplied another position, so only the observed position is claimed here.
+
+### Preservation and effects
+
+The nine original starter IDs retain their exact dimensions, canvas coordinates and relative order. The final board order is the new guide followed by those same nine originals.
+
+Exact text readback preserved all30 leaves of the copied source starter `1-0`, plus charter `A6-0` and dark/light atlas lineage `BH-0`/`E3-0`: **33 sampled original leaves unchanged**. No existing board was rewritten. The original Figma identity `IKqTiq7jeVBJusBfoHnPsH`, original Paper projection `01M2WGNCX9475G79JRKJTCM08P`, STARTER ONLY limits and the separately Proposed CAGR work remain intact.
+
+All five operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-foundations-entry-copy-20261109-c4-sd`
+- `paper-foundations-entry-content-20261109-c4-sd`
+- `paper-foundations-entry-order-20261109-c4-sd`
+- `paper-foundations-entry-names-20261109-c4-sd`
+- `paper-foundations-entry-finish-20261109-c4-sd`
+
+The source starter was duplicated; only the duplicate was replaced with the guide. Explicit finish released only `1D4-0`. Token tools, original atlases, the canonical candidate and its holds were not modified. This is a discovery/reference improvement, not executed link navigation or implementation acceptance.
+
+### Returns dossier — later coverage already resolves the remaining candidates
+
+A bounded read-only audit of `01M6Y39WH7QVTH07RTWHTSRP65` found an explicit primary entry to the current Terminal Returns Calendar. Its later build contract `197-0` already points to accepted Terminal session states `28BZ-0`, `28FS-0` and `28LZ-0`, and labels `LV-0` historical.
+
+The contract distinguishes requested and actual endpoints, selected sessions,21 intervals versus22 closes, price/coverage/adjustment limits, exact symbol/date/basis identity and superseded responses. AAPL historical dossier and NVDA newer studies retain their separate identities. No additional amendment was justified. All retained historical prices/clocks and held `AD-0` remain unchanged.
+
 ## Active continuation
 
-The successor covers20 design files. The shared tool-search references now distinguish examples from an exhaustive result set. Remaining bounded audits are checking changed authority pointers in migrated foundations and contextual consistency in the retained Returns dossier; preserve reference status and existing fixtures.
+The successor covers21 design files. All concrete findings from the latest bounded reviews—Expectation finder availability, Hub directory drift, Bonds duration-review parity, tool-search example completeness and the foundations handoff—are implemented and verified in Paper. Later Crypto, Risk, OS sharing, canonical F02 and Returns dossier coverage was preserved where another amendment would duplicate existing work. Remaining runtime, account, source-integration, held-target and release obligations retain their existing owners; static design proof does not close them.
 
 ## Acceptance boundary
 
