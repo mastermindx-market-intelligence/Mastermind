@@ -1,7 +1,7 @@
 # Mastermind OS — Always-on Team conversations and creation
 
-Date: 9 November 2026 UTC / 8 November 2026 America/Vancouver.  
-Operation: hermes-team-conversations-paper-20261108-c3.  
+Date: 9 November 2026 UTC / 8 November 2026 America/Vancouver.\
+Operation: hermes-team-conversations-paper-20261108-c3.\
 Status: **Paper design and interactive companion complete. Runtime integration and production acceptance remain pending in the existing implementation programme.**
 
 ## Outcome and entry points
@@ -22,16 +22,16 @@ This lane added **21 editable native Paper artboards**: 16 product frames, three
 
 Paper contains the editable visual specification, complete screen/state coverage and build annotations. The available Paper adapter does not provide a supported interaction-wiring API. The standalone HTML therefore supplies the executable click-through demonstration: download/open it in a browser and use **Advance sample** and **Connection** to exercise the simulated states. It contains original interface code and sample data, no production donor implementation, credentials, model calls or live scheduler. Only theme/language preferences persist across reload; a reconnect demonstration preserves the current in-memory conversation and draft.
 
-The HTML is 82,203 bytes; SHA-256:  
+The HTML is 82,203 bytes; SHA-256:\
 9220b233366efdf0d8d7c3f92a5a47e2a9271b1b3c4dc7d994c8cb3ac5d99ad6
 
 ## Assignment, sources and ownership
 
 The Chairman assigned complementary Paper work alongside the active integration session. This lane owns its HC/HS/HB frames and this guide. It does not take over Fable's live integration, maintenance, workers, provider processes, runtime custody or release holds.
 
-Protected procedure pin: **Mastermind ed7991199ccf76027f7acccc283c539c175e7e16**. The compatible protected docs/sol_skills/INDEX.md, applicable Paper/source/continuity/delivery laws and design instructions were read against the pinned sources.  
-Design source pin: **Macro 983e4d5439e5f318b9f713472d1511d0b93d123b**. The existing Noir/Atelier layout, typography, navigation and neutral palette are retained.  
-Source carrier: **sol/hermes-team-conversations-paper-20261108-c3**, one owned document path.  
+Protected procedure pin: **Mastermind ed7991199ccf76027f7acccc283c539c175e7e16**. The compatible protected docs/sol_skills/INDEX.md, applicable Paper/source/continuity/delivery laws and design instructions were read against the pinned sources.\
+Design source pin: **Macro 983e4d5439e5f318b9f713472d1511d0b93d123b**. The existing Noir/Atelier layout, typography, navigation and neutral palette are retained.\
+Source carrier: **sol/hermes-team-conversations-paper-20261108-c3**, one owned document path.\
 Authenticated source author: **mastermindx-3**. No technical review is represented as a GitHub approval.
 
 The initial coordination is recorded on [#2338](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2338#issuecomment-6731279263). Delivery of that comment is evidence of coordination, not evidence that another session has picked up this work. The other session's final source package was independently read at the immutable commit linked above; its guide blob is ff0388d4871b04ab722d2f240ea8f2131a528cff.
