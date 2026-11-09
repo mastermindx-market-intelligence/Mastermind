@@ -1,0 +1,137 @@
+{
+  "min_pure_children": 2,
+  "parent_names": [
+    "NoDur",
+    "Durbl",
+    "Manuf",
+    "Enrgy",
+    "HiTec",
+    "Telcm",
+    "Shops",
+    "Hlth",
+    "Utils",
+    "Other"
+  ],
+  "all_49_industries": 49,
+  "pure_industries": 38,
+  "mixed_excluded": {
+    "Toys": {
+      "Durbl": 5,
+      "Manuf": 1,
+      "NoDur": 90
+    },
+    "Hshld": {
+      "Durbl": 38,
+      "Manuf": 18,
+      "NoDur": 21,
+      "Other": 1
+    },
+    "Clths": {
+      "Manuf": 2,
+      "NoDur": 120
+    },
+    "BldMt": {
+      "Durbl": 1,
+      "Enrgy": 3,
+      "Manuf": 69,
+      "NoDur": 100,
+      "Other": 60
+    },
+    "ElcEq": {
+      "Durbl": 9,
+      "HiTec": 5,
+      "Manuf": 14
+    },
+    "Autos": {
+      "Durbl": 6,
+      "HiTec": 1,
+      "Manuf": 9,
+      "NoDur": 2
+    },
+    "PerSv": {
+      "Other": 644,
+      "Shops": 76
+    },
+    "BusSv": {
+      "Durbl": 1,
+      "HiTec": 11,
+      "Manuf": 10,
+      "Other": 183,
+      "Shops": 1
+    },
+    "Paper": {
+      "Manuf": 102,
+      "NoDur": 6
+    },
+    "Boxes": {
+      "Manuf": 25,
+      "Other": 10
+    },
+    "Meals": {
+      "Other": 21,
+      "Shops": 41
+    }
+  },
+  "one_or_zero_child_parents": {
+    "Durbl": [],
+    "Telcm": [
+      "Telcm"
+    ],
+    "Utils": [
+      "Util"
+    ]
+  },
+  "retained": {
+    "NoDur": [
+      "Agric",
+      "Beer",
+      "Books",
+      "Food",
+      "Smoke",
+      "Soda",
+      "Txtls"
+    ],
+    "Manuf": [
+      "Aero",
+      "Chems",
+      "FabPr",
+      "Guns",
+      "Mach",
+      "Rubbr",
+      "Ships",
+      "Steel"
+    ],
+    "Enrgy": [
+      "Coal",
+      "Oil"
+    ],
+    "HiTec": [
+      "Chips",
+      "Hardw",
+      "LabEq",
+      "Softw"
+    ],
+    "Shops": [
+      "Rtail",
+      "Whlsl"
+    ],
+    "Hlth": [
+      "Drugs",
+      "Hlth",
+      "MedEq"
+    ],
+    "Other": [
+      "Banks",
+      "Cnstr",
+      "Fin",
+      "Fun",
+      "Gold",
+      "Insur",
+      "Mines",
+      "Other",
+      "RlEst",
+      "Trans"
+    ]
+  },
+  "mapping_basis": "Source SIC code sets at annual June portfolio formation; Other is the catch-all in the 10-way scheme. A 49-way child is retained only if 100% of its published SIC codes map to one 10-way parent. No firm-weight composition or parent-return arithmetic identity is implied."
+}

@@ -1,0 +1,38 @@
+{
+  "after": {
+    "dev": 16777232,
+    "ino": 2017189002,
+    "mode": 384,
+    "mtime_ns": 1794059190124133516,
+    "size": 9827,
+    "uid": 501
+  },
+  "after_sha256": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+  "application_activation": false,
+  "backup": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/review_evidence/hermes_h4/capacity-bridge-predecessor-20261107.py",
+  "before": {
+    "dev": 16777232,
+    "ino": 2001281711,
+    "mode": 384,
+    "mtime_ns": 1793962406878940955,
+    "size": 8315,
+    "uid": 501
+  },
+  "before_sha256": "4d3f88a1b0ef0cbb501439acacebcbb5aa874cbd84c27755e87becda4b8a245c",
+  "candidate_sha256": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+  "gateway_after": "48443 Fri Nov  6 15:17:32 2026     /Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+  "gateway_before": "48443 Fri Nov  6 15:17:32 2026     /Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+  "gateway_restart": false,
+  "observed_at": "2026-11-07T13:46:30.125141+00:00",
+  "operation": "hermes-capacity-routing-completion-20261107-c4",
+  "original_gateway_unchanged": true,
+  "postimage_verified": true,
+  "profile_change": false,
+  "provider_request": false,
+  "running_mcp_version": "NOT_ATTESTED_BY_DISK_WRITE",
+  "schema": "mastermind.hermes_h4_capacity_bridge_install.v1",
+  "source_commit": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "state": "APPLIED_SOURCE_ONLY",
+  "target": "/Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py",
+  "worker_dispatch": false
+}

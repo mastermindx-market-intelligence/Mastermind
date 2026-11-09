@@ -1,0 +1,240 @@
+"""Render the intended BYOK text-model into the *native* Hermes profile.
+
+Pure configuration: does not read keys, contact providers, enable MCP, enable
+vision/computer use, grant Executive admission, or start a process. Only the
+already reviewed WP2 provider names and WP3 disabled Steward server are used.
+"""
+from __future__ import annotations
+
+from integrations.hermes_harness.native_mcp import render_disarmed_native_config
+from integrations.hermes_models.contract import (
+    API_MODE, PROFILE_PRIMARY, PROVIDERS, MODELARK_CONTRACT, native_provider,
+)
+from integrations.hermes_models.profile_config import render_profile
+from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.profile import RuntimeProfile
+from integrations.hermes_steward.config_guard import _load_unique_yaml
+
+
+def _expected_providers() -> dict:
+    names = (
+        "zai.glm-5.3",
+        "byteplus-modelark.glm-5.3-flash",
+        "minimax.attended",
+        "cursor-pool",
+    )
+    result: dict = {}
+    for ident in names:
+        spec = PROVIDERS[ident]
+        entry: dict = {
+            "name": spec.display_name,
+            "api": spec.base_url,
+            "key_env": spec.credential_env,
+            "api_mode": API_MODE,
+            "default_model": spec.served_model,
+        }
+        if ident == "byteplus-modelark.glm-5.3-flash":
+            entry["models"] = {
+                spec.served_model: {},
+                PROVIDERS["byteplus-modelark.deepseek-v4.1-flash"].served_model: {},
+            }
+        if not spec.enabled_in_profile:
+            entry["enabled"] = False
+        result[spec.hermes_name] = entry
+    return result
+
+
+def render_disarmed_native_byok(profile: RuntimeProfile) -> str:
+    """Compose an exact, keyless vendor config with no automatic fallback.
+
+    Profile authority continues to require the existing pinned role source.
+    A configured model/provider is not a successful inference or credential
+    grant. Primary, URL, mode, and key *names* are checked before publication.
+    """
+    if not isinstance(profile, RuntimeProfile) or profile.role not in PROFILE_PRIMARY:
+        raise RuntimeRefusal("NATIVE_BYOK_ROLE_REFUSED")
+    if profile.extension_allowlist:
+        raise RuntimeRefusal("NATIVE_BYOK_EXTENSION_NOT_INSTALLED")
+    try:
+        native = _load_unique_yaml(render_disarmed_native_config(profile).encode("utf-8"))
+        overlay = _load_unique_yaml(render_profile(
+            profile.role, native_provider_id=profile.native_provider_id,
+        ).encode("utf-8"))
+    except RuntimeRefusal:
+        raise
+    except (OSError, RuntimeError, ValueError, UnicodeError):
+        raise RuntimeRefusal("NATIVE_BYOK_SOURCE_INVALID") from None
+    if not isinstance(native, dict) or not isinstance(overlay, dict):
+        raise RuntimeRefusal("NATIVE_BYOK_SOURCE_INVALID")
+    if set(overlay) != {"model", "providers", "auxiliary", "agent", "toolsets"}:
+        raise RuntimeRefusal("NATIVE_BYOK_OVERLAY_DRIFT")
+    if (
+        not isinstance(overlay["agent"], dict)
+        or set(overlay["agent"]) != {"disabled_toolsets"}
+        or set(overlay["agent"]["disabled_toolsets"]) != set(native["agent"]["disabled_toolsets"])
+        or len(overlay["agent"]["disabled_toolsets"]) != len(native["agent"]["disabled_toolsets"])
+        or overlay["toolsets"] != native["toolsets"]
+    ):
+        raise RuntimeRefusal("NATIVE_BYOK_TOOLSET_DRIFT")
+    try:
+        primary = native_provider(profile.role, profile.native_provider_id)
+    except (ValueError, KeyError):
+        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
+    required_model = {
+        "provider": primary.hermes_name,
+        "default": primary.served_model,
+        "base_url": primary.base_url,
+        "key_env": primary.credential_env,
+        "api_mode": API_MODE,
+    }
+    if overlay["model"] != required_model:
+        raise RuntimeRefusal("NATIVE_BYOK_MODEL_DRIFT")
+    if overlay["providers"] != _expected_providers():
+        raise RuntimeRefusal("NATIVE_BYOK_PROVIDERS_DRIFT")
+    if MODELARK_CONTRACT["base_url"].rstrip("/") in MODELARK_CONTRACT["personal_plan_base_urls"]:
+        raise RuntimeRefusal("NATIVE_BYOK_REALM_DRIFT")
+    if native["mcp_servers"]["mastermind_steward"]["enabled"] is not False:
+        raise RuntimeRefusal("NATIVE_BYOK_MCP_ENABLED")
+    if primary.provider_id == "cursor-pool":
+        raise RuntimeRefusal("NATIVE_BYOK_DISABLED_PRIMARY")
+    # No auxiliary/vision model is added at this stage: the required
+    # computer-use enrollment and mini1 effect authorization do not exist.
+    native["model"] = required_model
+    native["providers"] = overlay["providers"]
+    # The WP1 base has an inert-looking vision auxiliary stanza. Removing
+    # it is necessary: this wave has no accepted mini1 vision grant.
+    native.pop("auxiliary", None)
+    import yaml  # no PyYAML import for the unrelated Secretary shadow scanner
+
+    rendered = (
+        "# Mastermind role model configured, not provider-armed or verified.\n"
+        "# Steward MCP, vision, computer-use and automatic fallback remain OFF.\n"
+        + yaml.safe_dump(native, sort_keys=False, allow_unicode=False)
+    )
+    if len(rendered.encode("utf-8")) > 64 * 1024:
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_TOO_LARGE")
+    try:
+        checked = _load_unique_yaml(rendered.encode("utf-8"))
+    except ValueError:
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID") from None
+    if checked != native or any(
+        forbidden in rendered.lower()
+        for forbidden in ("api_key:", "fallback_model:", "api/coding", "access_token:")
+    ):
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+    return rendered
+
+
+def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
+    """Compose the exact native config of a *qualified* optional consumer.
+
+    The Steward, Executive-read and Paper servers stay disabled and every
+    other member of the reviewed disarmed config is unchanged. Add the exact
+    MCP/OAuth entry of the Executive connection, whose tool filter is empty so
+    no raw Executive tool becomes model-facing, and the plugin grant that
+    names exactly that one server. V2 also selects the native Agent OS memory
+    provider and disables the two independent file-memory stores.
+
+    The bearer token and any client secret stay with the incumbent OAuth
+    owner and its token storage. This config never carries one.
+    """
+    from integrations.hermes_harness.native_mcp import (
+        render_consumer_mcp_server,
+        render_consumer_plugin_config,
+    )
+
+    # The same installer-owned disabled catalog is retained when the existing
+    # selected-child connection is enrolled. It adds no plugin or MCP grant.
+    from integrations.hermes_harness.executive_paper_mcp import render_disarmed_native_exec_paper
+    if publication.session.role != profile.role:
+        raise RuntimeRefusal("NATIVE_CONSUMER_ROLE_MISMATCH")
+    base = render_disarmed_native_exec_paper(profile)
+    try:
+        native = _load_unique_yaml(base.encode("utf-8"))
+    except ValueError:
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID") from None
+    if not isinstance(native, dict) or not isinstance(native.get("mcp_servers"), dict):
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+    if native["mcp_servers"]["mastermind_steward"]["enabled"] is not False:
+        raise RuntimeRefusal("NATIVE_BYOK_MCP_ENABLED")
+    server = render_consumer_mcp_server(publication)
+    plugins = render_consumer_plugin_config(publication)
+    native["mcp_servers"][publication.mcp.server] = server
+    native["plugins"] = plugins
+    from integrations.hermes_harness.native_executive_consumer import ExecutiveContextConsumerPublication
+    if type(publication) is ExecutiveContextConsumerPublication:
+        # Keep native MemoryManager/loader ownership. The held loader resolves
+        # this fixed provider to the original non-bundled consumer package.
+        memory = native.setdefault("memory", {})
+        if type(memory) is not dict:
+            raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+        memory["provider"] = publication.context.provider
+        # Agent OS is the sole durable memory owner for this composition.
+        # Native defaults otherwise also load independent MEMORY.md / USER.md.
+        memory["memory_enabled"] = False
+        memory["user_profile_enabled"] = False
+    import yaml  # no PyYAML import for the unrelated Secretary shadow scanner
+
+    rendered = (
+        "# Mastermind role model configured, not provider-armed or verified.\n"
+        "# Steward MCP, vision, computer-use and automatic fallback remain OFF.\n"
+        + yaml.safe_dump(native, sort_keys=False, allow_unicode=False)
+    )
+    if len(rendered.encode("utf-8")) > 64 * 1024:
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_TOO_LARGE")
+    try:
+        checked = _load_unique_yaml(rendered.encode("utf-8"))
+    except ValueError:
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID") from None
+    # The independently validated, disabled Steward entry retains its exact
+    # approved environment placeholder. Only the new Executive connection and
+    # plugin grant must contain no bearer template at all.
+    import json
+    consumer_text = json.dumps(
+        {"server": server, "plugins": plugins}, ensure_ascii=False).lower()
+    if (checked != native or any(
+        forbidden in rendered.lower()
+        for forbidden in ("api_key:", "fallback_model:", "api/coding", "access_token:",
+                          "client_secret:")
+    ) or "bearer " in consumer_text):
+        raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+    if checked["mcp_servers"][publication.mcp.server] != server:
+        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_CONFIG_INVALID")
+    if checked["plugins"] != plugins:
+        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_CONFIG_INVALID")
+    return rendered
+
+
+def expected_native_config(profile: RuntimeProfile, consumer=None, *, evaluation_inputs=None) -> str:
+    """The exact native config bytes this profile must carry.
+
+    Without a qualified consumer this is the reviewed disarmed BYOK/read
+    catalog. With one, the existing selected-child connection and its exact
+    plugin grant are composed onto that same catalog. No credential is added.
+    """
+    if consumer is None and evaluation_inputs is None:
+        from integrations.hermes_harness.executive_paper_mcp import render_disarmed_native_exec_paper
+        return render_disarmed_native_exec_paper(profile)
+    from integrations.hermes_harness.native_executive_consumer import (
+        publication_from_document,
+    )
+    rendered = render_qualified_native_byok(profile, publication_from_document(consumer))
+    if evaluation_inputs is None:
+        return rendered
+    from pathlib import Path
+    if (type(evaluation_inputs) is not dict or set(evaluation_inputs) != {"schema", "artifact_root"}
+            or evaluation_inputs["schema"] != "mastermind.hermes_native_eval_inputs/v1"
+            or profile.role != "mmmeta"
+            or native_provider(profile.role, profile.native_provider_id).provider_id != "zai.glm-5.3"
+            or type(evaluation_inputs["artifact_root"]) is not str
+            or not Path(evaluation_inputs["artifact_root"]).is_absolute()
+            or consumer.get("schema") not in {"mastermind.hermes_native_executive_consumer/v3",
+                                               "mastermind.hermes_native_executive_consumer/v4"}):
+        raise RuntimeRefusal("NATIVE_EVAL_CONFIG_UNQUALIFIED")
+    native = _load_unique_yaml(rendered.encode("utf-8"))
+    # Native agent initialization owns this setting. The original unselected
+    # renderers remain byte-identical; trial effort stays per admission.
+    native["model"]["streaming"] = False
+    import yaml
+    return ("# Explicit native EVAL inputs select nonstreaming model requests.\n"
+            + yaml.safe_dump(native, sort_keys=False, allow_unicode=False))

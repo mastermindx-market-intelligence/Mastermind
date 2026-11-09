@@ -1,0 +1,48 @@
+{
+  "schema": "commission10.research_package.v1",
+  "created_at": "2026-10-04T08:05:54.431574+00:00",
+  "scope": "research_only_no_implementation_authority",
+  "files": [
+    {
+      "path": "AUDIT_LEDGER.md",
+      "bytes": 10930,
+      "sha256": "242ca7c02a6c73293a03c5d13e44f390cd5608c4db3655aedc76771be2ff837d"
+    },
+    {
+      "path": "CONSISTENCY_RESULTS.json",
+      "bytes": 3400,
+      "sha256": "9fc43d79bd0c41e6fe458828ec98c361a00e86306decc6a9d93afa1f863a75eb"
+    },
+    {
+      "path": "FINAL_REPORT.md",
+      "bytes": 89648,
+      "sha256": "651fb05fe285e25b22fc1c005069b0213e7d163b618e8370ce3d88a00a9d1e99"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3157,
+      "sha256": "7117325976b5648e7c93dd8e127b792532fab0f4abcdaf58a8fe6b0d8908c448"
+    },
+    {
+      "path": "REPOSITORY_SOURCE_INVENTORY.json",
+      "bytes": 34389,
+      "sha256": "a51245dbf0d5172ea92ab3bef310af5cf9ae899a220c35f636e0f1740a75e5cc"
+    },
+    {
+      "path": "SOURCES.md",
+      "bytes": 24011,
+      "sha256": "2fb240a2d44dcf087f2dce1861fc122f5c7418205f6dc9133d531e1389744974"
+    },
+    {
+      "path": "VERIFICATION.md",
+      "bytes": 4324,
+      "sha256": "b0fe84a56e5b89eb3a9f9f56b09160e79059f91170f17e2bef12646de0153110"
+    },
+    {
+      "path": "verify_research.py",
+      "bytes": 9388,
+      "sha256": "94eaf51a246fb9bca146588a4e69784a2c66f92a1d7d6896e914e7aa87b603e3"
+    }
+  ],
+  "self_hash_excluded": true
+}

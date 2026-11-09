@@ -1,0 +1,155 @@
+{
+  "schema": "mastermind.fabric_application.protected_source_join.v1",
+  "observed_at": "2026-11-07T16:45:37.707158+00:00",
+  "parents": {
+    "application": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+    "protected_master": "de6966ce1524c01ab6ac06af5461370aa79f3994"
+  },
+  "governing_refresh": {
+    "compatible_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+    "current_source": "de6966ce1524c01ab6ac06af5461370aa79f3994",
+    "read_changes": [
+      "docs/sol_skills/BOOTSTRAP_KERNEL.md",
+      "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"
+    ],
+    "unchanged": [
+      "docs/sol_skills/INDEX.md",
+      "docs/DELIVERY_WORKFLOW.md",
+      "docs/SESSION_LOCAL_REVIEW_POLICY.md",
+      "docs/sol_skills/ACTIVE_EXECUTION.md"
+    ]
+  },
+  "production_decisions": [
+    "Preserve all nine APPLICATION/native-carrier changes and the independent protected three-member host-pull repair.",
+    "Extend the existing exact host inverse only from protected a42259-to-8af730 to also accept composed59728-to-bcfb8c.",
+    "Keep all existing historical parent identities, captured dependency checks, immutable publication ownership and live effect fences.",
+    "Preserve the protected portfolio context-request serialization while retaining the original Fabric correlation/recovery branch."
+  ],
+  "builder": {
+    "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "source_blobs": {
+      "base": "adbe443841ce6244b76b1650d3de460981c3b03f",
+      "ours": "ec60a994e52c73c5712599390cfc5b4d78222774",
+      "theirs": "a845c93b811069d8bc5fab76cf4cbaa8d1c30172"
+    },
+    "conflicts_resolved": [
+      {
+        "kind": "protected_host_inverse_before_existing_chain",
+        "matches": 1
+      },
+      {
+        "kind": "protected_host_inverse_before_existing_chain",
+        "matches": 1
+      }
+    ],
+    "exact_existing_parent": "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6",
+    "additional_exact_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "expected_current_manifest": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "sha256": "3f8e74a955f4973efcee0f795b2b4926694762cfa9cf1be4e039fa2ca316701f",
+    "source_bodies_emitted": false
+  },
+  "builds": {
+    "rows": [
+      {
+        "cohort": "107",
+        "returncode": 0,
+        "seconds": 0.07094308314844966,
+        "stdout": "{\"native_files\": 107, \"total_bytes\": 3240763, \"manifest_sha256\": \"59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a\", \"source_inventory_sha256\": \"d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+          "bytes": 10669
+        },
+        "native-source-inventory.json": {
+          "sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+          "bytes": 35834
+        }
+      },
+      {
+        "cohort": "109",
+        "returncode": 0,
+        "seconds": 0.0718666659668088,
+        "stdout": "{\"native_files\": 109, \"total_bytes\": 3483962, \"manifest_sha256\": \"f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2\", \"source_inventory_sha256\": \"b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2",
+          "bytes": 10868
+        },
+        "native-source-inventory.json": {
+          "sha256": "b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf",
+          "bytes": 36359
+        }
+      },
+      {
+        "cohort": "112",
+        "returncode": 0,
+        "seconds": 0.08899145806208253,
+        "stdout": "{\"native_files\": 112, \"total_bytes\": 3567137, \"manifest_sha256\": \"38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44\", \"source_inventory_sha256\": \"eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44",
+          "bytes": 11199
+        },
+        "native-source-inventory.json": {
+          "sha256": "eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b",
+          "bytes": 37275
+        }
+      }
+    ],
+    "source_builder_sha256": "3f8e74a955f4973efcee0f795b2b4926694762cfa9cf1be4e039fa2ca316701f",
+    "candidate_only": true
+  },
+  "qualification": {
+    "initial": {
+      "returncode": 1,
+      "junit": {
+        "tests": 906,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 6
+      },
+      "seconds": 237.86613287497312,
+      "log_sha256": "be2c9899e31f0a504701cbecc0e6cb21c915313897ce10fad39e3845fee37412"
+    },
+    "repaired_lineage_modules": {
+      "returncode": 0,
+      "junit": {
+        "tests": 240,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 1.8376227500848472,
+      "log_sha256": "7de5d072b4df5b78288befd7178933c349b4d017d9a57f24ee30671dc4374279"
+    },
+    "emitted_testcase_union": {
+      "passed": 886,
+      "failed": 0,
+      "skipped": 6
+    },
+    "emitted_testcase_union_count": 892,
+    "original_emitted_testcase_count": 890,
+    "repair_emitted_testcase_count": 240,
+    "counting_note": "Retain the original JUnit suite totals separately. Those totals differ from emitted testcase nodes. Union only the emitted classname/name/within-test occurrence records; do not sum repeated runs.",
+    "skips": "Six existing platform-specific cases; required hosted qualification remains owed.",
+    "repair": "Only two test modules changed after the initial run. Their full240-case run passes, including two added current109/112 host-guard refusals and exact historical109/112 fixture reconstruction. Production source unchanged after the initial run."
+  },
+  "v10_native_entry_sha256": "ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055",
+  "production_claims": {
+    "protected_merged": false,
+    "native_selected": false,
+    "c3_upgraded": false,
+    "original_j_consumed": false,
+    "grants_issued": false,
+    "vps_deployed": false,
+    "accepted": false
+  },
+  "inherited_whitespace_observation": {
+    "paths": [
+      "tests/test_executive_installed_snapshot_hardening.py",
+      "tests/test_host_pull_stage_diagnostics.py"
+    ],
+    "finding": "new blank line at EOF",
+    "scope": "Byte-identical protected postimages; root checks its diff against protected source without editing those incoming files."
+  }
+}

@@ -866,7 +866,7 @@ def test_automated_request_field_sets_are_exact_and_leave_v1_unchanged():
     assert cr.AUTOMATED_REQUIRED_FIELDS == frozenset(
         {"objective", "department", "priority", "execution_profile"}
     )
-    assert cr.AUTOMATED_OPTIONAL_FIELDS == cr.OPTIONAL_FIELDS
+    assert cr.AUTOMATED_OPTIONAL_FIELDS == cr.OPTIONAL_FIELDS | {"frontier_model_alias"}
 
 
 @pytest.mark.parametrize("request_ref,expected", _AUTOMATED_LITERAL_VECTORS)

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Mastermind Hermes runtime installer.
+# Upstream pin: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+# Any other SHA is refused by integrations.hermes_runtime.
+# Secrets stay in the 0600 file named by the profile. Do not pass them here.
+# This script does not call systemctl and does not fetch unless --fetch is set.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m integrations.hermes_runtime "$@"

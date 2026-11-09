@@ -1,0 +1,119 @@
+{
+  "all_affected_and_historical_control_cases": {
+    "errors": 0,
+    "failed": 0,
+    "names": [
+      "test_grok47_merged_source_digest_is_pinned",
+      "test_builder_refuses_tampered_overlay_base_despite_valid_forward[artifact_delivery.py]",
+      "test_builder_refuses_tampered_overlay_base_despite_valid_forward[pick.py]",
+      "test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds",
+      "test_protected_qwen_files_and_exact_context_reader_forward",
+      "test_publisher_successor_preserves_actual_manifest_and_prior_go_validator",
+      "test_publisher_forward_transform_refuses_partial_or_mixed_closures[other_member]",
+      "test_publisher_forward_transform_refuses_partial_or_mixed_closures[missing_member]",
+      "test_publisher_forward_transform_refuses_partial_or_mixed_closures[renamed_member]",
+      "test_publisher_forward_transform_refuses_partial_or_mixed_closures[added_member]",
+      "test_unknown_publisher_never_receives_forward_compatibility[current-native host-pull integrity parent closure differs]",
+      "test_unknown_publisher_never_receives_forward_compatibility[host-predecessor-native scoped-model parent closure]",
+      "test_committed_original_collection_successor_keeps_parent_closures_exact"
+    ],
+    "skipped": 0,
+    "tests": 13
+  },
+  "baseline": {
+    "counts": {
+      "errors": 0,
+      "failures": 7,
+      "skipped": 0,
+      "tests": 7
+    },
+    "junit_sha256": "d8ef7bc282457fe751f59e5ba608d8f1bf5b8b829c019ef4ef1ef2dc042dba77",
+    "log_sha256": "218944df0a7c6ed63ca5b292d653cccedf320e13701e28c83a0208117d918df4"
+  },
+  "builder_body_reread": false,
+  "changes": {
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": {
+      "after_blob": "59009f7c8e00a1ae2db51c293f36ee58ad2564bc",
+      "after_sha256": "587d5740a380a79ab1673a08d5ac461cccdae49c9a39eebf61a96055ede5e07e",
+      "before_blob": "cd821db44409ca2bfd0288d06090db8109d6e9a2",
+      "before_sha256": "b135fc30d0f9ddf3af0af04939dc8a0eaf0d42310f6b3673207ea47749d45508"
+    },
+    "tests/test_native_pool_policy_publication.py": {
+      "after_blob": "89ef60323a9252e10de7ee84d736f8179eac01a9",
+      "after_sha256": "d3a3a2df38583e0afc64a61c13ae6715e45cd42fa0573aaae1c3a6e219c918e7",
+      "before_blob": "425c588fcde730cfd297c397a81ca39f35dacdec",
+      "before_sha256": "2a02533db7334179c578c10d582426f67527066d351fd99e4955486586a3457c"
+    }
+  },
+  "hosted_failure": {
+    "diagnosis": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711908232",
+    "job_id": 128492240807,
+    "job_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42401548997/job/128492240807",
+    "observed_failure_names": [
+      "test_grok47_merged_source_digest_is_pinned",
+      "test_builder_refuses_tampered_overlay_base_despite_valid_forward[artifact_delivery.py]",
+      "test_builder_refuses_tampered_overlay_base_despite_valid_forward[pick.py]",
+      "test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds",
+      "test_protected_qwen_files_and_exact_context_reader_forward",
+      "test_publisher_successor_preserves_actual_manifest_and_prior_go_validator",
+      "test_unknown_publisher_never_receives_forward_compatibility"
+    ],
+    "root_opened_actual_job_log": true
+  },
+  "live_provider_acceptance": false,
+  "manifest_chain": {
+    "accepted_caller": "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_committed_original_collection_successor_keeps_parent_closures_exact",
+    "actual_current": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "collector_lineage": "current original-collection successor retained; no collector inverse",
+    "host_inverse_members": [
+      "ext/host_pull.sh",
+      "ext/host_pull_backend.py",
+      "ext/host_pull_daemon.sh"
+    ],
+    "host_predecessor": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "publisher_then_sparse_predecessor": "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+  },
+  "original_carrier_head": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "preserved": {
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": "all other top-level AST units unchanged, including historical source maps and existing fixtures",
+    "tests/test_native_pool_policy_publication.py": "all other top-level AST units unchanged, including historical source maps and existing fixtures"
+  },
+  "production_changed": false,
+  "repaired_run": {
+    "counts": {
+      "errors": 0,
+      "failures": 1,
+      "skipped": 0,
+      "tests": 68
+    },
+    "junit_sha256": "c94de2c7453c73d19aa7d67b47fda089b68e294a98958551d854f6210149bcae",
+    "log_sha256": "e852e3c99cfb3343f3ed929c090692a509506623abeb6a62f671905dff9bb58e"
+  },
+  "required_hosted_successor_ci": "pending normal publication; local qualification does not replace it",
+  "schema": "mastermind.hermes_historical_shadow_fixture_repair.v1",
+  "selected_generation_changed": false,
+  "separate_unchanged_local_refusal": {
+    "case": "test_operator_uses_real_selected_publisher_and_observes_same_target",
+    "cause": "not established; no production guard or unrelated fixture was changed",
+    "code": "POLICY_PUBLICATION_PREFLIGHT_REFUSED",
+    "exact_parent_test_and_fixture_prefix_unchanged": true,
+    "parent_reproduction": {
+      "counts": {
+        "errors": 0,
+        "failures": 1,
+        "skipped": 0,
+        "tests": 1
+      },
+      "junit_sha256": "3317608b7696dfc8bd1d9b54c6189a33752e3ccd5a388c919b9084a92a1df5de",
+      "log_sha256": "fd47474b35b4124688bcd133e1222c548a6d59066f48d466c92041e1eb210c36"
+    },
+    "state": "REFUSED",
+    "temporary_baseline_probe_removed": true
+  },
+  "source_parent": "60894ba27aebc645e36b4c34478d599af07457c4",
+  "source_review": "author diff review plus bounded principal judgment; no formal GitHub approval claimed",
+  "unchanged_production_trees": {
+    "ops/native_fabric/quota_continuity/candidate": "678dd9fc4b41f5569d077d1ed1ca917e50745f96",
+    "ops/native_fabric/quota_continuity/rollout": "6b503e6c28f84cd5c674a058b650375220f7718f"
+  }
+}

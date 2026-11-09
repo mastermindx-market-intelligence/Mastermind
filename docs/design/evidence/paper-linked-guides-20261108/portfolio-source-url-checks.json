@@ -1,0 +1,752 @@
+{
+  "files": [
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/master/docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "master",
+      "path": "docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md",
+      "readable": true,
+      "blobSha": "72d36d7c1eccdcabc69dd7ec23e2511ff60dcf3c"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/master/docs/design/prototypes/project-activity.html",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "master",
+      "path": "docs/design/prototypes/project-activity.html",
+      "readable": true,
+      "blobSha": "b98672ad070a7c5401083a7bb7c264db65d83446"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md",
+      "readable": true,
+      "blobSha": "129b9b8991b8359a1c27f7402c92f1a51ca7977b"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md",
+      "readable": true,
+      "blobSha": "97d4dddfc96045223bb89c356f893db6f0a8c90f"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/docs/DESIGN_DOCTRINE.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "docs/DESIGN_DOCTRINE.md",
+      "readable": true,
+      "blobSha": "2ef014e6ccb23c23922e22291d2cfe0904c60345"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_china_intel.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_china_intel.py",
+      "readable": true,
+      "blobSha": "9dead274465ca99070235ec4c80d30662bca8a02"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/design_candidates/paper_audit_20261108/BUILD_PLAN.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/design_candidates/paper_audit_20261108/BUILD_PLAN.md",
+      "readable": true,
+      "blobSha": "c8c7c6c14f1d92abce9147c7e34a9afc6b7d27c6"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/design_candidates/paper_audit_20261108/evidence-motion-reference.html",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/design_candidates/paper_audit_20261108/evidence-motion-reference.html",
+      "readable": true,
+      "blobSha": "21744db9d4b62030ff31ecaf4fbe716137e027e6"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/design/precision-r5/README.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "design/precision-r5/README.md",
+      "readable": true,
+      "blobSha": "ad4072aa6694af5a5a50c2e42722af5d135e54aa"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/design/paper/README.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "design/paper/README.md",
+      "readable": true,
+      "blobSha": "8a7539e9af8a68ab8278c60239f6806dba6798e7"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/scripts/build-storefront.mjs",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "scripts/build-storefront.mjs",
+      "readable": true,
+      "blobSha": "ca9144f28e5506f1cb6d54905e2bb92136c629a7"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/scripts/r4/ui.mjs",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "scripts/r4/ui.mjs",
+      "readable": true,
+      "blobSha": "d999ec68b0993a025b0648a4ad9695821e0ac3ed"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/src/storefront.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "src/storefront.ts",
+      "readable": true,
+      "blobSha": "7ad9554cc006dfbb91ffc6327eaf11787bef28a2",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/src/pilot.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "src/pilot.ts",
+      "readable": true,
+      "blobSha": "08172bfa34b18975c08f02bca6593a51c59a902d",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/docs/d06-macro-20261104.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "docs/d06-macro-20261104.md",
+      "readable": true,
+      "blobSha": "a88f90b7e5d77320c775a226892ca792adf335b9",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/dce261d07ebc993e8a9579cca2200e445b6636d4/research/design_candidates/production_design_20261102/f01/IMPLEMENTATION_HANDOFF.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "dce261d07ebc993e8a9579cca2200e445b6636d4",
+      "path": "research/design_candidates/production_design_20261102/f01/IMPLEMENTATION_HANDOFF.md",
+      "readable": true,
+      "blobSha": "9a947bde5fa26f1a408192bce2ab8d595a1985fa",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/34a32ff08b9e8296863668440adb208feac126f2/research/bonds_transmission_r30_2026-10-18/r33/SESSION_HANDOFF_2026-10-18.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "34a32ff08b9e8296863668440adb208feac126f2",
+      "path": "research/bonds_transmission_r30_2026-10-18/r33/SESSION_HANDOFF_2026-10-18.md",
+      "readable": true,
+      "blobSha": "ddf4c09e8b8d5c64bf14378f81a9ef519ed8c20c",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "readable": true,
+      "blobSha": "9743b8fac89b8394c903135a961381a477f98599",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/handoffs/D08-options.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "path": "research/design_candidates/production_design_20261102/handoffs/D08-options.md",
+      "readable": true,
+      "blobSha": "3199d60b48bf8010f047da2ace7646f1c5f04cae",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "path": "research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md",
+      "readable": true,
+      "blobSha": "c5f7899e07d7a54b869e60b8090bfafa95b8e74e",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "c742039f32d3ae73b557b8b2b5f6ff4df36b23c2",
+      "path": "research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+      "readable": true,
+      "blobSha": "88a4aeae872f33be734ea28df98a1af0e9c83b28",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_market_memory_page.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_market_memory_page.py",
+      "readable": true,
+      "blobSha": "3defc24d82cea3f24dea86931c273fc668be1406",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/templates/market_memory.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "templates/market_memory.html.j2",
+      "readable": true,
+      "blobSha": "fca29e2efab9cf733e785d9643badbac5a909ae9",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_expectation_surface.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_expectation_surface.py",
+      "readable": true,
+      "blobSha": "1b39e3a519a548d2187130498dd05b58a256ccdd",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md",
+      "readable": true,
+      "blobSha": "a5d2ee29c7c1744c3f572d9309167e29ce081d7d",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3/terminal/lib/savedViews.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3",
+      "path": "terminal/lib/savedViews.ts",
+      "readable": true,
+      "blobSha": "d72343e15f3c91433c47c942e2b034d0856f0435",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3/docs/audits/TERMINAL_PAPER_BUILD_ATLAS_2026-10-08.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3",
+      "path": "docs/audits/TERMINAL_PAPER_BUILD_ATLAS_2026-10-08.md",
+      "readable": true,
+      "blobSha": "0c6612aa9247ddefa660c87c26027531a65403fa",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/88f2919a5c2222bcf05f452f2549b9af180dcae6/terminal/lib/savedViewContract.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "88f2919a5c2222bcf05f452f2549b9af180dcae6",
+      "path": "terminal/lib/savedViewContract.ts",
+      "readable": true,
+      "blobSha": "bf18ac7151002d7a099fbebbb0681cffc3cec6dc",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/88f2919a5c2222bcf05f452f2549b9af180dcae6/docs/SAVED_VIEW_DATABASE_RELEASE.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "88f2919a5c2222bcf05f452f2549b9af180dcae6",
+      "path": "docs/SAVED_VIEW_DATABASE_RELEASE.md",
+      "readable": true,
+      "blobSha": "64a26910381da83c7327aa912ed33a8747ec1753",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/141502fa0f6ab5e109aa50f6c9b1025ee3a1060a/docs/design/PAPER_PORTFOLIO_AUDIT_20261108.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "141502fa0f6ab5e109aa50f6c9b1025ee3a1060a",
+      "path": "docs/design/PAPER_PORTFOLIO_AUDIT_20261108.md",
+      "readable": true,
+      "blobSha": "d08107b3cc64f89559ef32dcf397fed8d16d9a4b",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_expectation_surface.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "scripts/build_expectation_surface.py",
+      "readable": true,
+      "blobSha": "1b39e3a519a548d2187130498dd05b58a256ccdd",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/expectation_surface.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/expectation_surface.html.j2",
+      "readable": true,
+      "blobSha": "51d99c9ac76557e2dce356a53231416f5fe84a44",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_market_memory_page.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "scripts/build_market_memory_page.py",
+      "readable": true,
+      "blobSha": "3defc24d82cea3f24dea86931c273fc668be1406",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/market_memory.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/market_memory.html.j2",
+      "readable": true,
+      "blobSha": "fca29e2efab9cf733e785d9643badbac5a909ae9",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/templates/_policy_monitor_dialog.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "c742039f32d3ae73b557b8b2b5f6ff4df36b23c2",
+      "path": "templates/_policy_monitor_dialog.html.j2",
+      "readable": true,
+      "blobSha": "3b79568eb00e007d49ea4cde66a83c588d51ecc3",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "readable": true,
+      "blobSha": "9743b8fac89b8394c903135a961381a477f98599",
+      "error": null
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/options.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/options.html.j2",
+      "readable": true,
+      "blobSha": "4a503a00ad9ae0d3743508e65b6ecc55db48ba6e",
+      "error": null
+    }
+  ],
+  "allURLs": [
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/master/docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "master",
+      "path": "docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/master/docs/design/prototypes/project-activity.html",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "master",
+      "path": "docs/design/prototypes/project-activity.html"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/docs/DESIGN_DOCTRINE.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "docs/DESIGN_DOCTRINE.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_china_intel.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_china_intel.py"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/design_candidates/paper_audit_20261108/BUILD_PLAN.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/design_candidates/paper_audit_20261108/BUILD_PLAN.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/design_candidates/paper_audit_20261108/evidence-motion-reference.html",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/design_candidates/paper_audit_20261108/evidence-motion-reference.html"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10703",
+      "kind": "github-pr"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10707",
+      "kind": "github-pr"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-6-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/design/precision-r5/README.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "design/precision-r5/README.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-8-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-9-1",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/design/paper/README.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "design/paper/README.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/scripts/build-storefront.mjs",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "scripts/build-storefront.mjs"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/scripts/r4/ui.mjs",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "scripts/r4/ui.mjs"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/src/storefront.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "src/storefront.ts"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/main/src/pilot.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/aerlor",
+      "ref": "main",
+      "path": "src/pilot.ts"
+    },
+    {
+      "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-18-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/docs/d06-macro-20261104.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "docs/d06-macro-20261104.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/dce261d07ebc993e8a9579cca2200e445b6636d4/research/design_candidates/production_design_20261102/f01/IMPLEMENTATION_HANDOFF.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "dce261d07ebc993e8a9579cca2200e445b6636d4",
+      "path": "research/design_candidates/production_design_20261102/f01/IMPLEMENTATION_HANDOFF.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/34a32ff08b9e8296863668440adb208feac126f2/research/bonds_transmission_r30_2026-10-18/r33/SESSION_HANDOFF_2026-10-18.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "34a32ff08b9e8296863668440adb208feac126f2",
+      "path": "research/bonds_transmission_r30_2026-10-18/r33/SESSION_HANDOFF_2026-10-18.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/options_estate/WORKSPACE_DESIGN_SPEC.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/handoffs/D08-options.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "path": "research/design_candidates/production_design_20261102/handoffs/D08-options.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "path": "research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "c742039f32d3ae73b557b8b2b5f6ff4df36b23c2",
+      "path": "research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-3-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_market_memory_page.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_market_memory_page.py"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/templates/market_memory.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "templates/market_memory.html.j2"
+    },
+    {
+      "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/scripts/build_expectation_surface.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "scripts/build_expectation_surface.py"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "main",
+      "path": "research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6XQBG616KHKS5011KKQTQSN",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-3-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3/terminal/lib/savedViews.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3",
+      "path": "terminal/lib/savedViews.ts"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3/docs/audits/TERMINAL_PAPER_BUILD_ATLAS_2026-10-08.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3",
+      "path": "docs/audits/TERMINAL_PAPER_BUILD_ATLAS_2026-10-08.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/88f2919a5c2222bcf05f452f2549b9af180dcae6/terminal/lib/savedViewContract.ts",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "88f2919a5c2222bcf05f452f2549b9af180dcae6",
+      "path": "terminal/lib/savedViewContract.ts"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/88f2919a5c2222bcf05f452f2549b9af180dcae6/docs/SAVED_VIEW_DATABASE_RELEASE.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "ref": "88f2919a5c2222bcf05f452f2549b9af180dcae6",
+      "path": "docs/SAVED_VIEW_DATABASE_RELEASE.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/778",
+      "kind": "github-pr"
+    },
+    {
+      "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-O-1",
+      "kind": "paper"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/141502fa0f6ab5e109aa50f6c9b1025ee3a1060a/docs/design/PAPER_PORTFOLIO_AUDIT_20261108.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "ref": "141502fa0f6ab5e109aa50f6c9b1025ee3a1060a",
+      "path": "docs/design/PAPER_PORTFOLIO_AUDIT_20261108.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_expectation_surface.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "scripts/build_expectation_surface.py"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/expectation_surface.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/expectation_surface.html.j2"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_market_memory_page.py",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "scripts/build_market_memory_page.py"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/market_memory.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/market_memory.html.j2"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/templates/_policy_monitor_dialog.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "c742039f32d3ae73b557b8b2b5f6ff4df36b23c2",
+      "path": "templates/_policy_monitor_dialog.html.j2"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "research/options_estate/WORKSPACE_DESIGN_SPEC.md"
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/options.html.j2",
+      "kind": "github-file",
+      "repo": "mastermindx-market-intelligence/macro",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/options.html.j2"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-2-0",
+      "kind": "paper"
+    },
+    {
+      "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-2-0",
+      "kind": "paper"
+    }
+  ],
+  "limit": "Source-file existence and blob identity only; not click-through, implementation behavior or release proof."
+}

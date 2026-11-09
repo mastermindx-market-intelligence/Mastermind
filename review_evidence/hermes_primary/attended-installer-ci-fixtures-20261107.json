@@ -1,0 +1,134 @@
+{
+  "schema": "mastermind.hermes_attended_installer_ci_fixture_qualification.v1",
+  "source_parent": "024bc08b63072a03ca3af296cf3e52d9ab3388ad",
+  "governing_pin": "de6966ce1524c01ab6ac06af5461370aa79f3994",
+  "files": {
+    "tests/test_ceo_submit_armed_composition.py": "67346addf389873f67e9b50d57fb200cba24482ab15ea4e4331fd0aa3c85fe79",
+    "tests/test_executive_launchd_config.py": "b6ffbdd94bc9cce1b65f90ea40fed7ee3db19dc34167cedbf189518b33a2dd3d",
+    "tests/test_executive_privileged_control_composition.py": "25b17d1f9262c0b64cefcab3367152369a8b3cdcea6bb41a3aa6c4940a249176",
+    "tests/test_executive_python_runtime_provisioner.py": "fb065a98dbf9d1593cb9dfd07ca2ec485d56549d328d4e485571166704416519",
+    "tests/test_executive_release_publication.py": "2ef6d489aa63c29e2f6fc6971fa15a17670fe5e42648e48a78b264244bf375c5",
+    "tests/test_executive_release_stage_only.py": "3e612f2808fcacee6bf7f1788296fac96afe9435201c67a1fd70a611a23281c9",
+    "tests/test_os_release_assets.py": "531098ff59a6ca35fdea5b7e104fbffe891c5f1972917dc14f87766fbea9e5f5"
+  },
+  "hosted_failures": {
+    "head": "024bc08b63072a03ca3af296cf3e52d9ab3388ad",
+    "workflows": [
+      42410890733,
+      42410890759
+    ],
+    "diagnosed_job_ids": [
+      128518767190,
+      128518767133,
+      128518767112,
+      128518712417,
+      128518767178,
+      128518712543,
+      128518712513,
+      128518712498,
+      128518712446
+    ],
+    "distinct_case_count": 31,
+    "distinct_cases": [
+      "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+      "tests/test_executive_launchd_config.py::test_control_config_template_tracks_strict_service_schema",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[0]",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[1]",
+      "tests/test_executive_python_runtime_provisioner.py::test_installer_projects_exact_validated_python_runtime_provenance",
+      "tests/test_executive_release_publication.py::test_archive_padding_is_fully_consumed_before_publication",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-directory]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-file]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-symlink]",
+      "tests/test_executive_release_publication.py::test_postpublication_interruption_leaves_verified_release",
+      "tests/test_executive_release_publication.py::test_seal_survives_relocation_and_existing_release_is_only_verified",
+      "tests/test_executive_release_stage_only.py::test_changed_existing_assets_or_seal_never_repaired",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[archive]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[chown]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[os_release_assets.py:import]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[race]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:create]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:verify]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[rename]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-dir]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-symlink]",
+      "tests/test_executive_release_stage_only.py::test_ordinary_path_reuses_shared_stage",
+      "tests/test_executive_release_stage_only.py::test_packed_source_still_fails_archive_and_retains_stage",
+      "tests/test_executive_release_stage_only.py::test_preflight_refuses_before_staging[updates5]",
+      "tests/test_executive_release_stage_only.py::test_real_stage_seal_and_existing_destination_are_read_only",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[acl]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[mode]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[symlink]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[absent]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[sealed_identical]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[valid]"
+    ]
+  },
+  "changes": [
+    "Supply the existing installer ABI's absent attended-configuration digest in the privileged-readiness fixture.",
+    "Preserve exact Python runtime provenance projection and account for the appended attended digest argument.",
+    "Classify the attended configuration digest as installed-only; keep the unconfigured template free of enrollment evidence.",
+    "Supply the real installer's empty attended source/configuration defaults in isolated optional-preflight, publication and stage-only shell fixtures.",
+    "Refresh only the D7 whole-script fingerprint for the existing optional attended digest and validation; preserve the exact event-loop anchor and every refusal."
+  ],
+  "production_unchanged": {
+    "install_sha256": "6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2",
+    "phase1c_sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e",
+    "native_quota_tree": "e231e8ab2b171861620c49553e658a820fdb9d7d",
+    "hermes_runtime_changed": false,
+    "macro_projection_changed": false
+  },
+  "d7": {
+    "previous_full_script_sha256": "54dcc405c66afbbf5ca980f64dead4c0d6709ff1920bd02d1a27e9a3db38e5b6",
+    "current_full_script_sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e",
+    "anchor_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+    "anchor_unchanged": true,
+    "path_unique_anchor_call_membership_and_exact_ast_checks_retained": true,
+    "source_mutation_refusals_retained": 10
+  },
+  "qualification": {
+    "python": "3.12.13",
+    "existing_repository_conftest": true,
+    "no_dependency_installation": true,
+    "focused": {
+      "passed": 25,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "deselected": 688,
+      "seconds": 21.539,
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/installer-ci-fixture-repair-focused.log",
+      "sha256": "7d2f16c55551631039b417260995fc54ac645d6bcf3089822154bec1e8c595c1"
+    },
+    "publication_and_stage_modules": {
+      "passed": 45,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 116.366,
+      "log": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/installer-ci-release-fixtures.log",
+      "sha256": "ae085390cc57b1512a5748b566bd68f9f7dad1acd04c74fe01aaf25ee6c5207e",
+      "native_archive_and_builder_real": true,
+      "ownership_and_acl_collaborators": "existing explicit inert fixtures"
+    },
+    "total_targeted_passed": 70,
+    "diff_check_passed": true
+  },
+  "effects": {
+    "host_installation": false,
+    "provider_inference": false,
+    "enrollment": false,
+    "selected_release": false,
+    "live_acceptance": false
+  },
+  "final_carriers": [
+    "Mastermind#2175",
+    "macro#10740"
+  ],
+  "committed_gate_and_publication_return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712329564",
+  "remaining": [
+    "Current-head binding CI and original protected source/release/C3 composition",
+    "Active H4 latency-only successor and its qualification",
+    "Original actual consumer/account enrollment and primary/tool/worker/model/account/usage acceptance",
+    "Original J/Go401/H4/H6 effects retain their custody without replay"
+  ]
+}

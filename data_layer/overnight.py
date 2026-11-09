@@ -92,13 +92,31 @@ def risk_read(groups: dict) -> dict:
             "reasons": reasons or ["no live tape"]}
 
 
-def tape(force: bool = False) -> dict:
+def _tape_read_view(snapshot: dict, *, strict: bool) -> dict:
+    """Expose observation-free evidence without changing the shared cached tape."""
+    groups = snapshot.get("groups")
+    if (strict and isinstance(groups, dict)
+            and all(isinstance(rows, list) and not rows for rows in groups.values())):
+        return {
+            **snapshot,
+            "overnight_status": "unavailable",
+            "groups": None,
+            "risk": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+        }
+    return snapshot
+
+
+def tape(force: bool = False, *, strict: bool = False) -> dict:
     """The live overnight tape: per-symbol price + overnight % change (grouped) + the distilled risk
-    read. Cached ~5 min. Best-effort — empty groups + a calm/'no live tape' read when the feed is down."""
+    read. Cached ~5 min. Default callers retain the best-effort policy. Strict
+    read consumers receive unavailable evidence when the tape has no observations;
+    the shared fetch, risk calculation and cached default view stay unchanged."""
     global _cache, _cache_ts
     now = time.monotonic()
     if not force and _cache is not None and (now - _cache_ts) < _TTL:
-        return _cache
+        return _tape_read_view(_cache, strict=strict)
     changes = _fetch_changes(ALL_SYMBOLS)
     groups: dict[str, list[dict]] = {}
     for g, syms in GROUPS.items():
@@ -113,7 +131,7 @@ def tape(force: bool = False) -> dict:
     out = {"as_of": datetime.now(timezone.utc).isoformat(), "groups": groups,
            "risk": risk_read(groups), "n_symbols": len(changes), "live": bool(changes)}
     _cache, _cache_ts = out, now
-    return out
+    return _tape_read_view(out, strict=strict)
 
 
 def is_material(t: dict | None = None) -> bool:

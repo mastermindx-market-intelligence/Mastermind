@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "RESET_THE_WORKSPACE_TO_THE_GREEN_REMOTE",
+    "START_A_REPLACEMENT_WRITER_ON_THE_SAME_PATHS",
+    "PRESERVE_DIRT_AND_RECONCILE_CUSTODY"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/RECONCILE_STATE.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "An older managed workspace has uncommitted edits and an unresolved incumbent writer. The remote PR is green. No technical writer fence or lawful writer-release edge is established."
+}

@@ -1065,6 +1065,78 @@ def test_19_10c_bounding_receipt_reaches_the_envelope(tmp_path: Path):
     assert "original_bytes" in envelope["bounded"][0]
 
 
+@pytest.mark.parametrize("payload", [
+    {f"file.{index}[x]": {"state": "observed", "value": "x" * 80} for index in range(200)},
+    {"measurements": list(range(6000))},
+    {"unicode": ["界" * 30 for _ in range(300)]},
+])
+def test_job_bounds_structured_payload_without_losing_lifecycle(payload):
+    attempt = {
+        "attempt_id": "ATT-existing", "job_id": "JOB-001", "status": "FAILED",
+        "worker_id": "codex01", "launch_metadata": payload,
+        "error": {"message": "original failure"},
+    }
+    data = {
+        "job": {"job_id": "JOB-001", "status": "FAILED", "current_attempt_id": "ATT-existing"},
+        "attempts": [attempt], "latest_attempt": attempt,
+        "attempt_count": 1, "attempt_limit": 10,
+    }
+    original = canonical_json(data)
+    bounded, receipts = schemas.bound_job_document(data, limit=16384)
+    assert canonical_json(data) == original  # no mutation of registry values
+    assert bounded["job"] == data["job"]
+    assert bounded["attempt_count"] == 1 and bounded["attempt_limit"] == 10
+    assert len(bounded["attempts"]) == 1
+    for row in (bounded["latest_attempt"], bounded["attempts"][0]):
+        for key in ("attempt_id", "job_id", "status", "worker_id", "error"):
+            assert row[key] == attempt[key]
+        assert row["launch_metadata"]["bounded"] is True
+    assert {r["field"] for r in receipts} == {
+        "attempts[0].launch_metadata", "latest_attempt.launch_metadata",
+    }
+    assert all(r["original_bytes"] == len(canonical_json(payload)) for r in receipts)
+    assert len(canonical_json(bounded)) + len(canonical_json(receipts)) <= 16384
+
+
+def test_small_job_is_verbatim_and_many_attempts_are_not_silently_dropped():
+    small = {"job": {"job_id": "JOB-001"}, "attempts": [], "latest_attempt": None}
+    assert schemas.bound_job_document(small, limit=16384) == (small, [])
+    many = {**small, "attempts": [{"attempt_number": n} for n in range(5000)]}
+    with pytest.raises(GatewayError, match="ceiling"):
+        schemas.bound_job_document(many, limit=16384)
+
+
+def test_job_structured_bounds_reach_gateway_without_writes(tmp_path: Path):
+    import dataclasses
+
+    job_id = _seed_heterogeneous_pair(tmp_path)[0]
+    runtime = Runtime.at(tmp_path, create=False)
+    real_attempts = runtime.attempts.list_attempts(job_id)
+    large_attempt = dataclasses.replace(
+        real_attempts[0],
+        launch_metadata={f"field.{i}[0]": "x" * 100 for i in range(200)},
+    )
+
+    class Attempts:
+        def list_attempts(self, requested_job_id):
+            assert requested_job_id == job_id
+            return [large_attempt]
+
+    class ReadRuntime:
+        jobs = runtime.jobs
+        attempts = Attempts()
+
+    gateway = _gateway(tmp_path, runtime_factory=lambda _root: ReadRuntime())
+    gateway.config = dataclasses.replace(gateway.config, max_response_bytes=16384)
+    before = _tree_digest(tmp_path)
+    envelope = _call(gateway, "executive_job", {"job_id": job_id})
+    assert envelope["ok"] is True, envelope
+    assert len(envelope["bounded"]) == 2
+    assert envelope["data"]["latest_attempt"]["attempt_id"] == real_attempts[0].attempt_id
+    assert len(canonical_json(envelope)) < 32768
+    assert _tree_digest(tmp_path) == before
+
+
 def test_ceo_intent_status_preserves_bridge_identity_semantics(tmp_path: Path):
     """§9 — only intent ids resolve; no invented JOB-* lookup."""
 

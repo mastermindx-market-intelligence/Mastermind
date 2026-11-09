@@ -25,6 +25,8 @@ _MODEL_KEYS = {"provider", "provider_model", "family", "positioning", "context_w
 _OVERLAY = {"surface", "capabilities", "effective_context_window_tokens", "source_ids"}
 _RATE = {"rate_id", "surface", "currency", "unit", "min_context_tokens", "max_context_tokens", "input", "cached_input", "cache_write", "output", "source_id", "effective_from", "notes"}
 _BURN = {"surface", "method", "native_unit", "source_id", "notes"}
+# Public product families, not enrolled account/bucket identities or balances.
+_POOL_FAMILIES = {"cursor": frozenset({"cursor_models", "other_models"})}
 _SOURCE = {"url", "verified_at"}
 
 
@@ -125,6 +127,8 @@ class SubscriptionBurnRule:
     surface: str
     method: str
     native_unit: str
+    # Optional metadata: legacy catalogs stay readable but do not infer a pool.
+    pool_family: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -175,6 +179,19 @@ class ProviderModelCatalog:
         if len(rows) != 1:
             raise ModelEconomicsError(f"model {key!r} has no unique subscription burn rule for {surface!r}")
         return rows[0]
+
+    def subscription_pool_family(self, key: str, *, surface: str) -> str:
+        """Return explicit reviewed product metadata, never account capacity.
+
+        Shared AI Provider Control must bind this family to the actual account,
+        entitlement, complete windows and fresh observations before allocation.
+        A matching family across models does not prove shared account identity.
+        Missing metadata is unknown, never a free or independent model pool.
+        """
+        rule = self.subscription_burn_rule(key, surface=surface)
+        if rule.pool_family is None:
+            raise ModelEconomicsError(f"model {key!r} has no reviewed pool family for {surface!r}")
+        return rule.pool_family
 
     def api_rate_card(self, key: str, *, surface: str, context_tokens: int | None) -> ApiRateCard:
         surface = _id(surface, "surface")
@@ -228,7 +245,8 @@ def _parse_rate(raw: Any, sources: Mapping[str, Any], field: str) -> ApiRateCard
 
 
 def _parse_burn(raw: Any, sources: Mapping[str, Any], field: str) -> SubscriptionBurnRule:
-    raw = _closed(raw, _BURN, field)
+    has_pool = isinstance(raw, Mapping) and "pool_family" in raw
+    raw = _closed(raw, _BURN | {"pool_family"} if has_pool else _BURN, field)
     source = _id(raw["source_id"], field)
     _sources_exist((source,), sources, field)
     method = _id(raw["method"], field)
@@ -236,7 +254,16 @@ def _parse_burn(raw: Any, sources: Mapping[str, Any], field: str) -> Subscriptio
         raise ModelEconomicsError(f"{field} has unsupported burn method")
     if not isinstance(raw["notes"], str) or len(raw["notes"]) > 2048:
         raise ModelEconomicsError(f"{field} notes are invalid")
-    return SubscriptionBurnRule(_id(raw["surface"], field), method, _id(raw["native_unit"], field))
+    surface = _id(raw["surface"], field)
+    unit = _id(raw["native_unit"], field)
+    pool = _id(raw["pool_family"], field) if has_pool else None
+    if pool is not None and (
+        pool not in _POOL_FAMILIES.get(surface, ())
+        or method != "token_rate_card"
+        or unit != "usd_pool_value"
+    ):
+        raise ModelEconomicsError(f"{field} has incompatible subscription pool family")
+    return SubscriptionBurnRule(surface, method, unit, pool)
 
 
 def _parse_model(key: str, raw: Any, sources: Mapping[str, Any]) -> ProviderModelRecord:

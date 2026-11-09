@@ -1,7 +1,7 @@
 """Tests for brain/translate.py and its integration into the web API.
 
 All tests are OFFLINE: no real API calls are made. Monkeypatching is used to
-stub the cache file path and the Haiku LLM call.
+stub the cache file path and the outbound native translation response.
 """
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ import pytest as _pytest_w8
 
 
 @_pytest_w8.fixture(autouse=True)
-def _w8_legacy_env(monkeypatch):
+def _w8_legacy_env(monkeypatch, tmp_path):
+    import brain.translate as tr
+    monkeypatch.setattr(tr, "_ROOT", tmp_path)
+    monkeypatch.setattr(tr, "_CACHE_PATH", tmp_path / "translations.json")
+    monkeypatch.setattr(tr, "_cache_mem", None)
+    monkeypatch.setattr(tr, "_cache_mtime", None)
     monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "0")
     monkeypatch.setenv("MASTERMIND_PROPHET_FEED", "0")
     monkeypatch.setenv("MASTERMIND_ROTATION_IN", "off")
@@ -116,8 +121,21 @@ _STUB_MAP = {
 }
 
 
-def _stub_call_haiku(texts: list[str]) -> dict[str, str]:
-    return {t: _STUB_MAP[t] for t in texts if t in _STUB_MAP}
+def _stub_native_translation(monkeypatch) -> None:
+    from brain import cli_bridge
+    monkeypatch.delenv("MM_PROVIDER_APPLICATION_MODE", raising=False)
+    monkeypatch.setenv("BOT_LLM_BACKEND", "cli")
+    monkeypatch.setattr(cli_bridge, "available", lambda: True)
+
+    def reason(prompt, **kwargs):
+        assert kwargs["role"] == "scout" and kwargs["log_run"] is False
+        assert kwargs["allowed_tools"] == [] and kwargs["add_dirs"] == []
+        kwargs["before_provider_start"]()
+        inputs = json.loads(prompt.split("Input:\n", 1)[1])
+        return {"ok": True, "text": json.dumps({key: _STUB_MAP[text]
+                for key, text in inputs.items() if text in _STUB_MAP}, ensure_ascii=False)}
+
+    monkeypatch.setattr(cli_bridge, "reason_sync", reason)
 
 
 class TestTranslateAndCache:
@@ -125,14 +143,16 @@ class TestTranslateAndCache:
         """translate_and_cache writes new translations into the cache file."""
         import brain.translate as tr
         monkeypatch.setattr(tr, "_CACHE_PATH", tmp_path / "translations.json")
-        monkeypatch.setattr(tr, "_call_haiku", _stub_call_haiku)
+        _stub_native_translation(monkeypatch)
 
         result = tr.translate_and_cache(["SMH is a leader.", "Equal-weight."])
         assert result["SMH is a leader."] == "SMH 是领先者。"
         assert result["Equal-weight."] == "等权重。"
         # verify persisted to disk
         saved = json.loads((tmp_path / "translations.json").read_text())
-        assert saved["SMH is a leader."] == "SMH 是领先者。"
+        assert saved["schema"] == "mastermind.translation_cache.v1"
+        assert saved["operations"] == {}
+        assert saved["translations"]["SMH is a leader."] == "SMH 是领先者。"
 
     def test_skips_already_cached(self, tmp_path, monkeypatch):
         """Strings already in the cache do not trigger a Haiku call."""
@@ -165,12 +185,15 @@ class TestTranslateAndCache:
         """translate_book() collects all translatable strings from a book dict."""
         import brain.translate as tr
         monkeypatch.setattr(tr, "_CACHE_PATH", tmp_path / "translations.json")
-        monkeypatch.setattr(tr, "_call_haiku", _stub_call_haiku)
+        _stub_native_translation(monkeypatch)
 
         book = _make_minimal_book()
         tr.translate_book(book)
 
-        cache = json.loads((tmp_path / "translations.json").read_text())
+        saved = json.loads((tmp_path / "translations.json").read_text())
+        assert saved["schema"] == "mastermind.translation_cache.v1"
+        assert saved["operations"] == {}
+        cache = saved["translations"]
         assert cache["Paper-only. Not investment advice."] == "仅纸面。非投资建议。"
         assert cache["SMH is a leader."] == "SMH 是领先者。"
         assert cache["RS rank top decile."] == "RS 排名前十分之一。"

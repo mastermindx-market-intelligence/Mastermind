@@ -1,0 +1,31 @@
+{
+  "schema": "soxx.economic_false_exit_cost.v23",
+  "created": "2026-10-12",
+  "predeclared_before_calculation": true,
+  "input": "Existing verified v21 forced-vs-hold and below-entry rule event ledgers, no new market data",
+  "cohort_groups": [
+    "all",
+    "inspected",
+    "new_semis",
+    "sector"
+  ],
+  "checkpoints_RTH_hours": [
+    0.25,
+    0.5,
+    1.0,
+    2.0,
+    3.0,
+    6.0
+  ],
+  "decision": "Forced sale of remaining position versus original hold; context has unchanged hard stop and partial profit, next-open theoretical OHLC fill",
+  "beneficial_decision": "Actual next-open forced early exit yields strictly higher *modeled net trade return* than holding",
+  "harmful_decision": "Forced early exit yields strictly lower modeled net trade return than holding",
+  "theoretical_break_even_precision": "Mean harm among harmful forced exits divided by (mean harm among harmful + mean benefit among beneficial), strictly positive observed changes only. This is a descriptive break-even classifier precision under observed payoff magnitudes, NOT future probability.",
+  "naive_signal_precision": "Fraction of below-entry triggered decisions that were economically beneficial vs harmful; zero deltas tracked separately.",
+  "primary": "Asymmetry in economic payoff of mistakes; include concentration and stop-unavailable fractions; no threshold fitting",
+  "additional": "Leave-one-entry-week-out range in break-even precision for eligible forced-exit comparisons; keep correlated assets grouped",
+  "no_vendor_calls": true,
+  "model_originated_trade_sizing": false,
+  "no_actual_quotes": true,
+  "not_accepted_as_trading": true
+}

@@ -1,0 +1,60 @@
+{
+  "checks": [
+    {
+      "anchor": "_bind_company_consultation_server",
+      "ast_sha256": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
+      "path": "control_plane/executive_service.py",
+      "whole_ast_equal_to_both_inputs": true
+    },
+    {
+      "anchor": "_handle_ceo_ingress_connection",
+      "ast_sha256": "6ddae8da5ef235a74e212fc72e56da950dfe4b24c6d1e1b9eab4fe730f89d3ca",
+      "original_literal_count": 3,
+      "path": "control_plane/executive_service.py",
+      "protected_response_subtree_ast_equal": true,
+      "source_sha256": "4deb96d70ff9ed7386f48c5170aeb855db251090893c88e1da7e1395ff6de553",
+      "subtree_nodes": 136
+    },
+    {
+      "anchor": "serve_installed_control",
+      "ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+      "path": "scripts/executive_os_phase1c.py",
+      "source_sha256": "a422011c13b7ee3646aab825a0147e8f224048c9654aa7e924ca189ee3f894ba",
+      "whole_ast_equal_to_both_inputs": true
+    },
+    {
+      "exact_literal_lines_preserved": true,
+      "literal_count": 8,
+      "path": "integrations/mastermind_workspace_app/app.py",
+      "preimage_commit": "fbd8d4d6e32c095ddbe9b1b08c9ff9dcb536c42c",
+      "preimage_sha256": "7d1f1fc6e154c2e20fe099291ab52c0062c5544af0095d710a7b347049816eba",
+      "python_statements_equal": true,
+      "source_sha256": "e14333cf9fdddfcc6625357498813fadc0d0f45abc403d0ef9743e3eb87bdf3b"
+    },
+    {
+      "exact_literal_lines_preserved": true,
+      "literal_count": 4,
+      "path": "control_plane/workspace_read_service.py",
+      "preimage_commit": "fbd8d4d6e32c095ddbe9b1b08c9ff9dcb536c42c",
+      "preimage_sha256": "7dc90b3174c751d39aa4f98fe15c24c05e2984a903169fc8a4e917ebdbf4396f",
+      "python_statements_equal": true,
+      "source_sha256": "3c2cac6101f754ff5f6c52aee1ebe14d2f247bf212a0317f6970732cade6fb17"
+    },
+    {
+      "exact_literal_lines_preserved": true,
+      "literal_count": 3,
+      "path": "app/mastermind_os/src-tauri/src/auth.rs",
+      "preimage_commit": "fbd8d4d6e32c095ddbe9b1b08c9ff9dcb536c42c",
+      "preimage_sha256": "57b58e9fa3bca82cb9185e590ab360bb0cf89bc214bec2f60d41cc5413908609",
+      "python_statements_equal": false,
+      "source_sha256": "f42e9664f61b44c34bf4200193ba3210aef27acbff05e617c68031ee4b402b19"
+    }
+  ],
+  "inputs": {
+    "protected": "fbd8d4d6e32c095ddbe9b1b08c9ff9dcb536c42c",
+    "returned": "3ed10ce228a0c6c0da42fdcf80c1b329b6f6cfef"
+  },
+  "schema": "mastermind.h4_source_join_identity/v1",
+  "state": "FIXED_IDENTITY_PINS_REQUALIFIED",
+  "updated_file_pin_count": 3
+}

@@ -1,0 +1,25 @@
+{
+  "aggregate_stat_rows_recomputed": 63,
+  "ambiguous_stop_and_partial_candles": 0,
+  "entire_dataset_was_previously_touched": true,
+  "first_year_15m_entry_count": 10,
+  "high_first_vs_low_first_economic_differences": 0,
+  "independent_OHLC_replays": 84,
+  "independent_business_calendar_coverage_proven": false,
+  "largest_return_difference": 0.0,
+  "no_future_prefix_cases": 62,
+  "source_data_published": false,
+  "source_quality": {
+    "QQQ_warmup_head_missing_minutes": 30,
+    "source_15m": 8596,
+    "source_30m": 4298,
+    "year_intraday_source_gaps": 0
+  },
+  "source_year_peer_instruments": [
+    "AMD",
+    "QQQ",
+    "SMH"
+  ],
+  "trade_execution_proven": false,
+  "validation_schema": "soxx.terminal_finepivot_validation.v14"
+}

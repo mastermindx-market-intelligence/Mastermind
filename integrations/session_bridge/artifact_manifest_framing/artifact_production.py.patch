@@ -1,0 +1,26 @@
+--- a/artifact_production.py
++++ b/artifact_production.py
+@@ -95,6 +95,7 @@
+         'python3 "$HOME/lanes/support-releases/' + support_digest + '/ext/artifact_production.py" seal --packet "$HOME/lanes/tmp/'
+         + run_id + '.txt"\n'
+         'Include its ONE complete FABRIC_ARTIFACTS_V1 JSON line verbatim in the final result, including every path, byte count and SHA-256. '
++        'Do not add emphasis, backticks, code fences or prose to that line. '
+         'This advertises verified delivery only; it does not grant business acceptance. Missing files, missing/changed manifest or digest mismatch makes completion fail even if the model exits0. '
+         'No descendants, retries or old-worker replay are authorized by this contract.\n'
+     )
+@@ -255,7 +256,14 @@
+     for line in stdout.splitlines():
+         # Permit only the exact full-line Markdown emphasis wrapper. Preserve
+         # original stdout bytes for all digests and count wrapped/plain duplicates.
+-        if line.startswith('**' + RESULT_PREFIX):
++        marker_wrapper = '**' + RESULT_PREFIX.rstrip() + '**'
++        if line.startswith(marker_wrapper):
++            prefix = marker_wrapper + ' `'
++            if (not line.startswith(prefix) or not line.endswith('`')
++                    or len(line.encode()) > reader.MAX_REQUEST):
++                raise ValueError('artifact_manifest_wrapper')
++            line = RESULT_PREFIX + line[len(prefix):-1]
++        elif line.startswith('**' + RESULT_PREFIX):
+             if not line.endswith('**') or len(line.encode()) > reader.MAX_REQUEST:
+                 raise ValueError('artifact_manifest_wrapper')
+             line = line[2:-2]
