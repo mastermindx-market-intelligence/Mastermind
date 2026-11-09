@@ -1369,7 +1369,7 @@ def _receipt_channel_problem(path_text: str) -> str:
     """'' when the receipt can only have been produced by the placement owner.
 
     Trust basis (no signing authority exists by design): the owner runs as
-    its own service account (``_mastermind_exec``) and projects the receipt
+    its own dedicated Executive service account and projects the receipt
     into a path the fenced principal cannot write. The channel is defined
     POSITIVELY, not just negatively (REVIEW_2329 r2 N-4): every component
     of both the literal and the resolved path must be owned by root or by a
