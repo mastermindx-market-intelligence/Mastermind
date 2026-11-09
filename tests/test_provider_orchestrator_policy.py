@@ -3285,3 +3285,854 @@ def test_binding_gate_admits_v1_1_native_binding_and_refuses_other_labels():
     for label in ("ExecutionBinding.v2", "ExecutionBinding.v1.2", "", "ExecutionBinding"):
         problem = guard._binding_problems({**base, "schema": label}, "env")
         assert problem.startswith("env: schema must be ExecutionBinding.v1"), (label, problem)
+
+
+# --- r7: the parse drives the binding gate (REVIEW2 A1 findings 1-6) ---------
+#
+# The distinct r6 review recorded row NAMES, prose and verdict columns, not
+# command text. Each command below is reconstructed from the row name, the
+# finding text that cites it and the reviewer's columns (ledger
+# LANE_EXECUTIVE_DIRECTOR_C5.md states each reconstruction). Columns:
+#   bound   verdict with the faithful binding + owner-channel receipt
+#   nobind  verdict with the session armed but NO binding projected
+#   gate    whether validate_execution_binding was reached (same in both
+#           runs; instrumented by a spy around the module attribute)
+# Identity is inherited from the session (projection values) unless the
+# command sets it. ``frag`` must appear in the bound refusal reason (and,
+# for structural refusals, in the nobind one too).
+#
+# Fail-before: MASTERMIND_R6_GUARD_UNDER_TEST=<guard module path> runs these
+# tables against that module (verdicts + gate flags), e.g. the r6 guard from
+# ``git show HEAD~1:ops/executive_os/provider_orchestrator_guard.py``.
+
+_R7_G = "grok a /tmp grok-4"
+_R7_EXT = "/opt/mastermind/ext/"
+_R7_BAD_ROOT = "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3"
+
+#: (id, command, bound, nobind, gate, class, frag)
+_R7_REVIEW2_TABLE = [
+    # --- finding 1 (BLOCKER): redirection seams before/among the arguments ---
+    ("seam-redir-before-mode-pool", "pool </dev/null run " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-before-mode-pool-out", "pool >/tmp/lane.out run " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-fd-dup-before-mode", "pool 2>&1 run " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-after-run", "pool run </dev/null " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-subsh", _R7_EXT + "sub.sh </dev/null " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-remote-sub",
+     _R7_EXT + "remote_sub.sh </dev/null mini2 grok /tmp/p.txt /repo grok-4",
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-slot", "python3 " + _R7_EXT + "slot.py </dev/null grok -- run",
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-nested", "bash -c 'pool </dev/null run " + _R7_G + "'",
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-target-named-cat", ">/tmp/cat pool run " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("seam-redir-target-named-grep-subsh", ">/tmp/grep " + _R7_EXT + "sub.sh " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("fd-close-before-mode", "pool 0<&- run " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    ("quoted-run-redirect", "pool r''un </dev/null " + _R7_G,
+     "deny", "deny", False, "seam", "R6_REDIRECTION"),
+    # --- finding 2 (MAJOR): provider substitution through a misread head ---
+    ("head-misread-via-taskclass-value",
+     "POOL_TASK_CLASS='code cat' POOL_ORCHESTRATOR_ID=root-orch-1 "
+     "POOL_PARENT_RUN_ID=hermes-run-7 pool run " + _R7_G,
+     "deny", "deny", True, "id", "unaccounted descendant"),
+    # --- finding 3 (MAJOR): identity values read exactly ---
+    ("id-dq-then-sq-space", "POOL_ORCHESTRATOR_ID=\"root-orch-1\"' evil' " + _R7_BAD_ROOT,
+     "deny", "deny", True, "id", "'root-orch-1 evil'"),
+    ("id-dq-dq-space", "POOL_ORCHESTRATOR_ID=\"root-orch-1\"\" evil\" " + _R7_BAD_ROOT,
+     "deny", "deny", True, "id", "'root-orch-1 evil'"),
+    ("id-parent-sq-esc-space",
+     "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID='hermes-run-7'\\ evil "
+     "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
+     "deny", "deny", True, "id", "'hermes-run-7 evil'"),
+    ("id-env-prefix", "env POOL_ORCHESTRATOR_ID=\"root-orch-1\"' evil' " + _R7_BAD_ROOT,
+     "deny", "deny", True, "id", "'root-orch-1 evil'"),
+    ("id-nested-body",
+     "bash -c \"POOL_ORCHESTRATOR_ID='root-orch-1'' evil' " + _R7_BAD_ROOT + "\"",
+     "deny", "deny", True, "id", "'root-orch-1 evil'"),
+    # The reviewer's ALLOW needs r6's first-quoted-span reader: "…"'>x'.
+    ("id-gt-no-space", "POOL_ORCHESTRATOR_ID=\"root-orch-1\"'>x' " + _R7_BAD_ROOT,
+     "deny", "deny", True, "id", "'root-orch-1>x'"),
+    ("id-gt-unquoted", "POOL_ORCHESTRATOR_ID=root-orch-1'>x' " + _R7_BAD_ROOT,
+     "deny", "deny", True, "id", "'root-orch-1>x'"),
+    # --- finding 4 (MINOR): scope false negatives ---
+    ("scope-param-default", "${x:-pool} run " + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-param-default-nocolon", "${x-pool} run " + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-param-default-subsh", "${x:-sub.sh} " + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-zsh-empty-name", "${:-pool} run " + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-locale-empty", 'p$""ool run ' + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-locale-glue", 'p$"o"ol run ' + _R7_G,
+     "deny", "deny", False, "scope", "R6_EXPANSION"),
+    ("scope-glob-1char", "p* run " + _R7_G,
+     "deny", "deny", False, "scope", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("scope-glob-head-wildcard", "???? run " + _R7_G,
+     "deny", "deny", False, "scope", "R6_NOT_A_PLAIN_LAUNCH"),
+    # Homoglyph (Cyrillic er): names a DIFFERENT file; only a staged binary
+    # of that name could run (staged-file limit). Pinned out of scope.
+    ("scope-homoglyph", "рool run " + _R7_G,
+     "allow", "allow", False, "doc-limit", ""),
+    # --- finding 5 (MINOR): read forms write only to /dev/null ---
+    ("insp-echo-zshenv",
+     "echo 'pool() { command pool \"$@\"; command pool \"$@\"; }' >> ~/.zshenv",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-echo-bashrc",
+     "echo 'pool() { command pool \"$@\"; command pool \"$@\"; }' >> ~/.bashrc",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-cat-copy-wrapper", "cat " + _R7_EXT + "sub.sh > /tmp/evil/sub.sh",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-pipe-write", "cat " + _R7_EXT + "sub.sh | head -c 100000 > /tmp/evil/sub.sh",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-pipe-append-zshenv", "echo 'pool run " + _R7_G + "' | cat >> ~/.zshenv",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-devtcp", "cat " + _R7_EXT + "sub.sh > /dev/tcp/127.0.0.1/9",
+     "deny", "deny", False, "insp", "R6_REDIRECTION"),
+    ("insp-xxd-r", "xxd -r -p /tmp/pool.hex /tmp/evil/pool",
+     "deny", "deny", False, "insp", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("insp-tail-f", "tail -f /tmp/lane/pool",
+     "deny", "deny", False, "insp", "R6_NOT_A_PLAIN_LAUNCH"),
+    # --- finding 6 (MINOR): head paths and spellings ---
+    ("path-prefix-env", "/tmp/evil/env " + _R6_P + _R6_B,
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("path-prefix-nohup", _R6_P + "./nohup " + _R6_B,
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("upper-NICE", _R6_P + "NICE -n 5 " + _R6_B,
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("path-bash-staged", "/tmp/evil/bash -c '" + _R6_L + "'",
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("path-python-staged", _R6_P + "/tmp/evil/python3 " + _R7_EXT + "slot.py glm -- run",
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("upper-PYTHON3", _R6_P + "PYTHON3 " + _R7_EXT + "slot.py glm -- run",
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("path-inspector-staged", "/tmp/evil/cat " + _R7_EXT + "sub.sh",
+     "deny", "deny", False, "path", "R6_HEAD_SPELLING"),
+    ("slot-python2-literal", _R6_P + "python2 " + _R7_EXT + "slot.py glm -- run",
+     "deny", "deny", False, "path", "R6_NOT_A_PLAIN_LAUNCH"),
+    # Admitted ON PURPOSE (each reaches the binding gate; ledger judgement):
+    ("path-wrapper", _R6_P + _R7_EXT + "pool run glm a /tmp glm-5.3",
+     "allow", "deny", True, "on-purpose", ""),
+    ("path-prefix-system-env", "/usr/bin/env " + _R6_P + _R6_B,
+     "allow", "deny", True, "on-purpose", ""),
+    ("nested-comment", "bash -c '" + _R6_L + " # one bounded child'",
+     "allow", "deny", True, "on-purpose", ""),
+    ("nested-bs-newline-in-sq", "bash -c '" + _R6_P + "pool ru" + _NL + "n glm a /tmp glm-5.3'",
+     "allow", "deny", True, "on-purpose", ""),
+    ("nested-trailing-redirect", "bash -c '" + _R6_L + "' > /tmp/lane.log 2>&1",
+     "allow", "deny", True, "on-purpose", ""),
+    ("nested-sh", "sh -c '" + _R6_L + "'", "allow", "deny", True, "on-purpose", ""),
+    ("nested-bash-path", "/bin/bash -c '" + _R6_L + "'",
+     "allow", "deny", True, "on-purpose", ""),
+    ("slot-staged-path", _R6_P + "python3 /tmp/staged/slot.py glm -- run",
+     "allow", "deny", True, "on-purpose", ""),
+    ("slot-upper", _R6_P + "python3 " + _R7_EXT + "SLOT.PY glm -- run",
+     "allow", "deny", True, "on-purpose", ""),
+    ("slot-python2", _R6_P + "python " + _R7_EXT + "slot.py glm -- run",
+     "allow", "deny", True, "on-purpose", ""),
+    # --- r7 extras: zsh divergences, exact values, launch output targets ---
+    ("zsh-numeric-glob", _R6_L + " <1-9> /tmp/x",
+     "deny", "deny", False, "r7-extra", "R6_TOKENIZE_FAILED"),
+    ("zsh-clobber-spaced", _R6_L + " >! /tmp/lane.log",
+     "deny", "deny", False, "r7-extra", "R6_TOKENIZE_FAILED"),
+    ("zsh-clobber-glued", _R6_L + " >!/tmp/lane.log",
+     "deny", "deny", False, "r7-extra", "R6_TOKENIZE_FAILED"),
+    ("id-tilde-value", "POOL_ORCHESTRATOR_ID=~root-orch-1 " + _R7_BAD_ROOT,
+     "deny", "deny", False, "r7-extra", "R6_ASSIGNMENT"),
+    ("id-env-glob-value", "env POOL_ORCHESTRATOR_ID=root-orch-? " + _R7_BAD_ROOT,
+     "deny", "deny", False, "r7-extra", "R6_ASSIGNMENT"),
+    ("id-trailing-space", "POOL_ORCHESTRATOR_ID='root-orch-1 ' " + _R7_BAD_ROOT,
+     "deny", "deny", True, "r7-extra", "'root-orch-1 '"),
+    ("launch-writes-zshenv", _R6_L + " > ~/.zshenv",
+     "deny", "deny", False, "r7-extra", "R6_REDIRECTION"),
+    ("launch-overwrites-wrapper", _R6_L + " >> ~/.local/bin/pool",
+     "deny", "deny", False, "r7-extra", "R6_REDIRECTION"),
+    ("launch-devtcp", _R6_L + " > /dev/tcp/127.0.0.1/9",
+     "deny", "deny", False, "r7-extra", "R6_REDIRECTION"),
+    ("read-devtcp-input", "cat < /dev/tcp/127.0.0.1/9 " + _R7_EXT + "sub.sh",
+     "deny", "deny", False, "r7-extra", "R6_REDIRECTION"),
+    ("glued-pager-launch", "git grep -O'pool run " + _R7_G + "' x",
+     "deny", "deny", False, "r7-extra", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("glued-pager-name", "git grep -Opool x",
+     "deny", "deny", False, "r7-extra", "R6_NOT_A_PLAIN_LAUNCH"),
+    ("pool-helper-reaches-gate", "pool status",
+     "allow", "deny", True, "r7-extra", ""),
+    ("subsh-helper-reaches-gate", _R7_EXT + "sub.sh __launch_plan glm /tmp",
+     "allow", "deny", True, "r7-extra", ""),
+    # --- honest controls ---
+    ("control-plain-launch", _R6_L, "allow", "deny", True, "control", ""),
+    ("control-trailing-redirects", _R6_L + " > /tmp/lane.log 2>&1 </dev/null",
+     "allow", "deny", True, "control", ""),
+    ("control-inherited-bare-launch", _R6_B, "allow", "deny", True, "control", ""),
+    ("control-env-prefix", "env " + _R6_P + "nohup nice -n 5 timeout 90m " + _R6_B,
+     "allow", "deny", True, "control", ""),
+    ("control-slot", _R6_P + "python3 " + _R7_EXT + "slot.py glm -- run",
+     "allow", "deny", True, "control", ""),
+    ("control-pool-remote",
+     _R6_P + "pool remote mini2 glm /tmp/p.txt /repo glm-5.3",
+     "allow", "deny", True, "control", ""),
+    ("control-cat", "cat " + _R7_EXT + "sub.sh", "allow", "allow", False, "control", ""),
+    ("control-grep-pipe", "grep -n 'pool run' docs/runbook.md | head -5 2>/dev/null",
+     "allow", "allow", False, "control", ""),
+    ("control-ls-stderr", "ls -la ~/.local/bin/pool 2>/dev/null",
+     "allow", "allow", False, "control", ""),
+    ("control-echo-fd", "echo pool >&2", "allow", "allow", False, "control", ""),
+    ("control-wc-input", "wc -l < " + _R7_EXT + "sub.sh",
+     "allow", "allow", False, "control", ""),
+    ("control-gh-pr-view", "gh pr view 2329", "allow", "allow", False, "control", ""),
+    ("control-pytest-m", "python3 -m pytest tests/test_provider_orchestrator_policy.py",
+     "allow", "allow", False, "control", ""),
+    # Over-refusals the review confirmed and r7 keeps (no safe carve-out).
+    ("overrefusal-pytest-k", "pytest -k pool", "deny", "deny", False, "over-refusal",
+     "R6_NOT_A_PLAIN_LAUNCH"),
+    ("overrefusal-which", "which pool", "deny", "deny", False, "over-refusal",
+     "R6_NOT_A_PLAIN_LAUNCH"),
+    ("overrefusal-command-v", "command -v pool", "deny", "deny", False, "over-refusal",
+     "R6_PREFIX_FORM"),
+    ("overrefusal-cd-and", "cd /tmp && " + _R6_L, "deny", "deny", False, "over-refusal",
+     "R6_COMPOUND_LIST"),
+    ("overrefusal-trailing-semicolon", _R6_L + ";", "deny", "deny", False,
+     "over-refusal", "R6_COMPOUND_LIST"),
+    ("overrefusal-gh-pipe-grep", "gh pr view 1 | grep pool", "deny", "deny", False,
+     "over-refusal", "R6_PIPELINE"),
+]
+
+
+def _r7_gate_spy(monkeypatch: pytest.MonkeyPatch, module) -> list[str]:
+    calls: list[str] = []
+    original = module.validate_execution_binding
+
+    def spy(command, *args, **kwargs):
+        calls.append(command)
+        return original(command, *args, **kwargs)
+
+    monkeypatch.setattr(module, "validate_execution_binding", spy)
+    return calls
+
+
+def _r7_judge(
+    module, cwd: Path, command: str, capsys, monkeypatch, *, bound: bool,
+    binding: dict[str, object],
+) -> tuple[str, str, bool]:
+    """(verdict, reason, gate reached) through the module's real guard_bash."""
+    if bound:
+        monkeypatch.setenv("POOL_EXECUTION_BINDING", json.dumps(binding))
+    else:
+        monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+    calls = _r7_gate_spy(monkeypatch, module)
+    verdict, reason = _r6_verdict(module, cwd, command, capsys)
+    return verdict, reason, bool(calls)
+
+
+def _r7_both(module, shared_placement, monkeypatch, tmp_path, capsys, command):
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path, module)
+    binding = _binding()
+    bound = _r7_judge(module, shared_placement, command, capsys, monkeypatch,
+                      bound=True, binding=binding)
+    nobind = _r7_judge(module, shared_placement, command, capsys, monkeypatch,
+                       bound=False, binding=binding)
+    return bound, nobind
+
+
+@pytest.mark.parametrize("row", _R7_REVIEW2_TABLE, ids=[row[0] for row in _R7_REVIEW2_TABLE])
+def test_r7_review2_table_bound_nobind_and_gate(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    _, command, bound_expected, nobind_expected, gate, _, frag = row
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        _R6_GUARD, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == (bound_expected, nobind_expected), (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (gate, gate), (bound_reason, nobind_reason)
+    if _R6_GUARD is guard:
+        if frag:
+            assert frag in bound_reason, bound_reason
+        if bound_expected == "deny" and not gate:
+            assert frag in nobind_reason, nobind_reason
+            assert bound_reason.startswith(
+                "Mastermind shared-placement guard: unobservable launch"
+            )
+        if nobind_expected == "deny" and gate:
+            assert "missing binding" in nobind_reason, nobind_reason
+
+
+def test_r7_review2_table_covers_every_reviewer_row() -> None:
+    ids = {row[0] for row in _R7_REVIEW2_TABLE}
+    reviewer_rows = {
+        "seam-redir-before-mode-pool", "seam-redir-before-mode-pool-out",
+        "seam-fd-dup-before-mode", "seam-redir-after-run", "seam-redir-subsh",
+        "seam-redir-remote-sub", "seam-redir-slot", "seam-redir-nested",
+        "seam-redir-target-named-cat", "seam-redir-target-named-grep-subsh",
+        "id-dq-then-sq-space", "id-dq-dq-space", "id-parent-sq-esc-space",
+        "id-env-prefix", "id-nested-body", "scope-param-default",
+        "scope-param-default-nocolon", "scope-zsh-empty-name",
+        "scope-locale-empty", "scope-locale-glue", "scope-glob-1char",
+        "scope-homoglyph", "path-prefix-env", "path-prefix-nohup",
+        "path-wrapper", "upper-NICE", "nested-comment",
+        "nested-bs-newline-in-sq", "nested-trailing-redirect", "nested-sh",
+        "nested-bash-path", "slot-staged-path", "slot-upper", "slot-python2",
+        "insp-echo-zshenv", "insp-echo-bashrc", "insp-cat-copy-wrapper",
+        "insp-pipe-write", "insp-devtcp", "insp-xxd-r", "insp-tail-f",
+        "fd-close-before-mode", "quoted-run-redirect", "id-gt-no-space",
+        "head-misread-via-taskclass-value",
+    }
+    assert reviewer_rows <= ids, sorted(reviewer_rows - ids)
+    assert len(ids) == len(_R7_REVIEW2_TABLE)
+    # Every reviewer row that r6 allowed with ZERO binding check ("n") is a
+    # structural DENY now, except the pinned homoglyph limit.
+    for _, _, bound, nobind, gate, klass, _ in _R7_REVIEW2_TABLE:
+        if klass in ("seam", "scope", "insp", "path"):
+            assert (bound, nobind, gate) == ("deny", "deny", False)
+
+
+# --- r7: the 95 r6 rows again, now with the nobind run and the gate flag ----
+
+#: r6 rows that ARE launches (every other admitted row is a read or out of scope).
+_R7_R6_LAUNCH_ROWS = frozenset({
+    "exec", "command", "nohup", "setsid", "timeout", "nice",
+    "control-plain-launch", "control-slot-py", "control-faithful-bash-c",
+    "control-faithful-bash-c-outer-identity", "control-inherited-bare-launch",
+})
+
+
+@pytest.mark.parametrize("row", _R6_TABLE, ids=[row[0] for row in _R6_TABLE])
+def test_r7_r6_table_rows_with_gate_instrumentation(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple[str, str, str, str, str],
+) -> None:
+    name, command, expected, _, _ = row
+    launch = name in _R7_R6_LAUNCH_ROWS
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        _R6_GUARD, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert bound == expected, bound_reason
+    # A refused row is refused structurally (gate never reached); an
+    # admitted launch always reaches it; reads/out-of-scope never do.
+    assert bound_gate == nobind_gate == (expected == "allow" and launch)
+    assert nobind == ("deny" if expected == "deny" or launch else "allow"), nobind_reason
+    if launch:
+        assert "missing binding" in nobind_reason, nobind_reason
+
+
+# --- r7: every admitted launch shape reaches the gate with the PARSED token ---
+
+_R7_ADMITTED_LAUNCH_SHAPES = [
+    _R6_P + "pool run {pool} a /tmp m",
+    _R6_P + "pool run {pool} a /tmp m > /tmp/lane.log 2>&1",
+    _R6_P + "pool run {pool} a /tmp m < /tmp/packet.txt",
+    "env " + _R6_P + "pool run {pool} a /tmp m",
+    "/usr/bin/env " + _R6_P + "nohup pool run {pool} a /tmp m",
+    _R6_P + "nice -n 5 timeout 90m setsid pool run {pool} a /tmp m",
+    _R6_P + "exec command pool run {pool} a /tmp m",
+    _R6_P + _R7_EXT + "pool run {pool} a /tmp m",
+    _R6_P + "pool remote mini2 {pool} /tmp/p.txt /repo m",
+    _R6_P + _R7_EXT + "sub.sh {pool} a /tmp m",
+    _R6_P + _R7_EXT + "remote_sub.sh mini2 {pool} /tmp/p.txt /repo m",
+    _R6_P + "python3 " + _R7_EXT + "slot.py {pool} -- run",
+    _R6_P + "python3.12 " + _R7_EXT + "slot.py {pool} -- run",
+    _R6_P + "pool ru" + _NL + "n {pool} a /tmp m",
+    _R6_P + "pool 'run' \"{pool}\" a /tmp m",
+    "bash -c '" + _R6_P + "pool run {pool} a /tmp m'",
+    "sh -c '" + _R6_P + "pool run {pool} a /tmp m' 2>/dev/null",
+    _R6_P + "/bin/bash -c 'pool run {pool} a /tmp m'",
+]
+
+
+@pytest.mark.parametrize("shape", _R7_ADMITTED_LAUNCH_SHAPES)
+def test_r7_every_admitted_launch_shape_reaches_every_binding_check(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    shape: str,
+) -> None:
+    # Closes the r6 coverage gap (only trailing redirections were exercised):
+    # each admitted shape is parsed, censused and token-checked by the gate.
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    faithful, substituted = shape.format(pool="glm"), shape.format(pool="grok")
+    parse = guard.r7_parse(faithful)
+    assert parse is not None and not parse.refused, parse and parse.codes
+    assert len(parse.launches) == 1
+    calls = _r7_gate_spy(monkeypatch, guard)
+    assert _r6_verdict(guard, shared_placement, faithful, capsys)[0] == "allow"
+    verdict, reason = _r6_verdict(guard, shared_placement, substituted, capsys)
+    assert verdict == "deny" and "provider substitution" in reason, reason
+    assert len(calls) == 2
+    # The parse census and the r4 text view agree on every admitted shape.
+    assert [(w, t) for w, t, _ in guard._r7_census(parse)] == [
+        (w, t) for _, w, t, _ in guard._wrapper_invocations(faithful)
+    ]
+    # A stale fence and a re-rooted identity are refused on the same shape.
+    current = _binding(fence_counter=3)
+    _install(monkeypatch, tmp_path, _binding(fence_counter=2),
+             receipt=_receipt(current, fence_counter=3))
+    assert "stale fence" in _r6_verdict(guard, shared_placement, faithful, capsys)[1]
+
+
+def test_r7_census_disagreement_is_refused_as_unaccounted(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    # The text view sees a second invocation the parse reads as task text.
+    for command in (
+        _R6_P + 'pool run glm "then pool run glm b" /tmp glm-5.3',
+        _R6_P + 'pool run glm "see sub.sh grok" /tmp glm-5.3',
+        _R6_P + "pool run 'glm grok' a /tmp glm-5.3",
+    ):
+        verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+        assert verdict == "deny" and (
+            "unaccounted descendant" in reason or "provider substitution" in reason
+        ), reason
+    # The gate refuses, never skips, when the two readings differ.
+    monkeypatch.setattr(guard, "_wrapper_invocations", lambda command: [])
+    verdict, reason = _r6_verdict(guard, shared_placement, _R6_L, capsys)
+    assert verdict == "deny" and "unaccounted descendant" in reason, reason
+
+
+def test_r7_parse_reads_exact_identity_values_everywhere() -> None:
+    cases = {
+        "POOL_ORCHESTRATOR_ID=\"a\"' b' pool run glm": [("POOL_ORCHESTRATOR_ID", "a b")],
+        "env POOL_PARENT_RUN_ID='p'\\ q pool run glm": [("POOL_PARENT_RUN_ID", "p q")],
+        "POOL_ORCHESTRATOR_ID=a'>x' pool run glm": [("POOL_ORCHESTRATOR_ID", "a>x")],
+        "POOL_ORCHESTRATOR_ID=o bash -c 'POOL_ORCHESTRATOR_ID=i pool run glm'": [
+            ("POOL_ORCHESTRATOR_ID", "o"), ("POOL_ORCHESTRATOR_ID", "i"),
+        ],
+        "POOL_TASK_CLASS=code env POOL_TASK_CLASS='code cat' pool run glm": [
+            ("POOL_TASK_CLASS", "code"), ("POOL_TASK_CLASS", "code cat"),
+        ],
+    }
+    for command, expected in cases.items():
+        parse = guard.r7_parse(command)
+        assert parse is not None and not parse.refused, (command, parse.codes)
+        assert [launch.assignments for launch in parse.launches] == [expected], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "${x:-pool} run glm", "${x-pool} run glm", "${x:=pool} run glm",
+        "${x:+pool} run glm", "${x/a/pool} run glm", "${:-pool} run glm",
+        "${x:-sub.sh} glm", "${(e)x:-pool} run glm", 'p$""ool run glm',
+        'p$"o"ol run glm', "p* run glm", "s*.sh glm", "???? run glm",
+        "nice -n 5 p* run glm", "python3 /opt/x/s*.py glm",
+    ],
+)
+def test_r7_scope_is_widened_per_finding_4(command: str) -> None:
+    assert guard.r6_names_wrapper(command), command
+    assert guard.r6_refusal_codes(command), command
+
+
+def test_r7_scope_residue_stays_documented() -> None:
+    # Wholly wildcard OPERANDS and other spellings stay out of scope (the
+    # pinned r6 limit); command-word globs do not.
+    for command in ("python3 *.py", "ls *.sh", "bash *.sh", "рool run glm", "$W run glm"):
+        assert not guard.r6_names_wrapper(command), command
+
+
+# --- r7 closed read forms (REVIEW2 over-refusal carve-outs) -------------------
+
+_R7_READ_FORMS_ADMITTED = [
+    'git commit -m "fix pool"',
+    "git commit -am 'fix pool run cap'",
+    "git commit -q -m 'pool' -- docs/pool.md",
+    "git commit -F /tmp/msgs/pool",
+    "git commit --amend --no-edit -- pool",
+    "git --no-pager log --oneline -5 -- ~/.local/bin/pool",
+    "git log -n 3 --format=%H --grep='pool run' --no-ext-diff",
+    "git show --stat HEAD -- ~/.local/bin/pool",
+    "git diff --stat --cached -- pool",
+    "git diff -U3 --no-textconv HEAD~1 -- sub.sh",
+    "git status --short -uno -- pool",
+    "git status -sb pool",
+    "git grep -n -e 'pool run' -- docs",
+    "git grep -C2 -F slot.py",
+    "git add ops/pool",
+    "git add -A -- pool",
+    "rg -n 'pool run' docs",
+    "rg -l --hidden -g '*.md' pool",
+    "rg -C2 -F 'sub.sh' ops",
+    "rg --type py -e slot.py --no-config",
+    "sed -n 1,40p ~/.local/bin/pool",
+    "sed -n 5p " + _R7_EXT + "sub.sh",
+    "git log --oneline | grep pool",
+    "rg -n pool docs | head -5",
+    "grep -rn pool --include=*.py ops 2>/dev/null",
+    "/usr/bin/git log --oneline -- pool",
+]
+
+
+@pytest.mark.parametrize("command", _R7_READ_FORMS_ADMITTED)
+def test_r7_read_forms_admit_closed_reads(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert guard.r6_names_wrapper(command), command  # in scope: judged, not skipped
+    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    assert not bound_gate and not nobind_gate
+    parse = guard.r7_parse(command)
+    assert parse is not None and not parse.refused and not parse.launches
+
+
+_R7_READ_FORMS_REFUSED = [
+    # git: global options, exec-capable options, other subcommands, editors.
+    "git -c alias.x='!pool run grok a /tmp grok-4' x",
+    "git -c core.pager='pool run grok' log",
+    "git --config-env=core.pager=POOL_PAGER log -- pool",
+    "git --exec-path=/tmp/pool log",
+    "git -C /tmp log -- pool",
+    "git grep -O'pool run grok' x",
+    "git grep -Opool x",
+    "git grep --open-files-in-pager='pool run grok' x",
+    "git diff --ext-diff -- pool",
+    "git log -p --ext-diff -- pool",
+    "git log -p --textconv -- pool",
+    "git show --textconv HEAD:pool",
+    "git grep --textconv pool",
+    "git log --output=/tmp/out -- pool",
+    "git diff --output=/tmp/x -- pool",
+    "git rebase --exec 'pool run grok a /tmp grok-4' HEAD~3",
+    "git bisect run pool run grok a /tmp grok-4",
+    "git submodule foreach 'pool run grok a /tmp grok-4'",
+    "git config core.pager 'pool run grok'",
+    "git commit -e -m 'pool'",
+    "git commit -c HEAD -m pool",
+    "git commit -S -m 'pool'",
+    "git commit -- pool",
+    "git add -p pool",
+    "git add --edit pool",
+    "git log -- *pool",
+    # rg: --pre / -z / --hostname-bin and anything off the allowlist.
+    "rg --pre 'pool run grok' x",
+    "rg --pre=pool x",
+    "rg --pre-glob '*' --pre sh pool",
+    "rg -z pool x",
+    "rg -nz pool x",
+    "rg --search-zip pool x",
+    "rg --hostname-bin=/tmp/pool x",
+    "rg pool *",
+    # sed: only -n N[,M]p.
+    "sed -n '1e pool run grok' x",
+    "sed 'e pool run grok' x",
+    "sed -n 's/x/pool/ep' x",
+    "sed -n 1,5w/tmp/pool x",
+    "sed -i -n 1p pool",
+    "sed -n 1p -- pool",
+    # inspectors: ugrep exec/config options, follow, compile, xxd, globs.
+    "grep --filter='*:pool run grok' -r x .",
+    "grep -Q pool",
+    "grep -nQ pool .",
+    "grep --pager=pool x",
+    "grep --config=/tmp/cfg pool x",
+    "grep pool *",
+    "tail -F /tmp/lane/pool",
+    "tail -n 5 -f /tmp/lane/pool",
+    "tail --follow=name /tmp/lane/pool",
+    "file -C -m /tmp/magic/pool",
+    "xxd /opt/mastermind/ext/pool",
+    # read forms take no assignments, prefixes or staged paths.
+    "GIT_EXTERNAL_DIFF=/tmp/x git diff -- pool",
+    "env git log -- pool",
+    "/opt/homebrew/bin/rg pool",
+    "Git log -- pool",
+]
+
+
+@pytest.mark.parametrize("command", _R7_READ_FORMS_REFUSED)
+def test_r7_read_forms_refuse_exec_write_and_editor_options(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    assert guard.r6_names_wrapper(command), command  # in scope: judged, not skipped
+    (bound, bound_reason, bound_gate), (nobind, _, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), bound_reason
+    assert not bound_gate and not nobind_gate
+    assert bound_reason.startswith("Mastermind shared-placement guard: unobservable launch")
+
+
+def test_r7_read_form_allowlists_exclude_every_exec_capable_option() -> None:
+    for spec in guard._R7_GIT_SPECS.values():
+        short_flags, short_valued, long_flags, long_valued = spec
+        for option in ("--ext-diff", "--textconv", "--output", "--exec",
+                       "--open-files-in-pager", "--edit", "--patch-interactive",
+                       "--interactive", "--gpg-sign"):
+            assert option not in long_flags | long_valued, option
+        assert "O" not in short_flags | short_valued
+    # -c is a git GLOBAL option (refused: only --no-pager precedes the
+    # subcommand) and, on commit, re-edit-in-editor; elsewhere it is count.
+    assert "c" not in guard._R7_GIT_SPECS["commit"][0] | guard._R7_GIT_SPECS["commit"][1]
+    assert "e" not in "".join(guard._R7_GIT_SPECS["commit"][0] | guard._R7_GIT_SPECS["commit"][1])
+    assert "S" not in guard._R7_GIT_SPECS["commit"][0] | guard._R7_GIT_SPECS["commit"][1]
+    assert not ({"p", "e", "i"} & (guard._R7_GIT_SPECS["add"][0] | guard._R7_GIT_SPECS["add"][1]))
+    for subcommand in ("rebase", "bisect", "submodule", "config", "difftool", "-c"):
+        assert subcommand not in guard._R7_GIT_SPECS
+    rg_short_flags, rg_short_valued, rg_long_flags, rg_long_valued = guard._R7_RG_SPEC
+    assert "z" not in rg_short_flags | rg_short_valued
+    for option in ("--pre", "--pre-glob", "--search-zip", "--hostname-bin"):
+        assert option not in rg_long_flags | rg_long_valued, option
+    assert "xxd" not in guard._R7_READ_HEADS
+
+
+def test_r7_refusal_wording_distinguishes_mentions_from_launches(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    reason = _r6_verdict(guard, shared_placement, "pytest -k pool", capsys)[1]
+    assert "mentions a paid-launch wrapper name" in reason
+    assert "Not launching?" in reason and "git commit" in reason and "rg" in reason
+    assert "r7 admit rule" in reason
+    reason = _r6_verdict(guard, shared_placement, "pool </dev/null run glm a /tmp m", capsys)[1]
+    assert "names a paid-launch wrapper but is not one plain top-level launch" in reason
+    assert "redirections only at the end" in reason
+
+
+def test_r7_unarmed_sessions_see_launches_the_text_regex_misses(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Legacy (unarmed) identity checks now also run on a launch the parse
+    # finds but FABRIC_LAUNCH_RE misses; reads stay unchecked.
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS",
+                 "MASTERMIND_SHARED_PLACEMENT", "POOL_EXECUTION_BINDING"):
+        monkeypatch.delenv(name, raising=False)
+    for command in ("pool </dev/null run grok a /tmp grok-4",
+                    "pool 2>&1 run grok a /tmp grok-4"):
+        with pytest.raises(SystemExit):
+            guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+        assert "Fabric root-budget guard" in _emitted(capsys)["permissionDecisionReason"]
+    for command in ("cat /opt/mastermind/ext/sub.sh", "pool status", "git commit -m 'pool'"):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+        assert capsys.readouterr().out == "", command
+
+
+# --- r7: the REAL hook command line (python3 "<guard>" with JSON on stdin) ---
+#
+# On a single-uid host the receipt is necessarily principal-owned, so a
+# BOUND run that reaches the gate is refused at the receipt channel ("not
+# owner-authenticated") and an unbound one for "missing binding": both prove
+# the gate ran. A structural refusal names its R6 code; a read is allowed.
+
+_R7_HOOK_ROWS = [
+    # (id, command, bound expectation, nobind expectation)
+    ("seam-redir-before-mode", "pool </dev/null run grok a /tmp grok-4",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-fd-dup", "pool 2>&1 run grok a /tmp grok-4", "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-redir-after-run", "pool run </dev/null grok a /tmp grok-4",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-subsh", "/opt/x/sub.sh </dev/null grok a /tmp grok-4",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-slot", "python3 /opt/x/slot.py </dev/null grok -- run",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-nested", "bash -c 'pool </dev/null run grok a /tmp grok-4'",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("seam-target-named-cat", ">/tmp/cat pool run grok a /tmp grok-4",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("scope-param-default", "${x:-pool} run grok a /tmp grok-4", "R6_EXPANSION", "R6_EXPANSION"),
+    ("scope-locale", 'p$""ool run grok a /tmp grok-4', "R6_EXPANSION", "R6_EXPANSION"),
+    ("insp-echo-zshenv",
+     "echo 'pool() { command pool \"$@\"; command pool \"$@\"; }' >> ~/.zshenv",
+     "R6_REDIRECTION", "R6_REDIRECTION"),
+    ("path-prefix-env", "/tmp/evil/env pool run glm a /tmp glm-5.3",
+     "R6_HEAD_SPELLING", "R6_HEAD_SPELLING"),
+    ("id-lossy-value",
+     "POOL_ORCHESTRATOR_ID=\"root-orch-1\"' evil' " + _R7_BAD_ROOT,
+     "not owner-authenticated", "missing binding"),
+    ("control-plain-launch", _R6_L, "not owner-authenticated", "missing binding"),
+    ("control-git-commit", 'git commit -m "fix pool"', "allow", "allow"),
+    ("control-cat", "cat /opt/mastermind/ext/sub.sh", "allow", "allow"),
+    ("control-gh", "gh pr view 2329", "allow", "allow"),
+]
+
+
+@pytest.mark.parametrize("row", _R7_HOOK_ROWS, ids=[row[0] for row in _R7_HOOK_ROWS])
+def test_r7_real_hook_command_line(tmp_path: Path, row: tuple[str, str, str, str]) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("python3") is None:
+        pytest.skip("no python3 on PATH for the registered hook command")
+    _, command, bound_expected, nobind_expected = row
+    module_path = os.environ.get("MASTERMIND_R6_GUARD_UNDER_TEST", "").strip() or guard.__file__
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    binding = _binding()
+    receipt = tmp_path / "placement-receipt.json"
+    receipt.write_text(json.dumps(_receipt(binding)), encoding="utf-8")
+    base = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("POOL_", "MASTERMIND_")) and key not in ("BASH_ENV", "ENV")
+    }
+    base.update({
+        "HOME": str(home),
+        "MASTERMIND_CI_POLL_STATE_DIR": str(tmp_path / "poll"),
+        "MASTERMIND_SHARED_PLACEMENT": "1",
+        "MASTERMIND_PLACEMENT_RECEIPT": str(receipt),
+        "MASTERMIND_PLACEMENT_RECEIPT_OWNER_UIDS": str(os.geteuid()),
+        "POOL_ORCHESTRATOR_ID": "root-orch-1",
+        "POOL_PARENT_RUN_ID": "hermes-run-7",
+        "POOL_TASK_CLASS": "code",
+    })
+    payload = json.dumps(_payload(cwd, command))
+    for bound, expected in ((True, bound_expected), (False, nobind_expected)):
+        env = dict(base)
+        if bound:
+            env["POOL_EXECUTION_BINDING"] = json.dumps(binding)
+        result = subprocess.run(
+            ["/bin/sh", "-c", f'python3 "{module_path}"'], input=payload, env=env,
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        out = result.stdout.strip()
+        if expected == "allow":
+            assert out == "", (bound, out)
+            continue
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", (bound, out)
+        assert expected in decision["permissionDecisionReason"], (bound, out)
+
+
+# --- r7: the gate must FINISH (a hook killed at its 10 s timeout does not block)
+
+_R7_BUDGET_N = 250_000
+
+
+def _r7_fill(unit: str) -> str:
+    return (unit * (_R7_BUDGET_N // len(unit) + 1))[:_R7_BUDGET_N]
+
+
+_R7_BUDGET_ROWS = [
+    # (id, command, bound verdict) — every one judged far inside the budget.
+    ("long-path-word", "pool run grok a /tmp grok-4 -O" + _r7_fill("/a"), "deny"),
+    ("slash-run", "pool run grok a /tmp grok-4 " + _r7_fill("/") + "pool", "deny"),
+    ("dash-path-tokens", _R6_L + " " + _r7_fill("-a/"), "allow"),
+    ("quoted-identity-text", _R6_L + " '" + _r7_fill("POOL_ORCHESTRATOR_ID ") + "'", "deny"),
+    ("quoted-env-u-text", _R6_L + " '" + _r7_fill("env -u ") + "'", "deny"),
+    ("quoted-do-text", _R6_L + " '" + _r7_fill("do ") + "'", "allow"),
+    ("quoted-launch-text", _R6_L + " '" + _r7_fill("pool run glm ") + "'", "deny"),
+    ("glob-head", _r7_fill("*?") + " run glm", "allow"),
+    ("glob-arg", "ls " + _r7_fill("*?") + " pool", "allow"),
+    ("nested-substitutions", "pool " + "$(" * 60_000 + "x" + ")" * 60_000, "deny"),
+    ("dq-substitution-recursion", 'pool "' + '$("' * 60_000, "deny"),
+    ("many-heredocs", "pool " + _r7_fill("<<A "), "deny"),
+    ("many-semicolons", _r7_fill("pool run glm;"), "deny"),
+    ("long-literal-word", _R6_L + " " + _r7_fill("a"), "allow"),
+]
+
+
+@pytest.mark.parametrize("row", _R7_BUDGET_ROWS, ids=[row[0] for row in _R7_BUDGET_ROWS])
+def test_r7_armed_gate_finishes_far_inside_the_hook_budget(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple[str, str, str],
+) -> None:
+    import time
+
+    _, command, expected = row
+    assert len(command) <= guard.R7_MAX_ARMED_COMMAND_CHARS
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    started = time.monotonic()
+    verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+    elapsed = time.monotonic() - started
+    assert verdict == expected, reason[:300]
+    # The registered hook timeout is 10 s (provider_orchestrator_policy);
+    # every scan on the armed path is linear (measured ~1 s worst case).
+    assert elapsed < 5.0, (row[0], elapsed)
+
+
+def test_r7_armed_command_above_the_cap_is_refused_fail_closed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+    command = _R6_L + " " + "a" * guard.R7_MAX_ARMED_COMMAND_CHARS
+    verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+    assert verdict == "deny" and "refused fail-closed" in reason
+
+
+def test_r7_main_fails_closed_on_an_internal_error_when_armed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import io
+
+    _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(guard, "guard_fabric_launch", broken)
+    payload = json.dumps(_payload(shared_placement, _R6_L))
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    with pytest.raises(SystemExit):
+        guard.main()
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "internal guard error (ValueError)" in output["permissionDecisionReason"]
+    # Unarmed sessions keep the previous behaviour (the error propagates).
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT")
+    monkeypatch.delenv("POOL_EXECUTION_BINDING")
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    with pytest.raises(ValueError):
+        guard.main()
+
+
+def test_r7_glob_and_parts_matchers_agree_with_the_regex_semantics() -> None:
+    import fnmatch
+    import random
+    import re as regex
+
+    rng = random.Random(2329)
+    alphabet = "pols.uhrem_t*?[]!-ab"
+    for _ in range(4000):
+        pattern = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 9)))
+        for name in guard._R6_WRAPPER_BASENAMES:
+            assert guard._r7_glob_match(name, pattern) == fnmatch.fnmatchcase(name, pattern), (
+                name, pattern,
+            )
+    for _ in range(4000):
+        parts = ["".join(rng.choice("pols.uhb_") for _ in range(rng.randint(0, 3)))
+                 for _ in range(rng.randint(2, 4))]
+        expected_regex = ".*".join(regex.escape(part) for part in parts)
+        for name in guard._R6_WRAPPER_BASENAMES:
+            assert guard._r7_parts_match(name, parts) == bool(
+                regex.fullmatch(expected_regex, name)
+            ), (name, parts)
