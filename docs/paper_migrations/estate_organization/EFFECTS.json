@@ -1,1071 +1,135 @@
 {
-  "schema": "paper.estate.organization.effects.v1",
+  "schema": "paper.estate.effects.v2",
   "operation": "paper-estate-organization-20261108-c1",
-  "effects": [
+  "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "count": 138,
+  "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay.",
+  "operations": [
     {
       "operation_id": "peo-20261108-c1-directory-name-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "rename_resource",
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "4ad56ebf1d61be87bbf38e952527653722e8984ed722444e61be2083dece7b2f",
       "after_snapshot": "feac726f22ef23b7318a476cffb78d474fb2c4c1a2ba6522f0b9945ceaa0d30e",
-      "result": {
-        "resourceId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "name": "00 · Paper Estate · Start Here",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-directory-pages-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "update_pages",
-      "arguments": {
-        "updates": [
-          {
-            "pageId": "p-1-0",
-            "name": "00 · Start here · Estate guide",
-            "icon": "arrow"
-          },
-          {
-            "pageId": "p-2-0",
-            "name": "01 · Product map",
-            "icon": "design"
-          },
-          {
-            "pageId": "p-6-0",
-            "name": "02 · Build sources & decisions",
-            "icon": "blueprint"
-          },
-          {
-            "pageId": "p-3-0",
-            "name": "10 · Retained designs · Foundations & markets",
-            "icon": "images"
-          },
-          {
-            "pageId": "p-4-0",
-            "name": "11 · Retained designs · Evidence & tools",
-            "icon": "images"
-          },
-          {
-            "pageId": "p-5-0",
-            "name": "12 · Retained designs · Products & history",
-            "icon": "images"
-          }
-        ]
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "feac726f22ef23b7318a476cffb78d474fb2c4c1a2ba6522f0b9945ceaa0d30e",
       "after_snapshot": "9142d545328f85bfd1f7e02d9977a865b2422ee7eeb32fcf28e2e7e691c891ca",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "updates": [
-          {
-            "pageId": "p-1-0",
-            "name": "00 · Start here · Estate guide",
-            "icon": "arrow"
-          },
-          {
-            "pageId": "p-2-0",
-            "name": "01 · Product map",
-            "icon": "design"
-          },
-          {
-            "pageId": "p-6-0",
-            "name": "02 · Build sources & decisions",
-            "icon": "blueprint"
-          },
-          {
-            "pageId": "p-3-0",
-            "name": "10 · Retained designs · Foundations & markets",
-            "icon": "images"
-          },
-          {
-            "pageId": "p-4-0",
-            "name": "11 · Retained designs · Evidence & tools",
-            "icon": "images"
-          },
-          {
-            "pageId": "p-5-0",
-            "name": "12 · Retained designs · Products & history",
-            "icon": "images"
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-directory-order-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "arrange_pages",
-      "arguments": {
-        "order": [
-          "p-1-0",
-          "p-2-0",
-          "p-6-0",
-          {
-            "type": "divider"
-          },
-          "p-3-0",
-          "p-4-0",
-          "p-5-0"
-        ]
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "9142d545328f85bfd1f7e02d9977a865b2422ee7eeb32fcf28e2e7e691c891ca",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "pages": [
-          {
-            "type": "page",
-            "id": "p-1-0",
-            "name": "00 · Start here · Estate guide",
-            "icon": "arrow",
-            "isActive": false
-          },
-          {
-            "type": "page",
-            "id": "p-2-0",
-            "name": "01 · Product map",
-            "icon": "design",
-            "isActive": false
-          },
-          {
-            "type": "page",
-            "id": "p-6-0",
-            "name": "02 · Build sources & decisions",
-            "icon": "blueprint",
-            "isActive": true
-          },
-          {
-            "type": "divider",
-            "id": "p-7-0"
-          },
-          {
-            "type": "page",
-            "id": "p-3-0",
-            "name": "10 · Retained designs · Foundations & markets",
-            "icon": "images",
-            "isActive": false
-          },
-          {
-            "type": "page",
-            "id": "p-4-0",
-            "name": "11 · Retained designs · Evidence & tools",
-            "icon": "images",
-            "isActive": false
-          },
-          {
-            "type": "page",
-            "id": "p-5-0",
-            "name": "12 · Retained designs · Products & history",
-            "icon": "images",
-            "isActive": false
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-directory-intro-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "set_text_content",
-      "arguments": {
-        "updates": [
-          {
-            "nodeId": "3-0",
-            "html": "MASTERMIND / PAPER ESTATE"
-          },
-          {
-            "nodeId": "4-0",
-            "html": "Find the right design."
-          },
-          {
-            "nodeId": "5-0",
-            "html": "Choose a product, check its build source, and follow retained requirements."
-          },
-          {
-            "nodeId": "C1-0",
-            "html": "Migration record · Original file now navigation only"
-          },
-          {
-            "nodeId": "C3-0",
-            "html": "Migration preserves locations; it does not decide which revision to build. Open Build sources &amp; decisions before implementing."
-          },
-          {
-            "nodeId": "D-0",
-            "html": "Legacy links &amp; recovery"
-          },
-          {
-            "nodeId": "E-0",
-            "html": "Old page links open their relocation notices. Use the Product map for working designs; use Retained designs to trace earlier requirements."
-          },
-          {
-            "nodeId": "1U-0",
-            "html": "Keep your old bookmarks."
-          },
-          {
-            "nodeId": "BX-0",
-            "html": "Exact implementation sources, design qualifications and retained behavior. A working design is not automatically approved to build."
-          },
-          {
-            "nodeId": "L-0",
-            "html": "PAPER ESTATE / PRODUCT MAP"
-          },
-          {
-            "nodeId": "N-0",
-            "html": "Open the product’s entry page, then its build guide. Newer revisions do not automatically replace older requirements. Use Retained designs for lineage."
-          },
-          {
-            "nodeId": "U-0",
-            "html": "Sector Intelligence · R4 working design"
-          },
-          {
-            "nodeId": "3H-0",
-            "html": "R2 historical build reference | vNext study | Unified detail | Sector Central. Compare with R3 and the R4 working guide; do not infer build approval from the old title."
-          }
-        ]
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "updates": [
-          {
-            "nodeId": "3-0"
-          },
-          {
-            "nodeId": "4-0"
-          },
-          {
-            "nodeId": "5-0"
-          },
-          {
-            "nodeId": "C1-0"
-          },
-          {
-            "nodeId": "C3-0"
-          },
-          {
-            "nodeId": "D-0"
-          },
-          {
-            "nodeId": "E-0"
-          },
-          {
-            "nodeId": "1U-0"
-          },
-          {
-            "nodeId": "BX-0"
-          },
-          {
-            "nodeId": "L-0"
-          },
-          {
-            "nodeId": "N-0"
-          },
-          {
-            "nodeId": "U-0"
-          },
-          {
-            "nodeId": "3H-0"
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-product-deeplinks-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "set_text_content",
-      "arguments": {
-        "updates": [
-          {
-            "nodeId": "S-0",
-            "html": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0"
-          },
-          {
-            "nodeId": "V-0",
-            "html": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-3-0"
-          },
-          {
-            "nodeId": "10-0",
-            "html": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0"
-          },
-          {
-            "nodeId": "13-0",
-            "html": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0"
-          },
-          {
-            "nodeId": "18-0",
-            "html": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0"
-          },
-          {
-            "nodeId": "1B-0",
-            "html": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-2-0"
-          },
-          {
-            "nodeId": "1G-0",
-            "html": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-1-0"
-          },
-          {
-            "nodeId": "1J-0",
-            "html": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-1-0"
-          },
-          {
-            "nodeId": "1O-0",
-            "html": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0"
-          },
-          {
-            "nodeId": "1R-0",
-            "html": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0"
-          },
-          {
-            "nodeId": "1Q-0",
-            "html": "Options R1 · Desktop reference"
-          }
-        ]
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "updates": [
-          {
-            "nodeId": "S-0"
-          },
-          {
-            "nodeId": "V-0"
-          },
-          {
-            "nodeId": "10-0"
-          },
-          {
-            "nodeId": "13-0"
-          },
-          {
-            "nodeId": "18-0"
-          },
-          {
-            "nodeId": "1B-0"
-          },
-          {
-            "nodeId": "1G-0"
-          },
-          {
-            "nodeId": "1J-0"
-          },
-          {
-            "nodeId": "1O-0"
-          },
-          {
-            "nodeId": "1R-0"
-          },
-          {
-            "nodeId": "1Q-0"
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-estate-nav-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "write_html",
-      "arguments": {
-        "targetNodeId": "1-0",
-        "mode": "insert-children",
-        "html": "<div layer-name=\"Estate navigation\" style=\"display:flex;gap:24px;width:1312px;\"><div style=\"display:flex;flex-direction:column;gap:12px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;width:421px;\"><div style=\"font-family:Inter;font-size:24px;font-weight:700;color:#1C2430;line-height:32px;\">Product map</div><div style=\"font-family:Inter;font-size:17px;color:#5D6B7E;line-height:25px;\">Working entry pages</div><div style=\"font-family:Inter;font-size:14px;color:#285FFF;line-height:22px;overflow-wrap:anywhere;\">https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-2-0</div></div><div style=\"display:flex;flex-direction:column;gap:12px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;width:421px;\"><div style=\"font-family:Inter;font-size:24px;font-weight:700;color:#1C2430;line-height:32px;\">Build sources</div><div style=\"font-family:Inter;font-size:17px;color:#5D6B7E;line-height:25px;\">Scope, behavior and decisions</div><div style=\"font-family:Inter;font-size:14px;color:#285FFF;line-height:22px;overflow-wrap:anywhere;\">https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</div></div><div style=\"display:flex;flex-direction:column;gap:12px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;width:421px;\"><div style=\"font-family:Inter;font-size:24px;font-weight:700;color:#1C2430;line-height:32px;\">Retained designs</div><div style=\"font-family:Inter;font-size:17px;color:#5D6B7E;line-height:25px;\">Earlier versions and lineage</div><div style=\"font-family:Inter;font-size:14px;color:#285FFF;line-height:22px;overflow-wrap:anywhere;\">https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-3-0</div></div></div>"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "createdNodes": [
-          {
-            "id": "CF-0",
-            "name": "Estate navigation",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CG-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CH-0",
-            "name": "Product map",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CI-0",
-            "name": "Working entry pages",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CJ-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CK-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CL-0",
-            "name": "Build sources",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CM-0",
-            "name": "Scope, behavior and …",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CN-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CO-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CP-0",
-            "name": "Retained designs",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CQ-0",
-            "name": "Earlier versions and…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CR-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-estate-nav-position-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "move_nodes",
-      "arguments": {
-        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "moves": [
-          {
-            "nodeId": "CF-0",
-            "after": "2-0"
-          }
-        ]
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "moves": [
-          {
-            "nodeId": "CF-0",
-            "parentId": "1-0",
-            "index": 1
-          }
-        ],
-        "affectedParents": [
-          {
-            "parentId": "1-0",
-            "childIds": [
-              "2-0",
-              "CF-0",
-              "C0-0",
-              "C-0",
-              "1T-0",
-              "BV-0",
-              "C9-0"
-            ]
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-products-os-prophet-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "write_html",
-      "arguments": {
-        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "targetNodeId": "J-0",
-        "mode": "insert-children",
-        "html": "<div layer-name=\"OS and Prophet entries\" style=\"display:flex;gap:32px;\"><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Mastermind OS · Design map</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">Projects, conversations, team and access</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0</div></div><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Prophet · D03 working guide</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">Draft design; retain the recorded build boundaries</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0</div></div></div>"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "createdNodes": [
-          {
-            "id": "CT-0",
-            "name": "OS and Prophet entries",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CU-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CV-0",
-            "name": "Mastermind OS · Desi…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CW-0",
-            "name": "Projects, conversati…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CX-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CY-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "CZ-0",
-            "name": "Prophet · D03 workin…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D0-0",
-            "name": "Draft design; retain…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D1-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-products-ai-guide-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "write_html",
-      "arguments": {
-        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "targetNodeId": "J-0",
-        "mode": "insert-children",
-        "html": "<div layer-name=\"ai-guide entries\" style=\"display:flex;gap:32px;\"><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Mastermind AI · Chat workbench</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">R10 design, answer context and save/recovery</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0</div></div><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Market Guide · Start here</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">Scores, contextual help, aliases and return paths</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-1-0</div></div></div>"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "createdNodes": [
-          {
-            "id": "D3-0",
-            "name": "ai-guide entries",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D4-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D5-0",
-            "name": "Mastermind AI · Chat…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D6-0",
-            "name": "R10 design, answer c…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D7-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D8-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "D9-0",
-            "name": "Market Guide · Start…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DA-0",
-            "name": "Scores, contextual h…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DB-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-products-ontology-risk-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "write_html",
-      "arguments": {
-        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "targetNodeId": "J-0",
-        "mode": "insert-children",
-        "html": "<div layer-name=\"ontology-risk entries\" style=\"display:flex;gap:32px;\"><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Market Ontology · Journey map</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">WTI investigation, evidence and thesis receipts</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0</div></div><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Risk Radar &amp; dashboard dialogs</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">Risk, China, events and news design families</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-5-0</div></div></div>"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "createdNodes": [
-          {
-            "id": "DD-0",
-            "name": "ontology-risk entries",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DE-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DF-0",
-            "name": "Market Ontology · Jo…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DG-0",
-            "name": "WTI investigation, e…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DH-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DI-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DJ-0",
-            "name": "Risk Radar & dashboa…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DK-0",
-            "name": "Risk, China, events …",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DL-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-products-expectation-aerlor-01",
       "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
       "tool": "write_html",
-      "arguments": {
-        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "targetNodeId": "J-0",
-        "mode": "insert-children",
-        "html": "<div layer-name=\"expectation-aerlor entries\" style=\"display:flex;gap:32px;\"><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">Expectation Surface · Start here</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">Estimate revisions, coverage and methods</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0</div></div><div style=\"display:flex;flex-direction:column;gap:10px;padding:20px;background:#F7F8FA;width:640px;\"><div style=\"font-family:Inter;font-size:22px;font-weight:700;line-height:30px;color:#1C2430;\">AERLOR · Design &amp; build map</div><div style=\"font-family:Inter;font-size:16px;line-height:24px;color:#5D6B7E;\">R5 release lineage; later directions remain proposals</div><div style=\"font-family:Inter;font-size:15px;line-height:24px;color:#285FFF;overflow-wrap:anywhere;\">https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0</div></div></div>"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
       "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
-      "result": {
-        "file": {
-          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-          "name": "00 · Paper Estate · Start Here"
-        },
-        "contentHash": {
-          "tokens": "811c9dc5"
-        },
-        "createdNodes": [
-          {
-            "id": "DN-0",
-            "name": "expectation-aerlor entries",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DO-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DP-0",
-            "name": "Expectation Surface …",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DQ-0",
-            "name": "Estimate revisions, …",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DR-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DS-0",
-            "name": "Frame",
-            "component": "Frame",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DT-0",
-            "name": "AERLOR · Design & bu…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DU-0",
-            "name": "R5 release lineage; …",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          },
-          {
-            "id": "DV-0",
-            "name": "https://app.paper.de…",
-            "component": "Text",
-            "worldX": null,
-            "worldY": null,
-            "x": null,
-            "y": null
-          }
-        ]
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-01",
       "file_id": "01M5JRN1HWF62YK527NKCY7WD5",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5JRN1HWF62YK527NKCY7WD5",
-        "name": "90 · Test · Page lifecycle · Empty source"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "b259e6d6ee6375e61e083954d6fed17aa6aa8aca68c0acc2c06373cadf6c0762",
       "after_snapshot": "13c8f5f25de6673915528f12a50dc401a8f198d3d5bbff55fa5963b1bc7e6f29",
-      "result": {
-        "resourceId": "01M5JRN1HWF62YK527NKCY7WD5",
-        "name": "90 · Test · Page lifecycle · Empty source",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-02",
       "file_id": "01M5K0V5AGPSDXKA2K1PH1ABNE",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5K0V5AGPSDXKA2K1PH1ABNE",
-        "name": "90 · Test · Row guard · Empty clone · 2026-10-22"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "4ab4a15a39923dbcd680b4db04902dc30d380154eb96a5505ba4f3e617f0325a",
       "after_snapshot": "7335f2879a373a70b653f8d92d455dad5df99f6fba3bd1f452affc5668566fe2",
-      "result": {
-        "resourceId": "01M5K0V5AGPSDXKA2K1PH1ABNE",
-        "name": "90 · Test · Row guard · Empty clone · 2026-10-22",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-03",
       "file_id": "01M5JV8SY6WP21H72WKK7GJ5R6",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5JV8SY6WP21H72WKK7GJ5R6",
-        "name": "90 · Test · Delete regression · Empty clone · 2026-10-22"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "f760cf3cd38caa0ff66fe1c918db63eb4779880d7be8afe4891e0ff248db8049",
       "after_snapshot": "f760cf3cd38caa0ff66fe1c918db63eb4779880d7be8afe4891e0ff248db8049",
-      "result": {
-        "resourceId": "01M5JV8SY6WP21H72WKK7GJ5R6",
-        "name": "90 · Test · Delete regression · Empty clone · 2026-10-22",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-001-020.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1081,37 +145,19 @@
       "operation_id": "peo-20261108-c1-test-name-04",
       "file_id": "01M5JKR6H0JNN07BA3YKQDXBNC",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5JKR6H0JNN07BA3YKQDXBNC",
-        "name": "90 · Test · Native clone fidelity · Copy B"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "53cff1245adcbfa7e932251a2e0d8d20277f95b865b6d7cc30c9aa8837c43bd9",
       "after_snapshot": "d067bb3f80dd5d57ee04c12bb392f70072d5da311381d3ece10709e02267a41e",
-      "result": {
-        "resourceId": "01M5JKR6H0JNN07BA3YKQDXBNC",
-        "name": "90 · Test · Native clone fidelity · Copy B",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-05",
       "file_id": "01M5HDPF3HSZFJJAFMARVQSHZR",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5HDPF3HSZFJJAFMARVQSHZR",
-        "name": "90 · Empty · Jolly vase · Removal candidate"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "3d054ade444b5e006b16e0d4102a04d80d60d5f435a5fc8c604f1ce3b5321c8b",
       "after_snapshot": "3d054ade444b5e006b16e0d4102a04d80d60d5f435a5fc8c604f1ce3b5321c8b",
-      "result": {
-        "resourceId": "01M5HDPF3HSZFJJAFMARVQSHZR",
-        "name": "90 · Empty · Jolly vase · Removal candidate",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-001-020.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1127,37 +173,19 @@
       "operation_id": "peo-20261108-c1-test-name-06",
       "file_id": "01M5JS8TNZKQ01SJS4D0S9VQFC",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5JS8TNZKQ01SJS4D0S9VQFC",
-        "name": "90 · Test · Page lifecycle · Empty clone"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "82a038a7ea29a063b8e1e4507dd8ce872443a50a17a8b0d63561d304df79857d",
       "after_snapshot": "0e3ebba9dbf2f01fc8c4469464bf859980f3e71ebce3a2523912d168028c20c4",
-      "result": {
-        "resourceId": "01M5JS8TNZKQ01SJS4D0S9VQFC",
-        "name": "90 · Test · Page lifecycle · Empty clone",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-001-020.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-07",
       "file_id": "01M6JA41WWACWMRRVMVX1NQP9K",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6JA41WWACWMRRVMVX1NQP9K",
-        "name": "90 · Test · Guarded write acceptance · 2026-11-04"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "91e82567b9597ea3a75784ec76afcd8350deb4b5fd91feeb0d1534f73e4cdb16",
       "after_snapshot": "91e82567b9597ea3a75784ec76afcd8350deb4b5fd91feeb0d1534f73e4cdb16",
-      "result": {
-        "resourceId": "01M6JA41WWACWMRRVMVX1NQP9K",
-        "name": "90 · Test · Guarded write acceptance · 2026-11-04",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-001-020.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1173,19 +201,10 @@
       "operation_id": "peo-20261108-c1-test-name-08",
       "file_id": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
-        "name": "90 · Test · Native clone fidelity · Source"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "df134731c129a40a6b6c313e212a8258ea7b721be3fe6b904a679bdb01a33754",
       "after_snapshot": "df134731c129a40a6b6c313e212a8258ea7b721be3fe6b904a679bdb01a33754",
-      "result": {
-        "resourceId": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
-        "name": "90 · Test · Native clone fidelity · Source",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-001-020.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1201,19 +220,10 @@
       "operation_id": "peo-20261108-c1-test-name-09",
       "file_id": "01M5HQ8VMMY87NVDENZAGJNYKM",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5HQ8VMMY87NVDENZAGJNYKM",
-        "name": "90 · Test · Native clone fidelity · Empty clone"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "3f56df11f708fec72de3ec4f7c4bf9e283bea12c19b2d7c28247478f8f4fa21f",
       "after_snapshot": "3f56df11f708fec72de3ec4f7c4bf9e283bea12c19b2d7c28247478f8f4fa21f",
-      "result": {
-        "resourceId": "01M5HQ8VMMY87NVDENZAGJNYKM",
-        "name": "90 · Test · Native clone fidelity · Empty clone",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-001-020.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1229,37 +239,19 @@
       "operation_id": "peo-20261108-c1-test-name-10",
       "file_id": "01M5HRAG5659SFE58D3PTA7D0V",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5HRAG5659SFE58D3PTA7D0V",
-        "name": "90 · Test · Native clone fidelity · Copy A"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "429fbf754336b6421acd2b86007c997f8b59fb8859d16b07cbe900ef19c48de6",
       "after_snapshot": "db1952681bdcdad7d5a8309be38ed7074bffd80d5e5e7b1a0b3eff694df31006",
-      "result": {
-        "resourceId": "01M5HRAG5659SFE58D3PTA7D0V",
-        "name": "90 · Test · Native clone fidelity · Copy A",
-        "type": "file"
-      },
-      "retry_allowed": false
+      "receipt_path": "effects/operations-021-040.json"
     },
     {
       "operation_id": "peo-20261108-c1-test-name-11",
       "file_id": "01M6XNXMVK65A0JRXKJHXT7ZCF",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6XNXMVK65A0JRXKJHXT7ZCF",
-        "name": "90 · Test · Paper write-path · 2026-11-08"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "717a66f29af24a29eb83de83cb4d1b050715b8a028cf464029d89a60b3c7b116",
       "after_snapshot": "717a66f29af24a29eb83de83cb4d1b050715b8a028cf464029d89a60b3c7b116",
-      "result": {
-        "resourceId": "01M6XNXMVK65A0JRXKJHXT7ZCF",
-        "name": "90 · Test · Paper write-path · 2026-11-08",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1275,19 +267,10 @@
       "operation_id": "peo-20261108-c1-test-name-12",
       "file_id": "01M5K3WQXMD1QKXM2SBD7VABW1",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5K3WQXMD1QKXM2SBD7VABW1",
-        "name": "90 · Test · Copy-link identity · Empty clone · 2026-10-22"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "3183f3d4b2543cd435fd5edf55e9b5ebd842797515aa5ef6b85f7c574baedab1",
       "after_snapshot": "3183f3d4b2543cd435fd5edf55e9b5ebd842797515aa5ef6b85f7c574baedab1",
-      "result": {
-        "resourceId": "01M5K3WQXMD1QKXM2SBD7VABW1",
-        "name": "90 · Test · Copy-link identity · Empty clone · 2026-10-22",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "reconciliation": {
         "kind": "same-carrier-exact-target-read",
         "original_state": "EFFECT_UNKNOWN",
@@ -1303,19 +286,10 @@
       "operation_id": "peo-20261108-c1-family-name-01",
       "file_id": "01M38EVF74SJWG1GANN5VP380Z",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M38EVF74SJWG1GANN5VP380Z",
-        "name": "Market Dashboard · Risk Radar & Dialogs"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "960dcfac2475edeff47e13de054fd3b9b99fee0299da31fab582fb55718732be",
       "after_snapshot": "960dcfac2475edeff47e13de054fd3b9b99fee0299da31fab582fb55718732be",
-      "result": {
-        "resourceId": "01M38EVF74SJWG1GANN5VP380Z",
-        "name": "Market Dashboard · Risk Radar & Dialogs",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M38EVF74SJWG1GANN5VP380Z",
@@ -1337,19 +311,10 @@
       "operation_id": "peo-20261108-c1-family-name-02",
       "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
-        "name": "Options · Desktop Reference · R1 · 2026-10-21"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "9303d3b49eebedc93050587d3c27fc9f9394512ad3a34c647e237848243ba4e4",
       "after_snapshot": "e60d493e367e00692cad64de081a42d48b456324dc4d3f0be3f60919298e2154",
-      "result": {
-        "resourceId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
-        "name": "Options · Desktop Reference · R1 · 2026-10-21",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -1361,19 +326,10 @@
       "operation_id": "peo-20261108-c1-family-name-03",
       "file_id": "01M5HVW84WZFE62DREB6QB9ZDJ",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5HVW84WZFE62DREB6QB9ZDJ",
-        "name": "80 · Recovery · Mastermind Pages · 2026-10-22 · Do Not Edit"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "92bcdbe64fae9ddfb7c25e841a9f208379049a7fb2f0371571e8671ba537483a",
       "after_snapshot": "92bcdbe64fae9ddfb7c25e841a9f208379049a7fb2f0371571e8671ba537483a",
-      "result": {
-        "resourceId": "01M5HVW84WZFE62DREB6QB9ZDJ",
-        "name": "80 · Recovery · Mastermind Pages · 2026-10-22 · Do Not Edit",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M5HVW84WZFE62DREB6QB9ZDJ",
@@ -1395,19 +351,10 @@
       "operation_id": "peo-20261108-c1-family-name-04",
       "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M3P1X4FR6BRTB13KA736Y1HT",
-        "name": "Market Ontology · Research & Evidence"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "c24bdc69c166ffea9d6445bec4af2ec3a083b7ec2ffe150a7903bfcb02b02793",
       "after_snapshot": "c24bdc69c166ffea9d6445bec4af2ec3a083b7ec2ffe150a7903bfcb02b02793",
-      "result": {
-        "resourceId": "01M3P1X4FR6BRTB13KA736Y1HT",
-        "name": "Market Ontology · Research & Evidence",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -1429,19 +376,10 @@
       "operation_id": "peo-20261108-c1-family-name-05",
       "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M32XYWDYSFTNDZVJKQ5QHT33",
-        "name": "Market Guide · Scores & Contextual Help"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "a083881ff64cc79cbc9029fd09b3853669270b7571937948ebb2d8938fb435e0",
       "after_snapshot": "80ce7e82d2b3e850c769367aa1544c107ed9310ee041fabcb1a6483761fc76e3",
-      "result": {
-        "resourceId": "01M32XYWDYSFTNDZVJKQ5QHT33",
-        "name": "Market Guide · Scores & Contextual Help",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -1453,19 +391,10 @@
       "operation_id": "peo-20261108-c1-family-name-06",
       "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
-        "name": "Options · Mobile Studies · R1 · 2026-10-21"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "c17d03cceb95f995b8ff034ed14fda6b7e61ed237856a063615d942125d25318",
       "after_snapshot": "c17d03cceb95f995b8ff034ed14fda6b7e61ed237856a063615d942125d25318",
-      "result": {
-        "resourceId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
-        "name": "Options · Mobile Studies · R1 · 2026-10-21",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
@@ -1487,19 +416,10 @@
       "operation_id": "peo-20261108-c1-family-name-07",
       "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6FAXA774QT1VRDMAG7DFQ2W",
-        "name": "Sector Intelligence · R4 · Working Design"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "b683f1fbb6c531a52e4e9c77abc464d333fc16240aea76788095fafb3e7d9e22",
       "after_snapshot": "b683f1fbb6c531a52e4e9c77abc464d333fc16240aea76788095fafb3e7d9e22",
-      "result": {
-        "resourceId": "01M6FAXA774QT1VRDMAG7DFQ2W",
-        "name": "Sector Intelligence · R4 · Working Design",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
@@ -1521,19 +441,10 @@
       "operation_id": "peo-20261108-c1-family-name-08",
       "file_id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
-        "name": "80 · Archive · Unreconciled Design Collection · Do Not Edit"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "a2cacd89f6023b927fea282a20ecf197ca8d773f0f8d0464947a1dd3784f2822",
       "after_snapshot": "a2cacd89f6023b927fea282a20ecf197ca8d773f0f8d0464947a1dd3784f2822",
-      "result": {
-        "resourceId": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
-        "name": "80 · Archive · Unreconciled Design Collection · Do Not Edit",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
@@ -1555,19 +466,10 @@
       "operation_id": "peo-20261108-c1-family-name-09",
       "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
-        "name": "Macro · Policy Monitor · Design & States"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "1d7fa29fdd0af677bd1c90eaa14d3dc71c0d949ef28eb8c66a3b135d428bc8f3",
       "after_snapshot": "1d7fa29fdd0af677bd1c90eaa14d3dc71c0d949ef28eb8c66a3b135d428bc8f3",
-      "result": {
-        "resourceId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
-        "name": "Macro · Policy Monitor · Design & States",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -1589,19 +491,10 @@
       "operation_id": "peo-20261108-c1-family-name-10",
       "file_id": "01M6XQBG616KHKS5011KKQTQSN",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6XQBG616KHKS5011KKQTQSN",
-        "name": "80 · Recovery · Mastermind Pages · 2026-11-08 · Do Not Edit"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "094ebca81310b0a306b0d92cac3a7082511a6374296de565fddf0196c8c53653",
       "after_snapshot": "094ebca81310b0a306b0d92cac3a7082511a6374296de565fddf0196c8c53653",
-      "result": {
-        "resourceId": "01M6XQBG616KHKS5011KKQTQSN",
-        "name": "80 · Recovery · Mastermind Pages · 2026-11-08 · Do Not Edit",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6XQBG616KHKS5011KKQTQSN",
@@ -1623,19 +516,10 @@
       "operation_id": "peo-20261108-c1-family-name-11",
       "file_id": "01M6Y4G3644Y8918FCX2NS9M68",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y4G3644Y8918FCX2NS9M68",
-        "name": "Live Site Baselines · Historical Wave 1"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "fdb7ec6655cd6063e7e842e5fbb7a3639f75556d2b30bda74a5f47a6eeb08d99",
       "after_snapshot": "fdb7ec6655cd6063e7e842e5fbb7a3639f75556d2b30bda74a5f47a6eeb08d99",
-      "result": {
-        "resourceId": "01M6Y4G3644Y8918FCX2NS9M68",
-        "name": "Live Site Baselines · Historical Wave 1",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y4G3644Y8918FCX2NS9M68",
@@ -1657,19 +541,10 @@
       "operation_id": "peo-20261108-c1-family-name-12",
       "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y34XE4JKS3A40GMMZ954JE",
-        "name": "BioCatalyst · Blueprint and Builder Contracts"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "908652ed59a0da7ecbe4320f9952ae51a5633c81667d1f5bb81bb6422a7e0e30",
       "after_snapshot": "3844176050ba84ba33e4ef7107fdc774d3b95547265572dd1926244a4d735269",
-      "result": {
-        "resourceId": "01M6Y34XE4JKS3A40GMMZ954JE",
-        "name": "BioCatalyst · Blueprint and Builder Contracts",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
@@ -1681,19 +556,10 @@
       "operation_id": "peo-20261108-c1-family-name-13",
       "file_id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
-        "name": "Bonds and Transmission · Pre-R30 Archive"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "ff274eafab9cc820263379992c43c96f9059c89523213d19be130a070e19aeb3",
       "after_snapshot": "d08ac30569c229db46ed5cffe1563a1eabd87a77b776e9f1630da0d86fc049e9",
-      "result": {
-        "resourceId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
-        "name": "Bonds and Transmission · Pre-R30 Archive",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
@@ -1705,19 +571,10 @@
       "operation_id": "peo-20261108-c1-family-name-14",
       "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y3T1K3573JYPMBATASW1W5",
-        "name": "Bonds and Cross-Asset Transmission · Studies"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "ee9edb7e6d43ce178c16096c42ebcb7a08cc831da877fb8d7e3c5c2c206212d4",
       "after_snapshot": "ee9edb7e6d43ce178c16096c42ebcb7a08cc831da877fb8d7e3c5c2c206212d4",
-      "result": {
-        "resourceId": "01M6Y3T1K3573JYPMBATASW1W5",
-        "name": "Bonds and Cross-Asset Transmission · Studies",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
@@ -1739,19 +596,10 @@
       "operation_id": "peo-20261108-c1-family-name-15",
       "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
-        "name": "Bonds · Decision Workspace · Source Revisions"
-      },
-      "state": "APPLIED_RESPONSE_OBSERVED",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
       "before_snapshot": "b53f7feee1594b0eef53189168245887cdfe77e4eddf4ba914c10bcceb6043dc",
       "after_snapshot": "b43b81215d66d1b90df6f8a81a663ca4d6af0f2c6219761acf8af9c9f8432da2",
-      "result": {
-        "resourceId": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
-        "name": "Bonds · Decision Workspace · Source Revisions",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
@@ -1763,19 +611,10 @@
       "operation_id": "peo-20261108-c1-family-name-16",
       "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
       "tool": "rename_resource",
-      "arguments": {
-        "resourceId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
-        "name": "Bot Paper Portfolio · V3 Design"
-      },
-      "state": "EFFECT_UNKNOWN",
+      "original_state": "EFFECT_UNKNOWN",
       "before_snapshot": "84bc2429ffb9815d2154f6e548286a6a76e1969bc76eb01813d9fde651f8a6ea",
       "after_snapshot": "84bc2429ffb9815d2154f6e548286a6a76e1969bc76eb01813d9fde651f8a6ea",
-      "result": {
-        "resourceId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
-        "name": "Bot Paper Portfolio · V3 Design",
-        "type": "file"
-      },
-      "retry_allowed": false,
+      "receipt_path": "effects/operations-021-040.json",
       "verification": {
         "kind": "same-carrier-exact-target-read",
         "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
@@ -1792,6 +631,1445 @@
         "no_replay": true,
         "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
       }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-17",
+      "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b861c00bd62c28ff6e49af30d558be2d081674ef5287209691fbec47f07c7250",
+      "after_snapshot": "5b5b9c278ed96079037d2e1bacdf4be3d930f1ab222a1427b664861647b4d906",
+      "receipt_path": "effects/operations-021-040.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+        "file_name": "Market Breadth · Command Center R1",
+        "snapshot_sha256": "5b5b9c278ed96079037d2e1bacdf4be3d930f1ab222a1427b664861647b4d906"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-18",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "315d4a2d30b9ce5cbe7b4883125b492d425db0ab63ae59c5c08ee2219b756628",
+      "after_snapshot": "315d4a2d30b9ce5cbe7b4883125b492d425db0ab63ae59c5c08ee2219b756628",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+        "file_name": "Catalyst Intelligence · Decision Desk and Integration",
+        "snapshot_sha256": "4d0996e2ce75f352558314b83d9de324eff59134c66c0b7a959a09ff39096d23"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+        "file_name": "Catalyst Intelligence · Decision Desk and Integration",
+        "snapshot_sha256": "4d0996e2ce75f352558314b83d9de324eff59134c66c0b7a959a09ff39096d23",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-19",
+      "file_id": "01M6Y396T7MXR7VQXSRKMYS3RM",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "62ab2de5d26238e368da5c51a3a6ce4cd56fb94705990cf07a4e6b1c7ea9a17c",
+      "after_snapshot": "62ab2de5d26238e368da5c51a3a6ce4cd56fb94705990cf07a4e6b1c7ea9a17c",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y396T7MXR7VQXSRKMYS3RM",
+        "file_name": "China Intelligence · Historical Study",
+        "snapshot_sha256": "8deb4aef29796035d2c04513c36c21cee49e873d127bafa07b759a8c949f997d"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y396T7MXR7VQXSRKMYS3RM",
+        "file_name": "China Intelligence · Historical Study",
+        "snapshot_sha256": "8deb4aef29796035d2c04513c36c21cee49e873d127bafa07b759a8c949f997d",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-20",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "52e9a9dbcf402fb987778d84593800460d34ed099872be843ed017cf2c9c68da",
+      "after_snapshot": "52e9a9dbcf402fb987778d84593800460d34ed099872be843ed017cf2c9c68da",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "file_name": "Commodities · R1 Source and Legacy Archive",
+        "snapshot_sha256": "c5078e3eadeeccf5c666ac62dcb90c9da7f6d7c309b13d66943d2c3f74ac9319"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "file_name": "Commodities · R1 Source and Legacy Archive",
+        "snapshot_sha256": "c5078e3eadeeccf5c666ac62dcb90c9da7f6d7c309b13d66943d2c3f74ac9319",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-21",
+      "file_id": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "eef58809a436a148e0820e0ed1a0d8e6f3bcea62810a0d2aa3a99c30e487cf3c",
+      "after_snapshot": "eef58809a436a148e0820e0ed1a0d8e6f3bcea62810a0d2aa3a99c30e487cf3c",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+        "file_name": "Company Intelligence · Archive Not for Build",
+        "snapshot_sha256": "e5ff80d0b062e18aab206cdd74319780ea935045f5b0fdaeeb985d1c4df96914"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+        "file_name": "Company Intelligence · Archive Not for Build",
+        "snapshot_sha256": "e5ff80d0b062e18aab206cdd74319780ea935045f5b0fdaeeb985d1c4df96914",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-22",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "3e1bd0af59566d7cfd5d110cc71a61b8b05252493d5e3794898635b4e4d274aa",
+      "after_snapshot": "3e1bd0af59566d7cfd5d110cc71a61b8b05252493d5e3794898635b4e4d274aa",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "file_name": "Confluence Screener · R2 and Governed References",
+        "snapshot_sha256": "3f3d7d43488dc0dec84da504d85d85413a2acdac6571317a5f27d6d3e2aa411a"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "file_name": "Confluence Screener · R2 and Governed References",
+        "snapshot_sha256": "3f3d7d43488dc0dec84da504d85d85413a2acdac6571317a5f27d6d3e2aa411a",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-23",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "02467302f9c97b9111d7b0c77e42de86517db04c1205b0aaefc2d275a68f1867",
+      "after_snapshot": "8c7fbd52e494d7368c26df95d202b1ee165d9ae0a218e7020497a77ce60c61ae",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "file_name": "Crypto Intelligence · R4 References and Archive",
+        "snapshot_sha256": "8c7fbd52e494d7368c26df95d202b1ee165d9ae0a218e7020497a77ce60c61ae"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-24",
+      "file_id": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "4f3aa0448e612443522598e520844ac16d65e22323f7030e31325c0deea38765",
+      "after_snapshot": "4f3aa0448e612443522598e520844ac16d65e22323f7030e31325c0deea38765",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+        "file_name": "Earnings and Dossiers · Source Archive",
+        "snapshot_sha256": "5f90a12c7751a79ae13a31b4f8c9a25e95da0dc744f5418717f9bdc9cd5bf639"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+        "file_name": "Earnings and Dossiers · Source Archive",
+        "snapshot_sha256": "5f90a12c7751a79ae13a31b4f8c9a25e95da0dc744f5418717f9bdc9cd5bf639",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-25",
+      "file_id": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "8f489350e2bc88301204e0d874058b5a2cc039792485adb436ceee374189b298",
+      "after_snapshot": "8f489350e2bc88301204e0d874058b5a2cc039792485adb436ceee374189b298",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+        "file_name": "Forex · Prior Studies Archive",
+        "snapshot_sha256": "e34236bf67167175035b0f640b7c7b23f71a3379fc875fecdfb1fa0d26452b71"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+        "file_name": "Forex · Prior Studies Archive",
+        "snapshot_sha256": "e34236bf67167175035b0f640b7c7b23f71a3379fc875fecdfb1fa0d26452b71",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-26",
+      "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "665f543c091e80c8134a290e31471918069bb58dc4088896863577bc3cde5bd7",
+      "after_snapshot": "3d7eb5ee76cb5562fdca6dd92ea91d7bc51ceae0fd90e50969f190f6ca2ac369",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
+        "file_name": "Forex · R17-R24 and Alternate Studies",
+        "snapshot_sha256": "3d7eb5ee76cb5562fdca6dd92ea91d7bc51ceae0fd90e50969f190f6ca2ac369"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-27",
+      "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "7594f394f76abfe50958905df5f23ea7869364ed27f7d7d95994b2b7bac87a02",
+      "after_snapshot": "7594f394f76abfe50958905df5f23ea7869364ed27f7d7d95994b2b7bac87a02",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+        "file_name": "Forex Guided Intelligence · Source Revisions",
+        "snapshot_sha256": "97d7b4e1f40f779853d47a5693d7e18b363cdbfa9f0a6cb10cc58081c7b98e36"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+        "file_name": "Forex Guided Intelligence · Source Revisions",
+        "snapshot_sha256": "97d7b4e1f40f779853d47a5693d7e18b363cdbfa9f0a6cb10cc58081c7b98e36",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-28",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "db17534e84fa54192eca21d0507496c7c6f0841aa6924a931d2494d950084884",
+      "after_snapshot": "db17534e84fa54192eca21d0507496c7c6f0841aa6924a931d2494d950084884",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "file_name": "Design Foundations and Archetypes · Migrated References",
+        "snapshot_sha256": "1ea6759311e41e29cfc03560f6c5d7c8f9ad9ac4e2f8ff4808d0dbc2c0167c8e"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "file_name": "Design Foundations and Archetypes · Migrated References",
+        "snapshot_sha256": "1ea6759311e41e29cfc03560f6c5d7c8f9ad9ac4e2f8ff4808d0dbc2c0167c8e",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-29",
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "c33173c5b2ec4888e132fb23364a5551a0b5d53eff667e45d8b94e6db11eff6c",
+      "after_snapshot": "c33173c5b2ec4888e132fb23364a5551a0b5d53eff667e45d8b94e6db11eff6c",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3397SE03G626MJ72N90PF",
+        "file_name": "Government Revenue · R5 and Builder Contracts",
+        "snapshot_sha256": "fe7ae08d7d310beddad594554b1976e86b6c75ebfabdbe881a301d0f040d8549"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3397SE03G626MJ72N90PF",
+        "file_name": "Government Revenue · R5 and Builder Contracts",
+        "snapshot_sha256": "fe7ae08d7d310beddad594554b1976e86b6c75ebfabdbe881a301d0f040d8549",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-30",
+      "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "4d22d2334a2a8f318a1221f2e833f174a2877e4d00b81a6c801cc2bcc7e6d5df",
+      "after_snapshot": "4d22d2334a2a8f318a1221f2e833f174a2877e4d00b81a6c801cc2bcc7e6d5df",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
+        "file_name": "Intelligence Hub · Earlier Archive and References",
+        "snapshot_sha256": "7c8cb463872889791177e0ba3f8f2cd56d7614046a29f8fb6f89f54e402c0e03"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
+        "file_name": "Intelligence Hub · Earlier Archive and References",
+        "snapshot_sha256": "7c8cb463872889791177e0ba3f8f2cd56d7614046a29f8fb6f89f54e402c0e03",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-31",
+      "file_id": "01M6Y486E4X85MVP1AWS8H6E53",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "6f1ecb24c734e307a6e77ff8925a0ea2e9b27e8986c15505809b74881d4383c6",
+      "after_snapshot": "6f1ecb24c734e307a6e77ff8925a0ea2e9b27e8986c15505809b74881d4383c6",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y486E4X85MVP1AWS8H6E53",
+        "file_name": "Intelligence Hub · R4 Original Source Archive",
+        "snapshot_sha256": "9dd0bfcf247864cdbb8cdce84b97da3d5761a02aeaf303b9539ef506a335009c"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y486E4X85MVP1AWS8H6E53",
+        "file_name": "Intelligence Hub · R4 Original Source Archive",
+        "snapshot_sha256": "9dd0bfcf247864cdbb8cdce84b97da3d5761a02aeaf303b9539ef506a335009c",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-32",
+      "file_id": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "72dd80f99ca086515d49b9ee0073700e587effd706fc17362ba773ba5e5abd1c",
+      "after_snapshot": "72dd80f99ca086515d49b9ee0073700e587effd706fc17362ba773ba5e5abd1c",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+        "file_name": "International Markets · R9 Archive",
+        "snapshot_sha256": "4d026409c87c81f0dd150f338cdd267305a98e2d9ef8ba0ccc0cd6d2cdfebde0"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+        "file_name": "International Markets · R9 Archive",
+        "snapshot_sha256": "4d026409c87c81f0dd150f338cdd267305a98e2d9ef8ba0ccc0cd6d2cdfebde0",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-33",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "447f781a5a18810f8c3f7dd79d7ed697f74f81fb95ed2a9b605eb0004dd971de",
+      "after_snapshot": "447f781a5a18810f8c3f7dd79d7ed697f74f81fb95ed2a9b605eb0004dd971de",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "file_name": "Intraday Flow · R1 Draft",
+        "snapshot_sha256": "23b56d540c96cf61b5df682beb85a05937afe060c8a956088eafcc55319dec41"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "file_name": "Intraday Flow · R1 Draft",
+        "snapshot_sha256": "23b56d540c96cf61b5df682beb85a05937afe060c8a956088eafcc55319dec41",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-34",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "bf554cddec043c944e1e62c373f56c96f31937968296de3cfc41f8809f042d40",
+      "after_snapshot": "bf554cddec043c944e1e62c373f56c96f31937968296de3cfc41f8809f042d40",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "file_name": "Legacy Navigation and Entry Designs · Reference",
+        "snapshot_sha256": "a67a6b644979042a631c1ae2a579e799074c106be60fc45b9a0a03500a7c56d7"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "file_name": "Legacy Navigation and Entry Designs · Reference",
+        "snapshot_sha256": "a67a6b644979042a631c1ae2a579e799074c106be60fc45b9a0a03500a7c56d7",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-35",
+      "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "dd526eb952e3fe572d06d76e28eb90517fed48032eeb6fe632ea101680790d83",
+      "after_snapshot": "dd526eb952e3fe572d06d76e28eb90517fed48032eeb6fe632ea101680790d83",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+        "file_name": "Market Memory · Evidence Workspace R1",
+        "snapshot_sha256": "6270f19b78a4167e52a37000fb743a1e3718591ce706ab66c1478a374b88c8e1"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+        "file_name": "Market Memory · Evidence Workspace R1",
+        "snapshot_sha256": "6270f19b78a4167e52a37000fb743a1e3718591ce706ab66c1478a374b88c8e1",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-36",
+      "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "a0e648a80064afb946480445bc4c5c1662b21903c3657e5d8ac2d3a0fa56bf52",
+      "after_snapshot": "a0e648a80064afb946480445bc4c5c1662b21903c3657e5d8ac2d3a0fa56bf52",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+        "file_name": "Macro · Market Structure, Stages & Allocation · D06 R1",
+        "snapshot_sha256": "e975313c2a26d6181a3aee87e6587f37f14030530e0b10ee5f8b45a5c115bc08"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+        "file_name": "Macro · Market Structure, Stages & Allocation · D06 R1",
+        "snapshot_sha256": "e975313c2a26d6181a3aee87e6587f37f14030530e0b10ee5f8b45a5c115bc08",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-37",
+      "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "fa6b4d7ceb904d8e8d92d3ce3be9191250dcc85558601a835ae8be4a83d3a770",
+      "after_snapshot": "fa6b4d7ceb904d8e8d92d3ce3be9191250dcc85558601a835ae8be4a83d3a770",
+      "receipt_path": "effects/operations-041-060.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+        "file_name": "MedTech · Regulatory Catalyst R13 References",
+        "snapshot_sha256": "3827dd933e2128ef21df317d8bc24c9ad582b2b30ab6844313034ef641af3c1b"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+        "file_name": "MedTech · Regulatory Catalyst R13 References",
+        "snapshot_sha256": "3827dd933e2128ef21df317d8bc24c9ad582b2b30ab6844313034ef641af3c1b",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-38",
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "a376d32c432c13eeafb4f2cb174a9deba635269a36bffb81acc7f039a533f8f6",
+      "after_snapshot": "a376d32c432c13eeafb4f2cb174a9deba635269a36bffb81acc7f039a533f8f6",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "file_name": "News Intelligence · September Source Study",
+        "snapshot_sha256": "b0eb61ae998ec464c584cc6918aab763a746da8f79db6ef25a999e379ad6e4d0"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "file_name": "News Intelligence · September Source Study",
+        "snapshot_sha256": "b0eb61ae998ec464c584cc6918aab763a746da8f79db6ef25a999e379ad6e4d0",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-39",
+      "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "52d1b466d79c8e6ff89e921ba5ada3e76ff5ccf4c725956fcc53729f1740cedb",
+      "after_snapshot": "52d1b466d79c8e6ff89e921ba5ada3e76ff5ccf4c725956fcc53729f1740cedb",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+        "file_name": "Options Research Desk · R1",
+        "snapshot_sha256": "2529ed95b888ba06579f355288e74fef4480d5f06172e4894a93463063c79674"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+        "file_name": "Options Research Desk · R1",
+        "snapshot_sha256": "2529ed95b888ba06579f355288e74fef4480d5f06172e4894a93463063c79674",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-40",
+      "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "0b35be256cfe66933094d61d0595f40ad38f3a3393b64868bbc183fc1f3ab853",
+      "after_snapshot": "7eb5f9a37892a4c9f64f185b3c491d39331f9eb41ce7c86bc568a23e5bd44ce3",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+        "file_name": "Macro and Policy Watch · Reference Studies",
+        "snapshot_sha256": "7eb5f9a37892a4c9f64f185b3c491d39331f9eb41ce7c86bc568a23e5bd44ce3"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-41",
+      "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "70148fe4203b44ba2b03f12dd6d15792822026c35f447a5c0fb62f1b467697a1",
+      "after_snapshot": "70148fe4203b44ba2b03f12dd6d15792822026c35f447a5c0fb62f1b467697a1",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+        "file_name": "Returns Calendar · Terminal and Dossier",
+        "snapshot_sha256": "81672f9305d91cfb1bbc61d47379f321cdd7341b976833bb7c47654b537ca155"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+        "file_name": "Returns Calendar · Terminal and Dossier",
+        "snapshot_sha256": "81672f9305d91cfb1bbc61d47379f321cdd7341b976833bb7c47654b537ca155",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-42",
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "9f56b184510a8da2a38af301e40d4b177d6554c84a9789d45af74234650c7b02",
+      "after_snapshot": "9f56b184510a8da2a38af301e40d4b177d6554c84a9789d45af74234650c7b02",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+        "file_name": "Ranked Search and Discovery · T47 Draft",
+        "snapshot_sha256": "c73c42f46574a71628229ab905b6e8c33a821456a0dcde57d8f0a267190e45fa"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+        "file_name": "Ranked Search and Discovery · T47 Draft",
+        "snapshot_sha256": "c73c42f46574a71628229ab905b6e8c33a821456a0dcde57d8f0a267190e45fa",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-43",
+      "file_id": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "f6d5f77528158631fee0f812e6bef40543e293a6a94a462ace8cab4899c356f9",
+      "after_snapshot": "f6d5f77528158631fee0f812e6bef40543e293a6a94a462ace8cab4899c356f9",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+        "file_name": "Sector Intelligence · Legacy Archive",
+        "snapshot_sha256": "b2a2c72f3dc716b02287e887aadba6995bd1d441a5930ab1987f9fbcfe4b8297"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+        "file_name": "Sector Intelligence · Legacy Archive",
+        "snapshot_sha256": "b2a2c72f3dc716b02287e887aadba6995bd1d441a5930ab1987f9fbcfe4b8297",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-44",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "4f72a8e409e5e303150c385b43c8ce40cfd8fed98fbcba60842b5d3e11e024ab",
+      "after_snapshot": "4f72a8e409e5e303150c385b43c8ce40cfd8fed98fbcba60842b5d3e11e024ab",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+        "file_name": "Sector Intelligence · R2 · Build Direction & Retained Studies",
+        "snapshot_sha256": "db90af88cc412f70426be251fd528c24739c74a00d73ae0cdc7f3023be72e5f8"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+        "file_name": "Sector Intelligence · R2 · Build Direction & Retained Studies",
+        "snapshot_sha256": "db90af88cc412f70426be251fd528c24739c74a00d73ae0cdc7f3023be72e5f8",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-45",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "127e9cb777bd8c61419d0e24164d58f2a290d83ff91fbc7a3bd34789297a4bbb",
+      "after_snapshot": "127e9cb777bd8c61419d0e24164d58f2a290d83ff91fbc7a3bd34789297a4bbb",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "file_name": "Sector Intelligence · R3 · Retained Completion Reference",
+        "snapshot_sha256": "563040b4dd90277502299dc43569243fdaf1460e783a6f2882abf02136eb8ad5"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "file_name": "Sector Intelligence · R3 · Retained Completion Reference",
+        "snapshot_sha256": "563040b4dd90277502299dc43569243fdaf1460e783a6f2882abf02136eb8ad5",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-46",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "cda3d2f6172c0fb7a801eaa21e929b0654602e0c845aa64576c618ebe50faa1c",
+      "after_snapshot": "cda3d2f6172c0fb7a801eaa21e929b0654602e0c845aa64576c618ebe50faa1c",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "file_name": "Shared Market · Research and Reading References",
+        "snapshot_sha256": "7a8d38065acbc0c96a6fe7d1a228e61e32a2d3df61b22a29e286b88280d7f654"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "file_name": "Shared Market · Research and Reading References",
+        "snapshot_sha256": "7a8d38065acbc0c96a6fe7d1a228e61e32a2d3df61b22a29e286b88280d7f654",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-47",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "d4d5663697f089c0dc22b22788db92a567bd13abca5152475fb11b3c80d4206c",
+      "after_snapshot": "2446962c27fd0add74c35146e870ce718099635b33c1c9438b366213c559b1e9",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+        "file_name": "Shared Market · Search and Comparison",
+        "snapshot_sha256": "2446962c27fd0add74c35146e870ce718099635b33c1c9438b366213c559b1e9"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-48",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "rename_resource",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "97b247ead1d5f0892b796a47d162f324c75dcab75c33ed82960211b5dc104fc8",
+      "after_snapshot": "491bd391c691b25137b4503cf77f6db6a4acc170dda252ecbb8ad533659cfcbd",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "file_name": "Shared Shell · F01 Candidate and Integration",
+        "snapshot_sha256": "491bd391c691b25137b4503cf77f6db6a4acc170dda252ecbb8ad533659cfcbd"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-49",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "ece44a6fa15ad6d21464c8a358deaecb7b5ba5ab634ea805f97b02db89a91c07",
+      "after_snapshot": "ece44a6fa15ad6d21464c8a358deaecb7b5ba5ab634ea805f97b02db89a91c07",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "file_name": "Shared Market · Tools and Research Launcher",
+        "snapshot_sha256": "5caaf9ce32c8dbac96bdbdad27b27736b959a971d90a77c9ad09d1a031414be1"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "file_name": "Shared Market · Tools and Research Launcher",
+        "snapshot_sha256": "5caaf9ce32c8dbac96bdbdad27b27736b959a971d90a77c9ad09d1a031414be1",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-50",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42",
+      "after_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "file_name": "Shared Market · Watchlists and Save States",
+        "snapshot_sha256": "43855db95f446ae0cabd980cf554ebd58c97f8029428d5ed0eca47412a2171b3"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "file_name": "Shared Market · Watchlists and Save States",
+        "snapshot_sha256": "43855db95f446ae0cabd980cf554ebd58c97f8029428d5ed0eca47412a2171b3",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-51",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "96255a42bca10fa366510099a217f2e56cacf83c9e98b47f37a673af16d091c2",
+      "after_snapshot": "96255a42bca10fa366510099a217f2e56cacf83c9e98b47f37a673af16d091c2",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "file_name": "Shared Shell · Earlier Design Studies",
+        "snapshot_sha256": "215631238a1c3c959fa55e20a50bb96fb5ee5f0d066e5a2e2b5cbe6d2ae9b37d"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "file_name": "Shared Shell · Earlier Design Studies",
+        "snapshot_sha256": "215631238a1c3c959fa55e20a50bb96fb5ee5f0d066e5a2e2b5cbe6d2ae9b37d",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-52",
+      "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "d717a0c65f0f0be7a40839044e0a175e175aeeebf11e4f85b3f6bb3e0c1ef01b",
+      "after_snapshot": "d717a0c65f0f0be7a40839044e0a175e175aeeebf11e4f85b3f6bb3e0c1ef01b",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
+        "file_name": "Synthetic Catalyst Cases · Archive Not for Build",
+        "snapshot_sha256": "aa001b93588f0494d10041a708b30a3424dccb65ce709c561bf79c5af48040da"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
+        "file_name": "Synthetic Catalyst Cases · Archive Not for Build",
+        "snapshot_sha256": "aa001b93588f0494d10041a708b30a3424dccb65ce709c561bf79c5af48040da",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-name-53",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "d675faafc4c7a7848c12dd4b541efdb54704f6fbc2bc8861cac8d5e6e5465c6c",
+      "after_snapshot": "d675faafc4c7a7848c12dd4b541efdb54704f6fbc2bc8861cac8d5e6e5465c6c",
+      "receipt_path": "effects/operations-061-080.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+        "file_name": "Mastermind Pages · Legacy Links · Navigation Only",
+        "snapshot_sha256": "9e18050e3033f45ed4a97a1305b86a652d64cd334553de6fefe626d1bea6f3a2"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+        "file_name": "Mastermind Pages · Legacy Links · Navigation Only",
+        "snapshot_sha256": "9e18050e3033f45ed4a97a1305b86a652d64cd334553de6fefe626d1bea6f3a2",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-page-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "ec5d30f131cf4658e2e0cac9f26f6f93368b76e83c9ea446d9aa6cd80942fd2a",
+      "receipt_path": "effects/operations-061-080.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-recovery-page-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ec5d30f131cf4658e2e0cac9f26f6f93368b76e83c9ea446d9aa6cd80942fd2a",
+      "after_snapshot": "41982c44eec2ddf775e4cce3d2341ccb38ad97cfd279e3142f056c427148b992",
+      "receipt_path": "effects/operations-061-080.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-map-text-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "41982c44eec2ddf775e4cce3d2341ccb38ad97cfd279e3142f056c427148b992",
+      "after_snapshot": "41982c44eec2ddf775e4cce3d2341ccb38ad97cfd279e3142f056c427148b992",
+      "receipt_path": "effects/operations-061-080.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-pages-02",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "41982c44eec2ddf775e4cce3d2341ccb38ad97cfd279e3142f056c427148b992",
+      "after_snapshot": "7e314ee5aa506dd8b322d520d9e4926fdfc080348bfeb8debf7d0232ec72d5d4",
+      "receipt_path": "effects/operations-061-080.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-order-02",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7e314ee5aa506dd8b322d520d9e4926fdfc080348bfeb8debf7d0232ec72d5d4",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-recovery-header-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-recovery-scope-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-recovery-records-move-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-header-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-sector-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-news-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-memory-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-policy-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-options-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-foundations-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-lineage-assets-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-cleanup-summary-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-current-entry-text-02",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-product-memory-index-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-estate-nav-secondary-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-nav-order-02",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-layer-names-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "217dee26f476716e7d45066f7794bd173178ab22dd97f8aa68401cc6821d56cb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-cover-instructions-02",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "9e18050e3033f45ed4a97a1305b86a652d64cd334553de6fefe626d1bea6f3a2",
+      "after_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "receipt_path": "effects/operations-081-100.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-02",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "db90af88cc412f70426be251fd528c24739c74a00d73ae0cdc7f3023be72e5f8",
+      "after_snapshot": "583c13447c94655e51551be0d65f1ba90a48961f6850a4c109ed3d82a3ae0c12",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-03",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "563040b4dd90277502299dc43569243fdaf1460e783a6f2882abf02136eb8ad5",
+      "after_snapshot": "8a587966b3050ef879888ffe09d08d95d6b12700b501148b9764cb31c5b3af92",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-04",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "a67a6b644979042a631c1ae2a579e799074c106be60fc45b9a0a03500a7c56d7",
+      "after_snapshot": "0d4b08c242cc342d431a820174d0173ea20bba57860202f50c970b41c4a36acc",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-05",
+      "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b43b81215d66d1b90df6f8a81a663ca4d6af0f2c6219761acf8af9c9f8432da2",
+      "after_snapshot": "34719aeec33b3c9752c3b13327aa3eccf387f7478d3a150044c30723dd228bd9",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-06",
+      "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "97d7b4e1f40f779853d47a5693d7e18b363cdbfa9f0a6cb10cc58081c7b98e36",
+      "after_snapshot": "6e7468091332f473683212f63478966bffcb03ba7a06aeb431deeda1b7c8ffc3",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-07",
+      "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7eb5f9a37892a4c9f64f185b3c491d39331f9eb41ce7c86bc568a23e5bd44ce3",
+      "after_snapshot": "715f8e7b2a0e66e4f20b740e9bed93e789ca9c6bb21b91f4a587df9c73840ff5",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-08",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "491bd391c691b25137b4503cf77f6db6a4acc170dda252ecbb8ad533659cfcbd",
+      "after_snapshot": "6a3d816aef8499a45598741a528310ca9d0ad952a01e31103a38b276808b7fdc",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-09",
+      "file_id": "01M6Y4G3644Y8918FCX2NS9M68",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "bdf97b673bde217e4430a538ca7dd7a008d8e45b8a233d7b852df0b5ed6c5724",
+      "after_snapshot": "844dbecefe11affacc2eb6c7977e2d0c57e4b10a975a073c84d4036fd452ce1f",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-10",
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "b0eb61ae998ec464c584cc6918aab763a746da8f79db6ef25a999e379ad6e4d0",
+      "after_snapshot": "12550e661fed653a2742d375aa2fbe1350d3d444cb6cdbb2575b0110f8318f5b",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-11",
+      "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "85e7fe66520a4488b84121b93b4891e985a7e3e86eb1c288241e7b31df47cd25",
+      "after_snapshot": "65bc7326308e8d1fc51e99ef67758fa8fe742ccd46fba2586399a4dc18b17824",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-12",
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "8b1fc8e1f638d588bd2a242b4427cfab12b7367799d90a61cb4d1b88719ce8b1",
+      "after_snapshot": "8fdff2ee247bfc468b5de33d316faeb7438c6d804f8ef4ffcb4169b09b0ffbe4",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-page-scope-13",
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "abf41bb305250fef0e370cd43f306dd13a71ef91ff14dc97367edd7aed3c7a24",
+      "after_snapshot": "c4936cb5ee84ab597d29b976c5c6ef83f688f10e4ed1c0ba5b7df3ab2974ea42",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-news-order-01",
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "c4936cb5ee84ab597d29b976c5c6ef83f688f10e4ed1c0ba5b7df3ab2974ea42",
+      "after_snapshot": "95d7ee79480b16a406bd4dea65e41595a9397265b0fff06a36b37b38beaf0775",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-news-entry-contract-01",
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "95d7ee79480b16a406bd4dea65e41595a9397265b0fff06a36b37b38beaf0775",
+      "after_snapshot": "95d7ee79480b16a406bd4dea65e41595a9397265b0fff06a36b37b38beaf0775",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-news-retained-board-labels-01",
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "12550e661fed653a2742d375aa2fbe1350d3d444cb6cdbb2575b0110f8318f5b",
+      "after_snapshot": "8c365680fcde8c63031c49862c56de04eb7140eca8a79cdcda7d5ef40e2c1131",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-sector-label-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "after_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-guide-page-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "c53d31282e385267b77e6022806d7eaf281065126348d34c0c307a7b91156af0",
+      "after_snapshot": "487a356a400c518595bcbf0a5f7e4e0f29aced334a5d49f3ba7e43e166f12a25",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-page-names-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "487a356a400c518595bcbf0a5f7e4e0f29aced334a5d49f3ba7e43e166f12a25",
+      "after_snapshot": "80ed03efd1cfdace9cb1dbad3e9c3b4ecabeba3c9d176c49807169e57e58ea4e",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-page-order-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "80ed03efd1cfdace9cb1dbad3e9c3b4ecabeba3c9d176c49807169e57e58ea4e",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-guide-header-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-101-120.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-read-journey-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-read-native-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-read-build-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-retain-r3-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-retain-r2-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-resolve-status-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-fixtures-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-estate-01",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-sector-entry-link-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-terminal-concurrent-reconcile-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-entry-guide-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "after_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-entry-priority-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "after_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-f03-reference-layer-01",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "0d4b08c242cc342d431a820174d0173ea20bba57860202f50c970b41c4a36acc",
+      "after_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-commodities-scope-name-02",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "rename_resource",
+      "original_state": "EFFECT_UNKNOWN",
+      "before_snapshot": "c5078e3eadeeccf5c666ac62dcb90c9da7f6d7c309b13d66943d2c3f74ac9319",
+      "after_snapshot": "c5078e3eadeeccf5c666ac62dcb90c9da7f6d7c309b13d66943d2c3f74ac9319",
+      "receipt_path": "effects/operations-121-138.json",
+      "verification": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "file_name": "Commodities · Journeys & Research Studies",
+        "snapshot_sha256": "de26f12791c080dda9580b1ede47347f1db743b333bb091be53dfb550e966acb"
+      },
+      "reconciliation": {
+        "kind": "same-carrier-exact-target-read",
+        "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "file_name": "Commodities · Journeys & Research Studies",
+        "snapshot_sha256": "de26f12791c080dda9580b1ede47347f1db743b333bb091be53dfb550e966acb",
+        "original_state": "EFFECT_UNKNOWN",
+        "observed_outcome": "requested rename is present",
+        "no_replay": true,
+        "remaining_uncertainty": "none for requested metadata rename; original receipt remains EFFECT_UNKNOWN"
+      }
+    },
+    {
+      "operation_id": "peo-20261108-c1-crypto-archive-scope-01",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "8c7fbd52e494d7368c26df95d202b1ee165d9ae0a218e7020497a77ce60c61ae",
+      "after_snapshot": "cc66cc8ca0c120ddefabf1779cd3f3695f1b46e0d3436a375ed8d57a1001f64f",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-commodities-page-scope-01",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "de26f12791c080dda9580b1ede47347f1db743b333bb091be53dfb550e966acb",
+      "after_snapshot": "a43f9782187ee388e7d487a5bd17720e9f68ed84d5ff14755e5f369b66e71d42",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-commodities-page-order-01",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "a43f9782187ee388e7d487a5bd17720e9f68ed84d5ff14755e5f369b66e71d42",
+      "after_snapshot": "0588093b6b3ef41630b236e9c729f7d1ae505d8b3971afd8d260a33732957459",
+      "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-asset-retention-detail-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-121-138.json"
     }
   ]
 }

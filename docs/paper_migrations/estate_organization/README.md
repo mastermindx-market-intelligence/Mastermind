@@ -8,6 +8,13 @@ Current Chairman assignment, 8 November 2026 (America/Vancouver): take Meta-CEO 
 
 This extends the existing migration and design-clarity work. It is not a new product, runtime, workstream registry, design system, or authority store. Source evidence lives here in the existing Mastermind repository; Paper contains the usable navigation. Organizational linkage is PLAN_NOT_ORG_LINKED until an existing matching Agent OS owner is identified. That does not block this assigned source/design work.
 
+## Start here
+
+- [Open the Paper estate guide](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0).
+- [Browse every file by family](INDEX.md); [find every page](PAGES.md); [structured agent index](FILE_INDEX.json).
+- [Read scope and retained requirements](RETENTION.md) before choosing a version or retiring historical material.
+- [Resume the organization mission](CHECKPOINT.md); [inspect operation receipts](EFFECTS.json); [verified empty/test dispositions](TEST_CLEANUP.json).
+
 ## Governing inputs
 
 - Mastermind protected master: `a9f0b4e1fc7f419e2cf377d3132061169c986a21`; Sol Skillpack schema mastermind.sol_skillpack.v1, version 1.0.1, minimum bootstrap major 1.
@@ -24,11 +31,11 @@ Inventory coverage is separate from retention coverage. A migrated copy is not p
 
 ## Phase ladder
 
-1. **Estate census — baseline complete; classification in progress.** Reuse exact IDs; inventory files/pages including archived material; resolve misleading names, empty scaffolds and active source overlaps. Initial evidence: 83 listed resources, 80 readable design files, 538 page entries; one Others resource has inconsistent type metadata.
-2. **Navigation and status — applied centrally; estate-wide refinement in progress.** Extend existing directory `01M6XQ0KYY6ZDDV6F3G85SX6WW`. Normalize short page/file roles, correct legacy “current build” labels, preserve stable links and recovery snapshots. Do not create a second directory.
-3. **Product guides and retention — in progress as domains are inspected.** Link each product journey to exact frames, state/help pages and build contracts. Compare older/newer outcomes, controls, routes, variants, data semantics, failure/recovery states and implementation obligations. Record concrete missing or relocated requirements.
-4. **Cleanup — conditional.** Isolate confirmed tests/empty scaffolds and retired references from product entry points. Physical removal only through a currently admitted operation after the retention/link checks; preserve actual tool holds.
-5. **Acceptance and continuity — ongoing.** Test representative human/agent lookup journeys, backward links and recovered requirements. Persist exact applied operations/readbacks and unresolved gates at coherent milestones; continue the next safe phase.
+1. **Estate census — complete at the recorded observation.** All 83 listed resources are classified: 80 readable design files, 544 pages and 19 dividers. One Others resource behaves as a container despite its listed type. Baseline names and page aliases remain searchable.
+2. **Navigation and status — applied.** The existing directory now has eight navigation pages; 66 distinct file names are clarified. Product map, exact page links, three family indexes, lineage, recovery and local Sector guidance are in place. Old-link verification continues.
+3. **Retention — explicit by scope.** Targeted comparisons cover Sector, News, Memory, Policy, Options, Crypto and Commodities; prior accepted evidence covers additional families. RETENTION.md separates exact selections, complementary designs and unresolved comparisons. No exhaustive historical parity or production acceptance is claimed.
+4. **Cleanup — qualified candidates isolated.** All 15 pages of 12 tooling/empty files were inspected. Seven files are empty; five contain genuine tool specimens. Labels separate them from design work. Physical archive/delete/resource-move remains blocked by the current Paper catalog.
+5. **Acceptance and continuity — in progress.** Finish legacy-link proof, index and representative layout checks, clear only this session's working indicators, then deliver the source record through actual repository controls. A checkpoint never substitutes for continuing a safe next action.
 
 ## Naming and authority model
 
@@ -49,6 +56,14 @@ Avoid a blanket “canonical” promotion. Existing release, review and product 
 Principal retains design decisions and same-carrier Paper edits: PRINCIPAL_JUDGMENT and UNIQUE_APPROVED_ACCESS. Read-only native reasoning advisers challenge organization and contradictory lineage; no native routine labor, no delegated Paper writer. WHY NOT FABLE: bounded judgment fits the current principal/advisers; no separate scarce principal required. No background worker or watcher is claimed.
 
 Fresh explicit file read before each bounded edit; stable operation ID; same-carrier result/readback; target-scoped collaboration. Preserve live writers and uncertain effects. Metadata guards are not leases. Keep existing product IDs and content unless a specific preserved disposition permits a change.
+
+## Keep the estate organized
+
+For future design work, start from the existing product/family entry and preserve stable file and page IDs. Add a new file only when its scope genuinely needs a distinct owner or workspace. Put its purpose, scope, status and exact build-reference link near the entry; route it through this directory and update the file/page index in the same change.
+
+Before calling an earlier design superseded, identify the successor and map unique routes, states, controls, data semantics, help and failure/recovery requirements to a retained location or an explicit retirement decision. Revision numbers and a migrated copy do not close that comparison. Keep unresolved differences visible with exact source anchors. Preserve held and uncertain effects and concurrent writers.
+
+Before disposal, verify every page, unique content, incoming links and recoverability, then use only an admitted operation. Record the resulting evidence here. Do not create a second navigation, lifecycle or authority registry.
 
 ## Recovery checkpoint
 
