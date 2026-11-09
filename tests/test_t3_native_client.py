@@ -231,6 +231,40 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):run(self.client.stop(THREAD,request_id='stop'))
         self.assertFalse(self.native.calls)
 
+    def test_exact_result_does_not_wait_for_later_unrelated_thread_work(self):
+        def native_wait(args):
+            if args["untilDelegatedWorkSettled"]:
+                return {"structuredContent":dict(threadId="thread-1",runId="run-1",status="completed",timedOut=True)}
+            return {"structuredContent":dict(threadId="thread-1",runId="run-1",status="completed",timedOut=False)}
+        self.native.responses["t3_thread_wait"]=native_wait
+        self.native.detail["thread"].update(status="running",latestRunId="run-9",activeRunId="run-9")
+        result=run(self.client.original_result(RUN))
+        self.assertTrue(result.complete);self.assertEqual(result.answer,"done")
+        self.assertFalse(self.native.calls[0][1]["untilDelegatedWorkSettled"])
+
+    def test_later_thread_final_run_never_substitutes_original(self):
+        self.native.responses["t3_thread_wait"]={"structuredContent":dict(threadId="thread-1",runId="run-1",status="completed",timedOut=False,resultRun={"runId":"run-9","status":"completed"})}
+        self.native.detail["items"]=[item("unrelated latest final",rid="run-9")]
+        with self.assertRaises(Conflict):run(self.client.original_result(RUN))
+        self.assertNotIn("t3_thread_read",[n for n,_ in self.native.calls])
+
+    def test_explicit_child_settlement_wait_remains_available(self):
+        value={"structuredContent":dict(threadId="thread-1",runId="run-1",status="completed",timedOut=False,resultRun={"runId":"run-9","status":"completed"})}
+        self.native.responses["t3_thread_wait"]=value
+        observed=run(self.client.wait(RUN,include_children=True))
+        self.assertEqual(observed["resultRun"]["runId"],"run-9")
+        self.assertTrue(self.native.calls[-1][1]["untilDelegatedWorkSettled"])
+
+    def test_large_page_bounds_per_item_text_budget(self):
+        run(self.client.read(THREAD,limit=100))
+        self.assertLessEqual(self.native.calls[-1][1]["maxCharsPerItem"]*100,131072)
+        run(self.client.read(THREAD,limit=1))
+        self.assertEqual(self.native.calls[-1][1]["maxCharsPerItem"],8192)
+
+    def test_duplicate_native_thread_list_identity_refused(self):
+        self.native.responses["t3_thread_list"]={"structuredContent":{"threads":[{"threadId":"same","projectId":"project-1"}]*2,"nextCursor":None}}
+        with self.assertRaises(Unavailable):run(self.client.list_threads())
+
     def test_wait_is_bounded_and_original(self):
         run(self.client.wait(RUN,timeout_ms=123))
         args=self.native.calls[-1][1];self.assertEqual(args['runId'],'run-1');self.assertTrue(args['untilDelegatedWorkSettled'])

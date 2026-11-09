@@ -180,7 +180,7 @@ Stop now confirms native project/thread identity even when model capacity is dow
 It still never requires the provider to be available to stop, but a fabricated
 client-side Thread object cannot target a different project. These changes add
 seven focused regressions. The current combined client/notes/mission suite has
-118 isolated cases after adding the original second-toolkit coverage.
+123 isolated cases after adding the original second-toolkit coverage.
 
 ## Host CLI control path and active native work
 
@@ -197,3 +197,7 @@ T3's own `up --connect` help explicitly warns that a noninteractive restart can
 stop running turns. It has not been invoked against active user sessions. Direct
 cloud activation therefore remains a deliberate native maintenance/OAuth step,
 not a hidden side effect of installing this skill.
+
+## Exact-run versus thread-final settlement
+
+The native T3 `ThreadManagementService.wait` at upstream 0770446 can, with `untilDelegatedWorkSettled`, nominate a thread-wide `resultRun`. That can be a later independently queued user turn. The client therefore keeps `original_result` on exact-run completion (`untilDelegatedWorkSettled=false`) and never substitutes another final run. `wait(..., include_children=true)` remains available as an explicitly separate thread-settlement observation; its returned final-run identity is not silently treated as the original answer. A native restart that changes the run identity remains a visible lineage conflict requiring explicit native recovery rather than a guessed match. Large timeline pages bound their per-item text request and retain exact item expansion.

@@ -282,11 +282,15 @@ class T3NativeClient:
         rows = value.get("threads")
         if type(rows) is not list or len(rows) > limit:
             raise Unavailable("Native thread page malformed")
+        seen: set[str] = set()
         for row in rows:
             if type(row) is not dict or row.get("projectId") != self.scope.project_id:
                 raise Conflict("Native list escaped the selected project")
             try:
-                _id(row.get("threadId"), "thread_id")
+                tid = _id(row.get("threadId"), "thread_id")
+                if tid in seen:
+                    raise ValueError("duplicate native thread identity")
+                seen.add(tid)
             except ValueError:
                 raise Unavailable("Native thread identity malformed") from None
         nxt = value.get("nextCursor")
@@ -300,7 +304,7 @@ class T3NativeClient:
         if view not in {"messages", "activity"}:
             raise ValueError("Unsupported native view")
         args: dict[str, Any] = {"threadId": tid, "view": view, "limit": limit,
-                                "runLimit": 100, "maxCharsPerItem": 8192}
+                                "runLimit": 100, "maxCharsPerItem": min(8192, 131072 // limit)}
         if cursor is not None:
             if type(cursor) is not Cursor or cursor.thread != thread:
                 raise Conflict("Cursor belongs to another thread/connection")
@@ -723,6 +727,8 @@ class T3NativeClient:
                               progress: ResultProgress | None = None) -> Result:
         """Recover historical exact-run replies even after later turns start.
 
+        Exact-run completion is separate from thread-wide child settlement;
+        a later independent final turn never replaces the requested answer.
         Preserve the native candidate item across bounded scans and re-read its
         original bytes on resume. Passing only a bare cursor starts a new scan;
         pass result.progress to continue without dropping earlier evidence.
@@ -733,7 +739,11 @@ class T3NativeClient:
                     or cursor is not None and cursor != progress.cursor):
                 raise Conflict("Result continuation belongs to another original run")
             cursor = progress.cursor
-        waited = await self.wait(run, timeout_ms=1, include_children=True)
+        # Thread-wide delegated settlement may nominate a later independent
+        # user turn as resultRun. It is NOT lineage proof for this original run.
+        # Ask for exact-run completion here; callers can separately wait for
+        # children and inspect the explicitly returned native final-run identity.
+        waited = await self.wait(run, timeout_ms=1, include_children=False)
         status = waited["status"]
         if waited["timedOut"] or status not in TERMINAL:
             if progress is not None:
@@ -745,6 +755,8 @@ class T3NativeClient:
             if (type(result_run) is not dict or result_run.get("status") != status
                     or type(result_run.get("runId")) is not str):
                 raise Conflict("Native final-result lineage is malformed")
+            if result_run["runId"] != run.run_id:
+                raise Conflict("Thread-wide final answer is not the original run result")
             rid = _id(result_run["runId"], "native result run")
         if progress is not None and (progress.result_run_id != rid or progress.status != status):
             raise Conflict("Native original-result lineage changed during pagination")
