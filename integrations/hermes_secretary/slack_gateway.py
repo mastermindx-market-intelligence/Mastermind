@@ -353,8 +353,21 @@ def routable(conf: dict) -> dict:
 def route(conf: dict, *, text: str, channel: str, user: str, is_dm: bool,
           authorizations: list[str] | None = None, binding: str | None = None) -> tuple[str, str]:
     agents = routable(conf)
-    # 0) a thread explicitly bound to an agent (slash command, /mx-*) wins over aliases
+    # 0) A bound thread follows its last explicitly selected agent. A human
+    # can transfer focus by *mentioning this real shared bot* and writing a
+    # role selector at the start: <@Relay> engineering: please review.
+    # Bare role words or a mention of an unrelated Slack account never steal
+    # a thread. Native session IDs are independently keyed per role below.
     if binding and binding in agents:
+        own_ids = {conf.get("bot", {}).get("bot_user_id")}
+        own_ids.update(rec.get("bot_user_id") for rec in (conf.get("apps") or {}).values())
+        own_ids.discard(None)
+        if set(mentioned_user_ids(text)) & own_ids:
+            addressed_body = strip_mentions(text).strip().lower()
+            for alias in sorted((conf.get("mention_aliases") or {}), key=len, reverse=True):
+                role = conf["mention_aliases"][alias]
+                if role in agents and addressed_body.startswith(alias.lower() + ":"):
+                    return role, "explicit-role-switch" if role != binding else "thread-binding"
         return binding, "thread-binding"
     # 1) addressed to an agent that has its own Slack account
     for uid in mentioned_user_ids(text):
