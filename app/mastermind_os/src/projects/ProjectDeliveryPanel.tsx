@@ -1,10 +1,17 @@
 import { DelegatedTaskCard } from "../team/DelegatedTaskCard";
+import { ResultReturnCard } from "../team/ResultReturnCard";
 import type { DelegatedTask } from "../team/delegated-task";
+import type {
+  ExecutionReturnDeliveryReceipt,
+  ExecutionReturnRecord,
+} from "../hermes-native/execution-return-contract";
 import "./ProjectDeliveryPanel.css";
 
 /** TD03 — project work and delivery. The objective and task states come from
  *  real sources; while a source is missing the panel says so instead of
- *  inventing progress. Delivery returns here for review (HC08). */
+ *  inventing progress. Delivery returns here for review (HC08): the return
+ *  card consumes Director F's authoritative execution_return/v1 contract and
+ *  is null-fed until a producer exists. */
 export interface DeliveryTrailStep {
   key: string;
   step: string;
@@ -20,6 +27,7 @@ const STRINGS = {
       "The next outcome has not been read from the project source.",
     codingHeading: "Coding now",
     noTask: "No delegated coding task is projected for this project yet.",
+    returnHeading: "Result return",
     trailHeading: "Delivery trail",
     trailNote: "Code results return to this project for review and release.",
     trailUnknown: "Not projected",
@@ -32,6 +40,7 @@ const STRINGS = {
     outcomeUnavailable: "尚未从项目来源读取下一个成果。",
     codingHeading: "正在进行",
     noTask: "尚未为该项目投影受派的编码任务。",
+    returnHeading: "结果返回",
     trailHeading: "交付轨迹",
     trailNote: "编码结果返回此项目，供审阅与发布。",
     trailUnknown: "未投影",
@@ -45,6 +54,8 @@ export function ProjectDeliveryPanel({
   objective,
   owner,
   delegatedTask,
+  executionReturn,
+  deliveryReceipt = null,
   trail,
   onOpenCode,
   onOpenPlan,
@@ -54,6 +65,12 @@ export function ProjectDeliveryPanel({
   objective: string | null;
   owner: string | null;
   delegatedTask: DelegatedTask | null;
+  /** Director F's parsed mastermind.execution_return/v1 record for this
+   *  project's latest settled attempt; null today (no producer wired) — the
+   *  card renders the honest no-return state, never fixture data. */
+  executionReturn: ExecutionReturnRecord | null;
+  /** Optional parsed delivery receipt for that same return. */
+  deliveryReceipt?: ExecutionReturnDeliveryReceipt | null;
   trail: readonly DeliveryTrailStep[];
   onOpenCode?: () => void;
   onOpenPlan?: () => void;
@@ -90,6 +107,14 @@ export function ProjectDeliveryPanel({
         ) : (
           <p className="muted">{t.noTask}</p>
         )}
+      </section>
+      <section className="mm-delivery-return">
+        <h3>{t.returnHeading}</h3>
+        <ResultReturnCard
+          executionReturn={executionReturn}
+          deliveryReceipt={deliveryReceipt}
+          locale={locale}
+        />
       </section>
       <section className="mm-delivery-trail-section">
         <h3>{t.trailHeading}</h3>

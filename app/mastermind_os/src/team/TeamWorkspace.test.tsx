@@ -33,7 +33,19 @@ const available = (bots: unknown[]): TeamRosterRead => ({
   }),
 });
 const task: DelegatedTask = {
-  taskId: "task-1",
+  binding: {
+    schema: "ExecutionBinding.v1",
+    root_run_ref: "root-wo19-coding-7",
+    immediate_parent_run_ref: "run-41",
+    logical_child_key: "fleet-launch-repair",
+    request_digest: "a".repeat(64),
+    effective_complexity: "C2_COMPLEX_BOUNDED",
+    task_kind: "code",
+    runtime_kind: "",
+    operation_key: "",
+    caller_namespace: "",
+    lease_ref: "",
+  },
   title: "Repair launch refusal",
   summary: null,
   state: "queued",
@@ -42,7 +54,6 @@ const task: DelegatedTask = {
   route: [],
   authority: "preview",
   lastActivity: null,
-  result: null,
 };
 
 describe("classifyGatewayState — distinct conversation states per HS01", () => {

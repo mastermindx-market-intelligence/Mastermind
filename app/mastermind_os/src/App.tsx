@@ -5522,6 +5522,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               objective={null}
               owner={null}
               delegatedTask={null}
+              executionReturn={null}
               trail={[
                 {key: "plan", step: locale === "zh-CN" ? "01 · 计划" : "01 · Plan", label: locale === "zh-CN" ? "范围已接受" : "Scope accepted", state: "unknown"},
                 {key: "build", step: locale === "zh-CN" ? "02 · 构建" : "02 · Build", label: locale === "zh-CN" ? "工程进行中" : "Engineering working", state: "unknown"},

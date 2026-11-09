@@ -30,6 +30,7 @@
   padding: 0;
 }
 .mm-delivery-coding,
+.mm-delivery-return,
 .mm-delivery-trail-section {
   display: flex;
   flex-direction: column;

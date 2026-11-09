@@ -31,8 +31,10 @@ const STRINGS = {
     noActivity: "Not observed",
     unavailableTitle: "Code threads are not projected yet",
     unavailableBody:
-      "This surface reads a typed T3 thread projection. The projection source is not connected, so no thread state is shown or inferred.",
+      "This surface reads the typed T3 thread projection from MastermindMissionHost.t3ThreadProjection. That projection source is not connected on this host — no host implements it yet — so no thread state is shown or inferred.",
     unavailableNote:
+      "The source of truth for per-attempt T3 facts is the Fleet per-attempt read (Fleet & Capacity), not this list.",
+    unavailableFallback:
       "Open T3 Code directly to inspect threads on the machine that runs them.",
     evidenceHeading: "Projection source",
     securityNote:
@@ -59,8 +61,10 @@ const STRINGS = {
     noActivity: "未观测",
     unavailableTitle: "编码线程尚未投影",
     unavailableBody:
-      "此界面读取类型化的 T3 线程投影。投影来源未连接，因此不显示也不推断任何线程状态。",
-    unavailableNote: "请直接打开 T3 Code，在运行线程的机器上查看。",
+      "此界面通过 MastermindMissionHost.t3ThreadProjection 读取类型化的 T3 线程投影。该投影来源未连接此主机——目前尚无主机实现它——因此不显示也不推断任何线程状态。",
+    unavailableNote:
+      "每次尝试的 T3 事实以 Fleet 的逐次尝试读取为准（Fleet 与容量），而非此列表。",
+    unavailableFallback: "请直接打开 T3 Code，在运行线程的机器上查看。",
     evidenceHeading: "投影来源",
     securityNote:
       "此应用不保存任何提供商密钥；深层链接使用原生客户端自身的身份验证。",
@@ -108,6 +112,7 @@ export function CodeWorkspace({
           <p className="mm-eyebrow">{t.unavailableTitle}</p>
           <p>{t.unavailableBody}</p>
           <p className="muted">{t.unavailableNote}</p>
+          <p className="muted">{t.unavailableFallback}</p>
           <details className="mm-code-evidence">
             <summary>{t.evidenceHeading}</summary>
             <p>
