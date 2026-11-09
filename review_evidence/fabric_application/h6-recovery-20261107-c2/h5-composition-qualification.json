@@ -1,0 +1,209 @@
+{
+  "admission_authorized": false,
+  "broad_existing_cases_passed": 544,
+  "broad_run": {
+    "classes": {
+      "tests.test_company_consultation_identity_review": 12,
+      "tests.test_executive_fabric_release_identity_review": 203,
+      "tests.test_executive_identity_review": 74,
+      "tests.test_executive_model_router": 39,
+      "tests.test_h6_model_configuration_composition": 18,
+      "tests.test_mastermind_executive_app_static_fences": 41,
+      "tests.test_model_router_frontier_selection": 29,
+      "tests.test_os_public_direction_capacity_routes": 2,
+      "tests.test_workspace_admitted_plan_read": 99,
+      "tests.test_workspace_control_room_review_pins": 18,
+      "tests.test_workspace_fabric_review_pins": 27
+    },
+    "errors": 0,
+    "failures": 3,
+    "skips": 0,
+    "suite_counters": [
+      {
+        "errors": "0",
+        "failures": "3",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "562",
+        "time": "79.461",
+        "timestamp": "2026-11-07T08:49:04.183046-07:00"
+      }
+    ],
+    "testcase_records": 562
+  },
+  "broad_three_failures": "New negative-wire fixture used a boolean authorizer without the required permission stamp; authentication correctly refused before wire inspection. Replaced it with the actual signed HTTP/socket fixture and asserted source factory entry.",
+  "cli_unchanged_preview": true,
+  "configuration_revision": "2104a81e045277b40246030d8ef83756ef0097ac7a6fefa475bd8c337a3bfe43",
+  "continuation": "Consume completed newer worker checker contribution, qualify exact source, publish to original2175/10740 carrier; preserve active H5 physical consumer writer.",
+  "corrected_signed_route_run": {
+    "classes": {
+      "tests.test_h6_model_configuration_composition": 18
+    },
+    "errors": 0,
+    "failures": 0,
+    "skips": 0,
+    "suite_counters": [
+      {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "18",
+        "time": "10.852",
+        "timestamp": "2026-11-07T08:51:12.864129-07:00"
+      }
+    ],
+    "testcase_records": 18
+  },
+  "current_qualification": "544 existing cases passed; all18 new signed integration cases passed after fixture correction. The562-case initial invocation was not green.",
+  "evidence": {
+    "h5-cli-inspect.json": {
+      "bytes": 636,
+      "sha256": "b516eed7352c8c32fb169ad549f8d546d1f678c284fed3379d63c9eda925434a"
+    },
+    "h5-cli-preview.json": {
+      "bytes": 768,
+      "sha256": "1c445d3d1c89dbac2d49ce2f9c323c59a65a77d100ce5e7833f32255cab22e36"
+    },
+    "h5-cli-source-hashes.json": {
+      "bytes": 784,
+      "sha256": "132a4277546813957f73604f65b2236b87f3ba28b4680aaddfddbfec91b9d1e8"
+    },
+    "h5-composed-baseline.log": {
+      "bytes": 2250,
+      "sha256": "5f8d751fb198ca232a4dd959875f7d6c85eea2c143f3b93bb82cf36eaa859dec"
+    },
+    "h5-composed-baseline.xml": {
+      "bytes": 105374,
+      "sha256": "974a1c7266c19a10ce2be0cc7f56d2aef33c07d1af58ee2471f1f7465c2caa29"
+    },
+    "h5-frontend-build.log": {
+      "bytes": 1841,
+      "sha256": "184bba053c58179c42b49352f4a270aa502ba5a806a7e12cff66c13e221aa3ac"
+    },
+    "h5-frontend-component.log": {
+      "bytes": 632,
+      "sha256": "1d268decdb1aa494c2d713555496d46e0944bfa1c3241f6ae3a6a71a22c51398"
+    },
+    "h5-frontend-typecheck.log": {
+      "bytes": 68,
+      "sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c"
+    },
+    "h5-pin-composition.json": {
+      "bytes": 2688,
+      "sha256": "1ea3de7fd8f1b2cc877df160984f101754a914bbfbb16a1efbdaea567359b3ac"
+    },
+    "h5-signed-route.log": {
+      "bytes": 80,
+      "sha256": "341d5dca33250b815baddbafb6001e174c20bf1716bb74f3d612e77777db8938"
+    },
+    "h5-signed-route.xml": {
+      "bytes": 3390,
+      "sha256": "a17d2eceb9e24b88518574b8f7be51327cf316bb4ebe3a9c7a550f344bb216ba"
+    },
+    "primary-core-preimages.json": {
+      "bytes": 5157,
+      "sha256": "88bdc8f4de47a54d81543b2ac05d840057d355d1742988a23a60c36a1a5176e2"
+    }
+  },
+  "frontend": [
+    {
+      "elapsed_seconds": 4.28,
+      "log": "/private/tmp/h6-h5-frontend-l1l0_fjp/component.log",
+      "name": "component",
+      "returncode": 0
+    },
+    {
+      "elapsed_seconds": 2.775,
+      "log": "/private/tmp/h6-h5-frontend-l1l0_fjp/typecheck.log",
+      "name": "typecheck",
+      "returncode": 0
+    },
+    {
+      "elapsed_seconds": 3.205,
+      "log": "/private/tmp/h6-h5-frontend-l1l0_fjp/production-build.log",
+      "name": "production-build",
+      "returncode": 0
+    }
+  ],
+  "frontend_build_warnings": "Existing dynamic/static import overlap and large chunk warnings; build succeeded.",
+  "frontend_component_cases": 10,
+  "inherited_current_parent_evidence_guard": {
+    "baseline_failures": 1,
+    "corrected_cases_passed": 27,
+    "guard_modified": false,
+    "new_sha256": "169f1eb189634e0fdf61b016e6e0cb9ad6e636c519af9cb1c58b9788bc56526b",
+    "original_sha256": "9f63b8e5b536801d44b1953306795f5c83bfe8f43c0c8b9992862d0fbc41bfb1",
+    "path": "review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json",
+    "representation": "Structured repository/commit/path and PR/comment metadata; original historical measurements unchanged."
+  },
+  "initial_collection_failures": [
+    "Default test Python lacked declared PyJWT; temporary venv then lacked declared MCP. Installed complete declared dev dependency set only in disposable venv."
+  ],
+  "installed_browser_acceptance": false,
+  "live_capacity": "NOT_OBSERVED",
+  "native_generation_effect": "No emitted native generation source changed by H5; current native qualification retained.",
+  "native_installation": false,
+  "observed_at": "2026-11-07T15:52:59.687259+00:00",
+  "parents": [
+    "34226c03ab4f701b55825c8423b0e8b9596992c9",
+    "4fd801e48cd3b4c6f506fd60bc5f7fc8d50b4c6e"
+  ],
+  "physical_account_pools": "NOT_JOINED",
+  "provider_calls": false,
+  "python_environment": {
+    "base": "Homebrew Python3.14.7",
+    "declared_dev_dependencies_installed": true,
+    "isolated_venv": true,
+    "live_hermes_environment_modified": false,
+    "system_site_packages": true,
+    "versions": {
+      "PyJWT": "2.14.0",
+      "cryptography": "50.0.0",
+      "httpx": "0.28.1",
+      "mcp": "1.28.1",
+      "pytest": "9.1.1",
+      "starlette": "1.6.0",
+      "uvicorn": "0.52.4"
+    }
+  },
+  "qualified_source_tree_before_evidence": "a975b1ceb69a92e03f74996ef9ed275e24501490",
+  "route_repair": {
+    "change": "Add existing query-free model read to incumbent _WORKSPACE_ADDITIONAL_GET_ROUTES; no new router/auth/owner.",
+    "path": "integrations/executive_mcp/server.py",
+    "reason": "Actual signed mounted request reproduced404 because frozen H5 supplied inner route but not outer Executive fixed GET registration."
+  },
+  "schema": "mastermind.h6.h5_composition_qualification.v1",
+  "source_sha256": {
+    "app/mastermind_os/src-tauri/src/auth.rs": "b0b93acb01efd5765dd3b170464c7bbecf3b4bc81ee9503fb130402ce735c0d6",
+    "app/mastermind_os/src-tauri/src/main.rs": "03371866e49aad1994a02b9c7ae6d9c18f76d8132693547dc09a546446705799",
+    "app/mastermind_os/src/App.tsx": "5f12bba5247e5aaa6542ee8254f988c63797e0d0a8c0ebcc1dfc298a37b01e67",
+    "app/mastermind_os/src/host.ts": "47771c28ceb66abcbe6f10a142147f6abee71fd51539e0efb5c20f662df7c0de",
+    "app/mastermind_os/src/resources/ModelConfigurationRead.test.tsx": "1f78844955e870c78885db67fb5cd0729a7c32923decf48d4bbc86f7e49599ff",
+    "app/mastermind_os/src/resources/ModelConfigurationRead.tsx": "1542c5f6ab8e334206575c07721e34a223c92111e542bccfebb648885dd38c86",
+    "app/mastermind_os/src/resources/model-configuration.css": "3353ad07618094f5c823b360fc913607be009a4cf77be730b3749b74c8acf5a4",
+    "app/mastermind_os/src/resources/model-configuration.ts": "2528d9cc110bbb35e16c72712962ceecab54383a336417a0e73ab7f2e38e23c1",
+    "app/mastermind_os/src/resources/model-route-explanation.ts": "099685b784cd59736860283e203f2bb1ff6c832db696e48e9075a677ed00933d",
+    "app/mastermind_os/src/web-auth.ts": "515d735fcf750790ca88fb0519850a571d1df401af2eac493f8c8b8f34187ef5",
+    "common/workspace_model_configuration_contract.py": "2402032b4d3f84c3cbc98f4063040483ae4cf1f46a21b9d295379fa8fc0fef46",
+    "control_plane/executive_service.py": "6a104ea9d843d54d80e85d68922dc018d42c7a76cdf8bdd6fb28f7ec0a7901bd",
+    "control_plane/model_router.py": "05016d67fb0a56e0ca65bf182c92dfcff08ca8bfdd2d5401fe2046a8cd2b251c",
+    "control_plane/model_router_configuration.py": "606e1d4a2553ac82dbcede8a3d2d2bc73b669a2cb5c98c40303aac712b012e41",
+    "control_plane/workspace_model_configuration_read.py": "ca46a0197c9407b57d9ba9401c39a1d0f835cf37313456190c91d054b94d5796",
+    "control_plane/workspace_read_service.py": "9005465962307c91989d6adf7fb07d8454a08a146b8f6c00f600058e66342920",
+    "integrations/executive_mcp/server.py": "ace82bf6aa85bfc3eb6b87ad01794defc761794434b2abf30dcab716d6d52a55",
+    "integrations/mastermind_workspace_app/app.py": "184d39a1c216eee274b5c007c1f833e7fb51e277970abf61df027a8b6168e8c2",
+    "integrations/mastermind_workspace_app/installed.py": "e63d84db40ba43dd453a2e1d7e9babe6692da9f79698a06f746cdacb7f8baa87",
+    "integrations/mastermind_workspace_app/model_configuration.py": "6c79d981f47e247a2ee9e4711dc3a91af71246881802a8c868a859b6e0d9389f",
+    "ops/executive_os/model_pool_control.py": "6209b37536abe2cde847e17328ae00ffb3eee83da9c666a32e0a8b801227e351",
+    "tests/executive_company_identity_review.py": "9a5cfcb1207f587c6ddb5e50caabf89eb96f0eca8a018fbf8ded18d9bc1c1ea8",
+    "tests/executive_fabric_release_identity_review.py": "7bb4610af3bf644fe6a76e4fb2222697f09e48887c0d86ae9c9dffe44e17de48",
+    "tests/test_executive_autonomy_control.py": "90e2a7987b104a76bbd31010270e700884c152d0f6c85672abd4251f3392ea42",
+    "tests/test_fresh_conversation_turn.py": "b69292755bd0fbc88e80b47350628f2336bfa2ad2b393f55871fe12f325d4c1b",
+    "tests/test_h6_model_configuration_composition.py": "00f4721a0bafcdc3c9f17f5afbf499a480d1cda147a76e9378820e48a297c5bf",
+    "tests/test_workspace_control_room_review_pins.py": "0c9e9fa7e167c8301bfd8e2a4b34b7e5cfa857ebd31e94544bae290d93846315",
+    "tests/test_workspace_fabric_review_pins.py": "db99351449664590892b0eaf4b93ff0437bd23f2fb82807ded67d2bd7dbf33e6"
+  }
+}

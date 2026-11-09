@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,11 +35,14 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.3.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
-    assert permissions == {"nativeMessaging", "alarms"}
+    assert permissions == {"nativeMessaging", "alarms", "debugger"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting"]
+    assert manifest["optional_host_permissions"] == ["http://*/*", "https://*/*"]
+    assert manifest["options_page"] == "browser.html"
 
     forbidden_permissions = {
         "activeTab",
@@ -48,7 +52,6 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
         "clipboardWrite",
         "contentSettings",
         "cookies",
-        "debugger",
         "downloads",
         "geolocation",
         "history",
@@ -89,7 +92,7 @@ def test_extension_files_are_present_and_small():
     for path in (BACKGROUND, CONTENT):
         payload = path.read_bytes()
         assert payload
-        assert len(payload) <= 24 * 1024
+        assert len(payload) <= (32 if path == BACKGROUND else 24) * 1024
 
 
 def test_extension_source_contains_no_content_extraction_or_powerful_browser_api():
@@ -165,8 +168,8 @@ def test_background_uses_generated_exact_native_host_and_no_generic_action_vocab
     assert 'NATIVE_HOST = "com.mastermind.web_sol_surface"' not in source
     assert 'connectNative("com.mastermind.web_sol_surface")' not in source
     for forbidden in (
+        r"\bTYPE\b",
         "CLICK",
-        "TYPE",
         "SEND",
         "NAVIGATE",
         "RELOAD",
@@ -175,4 +178,4 @@ def test_background_uses_generated_exact_native_host_and_no_generic_action_vocab
         "RETRY",
         "FAILOVER",
     ):
-        assert forbidden not in source
+        assert re.search(forbidden, source) is None

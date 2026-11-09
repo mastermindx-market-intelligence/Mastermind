@@ -1,0 +1,222 @@
+{
+  "schema": "mastermind.design.corpus.v1",
+  "source_pin": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+  "design_pin": "bc6627515c0b0209c9b0779beaab9e780cf0370a",
+  "curated_at": "2026-11-08T05:58:17.392603+00:00",
+  "references": [
+    {
+      "id": "os-today-desktop",
+      "title": "Executive OS Today, desktop",
+      "product": "Mastermind OS",
+      "source_ref": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0",
+      "tags": [
+        "projects",
+        "decision",
+        "operations",
+        "hierarchy",
+        "dark"
+      ],
+      "principles": [
+        "One clear next action",
+        "Restrained neutral surfaces",
+        "Conversation before telemetry"
+      ],
+      "limitations": [
+        "Observed static desktop design; behavior and approval unverified",
+        "Deep project and agent states require separate evidence"
+      ],
+      "reuse_contexts": [
+        "Executive home",
+        "Decision intake",
+        "Project continuity"
+      ],
+      "why_it_works": "A spacious composition gives the composer, one important decision and project continuity different visual weights.",
+      "approval": {
+        "classification": "ai_curated",
+        "note": "Principal inspected actual Paper screenshots. No Chairman/owner acceptance receipt located; do not upgrade by inference."
+      },
+      "screenshot": {
+        "file_id": "01M3NRCX55B452A12819WNE1RH",
+        "page_id": "p-D-0",
+        "node_id": "LNV-0",
+        "path": "assets/references/osShot.jpg",
+        "sha256": "7e15bd3a834c3461c4897dc12c6da7a2dd926b3bffe030f1726820890b4ca099",
+        "source_ref": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0",
+        "observed_at": "2026-11-08T05:58:17.392603+00:00"
+      },
+      "implementation_refs": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/styles.css",
+          "access": "existing_authenticated_source_owner"
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/App.tsx",
+          "access": "existing_authenticated_source_owner"
+        }
+      ],
+      "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
+    },
+    {
+      "id": "os-today-mobile",
+      "title": "Executive OS Today, mobile",
+      "product": "Mastermind OS",
+      "source_ref": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0",
+      "tags": [
+        "mobile",
+        "decision",
+        "responsive",
+        "operations"
+      ],
+      "principles": [
+        "Mobile priority",
+        "Readable action hierarchy"
+      ],
+      "limitations": [
+        "Only the captured viewport was inspected",
+        "Below-fold content and keyboard behavior unverified"
+      ],
+      "reuse_contexts": [
+        "Mobile executive home",
+        "Responsive prioritization"
+      ],
+      "why_it_works": "The composer and decision remain readable at 390px, using deliberate prioritization rather than compressing the desktop navigation.",
+      "approval": {
+        "classification": "ai_curated",
+        "note": "Principal inspected actual Paper screenshots. No Chairman/owner acceptance receipt located; do not upgrade by inference."
+      },
+      "screenshot": {
+        "file_id": "01M3NRCX55B452A12819WNE1RH",
+        "page_id": "p-D-0",
+        "node_id": "N27-0",
+        "path": "assets/references/osMobileShot.jpg",
+        "sha256": "02c626cb9be4cb703dc91abf81a73040c7de482b32bb758a09b2f0e79a158134",
+        "source_ref": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0",
+        "observed_at": "2026-11-08T05:58:17.392603+00:00"
+      },
+      "implementation_refs": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/styles.css",
+          "access": "existing_authenticated_source_owner"
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/App.tsx",
+          "access": "existing_authenticated_source_owner"
+        }
+      ],
+      "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
+    },
+    {
+      "id": "sector-map-desktop",
+      "title": "Sector Intelligence market map",
+      "product": "Sector Intelligence",
+      "source_ref": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0",
+      "tags": [
+        "financial",
+        "sector",
+        "chart",
+        "table",
+        "rotation",
+        "dark"
+      ],
+      "principles": [
+        "Answer before evidence",
+        "Numerical alignment",
+        "Visible fixture status"
+      ],
+      "limitations": [
+        "AI-curated; no approval receipt",
+        "Dense chrome and verbose data classification compete with the answer",
+        "Original fixture disclosure conflicts with the historical top-tape date; see canary evidence",
+        "Example data, never a current signal"
+      ],
+      "reuse_contexts": [
+        "Financial comparison",
+        "Sector research",
+        "Analytical hierarchy"
+      ],
+      "why_it_works": "The answer headline, distribution marks and aligned numerical rows support rapid comparison while explicitly labeling example data.",
+      "approval": {
+        "classification": "ai_curated",
+        "note": "Principal inspected actual Paper screenshots. No Chairman/owner acceptance receipt located; do not upgrade by inference."
+      },
+      "screenshot": {
+        "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "page_id": "p-4-0",
+        "node_id": "DSJ-0",
+        "path": "assets/references/sectorShot.jpg",
+        "sha256": "8cb6698b459185054c81d7be2238b32008a911bb440fc5ae946c7d04402f8137",
+        "source_ref": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0",
+        "observed_at": "2026-11-08T05:58:17.392603+00:00"
+      },
+      "implementation_refs": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "ref": "bc6627515c0b0209c9b0779beaab9e780cf0370a",
+          "path": "docs/DESIGN_DOCTRINE.md",
+          "access": "existing_authenticated_source_owner"
+        }
+      ],
+      "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
+    },
+    {
+      "id": "policy-monitor-desktop",
+      "title": "Macro Policy Monitor",
+      "product": "Macro Policy Monitor",
+      "source_ref": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0",
+      "tags": [
+        "financial",
+        "policy",
+        "chart",
+        "evidence",
+        "unknown",
+        "dark"
+      ],
+      "principles": [
+        "Chart earns prominence",
+        "Unknown remains unknown",
+        "Semantic status text"
+      ],
+      "limitations": [
+        "Long page needs disclosure assessment",
+        "Static design cannot establish data or interaction correctness",
+        "Approval provenance unverified"
+      ],
+      "reuse_contexts": [
+        "Policy intelligence",
+        "Mixed freshness",
+        "Evidence narrative"
+      ],
+      "why_it_works": "A prominent policy path chart is paired with explanatory evidence and explicit gaps; quiet borders support a long analytical narrative.",
+      "approval": {
+        "classification": "ai_curated",
+        "note": "Principal inspected actual Paper screenshots. No Chairman/owner acceptance receipt located; do not upgrade by inference."
+      },
+      "screenshot": {
+        "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+        "page_id": "p-1-0",
+        "node_id": "1-0",
+        "path": "assets/references/policyShot.jpg",
+        "sha256": "86aa2dedd0ad864f328dcdcf3c3ef1b5176c14be605868a2e94e5a1b8bb0daab",
+        "source_ref": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0",
+        "observed_at": "2026-11-08T05:58:17.392603+00:00"
+      },
+      "implementation_refs": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "ref": "bc6627515c0b0209c9b0779beaab9e780cf0370a",
+          "path": "docs/DESIGN_DOCTRINE.md",
+          "access": "existing_authenticated_source_owner"
+        }
+      ],
+      "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
+    }
+  ]
+}

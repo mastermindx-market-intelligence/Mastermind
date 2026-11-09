@@ -1,0 +1,585 @@
+{
+  "schema": "ci.rwe_controlled_pair.v1",
+  "recorded_at": "2026-11-07",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "source_head": "d26440aac2c45b960d7175836121b885d94f9301",
+  "serial_run_id": 42398700247,
+  "parallel_run_id": 42402970898,
+  "serial_conclusion": "success",
+  "parallel_conclusion": "failure",
+  "environment_match": true,
+  "behavioral_parity": false,
+  "performance_acceptance": false,
+  "profile": {
+    "environment_id": "58de61f3d39fc214",
+    "definition": {
+      "kind": "pip-hash-lock",
+      "pyproject_sha256": "750e5eb565aa0f2e0fd86ff41a82204caa7382528897db875e0c3ab90033f90e",
+      "lock_path": "requirements/gate-linux-x86_64-py312.lock",
+      "lock_sha256": "fa122bfe79054625f0f094eea13ec9668f54c36f5fdd6f7146b0c1f6dd08c29a"
+    },
+    "platform": {
+      "os": "linux",
+      "architecture": "x86_64",
+      "python_implementation": "CPython",
+      "python_version": "3.12.16",
+      "python_executable_class": "toolcache"
+    },
+    "packages_installed": {
+      "count": 78,
+      "freeze_sha256": "185d3127c6dabf1a98442541ddcf9732ea3d0551ac4e2973bd9717d7b8f5b247"
+    },
+    "build_backend": {
+      "setuptools": "84.0.0",
+      "wheel": "0.48.0"
+    },
+    "vendored_inputs": [
+      {
+        "repo": "mastermindx-market-intelligence/macro",
+        "ref": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+        "resolved_ref": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+        "match": true,
+        "dest": "vendor/macro_src",
+        "present": true
+      }
+    ],
+    "pip_check": "ok",
+    "degraded": []
+  },
+  "included_sha256": "8ad1abf6e5deeb0262557edf692531495bdf989d6983319a2e772a5a5156fb51",
+  "serial_shards": [
+    {
+      "shard": 0,
+      "modules": 413,
+      "seconds": 1545.65,
+      "artifact_id": 13584854656,
+      "artifact_sha256": "765eb65059fb40320a834885f95350e65981a58157f5759d3145f783a82ef7c5"
+    },
+    {
+      "shard": 1,
+      "modules": 364,
+      "seconds": 1868.49,
+      "artifact_id": 13585851239,
+      "artifact_sha256": "4f93c34597ed2178442e8cb1e4240fce2014f6b1a4e664626f7d7c42334d6feb"
+    },
+    {
+      "shard": 2,
+      "modules": 355,
+      "seconds": 1214.9,
+      "artifact_id": 13585640600,
+      "artifact_sha256": "3156e32b135e61c3335ef4a61a43c7ea6e810cd21dd2702da95832ebcfa3fba9"
+    },
+    {
+      "shard": 3,
+      "modules": 391,
+      "seconds": 1934.55,
+      "artifact_id": 13585617463,
+      "artifact_sha256": "916f83cf74efca3f379b286cbde46c1a23e89a79d564b0529d2d3cfcae74ab3f"
+    },
+    {
+      "shard": 4,
+      "modules": 388,
+      "seconds": 1382.71,
+      "artifact_id": 13585327951,
+      "artifact_sha256": "f5d0580b0f059134003284deff6df25dcd3e0f090295742641477bc30dd41128"
+    },
+    {
+      "shard": 5,
+      "modules": 423,
+      "seconds": 1736.71,
+      "artifact_id": 13585054538,
+      "artifact_sha256": "bf779432e43dac55348835807fca3830cf52903199a2d93c1683ce19a59a0c37"
+    }
+  ],
+  "parallel_shards": [
+    {
+      "shard": 0,
+      "job_id": 128494830526,
+      "modules": 413,
+      "exit": 0,
+      "seconds": 691.18,
+      "artifact_id": 13585888735,
+      "artifact_sha256": "6cdbe57a244e28128846da22238ad3bcab22fb00f94ab07985e5cb93d27521d7",
+      "case_evidence": {
+        "outer": 0,
+        "children": [
+          {
+            "inner": 0,
+            "modules": 111,
+            "exit": 0,
+            "seconds": 537.13
+          },
+          {
+            "inner": 2,
+            "modules": 112,
+            "exit": 0,
+            "seconds": 599
+          },
+          {
+            "inner": 1,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 670.9
+          },
+          {
+            "inner": 3,
+            "modules": 97,
+            "exit": 0,
+            "seconds": 690.89
+          }
+        ]
+      }
+    },
+    {
+      "shard": 1,
+      "job_id": 128494830592,
+      "modules": 364,
+      "exit": 0,
+      "seconds": 834.84,
+      "artifact_id": 13586980505,
+      "artifact_sha256": "02f304ebbcc7376a9c84b2dd76c030f00c3bf5aecd6a82f8b2cc82261d3e8bee",
+      "case_evidence": {
+        "outer": 1,
+        "children": [
+          {
+            "inner": 1,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 649.14
+          },
+          {
+            "inner": 3,
+            "modules": 91,
+            "exit": 0,
+            "seconds": 671.17
+          },
+          {
+            "inner": 0,
+            "modules": 78,
+            "exit": 0,
+            "seconds": 690.24
+          },
+          {
+            "inner": 2,
+            "modules": 102,
+            "exit": 0,
+            "seconds": 834.44
+          }
+        ]
+      }
+    },
+    {
+      "shard": 2,
+      "job_id": 128494830651,
+      "modules": 355,
+      "exit": 0,
+      "seconds": 355.16,
+      "artifact_id": 13586433510,
+      "artifact_sha256": "5f5a31fbe47201d5d8c876d357e59ffc785f77799bc3d938b3a80b1277bdf19a",
+      "case_evidence": {
+        "outer": 2,
+        "children": [
+          {
+            "inner": 3,
+            "modules": 89,
+            "exit": 0,
+            "seconds": 171.93
+          },
+          {
+            "inner": 1,
+            "modules": 97,
+            "exit": 0,
+            "seconds": 242.51
+          },
+          {
+            "inner": 2,
+            "modules": 90,
+            "exit": 0,
+            "seconds": 322.22
+          },
+          {
+            "inner": 0,
+            "modules": 79,
+            "exit": 0,
+            "seconds": 354.94
+          }
+        ]
+      }
+    },
+    {
+      "shard": 3,
+      "job_id": 128494830525,
+      "modules": 391,
+      "exit": 1,
+      "seconds": 719.63,
+      "artifact_id": 13585809299,
+      "artifact_sha256": "710ef5e85f73277daa448eb4b77e5485c8ea064a3c411a6489826fb8dc684ea6",
+      "case_evidence": {
+        "outer": 3,
+        "children": [
+          {
+            "inner": 3,
+            "modules": 104,
+            "exit": 1,
+            "seconds": 589.35
+          },
+          {
+            "inner": 0,
+            "modules": 82,
+            "exit": 0,
+            "seconds": 600.82
+          },
+          {
+            "inner": 2,
+            "modules": 107,
+            "exit": 0,
+            "seconds": 700.82
+          },
+          {
+            "inner": 1,
+            "modules": 98,
+            "exit": 0,
+            "seconds": 719.39
+          }
+        ]
+      }
+    },
+    {
+      "shard": 4,
+      "job_id": 128494830512,
+      "modules": 388,
+      "exit": 0,
+      "seconds": 480.17,
+      "artifact_id": 13585999392,
+      "artifact_sha256": "46eb33b41d8fa08e4428cf646980bd38dfab44e418b7c2819158991af7d11756",
+      "case_evidence": {
+        "outer": 4,
+        "children": [
+          {
+            "inner": 0,
+            "modules": 100,
+            "exit": 0,
+            "seconds": 360.42
+          },
+          {
+            "inner": 1,
+            "modules": 102,
+            "exit": 0,
+            "seconds": 406.79
+          },
+          {
+            "inner": 3,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 429.65
+          },
+          {
+            "inner": 2,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 479.96
+          }
+        ]
+      }
+    },
+    {
+      "shard": 5,
+      "job_id": 128494830545,
+      "modules": 423,
+      "exit": 1,
+      "seconds": 412.57,
+      "artifact_id": 13585624572,
+      "artifact_sha256": "a599fae921290a042475545b79e8ebcbdd873480f51ebcca5bbe26254cba0968",
+      "case_evidence": {
+        "outer": 5,
+        "children": [
+          {
+            "inner": 1,
+            "modules": 105,
+            "exit": 1,
+            "seconds": 302.92
+          },
+          {
+            "inner": 2,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 335.67
+          },
+          {
+            "inner": 3,
+            "modules": 98,
+            "exit": 0,
+            "seconds": 398.09
+          },
+          {
+            "inner": 0,
+            "modules": 127,
+            "exit": 0,
+            "seconds": 412.38
+          }
+        ]
+      }
+    }
+  ],
+  "case_comparison": {
+    "modules": 2334,
+    "collected": 70693,
+    "invoked": 70693,
+    "finished": 70693,
+    "phases": 213527,
+    "deselected": 0,
+    "incomplete": 0,
+    "malformed": 0,
+    "duplicates": 0,
+    "collectionDiff": [],
+    "outcomeDiff": [
+      {
+        "module": "tests/test_hermes_vendor_derivation.py",
+        "serial": "aeceee012fe0247b5a1cfc27686a1965c8a958a6a3813427e20630ab82381bfa",
+        "parallel": "3f614b4a87ddd311c8a99866315b56dfa2ef24eaab13aeba89659f836fabbdde"
+      },
+      {
+        "module": "tests/test_executive_installed_preparation_chain.py",
+        "serial": "1120bb7c736c030211976f75a711439cea2cf04bb9c6ccdba1f35df6a95e121c",
+        "parallel": "34b857aa9f2b96ba8c7a9ef35f41321356a35c146988550d88284c23d65b757f"
+      }
+    ],
+    "caseSetDiff": [],
+    "terminalChildren": [
+      {
+        "outer": 0,
+        "children": [
+          {
+            "inner": 0,
+            "modules": 111,
+            "exit": 0,
+            "seconds": 537.13
+          },
+          {
+            "inner": 2,
+            "modules": 112,
+            "exit": 0,
+            "seconds": 599
+          },
+          {
+            "inner": 1,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 670.9
+          },
+          {
+            "inner": 3,
+            "modules": 97,
+            "exit": 0,
+            "seconds": 690.89
+          }
+        ]
+      },
+      {
+        "outer": 1,
+        "children": [
+          {
+            "inner": 1,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 649.14
+          },
+          {
+            "inner": 3,
+            "modules": 91,
+            "exit": 0,
+            "seconds": 671.17
+          },
+          {
+            "inner": 0,
+            "modules": 78,
+            "exit": 0,
+            "seconds": 690.24
+          },
+          {
+            "inner": 2,
+            "modules": 102,
+            "exit": 0,
+            "seconds": 834.44
+          }
+        ]
+      },
+      {
+        "outer": 2,
+        "children": [
+          {
+            "inner": 3,
+            "modules": 89,
+            "exit": 0,
+            "seconds": 171.93
+          },
+          {
+            "inner": 1,
+            "modules": 97,
+            "exit": 0,
+            "seconds": 242.51
+          },
+          {
+            "inner": 2,
+            "modules": 90,
+            "exit": 0,
+            "seconds": 322.22
+          },
+          {
+            "inner": 0,
+            "modules": 79,
+            "exit": 0,
+            "seconds": 354.94
+          }
+        ]
+      },
+      {
+        "outer": 3,
+        "children": [
+          {
+            "inner": 3,
+            "modules": 104,
+            "exit": 1,
+            "seconds": 589.35
+          },
+          {
+            "inner": 0,
+            "modules": 82,
+            "exit": 0,
+            "seconds": 600.82
+          },
+          {
+            "inner": 2,
+            "modules": 107,
+            "exit": 0,
+            "seconds": 700.82
+          },
+          {
+            "inner": 1,
+            "modules": 98,
+            "exit": 0,
+            "seconds": 719.39
+          }
+        ]
+      },
+      {
+        "outer": 4,
+        "children": [
+          {
+            "inner": 0,
+            "modules": 100,
+            "exit": 0,
+            "seconds": 360.42
+          },
+          {
+            "inner": 1,
+            "modules": 102,
+            "exit": 0,
+            "seconds": 406.79
+          },
+          {
+            "inner": 3,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 429.65
+          },
+          {
+            "inner": 2,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 479.96
+          }
+        ]
+      },
+      {
+        "outer": 5,
+        "children": [
+          {
+            "inner": 1,
+            "modules": 105,
+            "exit": 1,
+            "seconds": 302.92
+          },
+          {
+            "inner": 2,
+            "modules": 93,
+            "exit": 0,
+            "seconds": 335.67
+          },
+          {
+            "inner": 3,
+            "modules": 98,
+            "exit": 0,
+            "seconds": 398.09
+          },
+          {
+            "inner": 0,
+            "modules": 127,
+            "exit": 0,
+            "seconds": 412.38
+          }
+        ]
+      }
+    ]
+  },
+  "failures": [
+    {
+      "shard": 3,
+      "module": "tests/test_hermes_vendor_derivation.py",
+      "case": "test_selected_derivation_refuses_other_or_combined_postimages[diagnostic_privacy-cross_variant]",
+      "phase": "setup",
+      "observed": "FileNotFoundError on .git/objects/maintenance.lock during recursive fixture chmod/stat",
+      "historical_cause": "unproved",
+      "mechanism": "Disposable fixture allows detached Git auto-maintenance while traversing the complete Git namespace.",
+      "repair_commit": "9e36bab664078f20bdd4115466ad4b23f98a4a86",
+      "repair": "Per-invocation maintenance.auto=false and gc.auto=0; unchanged real Git inventory and permission assertions."
+    },
+    {
+      "shard": 5,
+      "module": "tests/test_executive_installed_preparation_chain.py",
+      "case": "test_unqualified_installed_chain_never_publishes_the_new_target[grandparent-acceptance]",
+      "phase": "call: fixture construction before fault injection",
+      "observed": "Initial _UnstartedPreproofGuard._hold rejects /tmp, directory=True, exact=False, as unsafe.",
+      "historical_cause": "The two observed stat values were not retained; changed field and originating process are unproved.",
+      "source_defect": "Initial nine-field comparison disagrees with the existing five-field ordinary-ancestor contract used by later check().",
+      "repair_commit": "9e36bab664078f20bdd4115466ad4b23f98a4a86",
+      "repair": "Use ancestor identity only for ordinary directories; preserve full identity for all files and exact directories, original stat snapshot, promotion checks, no-follow lookups, namespaces, aliases and absences."
+    }
+  ],
+  "repair_qualification": {
+    "original_source_baseline": {
+      "tests": 22,
+      "failures": 4,
+      "passed": 18,
+      "errors": 0,
+      "skipped": 0,
+      "result": "Four intended positive ordinary-ancestor metadata regressions reproduce; negative controls pass."
+    },
+    "candidate": {
+      "tests": 425,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "controller_seconds": 101.458,
+      "complete_modules": [
+        "tests/test_executive_acceptance_supersede_unstarted_preproof.py",
+        "tests/test_executive_installed_preparation_chain.py",
+        "tests/test_hermes_vendor_derivation.py",
+        "tests/test_executive_fabric_release_identity_review.py"
+      ],
+      "runtime": "CPython 3.12.13 / pytest 9.2.0 / Darwin",
+      "source_unchanged": true
+    }
+  },
+  "performance": {
+    "longest_serial_gate_seconds": 1934.55,
+    "longest_parallel_gate_seconds": 834.84,
+    "interpretation": "Single failed parallel trial. These observed gate times are not an accepted speedup, CPU service time or p95."
+  },
+  "holds": {
+    "original_h1_fixture_settlement_cleared": false,
+    "macro_10674_original_preparation_effect_cleared": false,
+    "terminal_1223_create_commit_effect_cleared": false
+  },
+  "next_action": "Consume fresh natural native qualification at repair descendant 9e36; repair remaining concrete failures. Do not rerun or waive the failed unchanged d264 trial."
+}

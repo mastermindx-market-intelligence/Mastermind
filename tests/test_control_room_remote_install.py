@@ -30,6 +30,11 @@ def _repo_python_import_closure(root: Path) -> set[str]:
         # The entrypoint loads this exact module through importlib after setting
         # the immutable release root; keep that one dynamic edge explicit.
         "control_plane/chairman_control_room_remote.py",
+        # Executive runtime reads are local-only.  The remote collector reaches
+        # the same explicit unavailable/degraded path without shipping SQLite,
+        # registries, brokers, or execution modules.
+        "control_plane/chairman_control_room.py",
+        "control_plane/executive_inbox.py",
     }
     closure: set[str] = set()
 
@@ -56,11 +61,22 @@ def _repo_python_import_closure(root: Path) -> set[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    queue_module(alias.name)
+                    if alias.name.startswith("control_plane."):
+                        queue_module(alias.name)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                queue_module(node.module)
                 for alias in node.names:
-                    queue_module(f"{node.module}.{alias.name}")
+                    if (
+                        node.module == "control_plane"
+                        and alias.name != "executive_runtime"
+                    ):
+                        queue_module(f"control_plane.{alias.name}")
+                    elif (
+                        node.module.startswith("control_plane.")
+                        and node.module != "control_plane.executive_runtime"
+                    ):
+                        queue_module(node.module)
+        if getattr(tree, "type_ignores", None):
+            raise ValueError("TYPE_CHECKING imports must remain explicit in the release proof")
     return closure
 
 
@@ -432,10 +448,14 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert {
         path for path in manifest["files"] if path.endswith(".py")
     } == _repo_python_import_closure(source)
+    assert "control_plane/company_orientation.py" in manifest["files"]
+    # The exact predecessor closure remains eight modules, plus only the
+    # accepted pure value projector required by the boot packet.
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
+        and path != "control_plane/company_orientation.py"
         for path in manifest["files"]
-    ) == 27
+    ) == 8
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
@@ -494,11 +514,14 @@ def test_exact_extracted_release_composes_degraded_remote_state_without_git_meta
 
     source_dir = tmp_path / "sources"
     source_dir.mkdir(mode=0o750)
+    source_dir.chmod(0o750)
+    os.chown(source_dir, -1, os.getgid())
     active = json.loads((fixtures / "active_builds_v1.json").read_text())
     active["collected_at"] = "2026-08-28T20:00:00+00:00"
     active_path = source_dir / "project-active-builds.json"
     active_path.write_text(json.dumps(active), encoding="utf-8")
     active_path.chmod(0o640)
+    os.chown(active_path, -1, os.getgid())
 
     harness = """
 import json, os, sys
@@ -545,7 +568,10 @@ print(json.dumps(remote.compose_collected(inputs, identity), sort_keys=True))
     projected = json.loads(result.stdout)
     assert projected["schema"] == remote.REMOTE_SCHEMA
     assert projected["source_freshness"]["agent_os_brief"]["state"] == "fresh"
-    assert projected["source_freshness"]["active_builds"]["state"] == "fresh"
+    assert projected["source_freshness"]["active_builds"]["state"] == "fresh", {
+        "active_builds": projected["source_freshness"]["active_builds"],
+        "degraded": projected["degraded"],
+    }
     assert projected["source_freshness"]["executive_runtime"]["state"] == "unavailable"
     assert all("/" not in reason for reason in projected["degraded"])
 
@@ -681,6 +707,9 @@ def test_installer_directory_guard_refuses_symlink_and_unsafe_mode_without_targe
     safe = tmp_path / "safe"
     safe.mkdir(mode=0o750)
     safe.chmod(0o750)
+    # macOS may inherit a temporary directory's group from its parent.
+    # Match the fixture to the process group the guard is asked to validate.
+    os.chown(safe, -1, os.getgid())
     accepted = _validate_installer_directory(safe, mode="0750")
     assert accepted.returncode == 0, accepted.stderr
 
@@ -703,6 +732,7 @@ def test_installer_directory_guard_refuses_symlink_and_unsafe_mode_without_targe
     unsafe = tmp_path / "unsafe"
     unsafe.mkdir(mode=0o770)
     unsafe.chmod(0o770)
+    os.chown(unsafe, -1, os.getgid())
     refused_mode = _validate_installer_directory(unsafe, mode="0750")
     assert refused_mode.returncode == 65
     assert refused_mode.stderr.strip() == "test_directory_mode"
@@ -796,7 +826,7 @@ def test_installer_verify_source_only_refuses_unsafe_source(tmp_path, problem):
     elif problem == "hardlink":
         target = repo / "control_plane/chairman_control_room.py"
         target.unlink()
-        os.link(repo / "control_plane/ceo_intent.py", target)
+        os.link(repo / "control_plane/executive_inbox.py", target)
         _git("add", "control_plane/chairman_control_room.py", cwd=repo)
         _git("commit", "-qm", "hard", cwd=repo)
         commit, tree = _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "HEAD^{tree}", cwd=repo)

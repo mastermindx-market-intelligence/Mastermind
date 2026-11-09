@@ -1,0 +1,6 @@
+test_composed_preserving_migration_imports_then_observes_once (private_service_original_delivery_test.ComposedPreservingMigrationTests.test_composed_preserving_migration_imports_then_observes_once) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 3.267s
+
+OK

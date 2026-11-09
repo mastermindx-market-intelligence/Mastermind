@@ -189,6 +189,8 @@ class TestClassifySourceStrictness:
     @pytest.mark.parametrize("text,kind", [
         ("Your organization has disabled Claude subscription access for Claude Code", "auth"),
         ("Invalid bearer token", "auth"),
+        ("Failed to authenticate. API Error: 401 OAuth access token has been revoked.", "auth"),
+        ("FAILED TO AUTHENTICATE. API ERROR: 401 OAUTH ACCESS TOKEN HAS BEEN REVOKED.", "auth"),
         ("Claude usage limit reached. Your limit will reset at 3pm", "window"),
         ("You've reached your weekly usage limit", "weekly"),
     ])
@@ -199,6 +201,103 @@ class TestClassifySourceStrictness:
     def test_default_source_is_error(self):
         assert self.kr.classify_failure("Quota exceeded") is not None
         assert self.kr.classify_failure("Quota exceeded", source="text") is None
+
+
+
+class TestChatStreamAuthBanner:
+    """The incumbent stream records failure once; it never replays a provider call."""
+
+    @pytest.mark.parametrize("message_shape", ["assistant", "result"])
+    @pytest.mark.parametrize("banner,should_cool", [
+        ("Failed to authenticate. API Error: 401 OAuth access token has been revoked.", True),
+        ("HTTP 401 mentioned in the filing; Token revoked by issuer is a quote.", False),
+    ])
+    def test_stream_classifies_exact_banner_without_midstream_rotation(
+        self, monkeypatch, message_shape, banner, should_cool
+    ):
+        import sys
+        from types import SimpleNamespace
+
+        import brain
+        from brain import cli_bridge as cb, key_rotor as kr
+
+        candidates = [
+            {"key_id": "fixture-first", "env_name": "FIXTURE_FIRST"},
+            {"key_id": "fixture-second", "env_name": "FIXTURE_SECOND"},
+        ]
+        selected, queried, cooled, logged = [], [], [], []
+
+        def fixture_env(env_name=None):
+            selected.append(env_name)
+            return {"FIXTURE_SLOT": env_name}
+
+        bot_owner = SimpleNamespace(
+            SERVER_NAME="bot", PAPER_MARKER="fixture-paper",
+            armed_allowed_tools=lambda: ["mcp__bot__get_intelligence"],
+            build_server=lambda: object(),
+        )
+        cognition_owner = SimpleNamespace(
+            SERVER_NAME="cognition", allowed_tools=lambda: [],
+            build_server=lambda: object(),
+        )
+        ledger_owner = SimpleNamespace(log_turn_async=lambda **row: logged.append(row))
+        for name, owner in [
+            ("bot_mcp", bot_owner), ("cognition_mcp", cognition_owner),
+            ("thinking_log", ledger_owner),
+        ]:
+            monkeypatch.setitem(sys.modules, "brain." + name, owner)
+            monkeypatch.setattr(brain, name, owner, raising=False)
+
+        private_error = "Claude Code returned an error result: success /private/fixture"
+        async def fake_query(*, prompt, options):
+            queried.append((prompt, options.env))
+            if message_shape == "assistant":
+                yield SimpleNamespace(content=[SimpleNamespace(type="text", text=banner)])
+            yield SimpleNamespace(
+                result=banner if message_shape == "result" else None,
+                session_id="fixture-session", total_cost_usd=0.0,
+            )
+            raise RuntimeError(private_error)
+
+        async def forbidden_fallback(*args, **kwargs):
+            raise AssertionError("chat stream must not replay via subprocess")
+
+        monkeypatch.setattr(cb, "_SDK", True)
+        monkeypatch.setattr(cb, "_Options", SimpleNamespace, raising=False)
+        monkeypatch.setattr(cb, "_sdk_query", fake_query, raising=False)
+        monkeypatch.setattr(cb, "_via_subprocess", forbidden_fallback)
+        monkeypatch.delenv("MM_PROVIDER_APPLICATION_MODE", raising=False)
+        monkeypatch.setenv("BOT_LLM_BACKEND", "sdk")
+        monkeypatch.setattr(cb, "_selected_backend", lambda: "sdk")
+        monkeypatch.setattr(cb, "cli_path", lambda: "/fixture/claude")
+        monkeypatch.setattr(cb, "_cfg", lambda: {"reasoning": {}})
+        monkeypatch.setattr(cb, "resolve_model", lambda role: "fixture-model")
+        monkeypatch.setattr(cb, "_subscription_env", fixture_env)
+        monkeypatch.setattr(kr, "candidates", lambda: candidates)
+        monkeypatch.setattr(
+            kr, "mark_cooling",
+            lambda key_id, **kw: cooled.append((key_id, kw["cool_kind"])) or True,
+        )
+
+        async def drain():
+            return [event async for event in cb.chat_stream("fixture news read")]
+
+        events = asyncio.run(drain())
+        assert selected == ["FIXTURE_FIRST"]
+        assert queried == [("fixture news read", {"FIXTURE_SLOT": "FIXTURE_FIRST"})]
+        assert cooled == ([("fixture-first", "auth")] if should_cool else [])
+        assert [event["type"] for event in events] == ["text", "error", "done"]
+        assert events[1] == cb.public_chat_error_event()
+        assert private_error not in json.dumps(events)
+        assert events[-1] == {
+            "type": "done", "session_id": "fixture-session",
+            "cost_usd": 0.0, "tools_used": [],
+        }
+        assert len(logged) == 1
+        assert logged[0]["key_id"] == "fixture-first"
+        assert logged[0]["thread_id"] == "fixture-session"
+        assert logged[0]["flags"] == {"error": True}
+        assert logged[0]["tools"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +594,8 @@ class TestRotationLoop:
 
         async def _fake_via_sdk(prompt, mdl, role, system, append_system, tools, dirs,
                                 turns, workdir, perm, mcp_servers, resume, arm,
-                                run_id=None, env_name=None, thinking_out=None):
+                                run_id=None, env_name=None, thinking_out=None,
+                                failure_out=None):
             call_count["n"] += 1
             if env_name == "CLAUDE_CODE_OAUTH_TOKEN_3":
                 # Return the org-disabled banner as text (the crux case)
@@ -553,7 +653,7 @@ class TestRotationLoop:
                 "what is the market doing?",
                 log_run=False,
                 _backend_override="cli",
-                _oauth_candidates=pinned,
+                _subscription_slots=pinned,
             )
         )
 

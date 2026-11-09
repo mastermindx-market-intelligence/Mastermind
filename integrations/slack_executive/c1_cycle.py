@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from .sol_state import (
     PublicationReceipt,
     build_sol_state_document,
+    semantic_sol_state_hash,
 )
 
 
@@ -60,6 +61,25 @@ async def run_once(
     )
 
 
+def _cadence_hash(document: dict[str, Any]) -> str:
+    """Compare validated semantics without changing the public integrity hash.
+
+    Executive generation time changes on an otherwise identical fresh read.
+    Only that nested clock is removed here; the wrapper hash helper already
+    omits wrapper clocks and self-hash. All runtime, grounding, degradation,
+    availability, Relay metadata and submission guards remain significant.
+    """
+
+    semantic_document = dict(document)
+    if document["executive"] is not None:
+        semantic_document["executive"] = {
+            key: value
+            for key, value in document["executive"].items()
+            if key != "generated_at"
+        }
+    return semantic_sol_state_hash(semantic_document)
+
+
 class C1RelayService:
     """Storeless in-process publication cadence for the C1 Relay."""
 
@@ -94,16 +114,18 @@ class C1RelayService:
     async def poll_once(
         self,
         *,
-        checked_at: datetime,
+        now: Callable[[], datetime] = _utc_now,
     ) -> PublicationReceipt | None:
         executive_state = await _read_current(self._reader)
+        # Freshness is observed after the read, never at request dispatch.
+        checked_at = now()
         candidate = build_sol_state_document(
             executive_state,
             relay_checked_at=checked_at,
             max_executive_age_seconds=self._max_executive_age_seconds,
             relay_version=self._relay_version,
         )
-        semantic_hash = candidate["state_hash"]
+        semantic_hash = _cadence_hash(candidate)
 
         due_to_change = self._last_semantic_hash != semantic_hash
         due_to_heartbeat = (

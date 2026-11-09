@@ -125,7 +125,7 @@ from integrations.slack_agent_dialogue.wake_projection import (
 )
 
 _TOKEN_MAX_BYTES = 2048
-AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+AGENT_RELAY_SOCKET_PATH = Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
 EXECUTIVE_OBSERVATION_SOCKET_PATH = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
@@ -367,6 +367,7 @@ class RelayRuntimeConfig:
     allowed_parent_user_ids: tuple[str, ...]
     dialogue_coordination_socket_path: Path | None = None
     w3c_enabled: bool = False
+    dot_canary_enabled: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -405,7 +406,7 @@ class RelayRuntimeConfig:
                 "dialogue_coordination_socket_path",
                 coordination_path,
             )
-        if type(self.w3c_enabled) is not bool:
+        if type(self.w3c_enabled) is not bool or type(self.dot_canary_enabled) is not bool:
             raise RelayRuntimeError("RUNTIME_INVALID")
         if self.w3c_enabled and coordination_path is None:
             raise RelayRuntimeError("RUNTIME_INVALID")
@@ -1359,6 +1360,7 @@ def build_service(
             authority_policy=authority,
             active_waiter_registry=active_waiters,
         ),
+        dot_canary_armed=config.dot_canary_enabled,
     )
 
 
@@ -1586,6 +1588,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--allowed-parent-user-id", required=True, action="append")
     parser.add_argument("--dialogue-coordination-socket-path")
     parser.add_argument("--enable-w3c", action="store_true")
+    parser.add_argument("--enable-dot-canary", action="store_true")
     return parser
 
 
@@ -1607,6 +1610,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else Path(namespace.dialogue_coordination_socket_path)
             ),
             w3c_enabled=namespace.enable_w3c,
+            dot_canary_enabled=namespace.enable_dot_canary,
         )
         asyncio.run(run_relay(config))
         return 0

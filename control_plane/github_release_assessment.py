@@ -22,6 +22,8 @@ from typing import Any
 
 INPUT_SCHEMA = "mastermind.github_release_assessment.input.v3"
 OUTPUT_SCHEMA = "mastermind.github_release_assessment.v1"
+CI_OBSERVATION_INPUT_SCHEMA = "mastermind.github_ci_candidate_observation.input.v1"
+CI_OBSERVATION_OUTPUT_SCHEMA = "mastermind.github_ci_candidate_observation.v1"
 
 MAX_PATHS = 256
 MAX_SEMANTIC_OWNERS = 128
@@ -435,6 +437,109 @@ class CheckAttempt:
     applicable: bool
     superseded: bool
     source_ref: SourceReference
+
+
+class CandidateCIState(str, Enum):
+    GREEN = "GREEN"
+    PENDING = "PENDING"
+    FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
+    STALE = "STALE"
+
+
+@dataclasses.dataclass(frozen=True)
+class CandidateCheckRun:
+    identity: CheckIdentity
+    head_sha: str
+    check_run_id: int
+    workflow_run_id: int | None
+    attempt: int
+    sequence: int
+    status: CheckStatus
+    conclusion: CheckConclusion | None
+    applicable: bool
+    superseded: bool
+    source_ref: SourceReference
+
+
+@dataclasses.dataclass(frozen=True)
+class CandidateCIObservationInput:
+    schema: str
+    observed_at: int
+    repository: str
+    repository_id: int
+    pull_request_number: int
+    candidate_ref: str
+    expected_head_sha: str
+    observed_head_sha: str
+    policy_revision: str
+    required_checks: tuple[CheckIdentity, ...]
+    allowed_non_success_checks: tuple[CheckIdentity, ...]
+    check_runs: tuple[CandidateCheckRun, ...]
+    checks_complete: bool
+    policy_source_ref: SourceReference
+    checks_source_ref: SourceReference
+
+
+@dataclasses.dataclass(frozen=True)
+class CandidateCIObservation:
+    schema: str
+    state: CandidateCIState
+    repository: str
+    repository_id: int
+    pull_request_number: int
+    candidate_ref: str
+    expected_head_sha: str
+    observed_head_sha: str
+    policy_revision: str
+    required_checks: tuple[CheckIdentity, ...]
+    latest_checks: tuple[CandidateCheckRun, ...]
+    terminal: bool
+    issues: tuple[AssessmentIssue, ...]
+    source_refs: tuple[SourceReference, ...]
+    input_digest: str
+    canonical_digest: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": self.schema,
+            "state": self.state.value,
+            "repository": self.repository,
+            "repository_id": self.repository_id,
+            "pull_request_number": self.pull_request_number,
+            "candidate_ref": self.candidate_ref,
+            "expected_head_sha": self.expected_head_sha,
+            "observed_head_sha": self.observed_head_sha,
+            "policy_revision": self.policy_revision,
+            "required_checks": [
+                {"context": item.context, "app_id": item.app_id}
+                for item in self.required_checks
+            ],
+            "latest_checks": [
+                {
+                    "context": item.identity.context,
+                    "app_id": item.identity.app_id,
+                    "head_sha": item.head_sha,
+                    "check_run_id": item.check_run_id,
+                    "workflow_run_id": item.workflow_run_id,
+                    "attempt": item.attempt,
+                    "sequence": item.sequence,
+                    "status": item.status.value,
+                    "conclusion": (
+                        None if item.conclusion is None else item.conclusion.value
+                    ),
+                    "applicable": item.applicable,
+                    "superseded": item.superseded,
+                    "source_ref": item.source_ref.to_dict(),
+                }
+                for item in self.latest_checks
+            ],
+            "terminal": self.terminal,
+            "issues": [item.value for item in self.issues],
+            "source_refs": [item.to_dict() for item in self.source_refs],
+            "input_digest": self.input_digest,
+            "canonical_digest": self.canonical_digest,
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1303,6 +1408,7 @@ def _jsonable(value: object) -> Any:
         CarrierAssessmentState,
         WriterAssessmentState,
         CheckAssessmentState,
+        CandidateCIState,
         ReviewAssessmentState,
         SourceAssessmentState,
         ProductionAssessmentState,
@@ -2331,6 +2437,479 @@ def _verdict(issues: set[AssessmentIssue]) -> AssessmentVerdict:
     return AssessmentVerdict.ELIGIBLE
 
 
+def _validate_candidate_ci_observation_input(
+    packet: object,
+) -> CandidateCIObservationInput:
+    """Validate one exact-candidate CI snapshot without contacting GitHub."""
+
+    item = _exact(
+        packet,
+        CandidateCIObservationInput,
+        field="candidate_ci_observation",
+    )
+    if item.schema != CI_OBSERVATION_INPUT_SCHEMA:
+        raise AssessmentInputError("candidate_ci_observation.schema is unsupported")
+    _plain_int(item.observed_at, field="candidate_ci_observation.observed_at", allow_zero=True)
+    _repository(item.repository, field="candidate_ci_observation.repository")
+    _plain_int(item.repository_id, field="candidate_ci_observation.repository_id")
+    _plain_int(
+        item.pull_request_number,
+        field="candidate_ci_observation.pull_request_number",
+    )
+    _ref(item.candidate_ref, field="candidate_ci_observation.candidate_ref")
+    observed_head = _sha(
+        item.observed_head_sha,
+        field="candidate_ci_observation.observed_head_sha",
+    )
+    expected_head = _sha(
+        item.expected_head_sha,
+        field="candidate_ci_observation.expected_head_sha",
+    )
+    assert observed_head is not None and expected_head is not None
+    _source_token(
+        item.policy_revision,
+        field="candidate_ci_observation.policy_revision",
+    )
+    _plain_bool(
+        item.checks_complete,
+        field="candidate_ci_observation.checks_complete",
+    )
+
+    required_rows = _ensure_tuple(
+        item.required_checks,
+        field="candidate_ci_observation.required_checks",
+        maximum=MAX_CHECK_IDENTITIES,
+    )
+    if not required_rows:
+        raise AssessmentInputError(
+            "candidate_ci_observation.required_checks must not be empty"
+        )
+    required_keys: list[tuple[str, int]] = []
+    for index, raw in enumerate(required_rows):
+        required_keys.append(
+            _validate_check_identity(
+                raw,
+                field=f"candidate_ci_observation.required_checks[{index}]",
+            )
+        )
+    if len(set(required_keys)) != len(required_keys):
+        raise AssessmentInputError(
+            "candidate_ci_observation.required_checks contains duplicates"
+        )
+
+    allowed_rows = _ensure_tuple(
+        item.allowed_non_success_checks,
+        field="candidate_ci_observation.allowed_non_success_checks",
+        maximum=MAX_CHECK_IDENTITIES,
+    )
+    allowed_keys: list[tuple[str, int]] = []
+    for index, raw in enumerate(allowed_rows):
+        allowed_keys.append(
+            _validate_check_identity(
+                raw,
+                field=(
+                    "candidate_ci_observation.allowed_non_success_checks"
+                    f"[{index}]"
+                ),
+            )
+        )
+    if len(set(allowed_keys)) != len(allowed_keys):
+        raise AssessmentInputError(
+            "candidate_ci_observation.allowed_non_success_checks contains duplicates"
+        )
+    if not set(allowed_keys).issubset(set(required_keys)):
+        raise AssessmentInputError(
+            "candidate_ci_observation.allowed_non_success_checks must be required"
+        )
+
+    runs = _ensure_tuple(
+        item.check_runs,
+        field="candidate_ci_observation.check_runs",
+        maximum=MAX_CHECK_ATTEMPTS,
+    )
+    seen_ids: set[int] = set()
+    seen_generations: set[tuple[tuple[str, int], int, int]] = set()
+    for index, raw in enumerate(runs):
+        row = _exact(
+            raw,
+            CandidateCheckRun,
+            field=f"candidate_ci_observation.check_runs[{index}]",
+        )
+        identity = _validate_check_identity(
+            row.identity,
+            field=f"candidate_ci_observation.check_runs[{index}].identity",
+        )
+        head = _sha(
+            row.head_sha,
+            field=f"candidate_ci_observation.check_runs[{index}].head_sha",
+        )
+        if head != observed_head:
+            raise AssessmentInputError(
+                "candidate_ci_observation.check_runs contains another head"
+            )
+        check_run_id = _plain_int(
+            row.check_run_id,
+            field=f"candidate_ci_observation.check_runs[{index}].check_run_id",
+        )
+        if row.workflow_run_id is not None:
+            _plain_int(
+                row.workflow_run_id,
+                field=(
+                    "candidate_ci_observation.check_runs"
+                    f"[{index}].workflow_run_id"
+                ),
+            )
+        attempt = _plain_int(
+            row.attempt,
+            field=f"candidate_ci_observation.check_runs[{index}].attempt",
+        )
+        sequence = _plain_int(
+            row.sequence,
+            field=f"candidate_ci_observation.check_runs[{index}].sequence",
+        )
+        _exact_enum(
+            row.status,
+            CheckStatus,
+            field=f"candidate_ci_observation.check_runs[{index}].status",
+        )
+        if row.conclusion is not None:
+            _exact_enum(
+                row.conclusion,
+                CheckConclusion,
+                field=f"candidate_ci_observation.check_runs[{index}].conclusion",
+            )
+        if row.status is CheckStatus.COMPLETED:
+            if row.conclusion is None:
+                raise AssessmentInputError(
+                    "completed candidate check requires a conclusion"
+                )
+        elif row.conclusion is not None:
+            raise AssessmentInputError(
+                "nonterminal candidate check cannot have a conclusion"
+            )
+        _plain_bool(
+            row.applicable,
+            field=f"candidate_ci_observation.check_runs[{index}].applicable",
+        )
+        _plain_bool(
+            row.superseded,
+            field=f"candidate_ci_observation.check_runs[{index}].superseded",
+        )
+        _validate_source_reference(
+            row.source_ref,
+            field=f"candidate_ci_observation.check_runs[{index}].source_ref",
+        )
+        generation = (identity, attempt, sequence)
+        if check_run_id in seen_ids or generation in seen_generations:
+            raise AssessmentInputError(
+                "candidate_ci_observation.check_runs contains duplicate identity"
+            )
+        seen_ids.add(check_run_id)
+        seen_generations.add(generation)
+
+    _validate_source_reference(
+        item.policy_source_ref,
+        field="candidate_ci_observation.policy_source_ref",
+    )
+    _validate_source_reference(
+        item.checks_source_ref,
+        field="candidate_ci_observation.checks_source_ref",
+    )
+    return item
+
+
+_CANDIDATE_CI_SOURCE_ISSUES = frozenset(
+    {
+        AssessmentIssue.SOURCE_SUBJECT_MISMATCH,
+        AssessmentIssue.SOURCE_OWNER_MISMATCH,
+        AssessmentIssue.SOURCE_REVISION_MISMATCH,
+        AssessmentIssue.SOURCE_INCOMPLETE,
+        AssessmentIssue.SOURCE_STALE,
+        AssessmentIssue.SOURCE_FUTURE,
+        AssessmentIssue.SOURCE_CONFLICT,
+    }
+)
+
+
+def _candidate_ci_ref_health(
+    packet: CandidateCIObservationInput,
+    ref: SourceReference,
+    issues: set[AssessmentIssue],
+    *,
+    expected_revision: str,
+    expected_resource_kind: str,
+    expected_resource_id: str,
+) -> bool:
+    """Classify one owner-native reference without treating evidence as authority."""
+
+    usable = True
+    if ref.owner is not SourceOwner.GITHUB:
+        issues.add(AssessmentIssue.SOURCE_OWNER_MISMATCH)
+        usable = False
+    if (
+        ref.repository != packet.repository
+        or ref.resource_kind != expected_resource_kind
+        or ref.resource_id != expected_resource_id
+    ):
+        issues.add(AssessmentIssue.SOURCE_SUBJECT_MISMATCH)
+        usable = False
+    if ref.revision != expected_revision:
+        issues.add(AssessmentIssue.SOURCE_REVISION_MISMATCH)
+        usable = False
+    if ref.observed_at > packet.observed_at:
+        issues.add(AssessmentIssue.SOURCE_FUTURE)
+        usable = False
+    freshness_time = ref.observed_at if ref.valid_at is None else ref.valid_at
+    if packet.observed_at - freshness_time > MAX_EVIDENCE_AGE_SECONDS:
+        issues.add(AssessmentIssue.SOURCE_STALE)
+        usable = False
+    if (
+        ref.coverage is not SourceReferenceCoverage.COMPLETE
+        or ref.truncated
+        or ref.continuation is not None
+    ):
+        issues.add(AssessmentIssue.SOURCE_INCOMPLETE)
+        usable = False
+    return usable
+
+
+def _candidate_ci_run_payload(row: CandidateCheckRun) -> dict[str, object]:
+    return {
+        "context": row.identity.context,
+        "app_id": row.identity.app_id,
+        "head_sha": row.head_sha,
+        "check_run_id": row.check_run_id,
+        "workflow_run_id": row.workflow_run_id,
+        "attempt": row.attempt,
+        "sequence": row.sequence,
+        "status": row.status.value,
+        "conclusion": None if row.conclusion is None else row.conclusion.value,
+        "applicable": row.applicable,
+        "superseded": row.superseded,
+        "source_ref": row.source_ref.to_dict(),
+    }
+
+
+def _candidate_ci_input_payload(
+    packet: CandidateCIObservationInput,
+) -> dict[str, object]:
+    return {
+        "schema": packet.schema,
+        "observed_at": packet.observed_at,
+        "repository": packet.repository,
+        "repository_id": packet.repository_id,
+        "pull_request_number": packet.pull_request_number,
+        "candidate_ref": packet.candidate_ref,
+        "expected_head_sha": packet.expected_head_sha,
+        "observed_head_sha": packet.observed_head_sha,
+        "policy_revision": packet.policy_revision,
+        "required_checks": [
+            {"context": item.context, "app_id": item.app_id}
+            for item in sorted(packet.required_checks, key=_identity_key)
+        ],
+        "allowed_non_success_checks": [
+            {"context": item.context, "app_id": item.app_id}
+            for item in sorted(packet.allowed_non_success_checks, key=_identity_key)
+        ],
+        "check_runs": [
+            _candidate_ci_run_payload(item)
+            for item in sorted(
+                packet.check_runs,
+                key=lambda row: (
+                    _identity_key(row.identity),
+                    row.attempt,
+                    row.sequence,
+                    row.check_run_id,
+                ),
+            )
+        ],
+        "checks_complete": packet.checks_complete,
+        "policy_source_ref": packet.policy_source_ref.to_dict(),
+        "checks_source_ref": packet.checks_source_ref.to_dict(),
+    }
+
+
+def assess_candidate_ci_observation(
+    packet: CandidateCIObservationInput,
+) -> CandidateCIObservation:
+    """Classify one supplied CI snapshot for one exact candidate.
+
+    This function is deterministic and side-effect free. It does not poll GitHub,
+    register a watcher, persist a baseline, rerun checks, merge, deploy, or change
+    a lease. A future Class-E/Class-T owner may feed it owner-native snapshots and
+    decide when a material result should be returned.
+    """
+
+    packet = _validate_candidate_ci_observation_input(packet)
+    input_digest = _digest(_candidate_ci_input_payload(packet))
+    issues: set[AssessmentIssue] = set()
+    refs = (
+        packet.policy_source_ref,
+        packet.checks_source_ref,
+        *(row.source_ref for row in packet.check_runs),
+    )
+
+    native_refs: dict[tuple[object, ...], SourceReference] = {}
+    for ref in refs:
+        existing = native_refs.get(_source_native_key(ref))
+        if existing is None:
+            native_refs[_source_native_key(ref)] = ref
+        elif existing.content_sha256 != ref.content_sha256:
+            issues.add(AssessmentIssue.SOURCE_CONFLICT)
+
+    _candidate_ci_ref_health(
+        packet,
+        packet.policy_source_ref,
+        issues,
+        expected_revision=packet.policy_revision,
+        expected_resource_kind="required_checks_policy",
+        expected_resource_id=packet.policy_revision,
+    )
+    _candidate_ci_ref_health(
+        packet,
+        packet.checks_source_ref,
+        issues,
+        expected_revision=packet.observed_head_sha,
+        expected_resource_kind="commit_check_runs",
+        expected_resource_id=packet.observed_head_sha,
+    )
+    for row in packet.check_runs:
+        _candidate_ci_ref_health(
+            packet,
+            row.source_ref,
+            issues,
+            expected_revision=row.head_sha,
+            expected_resource_kind="check_run",
+            expected_resource_id=f"check-run:{row.check_run_id}",
+        )
+
+    latest_checks: list[CandidateCheckRun] = []
+    state: CandidateCIState
+    if issues & _CANDIDATE_CI_SOURCE_ISSUES:
+        state = CandidateCIState.UNKNOWN
+    elif packet.observed_head_sha != packet.expected_head_sha:
+        issues.add(AssessmentIssue.CANDIDATE_HEAD_MOVED)
+        state = CandidateCIState.STALE
+    else:
+        required = {_identity_key(item) for item in packet.required_checks}
+        allowed_non_success = {
+            _identity_key(item) for item in packet.allowed_non_success_checks
+        }
+        unknown = not packet.checks_complete
+        pending = False
+        failed = False
+        if unknown:
+            issues.add(AssessmentIssue.CHECK_COVERAGE_PARTIAL)
+
+        for identity in sorted(required):
+            rows = [
+                row
+                for row in packet.check_runs
+                if _identity_key(row.identity) == identity
+            ]
+            if not rows:
+                if packet.checks_complete:
+                    issues.add(AssessmentIssue.CHECK_MISSING)
+                    pending = True
+                else:
+                    unknown = True
+                continue
+            latest = max(rows, key=lambda row: (row.attempt, row.sequence))
+            latest_checks.append(latest)
+            if latest.superseded:
+                issues.add(AssessmentIssue.CHECK_SUPERSEDED)
+                unknown = True
+                continue
+            if latest.status in {CheckStatus.QUEUED, CheckStatus.IN_PROGRESS}:
+                issues.add(AssessmentIssue.CHECK_PENDING)
+                pending = True
+                continue
+            conclusion = latest.conclusion
+            if conclusion is CheckConclusion.SUCCESS:
+                continue
+            if conclusion is CheckConclusion.SKIPPED:
+                if identity in allowed_non_success and not latest.applicable:
+                    continue
+                issues.add(AssessmentIssue.CHECK_SKIPPED_NOT_ALLOWED)
+                failed = True
+                continue
+            if conclusion is CheckConclusion.NEUTRAL:
+                if identity in allowed_non_success and not latest.applicable:
+                    continue
+                issues.add(AssessmentIssue.CHECK_NEUTRAL_NOT_ALLOWED)
+                failed = True
+                continue
+            if conclusion is CheckConclusion.CANCELLED:
+                issues.add(AssessmentIssue.CHECK_CANCELLED)
+                failed = True
+                continue
+            if conclusion is CheckConclusion.UNKNOWN:
+                issues.add(AssessmentIssue.CHECK_COVERAGE_PARTIAL)
+                unknown = True
+                continue
+            issues.add(AssessmentIssue.CHECK_FAILED)
+            failed = True
+
+        if failed:
+            state = CandidateCIState.FAILED
+        elif unknown:
+            state = CandidateCIState.UNKNOWN
+        elif pending:
+            state = CandidateCIState.PENDING
+        else:
+            state = CandidateCIState.GREEN
+
+    ordered_checks = tuple(
+        sorted(latest_checks, key=lambda row: _identity_key(row.identity))
+    )
+    ordered_issues = tuple(sorted(issues, key=lambda item: item.value))
+    ordered_refs = tuple(sorted(set(refs), key=_source_full_key))
+    terminal = state in {
+        CandidateCIState.GREEN,
+        CandidateCIState.FAILED,
+        CandidateCIState.STALE,
+    }
+    output_without_digest = {
+        "schema": CI_OBSERVATION_OUTPUT_SCHEMA,
+        "state": state.value,
+        "repository": packet.repository,
+        "repository_id": packet.repository_id,
+        "pull_request_number": packet.pull_request_number,
+        "candidate_ref": packet.candidate_ref,
+        "expected_head_sha": packet.expected_head_sha,
+        "observed_head_sha": packet.observed_head_sha,
+        "policy_revision": packet.policy_revision,
+        "required_checks": [
+            {"context": item.context, "app_id": item.app_id}
+            for item in sorted(packet.required_checks, key=_identity_key)
+        ],
+        "latest_checks": [_candidate_ci_run_payload(item) for item in ordered_checks],
+        "terminal": terminal,
+        "issues": [item.value for item in ordered_issues],
+        "source_refs": [item.to_dict() for item in ordered_refs],
+        "input_digest": input_digest,
+    }
+    canonical_digest = _digest(output_without_digest)
+    return CandidateCIObservation(
+        schema=CI_OBSERVATION_OUTPUT_SCHEMA,
+        state=state,
+        repository=packet.repository,
+        repository_id=packet.repository_id,
+        pull_request_number=packet.pull_request_number,
+        candidate_ref=packet.candidate_ref,
+        expected_head_sha=packet.expected_head_sha,
+        observed_head_sha=packet.observed_head_sha,
+        policy_revision=packet.policy_revision,
+        required_checks=tuple(sorted(packet.required_checks, key=_identity_key)),
+        latest_checks=ordered_checks,
+        terminal=terminal,
+        issues=ordered_issues,
+        source_refs=ordered_refs,
+        input_digest=input_digest,
+        canonical_digest=canonical_digest,
+    )
+
+
 def assess_github_release(packet: AssessmentInput) -> GithubReleaseAssessment:
     """Classify one immutable release packet without performing an effect."""
 
@@ -2455,6 +3034,8 @@ def assess_github_release(packet: AssessmentInput) -> GithubReleaseAssessment:
 __all__ = [
     "INPUT_SCHEMA",
     "OUTPUT_SCHEMA",
+    "CI_OBSERVATION_INPUT_SCHEMA",
+    "CI_OBSERVATION_OUTPUT_SCHEMA",
     "MAX_EVIDENCE_AGE_SECONDS",
     "AssessmentInput",
     "AssessmentInputError",
@@ -2465,6 +3046,10 @@ __all__ = [
     "CarrierFact",
     "CheckAssessmentState",
     "CheckAttempt",
+    "CandidateCheckRun",
+    "CandidateCIObservation",
+    "CandidateCIObservationInput",
+    "CandidateCIState",
     "CheckConclusion",
     "CheckIdentity",
     "CheckStatus",
@@ -2500,5 +3085,6 @@ __all__ = [
     "SourceReferenceCoverage",
     "WriterAssessmentState",
     "WriterFact",
+    "assess_candidate_ci_observation",
     "assess_github_release",
 ]

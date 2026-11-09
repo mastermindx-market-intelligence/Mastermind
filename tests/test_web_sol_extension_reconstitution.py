@@ -38,9 +38,9 @@ const config = {
   instanceId: INSTANCE,
   nativeHost: EXPECTED_HOST,
   protocolMajor: 1,
-  clientPackageVersion: "0.1.0",
-  nativePackageVersion: "0.1.0",
-  extensionPackageVersion: "0.1.0",
+  clientPackageVersion: "0.3.0",
+  nativePackageVersion: "0.3.0",
+  extensionPackageVersion: "0.3.0",
   capabilityDigest,
 };
 
@@ -494,9 +494,10 @@ def test_content_probe_waits_for_delayed_webcrypto_digest():
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
-def test_manifest_grants_only_native_messaging_and_bounded_alarm_reconnect():
+def test_manifest_preserves_reconnect_and_requires_debugger_without_automatic_site_grants():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms"}
+    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms", "debugger"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting"]
     assert set(manifest["host_permissions"]) == {
         "https://chat.openai.com/*",
         "https://chatgpt.com/*",

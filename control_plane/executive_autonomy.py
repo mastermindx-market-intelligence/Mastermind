@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 RECEIPT_SCHEMA_VERSION = "mastermind.executive_autonomy_state/v1"
 TOOL_VERSION = "1.0.0"
@@ -487,18 +489,10 @@ def validate_disarmed_interlock_document(
 
 
 def _macos_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
         raise AutonomyRefusal("receipt_acl_unsafe")
-    return completed.stdout.strip().endswith("+")
 
 
 def load_receipt_file(

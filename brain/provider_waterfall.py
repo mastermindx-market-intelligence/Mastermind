@@ -21,6 +21,8 @@ from typing import Any
 
 import bot  # noqa: F401  # makes the vendored Macro engine importable
 
+from brain import provider_failure  # pure typing module — evidence only, never a routing input
+
 _CODEX_ID = "codex_account"
 
 
@@ -87,22 +89,78 @@ def provider_rungs(role: str | None = None) -> list[dict[str, Any]]:
     return sorted(rungs, key=lambda rung: bool(rung["cooling"]))
 
 
-def available() -> bool:
+def _shared_availability_modules():
+    from engine.neuralweb import capability_broker, key_pool
+
+    return capability_broker, key_pool
+
+
+def _oauth_available(role: str | None = None) -> bool:
+    """Whether any PRESENT OAuth capability is authorized for this lane.
+
+    This deliberately does not call ``llm_auth._oauth_pool_candidates`` or
+    ``provider_rungs``.  Those functions rank candidates using cooling, window
+    load and weekly budget state; that work affects ORDER, not whether the pool
+    has a rung at all.  Health/readiness callers only need existence.
+    """
     try:
-        return bool(provider_rungs())
+        capability_broker, key_pool = _shared_availability_modules()
+        lane = _lane(role)
+        for capability_id in key_pool.discover_present_keys():
+            try:
+                resolved = capability_broker.resolve(capability_id, lane=lane)
+                if resolved.get("allowed") and resolved.get("ref_name"):
+                    return True
+            except Exception:
+                # Shared discovery skips a broken slot and considers the rest.
+                continue
     except Exception:
         return False
+    return False
+
+
+def available() -> bool:
+    """True when at least one authorized subscription provider is configured.
+
+    Provider ranking remains the responsibility of ``provider_rungs`` at actual
+    reasoning time.  Keeping this existence check independent is load-bearing:
+    ``/health`` calls it and must not rescan cooling/usage ledgers per probe.
+    """
+    # Actual reasoning imports these before selecting any provider.
+    # Preserve that prerequisite without consulting ranking ledgers.
+    try:
+        _shared_modules()
+    except Exception:
+        return False
+    try:
+        from brain import codex_bridge
+
+        if codex_bridge.available():
+            return True
+    except Exception:
+        pass
+    # Public availability exposes boolean state, never the helper's payload.
+    # Fail closed if a future helper change returns a non-boolean value.
+    return _oauth_available() is True
 
 
 def _failure_kind(error: object) -> str | None:
-    """Classify only failures that authorize provider failover."""
+    """Classify only failures that authorize provider failover.
+
+    Macro's shared classifier primarily covers HTTP-shaped provider failures.
+    Codex can instead return a local refresh failure before an HTTP status exists;
+    that credential is just as unusable and must release the Claude OAuth fallback.
+    Keep this vocabulary deliberately narrow so tool/runtime failures are never replayed.
+    """
+    msg = str(error or "").lower()
+    if "access token could not be refreshed" in msg:
+        return "auth"
     try:
         llm_auth, _ = _shared_modules()
         exc = RuntimeError(str(error or ""))
         if llm_auth._is_auth_error(exc):
             return "auth"
         if llm_auth._is_rate_limit_error(exc):
-            msg = str(error or "").lower()
             return "weekly" if "weekly" in msg or "week limit" in msg else "window"
     except Exception:
         pass
@@ -145,6 +203,7 @@ async def reason(prompt: str, **kwargs) -> dict:
     role = str(kwargs.get("role") or "pm")
     rungs = provider_rungs(role)
     attempts: list[dict[str, Any]] = []
+    failures: list = []
 
     if not rungs:
         return {
@@ -154,6 +213,9 @@ async def reason(prompt: str, **kwargs) -> dict:
             "provider": None,
             "shared_pool": True,
             "provider_attempts": attempts,
+            "provider_failures": list(failures),
+            "provider_failure": provider_failure.classify(
+                error="no shared Codex or Claude OAuth provider is available"),
             "error": "no shared Codex or Claude OAuth provider is available",
         }
 
@@ -174,7 +236,7 @@ async def reason(prompt: str, **kwargs) -> dict:
                 prompt,
                 **kwargs,
                 _backend_override="cli",
-                _oauth_candidates=[candidate],
+                _subscription_slots=[candidate],
             )
 
         result["provider"] = rung["provider"]
@@ -189,7 +251,24 @@ async def reason(prompt: str, **kwargs) -> dict:
         result["provider_attempts"] = list(attempts)
         last = result
 
+        # EVIDENCE ONLY: type the failure next to the legacy error string.  The
+        # continue/return decisions below never read it (reserved-seat failover).
+        failure = None if (result.get("ok") and result.get("text")) else \
+            provider_failure.classify(
+                error=result.get("error"),
+                evidence=result.get("provider_failure_evidence"),
+                provider=rung["provider"],
+                key_id=rung["key_id"],
+                tools_used=result.get("tools_used"),
+            )
+        failures.append(failure)
+        result["provider_failures"] = list(failures)
+        result["provider_failure"] = failure
+
         if result.get("ok") and result.get("text"):
+            return result
+        # An owned SDK terminal must not enter shared auth/quota classification.
+        if result.get("error") == cli_bridge._SDK_TERMINAL_ERROR:
             return result
 
         # Claude's own candidate execution is scoped to one slot here. Advance
@@ -213,5 +292,8 @@ async def reason(prompt: str, **kwargs) -> dict:
         "provider": None,
         "shared_pool": True,
         "provider_attempts": attempts,
+        "provider_failures": list(failures),
+        "provider_failure": provider_failure.classify(
+            error="shared provider waterfall exhausted"),
         "error": "shared provider waterfall exhausted",
     }

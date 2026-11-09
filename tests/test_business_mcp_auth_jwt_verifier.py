@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import json
 from collections.abc import Mapping
 
@@ -350,7 +351,20 @@ def test_hs256_public_key_confusion_is_refused_before_jwks(rsa_key) -> None:
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    token = _token(public_der, policy, algorithm="HS256")
+    # Build the attack token directly: PyJWT correctly refuses to use an RSA
+    # public key as an HMAC signing secret.
+    header = _base64url_bytes(
+        json.dumps(
+            {"alg": "HS256", "kid": KID, "typ": "at+jwt"},
+            separators=(",", ":"),
+        ).encode("ascii")
+    )
+    payload = _base64url_bytes(
+        json.dumps(_claims(policy), separators=(",", ":")).encode("ascii")
+    )
+    signing_input = f"{header}.{payload}"
+    signature = hmac.digest(public_der, signing_input.encode("ascii"), "sha256")
+    token = f"{signing_input}.{_base64url_bytes(signature)}"
 
     with pytest.raises(AuthError) as caught:
         _run(authenticator.verify_token(token, now=NOW))
@@ -517,3 +531,27 @@ def test_unexpected_cache_defect_maps_to_fixed_internal_error(rsa_key) -> None:
     assert caught.value.code is AuthErrorCode.INTERNAL_ERROR
     assert "secret cache detail" not in str(caught.value)
     assert token not in str(caught.value)
+
+
+@pytest.mark.parametrize("kid", ["-auth0-signing-key", "_auth0-signing-key"])
+def test_base64url_key_id_is_verified_without_rewriting_the_provider_key(rsa_key, kid):
+    """Provider key IDs may begin with URL-safe punctuation; signatures still bind the exact ID."""
+    policy = _policy()
+    authenticator, _fetcher, _cache = _authenticator(
+        policy, _jwks(_rsa_jwk(rsa_key, kid=kid)),
+    )
+    token = _token(rsa_key, policy, headers={"kid": kid})
+    principal = _run(authenticator.verify_token(token, now=NOW))
+    assert principal.resource == policy.resource
+    assert principal.scopes == policy.required_scopes
+
+
+@pytest.mark.parametrize("kid", ["", ".", ":", "../key", "key/value", "key\\value", " key", "key\n", "-" * 129])
+def test_provider_key_id_compatibility_keeps_ambiguous_ids_refused(rsa_key, kid):
+    policy = _policy()
+    authenticator, _fetcher, _cache = _authenticator(
+        policy, _jwks(_rsa_jwk(rsa_key, kid=kid)),
+    )
+    token = _token(rsa_key, policy, headers={"kid": kid})
+    with pytest.raises(AuthError):
+        _run(authenticator.verify_token(token, now=NOW))

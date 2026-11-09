@@ -21,6 +21,8 @@ from control_plane import surface_bindings as sb
 from . import web_sol_instance as wsi
 from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
+from . import web_sol_census_protocol as census
+from . import web_sol_browser_protocol as browser
 
 SOCKET_TIMEOUT_SECONDS = 5.0
 _CHATGPT_CANONICAL_HOST = "chatgpt.com"
@@ -111,6 +113,9 @@ def _request(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -124,6 +129,14 @@ def _request(
         "expires_at": expires_at,
         "nonce": nonce,
     }
+    if action == wsp.SurfaceAction.TYPED_REENTRY.value:
+        request.update(
+            {
+                "operation_id": operation_id,
+                "result_digest": result_digest,
+                "obligation_digest": obligation_digest,
+            }
+        )
     return wsp.validate_request(request)
 
 
@@ -315,8 +328,14 @@ def _transport_failure_code(
     sent: bool,
     action: str,
 ) -> str:
+    if action in browser.ACTIONS:
+        return "browser_effect_unknown" if sent and action not in browser.READ_ACTIONS else "browser_unavailable"
     if sent and action == "FOREGROUND":
         return "foreground_effect_unknown"
+    if sent and action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    if action == "CENSUS":
+        return "census_unavailable"
     if sent:
         return "inspect_effect_unknown"
     return "extension_unavailable"
@@ -330,10 +349,15 @@ def _exchange_web_sol_socket(
     challenge_factory: Callable[[], str] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
+    is_census = request.get("schema") == census.REQUEST_SCHEMA
+    is_browser = request.get("schema") == browser.REQUEST_SCHEMA
+    if is_census:
+        census.validate_census_window(request)
+    if is_browser:
+        browser.validate_window(request)
     _private_socket(path)
-    deadline = native.Deadline(
-        ends_at=monotonic() + SOCKET_TIMEOUT_SECONDS,
-    )
+    started = monotonic()
+    deadline = native.Deadline(ends_at=started + SOCKET_TIMEOUT_SECONDS)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(deadline.remaining(monotonic))
     sent = False
@@ -349,11 +373,16 @@ def _exchange_web_sol_socket(
             }
             if challenge_factory is not None:
                 handshake_kwargs["challenge_factory"] = challenge_factory
-            _complete_transport_handshake(
+            handshake = _complete_transport_handshake(
                 reader,
                 writer,
                 **handshake_kwargs,
             )
+            if is_browser:
+                if request["action"] == "status" and request["transport_boot_nonce"] is None:
+                    request["transport_boot_nonce"] = handshake["boot_nonce"]
+                if request["transport_boot_nonce"] != handshake["boot_nonce"]:
+                    raise WebSolExtensionError("browser_connection_changed")
             action_writer = _FrameWriteProgress(
                 writer,
                 expected_bytes=len(native.encode_frame(request)),
@@ -369,6 +398,12 @@ def _exchange_web_sol_socket(
                 sent = action_writer.effect_possible
                 raise
             sent = True
+            if is_census:
+                deadline = native.Deadline(ends_at=started + census.TOTAL_SECONDS)
+                connection.settimeout(deadline.remaining(monotonic))
+            if is_browser:
+                deadline = native.Deadline(ends_at=started + browser.TOTAL_SECONDS)
+                connection.settimeout(deadline.remaining(monotonic))
             response = native.read_frame(
                 reader,
                 deadline=deadline,
@@ -389,7 +424,7 @@ def _exchange_web_sol_socket(
             _transport_failure_code(
                 exc,
                 sent=sent,
-                action=request["action"],
+                action=request.get("action", "CENSUS"),
             )
         ) from exc
     finally:
@@ -397,8 +432,49 @@ def _exchange_web_sol_socket(
     return response
 
 
+def browser_via_extension(
+    instance_id: str, *, session_id: str, operation_key: str, action: str,
+    connection_id: str | None = None, tab_id: int | None = None,
+    url_fingerprint: str | None = None, snapshot_id: str | None = None,
+    ref: str | None = None, params: dict[str, Any] | None = None,
+    nonce: str | None = None,
+) -> dict[str, Any]:
+    """One browser command, one exact installed instance; never retries.
+
+    The caller derives session identity from its native invocation, not model
+    arguments. Chrome permission and the private native socket remain the
+    authority. A binding locator identifies an adapter, never a tab grant.
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    try:
+        request = browser.validate_window({
+            "schema": browser.REQUEST_SCHEMA, "adapter_instance_id": instance_id,
+            "session_id": session_id, "operation_key": operation_key,
+            "nonce": nonce or secrets.token_urlsafe(24), "transport_boot_nonce": connection_id,
+            "action": action, "tab_id": tab_id, "url_fingerprint": url_fingerprint,
+            "snapshot_id": snapshot_id, "ref": ref, "params": {} if params is None else params,
+            "issued_at": now.isoformat().replace("+00:00", "Z"),
+            "expires_at": (now + timedelta(seconds=45)).isoformat().replace("+00:00", "Z"),
+        })
+        response = _exchange_web_sol_socket(request, path=wsi.socket_path(instance_id), expected_instance_id=instance_id)
+    except wsp.WebSolProtocolError:
+        raise WebSolExtensionError("invalid_browser_request") from None
+    try:
+        accepted = browser.validate_receipt(response)
+        if any(accepted[k] != request[k] for k in browser.IDENTITY_FIELDS):
+            raise wsp.WebSolProtocolError("browser_receipt_identity")
+    except wsp.WebSolProtocolError:
+        raise WebSolExtensionError("browser_unavailable" if action in browser.READ_ACTIONS else "browser_effect_unknown") from None
+    return accepted
+
+
 def _untrusted_receipt_code(action: str, default: str) -> str:
-    return "foreground_effect_unknown" if action == "FOREGROUND" else default
+    if action == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if action == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    return default
 
 
 def _invoke(
@@ -409,6 +485,9 @@ def _invoke(
     issued_at: str,
     expires_at: str,
     nonce: str,
+    operation_id: str | None = None,
+    result_digest: str | None = None,
+    obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -417,6 +496,9 @@ def _invoke(
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -492,3 +574,58 @@ def foreground_via_extension(
         expires_at=expires_at,
         nonce=nonce,
     )
+
+
+def typed_reentry_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    operation_id: str,
+    result_digest: str,
+    obligation_digest: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Return one digest-only typed payload to one exact loaded conversation."""
+
+    return _invoke(
+        binding,
+        action="TYPED_REENTRY",
+        operation_key=operation_key,
+        operation_id=operation_id,
+        result_digest=result_digest,
+        obligation_digest=obligation_digest,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def census_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Read one validated profile binding; no alternate socket or profile selector."""
+    accepted = _accepted_binding(binding)
+    try:
+        instance_id = wsi.adapter_instance_id(accepted)
+        request = census.validate_census_window({
+            "schema": census.REQUEST_SCHEMA, "adapter_instance_id": instance_id,
+            "operation_key": operation_key, "issued_at": issued_at,
+            "expires_at": expires_at, "nonce": nonce,
+        })
+        response = _exchange_web_sol_socket(request, path=wsi.socket_path(instance_id),
+                                            expected_instance_id=instance_id)
+        receipt = census.validate_census_receipt(response)
+    except wsp.WebSolProtocolError:
+        raise WebSolExtensionError("invalid_census_value") from None
+    except wsi.WebSolInstanceError:
+        raise WebSolExtensionError("invalid_binding") from None
+    if any(receipt[field] != request[field] for field in census.IDENTITY_FIELDS):
+        raise WebSolExtensionError("receipt_identity_mismatch")
+    return receipt

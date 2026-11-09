@@ -257,7 +257,11 @@ const flattened = node => node.textContent + node.children.map(flattened).join('
 async function popupFixture(reader, tabs) {
   const elements = Object.fromEntries(['refresh', 'rows', 'summary', 'scope', 'status', 'timestamp'].map(id => [id, new TestElement(id)]));
   const context = {document: {getElementById: id => elements[id], createElement: tag => new TestElement(tag)},
-    chrome: {tabs}, MMX_WEB_SOL_INSTANCE: {instanceId: INSTANCE}, MMXWebSolCensus: reader};
+    chrome: {runtime: {sendMessage(message) {
+      assert.equal(JSON.stringify(message), JSON.stringify({kind: 'MMX_WEB_SOL_CENSUS_REFRESH'}));
+      return reader.collect(tabs, INSTANCE);
+    }}}};
+  context.self = {}; context.top = context.self;
   vm.runInNewContext(fs.readFileSync(path.join(path.dirname(file), 'census.js'), 'utf8'), context);
   const done = async () => {
     for (let i = 0; i < 100 && elements.refresh.disabled; i++) await new Promise(r => setTimeout(r, 2));
@@ -284,3 +288,252 @@ test('popup failure publishes a fixed safe message and re-enables refresh', asyn
   assert.equal(elements.status.textContent, 'Snapshot unavailable. No browser-control action was attempted.');
   assert.ok(!flattened(elements.status).includes('PRIVATE_SENTINEL'));
 });
+
+// Read-budget regression coverage. Existing tests above remain unchanged.
+{
+'use strict';
+// Exercise the real collector in an isolated JS realm. Only browser APIs and
+// time are controlled: the module's source, limits and control flow are intact.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const crypto = require('node:crypto');
+const SOURCE = process.env.CORE_PATH || path.resolve(__dirname,
+  '../integrations/chairman_surfaces/web_sol_extension/census_core.js');
+const INSTANCE = 'a'.repeat(64);
+const HANG = Symbol('controlled-pending-browser-read');
+const PRIVATE = 'SYNTHETIC_PRIVATE_ERROR_MUST_NOT_LEAK';
+const plain = value => JSON.parse(JSON.stringify(value));
+const turn = () => new Promise(resolve => setImmediate(resolve));
+function row(id) {
+  return {id, windowId: 1, url: `https://chatgpt.com/c/budget-${id}`,
+    status: 'complete', discarded: false, frozen: false, active: false, incognito: false};
+}
+function observation(t) {
+  return {kind: 'MMX_WEB_SOL_PROBE',
+    conversation_fingerprint: crypto.createHash('sha256').update(t.url).digest('hex'),
+    observation: {schema: 'mastermind.web_sol_surface_probe.v1',
+      target_present: true, exact_conversation_loaded: true, page_responsive: true,
+      document_ready_state: 'complete', visibility: 'hidden', composer_available: true,
+      generation_state: 'active', auth_required: false, provider_error_present: false}};
+}
+function load() {
+  let now = 0, sequence = 0;
+  const timers = new Map();
+  const NativeDate = Date;
+  const epoch = NativeDate.parse('2026-09-06T21:00:00.000Z');
+  class ControlledDate extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [epoch + now])); }
+    static now() { return epoch + now; }
+  }
+  const context = vm.createContext({module: {exports: {}}, URL, TextEncoder, Promise,
+    Date: ControlledDate, performance: {now: () => now},
+    crypto: {subtle: {digest: async (_name, bytes) => {
+      const b = crypto.createHash('sha256').update(bytes).digest();
+      return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+    }}},
+    setTimeout: (fn, delay) => { const id = ++sequence; timers.set(id, {fn, due: now + delay}); return id; },
+    clearTimeout: id => timers.delete(id)});
+  vm.runInContext(fs.readFileSync(SOURCE, 'utf8'), context, {filename: SOURCE});
+  const core = context.module.exports;
+  async function complete(promise) {
+    let finished = false, result, failure;
+    promise.then(value => { finished = true; result = value; }, error => { finished = true; failure = error; });
+    for (let step = 0; step < 10000; step++) {
+      // Drain the entire promise/microtask turn before advancing fake time.
+      await turn();
+      if (finished) { if (failure) throw failure; return result; }
+      assert.ok(timers.size, 'collector must have a finite deadline or have settled');
+      now = Math.min(...[...timers.values()].map(t => t.due));
+      for (const [id, timer] of [...timers]) if (timer.due <= now) {
+        timers.delete(id); timer.fn();
+      }
+    }
+    assert.fail('controlled-clock execution did not terminate');
+  }
+  return {core, complete, timers};
+}
+function api(count = 8) {
+  const rows = Array.from({length: count}, (_, i) => row(i + 1));
+  const state = {query: null, get: null, send: null};
+  const stats = {calls: {query: 0, get: 0, send: 0}, active: 0, high: 0,
+    pending: {query: 0, get: 0, send: 0}, highByKind: {query: 0, get: 0, send: 0}, mutations: 0};
+  const deferred = [];
+  const byId = new Map();
+  function invoke(kind, choose, expected) {
+    const n = ++stats.calls[kind];
+    stats.active++; stats.pending[kind]++;
+    stats.high = Math.max(stats.high, stats.active);
+    stats.highByKind[kind] = Math.max(stats.highByKind[kind], stats.pending[kind]);
+    const release = () => { stats.active--; stats.pending[kind]--; };
+    let value;
+    try { value = choose ? choose(n) : expected; } catch (error) { release(); throw error; }
+    let result;
+    if (value === HANG) {
+      result = new Promise((resolve, reject) => deferred.push({kind, resolve, reject, expected, settled: false}));
+    } else if (value instanceof Error) result = Promise.reject(value);
+    else result = Promise.resolve(structuredClone(value));
+    return result.finally(release);
+  }
+  const tabs = {
+    query(args) {
+      assert.deepEqual(plain(args), {url: ['https://chatgpt.com/*', 'https://chat.openai.com/*']});
+      return invoke('query', state.query, rows);
+    },
+    get(id) {
+      const n = (byId.get(id) || 0) + 1; byId.set(id, n);
+      const t = rows.find(t => t.id === id);
+      return invoke('get', state.get ? () => state.get(id, n) : null, t);
+    },
+    sendMessage(id, request, target) {
+      assert.deepEqual(plain(target), {frameId: 0});
+      assert.equal(request.kind, 'MMX_WEB_SOL_REPROBE');
+      const p = observation(rows.find(t => t.id === id));
+      assert.equal(request.expected_conversation_fingerprint, p.conversation_fingerprint);
+      return invoke('send', state.send ? () => state.send(id) : null, p);
+    },
+  };
+  for (const name of ['update', 'reload', 'create', 'remove', 'discard', 'executeScript']) {
+    tabs[name] = () => { stats.mutations++; throw Error('FORBIDDEN_BROWSER_EFFECT'); };
+  }
+  function settle(kind, rejection = false) {
+    for (const item of deferred) if (!item.settled && (!kind || item.kind === kind)) {
+      item.settled = true;
+      rejection ? item.reject(Error(PRIVATE)) : item.resolve(structuredClone(item.expected));
+    }
+  }
+  return {tabs, stats, state, rows, settle};
+}
+async function sweep(h, fixture) { return h.complete(h.core.collect(fixture.tabs, INSTANCE)); }
+function noLeak(snapshot) {
+  const text = JSON.stringify(snapshot);
+  assert.ok(!text.includes(PRIVATE)); assert.ok(!text.includes('https://'));
+  assert.ok(!text.includes('windowId')); assert.ok(!text.includes('tabId'));
+  for (const r of snapshot.rows) {
+    assert.equal(r.selected_model, null); assert.equal(r.selected_effort, null);
+    assert.equal(r.served_model, null); assert.equal(r.model_evidence, 'UNVERIFIED');
+  }
+}
+
+test('three refreshes cannot triple pending pre-probe tab lookups', async () => {
+  const h = load(), f = api(); f.state.get = () => HANG;
+  for (let i = 0; i < 3; i++) { const s = await sweep(h, f); noLeak(s); }
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `pending high=${f.stats.high}, bound=${h.core.CONCURRENCY}`);
+  assert.equal(f.stats.calls.get, h.core.CONCURRENCY);
+  assert.equal(f.stats.calls.send, 0);
+});
+test('overlapping refreshes share pending lookup admission', async () => {
+  const h = load(), f = api(16); f.state.get = () => HANG;
+  const result = await h.complete(Promise.all([h.core.collect(f.tabs, INSTANCE), h.core.collect(f.tabs, INSTANCE)]));
+  assert.equal(result.length, 2);
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `pending high=${f.stats.high}`);
+});
+test('unresolved initial inventory queries cannot grow across forty refreshes', async () => {
+  const h = load(), f = api(); f.state.query = () => HANG;
+  for (let i = 0; i < 40; i++) {
+    const s = await sweep(h, f);
+    assert.equal(s.inventory_coverage, 'UNAVAILABLE'); assert.equal(s.initial_tab_count, null);
+    noLeak(s);
+  }
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `pending inventory high=${f.stats.high}`);
+  assert.equal(f.stats.calls.query, h.core.CONCURRENCY);
+});
+test('unresolved final inventory queries retain slots between refreshes', async () => {
+  const h = load(), f = api(0); f.state.query = n => n % 2 ? [] : HANG;
+  for (let i = 0; i < 20; i++) await sweep(h, f);
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `pending final-inventory high=${f.stats.high}`);
+});
+test('pending post-probe lookups are budgeted, not just pre-probe lookups', async () => {
+  const h = load(), f = api(); f.state.get = (id, n) => n % 2 ? row(id) : HANG;
+  for (let i = 0; i < 3; i++) await sweep(h, f);
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `post-probe high=${f.stats.high}`);
+});
+test('query, lookup and message operations cannot each claim an independent full pool', async () => {
+  const h = load(), f = api(3); f.state.send = () => HANG;
+  await sweep(h, f); assert.equal(f.stats.pending.send, 3);
+  f.state.query = () => HANG;
+  for (let i = 0; i < 10; i++) await sweep(h, f);
+  assert.ok(f.stats.high <= h.core.CONCURRENCY, `mixed pending high=${f.stats.high}`);
+});
+test('saturation returns unknown inventory rather than inventing zero sessions', async () => {
+  const h = load(), f = api(); f.state.get = () => HANG;
+  const first = await sweep(h, f), again = await sweep(h, f);
+  assert.equal(first.rows.length, 8);
+  assert.equal(first.inventory_coverage, 'PARTIAL');
+  assert.equal(first.reason, 'FINAL_QUERY_UNAVAILABLE');
+  assert.equal(again.inventory_coverage, 'UNAVAILABLE'); assert.equal(again.initial_tab_count, null);
+  assert.equal(again.final_tab_count, null); assert.equal(again.reason, 'QUERY_UNAVAILABLE');
+  assert.equal(again.probe_coverage, 'NONE');
+});
+test('settling late lookups restores admission without mutating the prior result', async () => {
+  const h = load(), f = api(); f.state.get = () => HANG;
+  const first = await sweep(h, f), before = JSON.stringify(first);
+  f.state.get = null; f.settle('get'); await turn();
+  assert.equal(JSON.stringify(first), before); assert.equal(f.stats.active, 0);
+  const recovered = await sweep(h, f);
+  assert.equal(recovered.inventory_coverage, 'COMPLETE_IN_SCOPE'); assert.equal(recovered.probed_tab_count, 8);
+  assert.equal(f.stats.active, 0); assert.equal(f.stats.mutations, 0);
+});
+test('late query rejections free held slots without error-text leakage', async () => {
+  const h = load(), f = api(0); f.state.query = () => HANG;
+  const completed = [];
+  for (let i = 0; i < 8; i++) completed.push(await sweep(h, f));
+  const before = completed.map(JSON.stringify);
+  f.state.query = null; f.settle('query', true); await turn();
+  assert.equal(f.stats.active, 0);
+  const recovered = await sweep(h, f);
+  assert.equal(recovered.inventory_coverage, 'COMPLETE_IN_SCOPE'); assert.equal(recovered.initial_tab_count, 0);
+  completed.forEach((s, i) => { assert.equal(JSON.stringify(s), before[i]); noLeak(s); });
+});
+test('synchronous browser errors release slots exactly once', async () => {
+  const h = load(), f = api(1); f.state.query = () => { throw Error(PRIVATE); };
+  for (let i = 0; i < 40; i++) { noLeak(await sweep(h, f)); assert.equal(f.stats.active, 0); }
+  f.state.query = null;
+  const recovered = await sweep(h, f); assert.equal(recovered.probed_tab_count, 1);
+  assert.equal(f.stats.active, 0); assert.equal(f.stats.mutations, 0);
+});
+test('immediate promise rejection does not permanently consume a slot', async () => {
+  const h = load(), f = api(1); f.state.get = () => Error(PRIVATE);
+  for (let i = 0; i < 20; i++) { noLeak(await sweep(h, f)); assert.equal(f.stats.active, 0); }
+  f.state.get = null;
+  assert.equal((await sweep(h, f)).probed_tab_count, 1);
+});
+test('late message resolution changes neither completed cues nor subsequent identity', async () => {
+  const h = load(), f = api(); f.state.send = () => HANG;
+  const first = await sweep(h, f), before = JSON.stringify(first);
+  f.state.send = null; f.settle('send'); await turn();
+  assert.equal(JSON.stringify(first), before);
+  assert.equal((await sweep(h, f)).generation_cue_count, 8); assert.equal(f.stats.active, 0);
+});
+test('a saturated API object does not consume a different profile API object budget', async () => {
+  const h = load(), stalled = api(), healthy = api(2); stalled.state.get = () => HANG;
+  await sweep(h, stalled);
+  const other = await sweep(h, healthy);
+  assert.equal(other.probed_tab_count, 2); assert.equal(other.inventory_coverage, 'COMPLETE_IN_SCOPE');
+  assert.equal(stalled.stats.calls.get, 8); assert.equal(healthy.stats.mutations, 0);
+});
+test('the healthy 128-tab capability survives the stronger read budget', async () => {
+  const h = load(), f = api(128); const s = await sweep(h, f);
+  assert.equal(s.rows.length, 128); assert.equal(s.probed_tab_count, 128);
+  assert.equal(s.inventory_coverage, 'COMPLETE_IN_SCOPE'); assert.equal(s.consistency, 'STABLE_AT_BOUNDARIES');
+  assert.equal(f.stats.calls.query, 2); assert.equal(f.stats.calls.get, 256); assert.equal(f.stats.calls.send, 128);
+  assert.ok(f.stats.high <= h.core.CONCURRENCY); assert.equal(f.stats.active, 0); assert.equal(f.stats.mutations, 0);
+  noLeak(s);
+});
+test('sleeping rows stay present, unprobed and unknown', async () => {
+  const h = load(), f = api(128);
+  for (const t of f.rows) t.discarded = true;
+  const s = await sweep(h, f);
+  assert.equal(s.rows.length, 128); assert.equal(s.unknown_cue_count, 128);
+  assert.equal(f.stats.calls.get, 0); assert.equal(f.stats.calls.send, 0); assert.equal(f.stats.mutations, 0);
+});
+test('unconfigured collectors never enter the browser at all', async () => {
+  const h = load(), f = api();
+  const s = await h.complete(h.core.collect(f.tabs, null));
+  assert.equal(s.reason, 'ADAPTER_UNCONFIGURED'); assert.equal(s.inventory_coverage, 'UNAVAILABLE');
+  assert.deepEqual(f.stats.calls, {query: 0, get: 0, send: 0});
+});
+
+}

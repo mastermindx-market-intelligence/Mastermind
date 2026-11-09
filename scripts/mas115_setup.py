@@ -38,6 +38,7 @@ from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import nonseat_canary as canary
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
+from integrations.chairman_surfaces import mas115_profile_search_health as profile_search_health
 from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 
 
@@ -47,6 +48,7 @@ _CONFIRM_ENROLL = "ENROLL THREE CHAIRMAN SEATS"
 _CONFIRM_BOOTSTRAP_PEER = "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
 _CONFIRM_CREATE_PEER = "CREATE ONE DISPOSABLE PEER PROFILE"
 _CONFIRM_ROLLBACK_PEER = "REMOVE THE OPERATION-CREATED PEER PROFILE"
+_CONFIRM_PROFILE_SEARCH_HEALTH = "OBSERVE MULTILOGIN PROFILE SEARCH HEALTH ONCE"
 _MAX_PRIVATE_URL_BYTES = 8 * 1024
 
 
@@ -560,6 +562,28 @@ def _matching_local_row(bound_doc: dict) -> dict:
     return row
 
 
+def profile_search_health_interactive(vendor: str) -> int:
+    """Run one confirmed, read-only Multilogin Profile Search observation."""
+
+    if vendor != "multilogin":
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+
+    prompt = (
+        f"Type {_CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
+    print(prompt, file=sys.stderr, end="", flush=True)
+    try:
+        # ``input`` already removes the terminal newline.  An empty prompt keeps
+        # stdout machine-clean while preserving the exact operator ceremony.
+        confirmation = input("")
+    except (EOFError, KeyboardInterrupt):
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+    if confirmation != _CONFIRM_PROFILE_SEARCH_HEALTH:
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+    return profile_search_health.run_coordinator_profile_search_health()
+
+
 def create_peer_interactive() -> int:
     """Create the one missing stopped disposable Multilogin peer profile.
 
@@ -691,6 +715,13 @@ def main(argv=None) -> int:
     )
     run_parser = sub.add_parser("run-canary", help="run the accepted disposable canary")
     run_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    health_parser = sub.add_parser(
+        "profile-search-health",
+        help="observe one bounded Multilogin Profile Search census",
+    )
+    health_parser.add_argument(
+        "--vendor", default="multilogin", choices=("multilogin", "gologin"),
+    )
     create_peer_parser = sub.add_parser(
         "create-peer-profile", help="create the one missing stopped disposable peer profile",
     )
@@ -743,6 +774,8 @@ def main(argv=None) -> int:
                 "--vendor", args.vendor,
                 "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
             ])
+        if args.command == "profile-search-health":
+            return profile_search_health_interactive(args.vendor)
         if args.command == "create-peer-profile":
             if args.vendor != "multilogin":
                 raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be created")

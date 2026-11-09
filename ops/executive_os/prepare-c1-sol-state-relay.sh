@@ -26,6 +26,7 @@ WORKSPACE_ID="T0BRD2AQXQV"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
+C1_REBIND_LOCK_ROOT="$SYSTEM_ROOT/locks"
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
@@ -188,19 +189,27 @@ if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
 fi
 
 read_attribute() {
-  local record="$1" attribute="$2"
-  /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
-    | /usr/bin/awk -v key="$attribute" '
+  local record="$1"
+  local attribute="$2"
+  LC_ALL=C LANG=C /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
+    | /usr/bin/awk -v attribute="$attribute" '
         NR == 1 {
-          prefix=key ":"
-          if (index($0, prefix) != 1) exit 65
-          value=substr($0, length(prefix) + 1)
+          standard=attribute ":"
+          native="dsAttrTypeNative:" attribute ":"
+          if (index($0, standard) == 1) {
+            value=substr($0, length(standard) + 1)
+          } else if (index($0, native) == 1) {
+            value=substr($0, length(native) + 1)
+          } else {
+            malformed=1
+            next
+          }
           sub(/^[[:space:]]*/, "", value)
           next
         }
         {value=value " " $0}
         END {
-          if (NR == 0) exit 65
+          if (NR == 0 || malformed) exit 65
           gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
           print value
         }
@@ -273,8 +282,43 @@ ensure_user() {
   fi
 }
 
+lock_namespace_has_acl() {
+  case "${1:-}" in
+    *$'\n'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_rebind_lock_root() {
+  if [ -e "$C1_REBIND_LOCK_ROOT" ] || [ -L "$C1_REBIND_LOCK_ROOT" ]; then
+    [ -d "$C1_REBIND_LOCK_ROOT" ] && [ ! -L "$C1_REBIND_LOCK_ROOT" ] || {
+      /bin/echo "C1 rebind lock namespace is not a direct directory" >&2
+      exit 65
+    }
+  else
+    /usr/bin/install -d -o root -g wheel -m 0700 "$C1_REBIND_LOCK_ROOT"
+  fi
+  [ "$(/usr/bin/stat -f '%u:%g' "$C1_REBIND_LOCK_ROOT")" = "0:0" ] || {
+    /bin/echo "C1 rebind lock namespace is not root:wheel" >&2
+    exit 65
+  }
+  [ "$(/usr/bin/stat -f '%Lp' "$C1_REBIND_LOCK_ROOT")" = "700" ] || {
+    /bin/echo "C1 rebind lock namespace is not mode 0700" >&2
+    exit 65
+  }
+  LOCK_NAMESPACE_LONG="$("/bin/ls" -lde "$C1_REBIND_LOCK_ROOT")" || {
+    /bin/echo "C1 rebind lock namespace ACL observation failed" >&2
+    exit 65
+  }
+  if lock_namespace_has_acl "$LOCK_NAMESPACE_LONG"; then
+    /bin/echo "C1 rebind lock namespace has a filesystem ACL" >&2
+    exit 65
+  fi
+}
+
 ensure_group
 ensure_user
+ensure_rebind_lock_root
 
 # Relay must remain out of broad Executive/worker groups. CeoIngress access is
 # granted by the dedicated socket's primary GID, not by _mastermind_ops.
@@ -361,7 +405,7 @@ PY
 /usr/bin/plutil -lint "$RELAY_PLIST" >/dev/null
 
 for protected_path in "$CONTROL_CONFIG" "$CONTROL_PLIST" "$RELAY_PLIST" \
-  "$RUNTIME_ROOT/sol-state-relay" "$RELAY_HOME" "$RELAY_LOG_ROOT"; do
+  "$C1_REBIND_LOCK_ROOT" "$RUNTIME_ROOT/sol-state-relay" "$RELAY_HOME" "$RELAY_LOG_ROOT"; do
   case "$(/usr/bin/stat -f '%Sp' "$protected_path")" in
     *+) /bin/echo "unexpected filesystem ACL on C1 prepared path" >&2; exit 65 ;;
   esac

@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.design.assignment.v1",
+  "operation_id": "hermes-design-director-20261108-c1-01",
+  "issued_at": "2026-11-08T05:58:17.392603+00:00",
+  "source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/sol/hermes-design-director-20261108-c1-01/docs/hermes/design-director/COMMISSION.md",
+  "shell_ref": "Preserve the target product’s existing shell and navigation; Terminal has a separately governed theme.",
+  "token_ref": "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/templates/theme.css",
+  "constraints": [
+    "No decorative colored container edges",
+    "Do not invent live data, approval or execution authority",
+    "Preserve known active writers and exact target identity"
+  ],
+  "non_goals": [
+    "New router, identity store, scheduler or approval database",
+    "Trading signals or order execution"
+  ],
+  "effect_state": "none",
+  "assignment_id": "financial-intelligence-journey",
+  "product": "Sector Intelligence",
+  "persona": "An investor comparing sector strength and investigating supporting evidence",
+  "objective": "Create a sophisticated sector intelligence experience that makes breadth, rotation, positioning and risk understandable without losing analytical depth.",
+  "user_question": "Where is leadership broadening, and how trustworthy is that reading?",
+  "useful_next_step": "Compare a sector with its benchmark and inspect the evidence behind the reading.",
+  "paper": {
+    "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+    "page_id": "p-4-0",
+    "scope_node_ids": [
+      "DSJ-0"
+    ],
+    "allow_new_artboards": false
+  },
+  "preserve": [
+    "Existing benchmark, universe, timeframe and compare controls",
+    "Current taxonomy and missing-data distinctions",
+    "All deep evidence destinations"
+  ],
+  "states": [
+    "Populated fixture explicitly labeled",
+    "Stale source distinct from fresh source",
+    "Unavailable positioning and loading",
+    "Empty filter and recoverable error"
+  ],
+  "viewports": [
+    "1440 desktop",
+    "390 mobile",
+    "Light and dark",
+    "English and Chinese"
+  ],
+  "acceptance": [
+    "Subject, assessment and useful next step clear at first glance",
+    "Numbers have units, timestamps and comparable universes",
+    "No horizontal page overflow; deep tables keep an accessible destination",
+    "Capture actual screenshots of every assigned state and viewport"
+  ],
+  "reference_ids": [
+    "sector-map-desktop",
+    "policy-monitor-desktop"
+  ],
+  "data_and_interactions": "Recover the actual accepted product contracts before composition. Keep market, cohort and observation clocks separate. Filters, sort, compare and detail links require explicit interaction specifications. Synthetic values remain visibly fixtures."
+}

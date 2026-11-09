@@ -1,0 +1,2525 @@
+{
+  "recorded_at_utc": "2026-10-31T06:23:22.756909+00:00",
+  "candidates": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1362,
+      "snapshot_head": "e141848f49d18f848959b01c721f1434438d24e3",
+      "snapshot_base": "e00e97b81a5d41cb8a570ad080316279a0f3853f",
+      "head_readback_at_utc": "2026-10-31T06:23:00.753683+00:00",
+      "current_head_readback": "e141848f49d18f848959b01c721f1434438d24e3",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 276,
+          "deletions": 9,
+          "filename": "app/mastermind_os/src-tauri/src/auth.rs",
+          "sha": "0f46a4ac5774e379e80de7658cb4d1eeb78d8610",
+          "status": "modified"
+        },
+        {
+          "additions": 4,
+          "deletions": 1,
+          "filename": "app/mastermind_os/src-tauri/src/main.rs",
+          "sha": "3c519f23229b04f99fdb817b3e3bc93ed1e4e750",
+          "status": "modified"
+        },
+        {
+          "additions": 197,
+          "deletions": 1,
+          "filename": "app/mastermind_os/src/App.session-composition.test.tsx",
+          "sha": "d8639d383c8af416322107e272054a03e59c1e3f",
+          "status": "modified"
+        },
+        {
+          "additions": 70,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/App.tsx",
+          "sha": "0d8c68827bbc6313108c4c0ebdad9dd93dbc5c4b",
+          "status": "modified"
+        },
+        {
+          "additions": 43,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/conversations/ConversationWindow.tsx",
+          "sha": "979ae35c1fa20a93af44a867ecbd5f1f03d1bc91",
+          "status": "modified"
+        },
+        {
+          "additions": 102,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/conversations/HistoricalOriginalAnswers.integration.test.tsx",
+          "sha": "2fede436f0b6b008bd4c57d31820d3c39de72d04",
+          "status": "added"
+        },
+        {
+          "additions": 227,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/conversations/HistoricalOriginalAnswers.test.tsx",
+          "sha": "739714da62eb4bb37a3a0d01c606158b2dc3269c",
+          "status": "added"
+        },
+        {
+          "additions": 242,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/conversations/HistoricalOriginalAnswers.tsx",
+          "sha": "c0c97de1f175be7670cdd67ba1797af5e18d84f7",
+          "status": "added"
+        },
+        {
+          "additions": 43,
+          "deletions": 1,
+          "filename": "app/mastermind_os/src/conversations/awaiting-answer-port.test.ts",
+          "sha": "49448f40f7c83f06350b8cbbbd2056c2973ed66b",
+          "status": "modified"
+        },
+        {
+          "additions": 5,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/conversations/awaiting-answer-port.ts",
+          "sha": "8d3b58ddbf2888e3f8b8a289de742e3bcbe56c86",
+          "status": "modified"
+        },
+        {
+          "additions": 139,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/conversations/useQualifiedOriginalAnswer.ts",
+          "sha": "be2277ae2cb0ac440d5ac13869d4f00864e5fa8e",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/host.ts",
+          "sha": "403b2a8ab145c4fddbd2aca8427c2bf7f583de62",
+          "status": "modified"
+        },
+        {
+          "additions": 157,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/native-executive-transport.test.ts",
+          "sha": "21dc5a519a93b1c21ad274a75c1d9f2400c57fe2",
+          "status": "modified"
+        },
+        {
+          "additions": 54,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/native-executive-transport.ts",
+          "sha": "8eb2dc928064bef3258bd5afbe52c441181897b7",
+          "status": "modified"
+        },
+        {
+          "additions": 127,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/orchestration/executive-session-command-port.test.ts",
+          "sha": "d0b782266015b63d0e1daac3d4ec64bb9e803f5a",
+          "status": "modified"
+        },
+        {
+          "additions": 102,
+          "deletions": 11,
+          "filename": "app/mastermind_os/src/orchestration/executive-session-command-port.ts",
+          "sha": "48be189c1defb5b53297b132b0ce7bc452ffd206",
+          "status": "modified"
+        },
+        {
+          "additions": 85,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/orchestration/os-executive-session-host.test.ts",
+          "sha": "395bc4998de82b2b6bcd32c991297803ba5d2aaf",
+          "status": "modified"
+        },
+        {
+          "additions": 41,
+          "deletions": 1,
+          "filename": "app/mastermind_os/src/orchestration/os-executive-session-host.ts",
+          "sha": "b81c9162d5569ec1c767c21b32f756d525f5db25",
+          "status": "modified"
+        },
+        {
+          "additions": 55,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/web-auth.test.ts",
+          "sha": "05726a45a8ebbd973b8e59f61f56ca08f7c2b558",
+          "status": "modified"
+        },
+        {
+          "additions": 14,
+          "deletions": 4,
+          "filename": "app/mastermind_os/src/web-auth.ts",
+          "sha": "cf86c879d55e36d3586df8781f72ebac61200e07",
+          "status": "modified"
+        },
+        {
+          "additions": 7,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/web-executive-session-transport.test.ts",
+          "sha": "eb1d9dab8bf882b21e3e9c401a4afcc14666b78b",
+          "status": "modified"
+        },
+        {
+          "additions": 50,
+          "deletions": 0,
+          "filename": "common/reply_subscription_private_contract.py",
+          "sha": "60d2e6b085da267939b38f23407f60b57045bd00",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 1,
+          "filename": "common/session_bridge_private_contract.py",
+          "sha": "497f63068fef793cedf2c8a9f03172c650a08bcf",
+          "status": "modified"
+        },
+        {
+          "additions": 11,
+          "deletions": 1,
+          "filename": "control_plane/executive_agent_capabilities.py",
+          "sha": "4608cb1e9fe2260404d5f5badbb62648f95ccaa6",
+          "status": "modified"
+        },
+        {
+          "additions": 10,
+          "deletions": 2,
+          "filename": "control_plane/executive_coo_policy.py",
+          "sha": "54774a06470d41af4b0bd9e6ac173f1815f3516f",
+          "status": "modified"
+        },
+        {
+          "additions": 88,
+          "deletions": 55,
+          "filename": "control_plane/executive_current_target.py",
+          "sha": "c54b6cb3b77c1a125e08d112f8d8cf53302025cf",
+          "status": "modified"
+        },
+        {
+          "additions": 60,
+          "deletions": 5,
+          "filename": "control_plane/executive_installed_peer.py",
+          "sha": "63d94ff8ae44ddeb21d54f522327f97a18dd9c86",
+          "status": "modified"
+        },
+        {
+          "additions": 1141,
+          "deletions": 609,
+          "filename": "control_plane/executive_runtime.py",
+          "sha": "d0cacbd783fd099f575f2f7cb5519a5eb4d56550",
+          "status": "modified"
+        },
+        {
+          "additions": 139,
+          "deletions": 2,
+          "filename": "control_plane/executive_service.py",
+          "sha": "f713e26956ae7244c695770c8d1fe884ecf30cf8",
+          "status": "modified"
+        },
+        {
+          "additions": 6,
+          "deletions": 4,
+          "filename": "control_plane/native_continuation.py",
+          "sha": "e2ddc0f9a0ea5fbf2e205ba0a8e7d7d84d459530",
+          "status": "modified"
+        },
+        {
+          "additions": 83,
+          "deletions": 0,
+          "filename": "docs/EXECUTIVE_CONTROL_AEAD_PROFILE.md",
+          "sha": "a415f61f23b1b9638a5f93990cc45985ef52330b",
+          "status": "added"
+        },
+        {
+          "additions": 92,
+          "deletions": 0,
+          "filename": "docs/EXECUTIVE_MCP_REPLY_EVENTS_OWNER_INTEGRATION.md",
+          "sha": "a43cd7b0634dc2ee29c29f749ac46c4e4c937134",
+          "status": "added"
+        },
+        {
+          "additions": 95,
+          "deletions": 0,
+          "filename": "docs/EXECUTIVE_REPLY_DELIVERY_COMPOSITION.md",
+          "sha": "1ce00d2963fcf37c6617eb3f2a55bbe8c32036fa",
+          "status": "added"
+        },
+        {
+          "additions": 81,
+          "deletions": 0,
+          "filename": "docs/EXECUTIVE_REPLY_SUBSCRIPTION_STORAGE.md",
+          "sha": "b8327bf9d0d8832a2eeddf888170210d4a9ff2cb",
+          "status": "added"
+        },
+        {
+          "additions": 204,
+          "deletions": 0,
+          "filename": "docs/checkpoints/CROSS_CLIENT_HOOKS_R1_2026-10-12.md",
+          "sha": "99c2ca7a369eaa7071aefbac242f2231cb7b842b",
+          "status": "added"
+        },
+        {
+          "additions": 75,
+          "deletions": 0,
+          "filename": "docs/checkpoints/EXECUTIVE_BRIDGE_COMPLETION_2026-10-18.md",
+          "sha": "fc08d4d2d2ecd11073a988231821b9023b103da4",
+          "status": "added"
+        },
+        {
+          "additions": 96,
+          "deletions": 1,
+          "filename": "docs/runbooks/mastermind-os-public-launch.md",
+          "sha": "2fa80577e6e6c510574e16dee1f0efc1bc7d65e0",
+          "status": "modified"
+        },
+        {
+          "additions": 10,
+          "deletions": 1,
+          "filename": "integrations/company_consultation_host.py",
+          "sha": "447669b2e743c1c7eefccfb48cb2110c6ff6fabb",
+          "status": "modified"
+        },
+        {
+          "additions": 79,
+          "deletions": 4,
+          "filename": "integrations/executive_mcp/server.py",
+          "sha": "38ba6a023c2b94fd5725152f7912292ef9cfc6a1",
+          "status": "modified"
+        },
+        {
+          "additions": 93,
+          "deletions": 6,
+          "filename": "integrations/mastermind_executive_app/os_session_transport.py",
+          "sha": "83366bd8fe7cab59be438f7ea0550f0932af039c",
+          "status": "modified"
+        },
+        {
+          "additions": 42,
+          "deletions": 7,
+          "filename": "integrations/session_bridge/canary_source.py",
+          "sha": "7d22768e4dcad3929890fa9ff0f2c953579bec2d",
+          "status": "modified"
+        },
+        {
+          "additions": 44,
+          "deletions": 9,
+          "filename": "integrations/session_bridge/installed.py",
+          "sha": "1a017a4ba02c3482954434470b2be4a36ea33d35",
+          "status": "modified"
+        },
+        {
+          "additions": 189,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/installed_reply_events.py",
+          "sha": "b4318cd9645dc16b28be6a3b752c44cf2ccfbf84",
+          "status": "added"
+        },
+        {
+          "additions": 178,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/reference_tools.py",
+          "sha": "bf469659e45140159c97c0db18d7253e117fab3f",
+          "status": "added"
+        },
+        {
+          "additions": 75,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/reply_event_host_composition.py",
+          "sha": "1ba4de652dea4e9ea152252d6c0d04da57deeeb8",
+          "status": "added"
+        },
+        {
+          "additions": 67,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/reply_policy_selection.py",
+          "sha": "2a29316212c6aa9e29b2a8419a0b00018d28662b",
+          "status": "added"
+        },
+        {
+          "additions": 72,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/runtime_attention.py",
+          "sha": "99c0448eef30eb6fafb0b3f78e7273375fab8808",
+          "status": "added"
+        },
+        {
+          "additions": 93,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/runtime_reply_authorization.py",
+          "sha": "807e130a14de4a4bb2ccfa7f0a8a21f3c16d60e8",
+          "status": "added"
+        },
+        {
+          "additions": 85,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/runtime_reply_authorization_owner.py",
+          "sha": "34a99e7d04b82f0388a7f569c27408d364d36764",
+          "status": "added"
+        },
+        {
+          "additions": 245,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/runtime_reply_delivery.py",
+          "sha": "75627e3142ce6b05d3e24c7758edbe322a1def90",
+          "status": "added"
+        },
+        {
+          "additions": 378,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/runtime_reply_subscriptions.py",
+          "sha": "e9b7bd83a47fb1faebe9da81436cdfd2da678054",
+          "status": "added"
+        },
+        {
+          "additions": 321,
+          "deletions": 59,
+          "filename": "integrations/session_bridge/runtime_return.py",
+          "sha": "1789b0f65798e4263d9e2d1e15c9e28ebc006ba2",
+          "status": "modified"
+        },
+        {
+          "additions": 245,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/web_reply_callback_transport.py",
+          "sha": "20f051c21848262d14e5eaf5f0a7cf127a17ef6a",
+          "status": "added"
+        },
+        {
+          "additions": 267,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/web_reply_delivery.py",
+          "sha": "b9408e9ec2f9f480551ab8d41bbc23e7ecdc262e",
+          "status": "added"
+        },
+        {
+          "additions": 198,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/web_reply_event_asgi.py",
+          "sha": "12dfffecce68527bd3e5f9a471881a2a72cc0d52",
+          "status": "added"
+        },
+        {
+          "additions": 293,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/web_reply_event_rpc.py",
+          "sha": "8497fd5ebe44ecd1954a216b074ca83fe4208661",
+          "status": "added"
+        },
+        {
+          "additions": 398,
+          "deletions": 0,
+          "filename": "integrations/session_bridge/web_reply_subscription_owner.py",
+          "sha": "9404b74e4621c036dffcb0ef4d179ce7fe239a7a",
+          "status": "added"
+        },
+        {
+          "additions": 6,
+          "deletions": 2,
+          "filename": "integrations/slack_agent_dialogue/persisted_wake_carrier.py",
+          "sha": "7d81cdec906a5ad7e07e56b2acecd3c4f0554f4f",
+          "status": "modified"
+        },
+        {
+          "additions": 12,
+          "deletions": 6,
+          "filename": "ops/executive_os/OS_WEB_ASSETS.md",
+          "sha": "edfbd9f28e595dce36454c43519feb6e4fef4fa4",
+          "status": "modified"
+        },
+        {
+          "additions": 15,
+          "deletions": 9,
+          "filename": "ops/executive_os/autonomy_control.py",
+          "sha": "0d87e2e55defbac0b065401f7fd769f10724be02",
+          "status": "modified"
+        },
+        {
+          "additions": 81,
+          "deletions": 0,
+          "filename": "ops/executive_os/control_aead_contract.py",
+          "sha": "c22847a60594a9cee6374bf7b560284a0843533f",
+          "status": "added"
+        },
+        {
+          "additions": 331,
+          "deletions": 0,
+          "filename": "ops/executive_os/control_aead_profile.py",
+          "sha": "7ac23c17d17ab3b6aa06bab30db58ba1b16ede31",
+          "status": "added"
+        },
+        {
+          "additions": 106,
+          "deletions": 1,
+          "filename": "ops/executive_os/executive_mcp_entry.py",
+          "sha": "d9909515b43511983dc6c1b79cd961d8db678fbc",
+          "status": "modified"
+        },
+        {
+          "additions": 23,
+          "deletions": 1,
+          "filename": "ops/executive_os/install.sh",
+          "sha": "e73c0f8bf1af6d9b271aec2af61fa8bda500a300",
+          "status": "modified"
+        },
+        {
+          "additions": 1,
+          "deletions": 1,
+          "filename": "ops/executive_os/os_public_edge.caddy.template",
+          "sha": "6bb16b345eea5d33f172332b4fd2c5eb115c37cc",
+          "status": "modified"
+        },
+        {
+          "additions": 11,
+          "deletions": 2,
+          "filename": "ops/executive_os/os_public_edge.py",
+          "sha": "49e0072ac08e90aa4bc96840b040fa6868ea0715",
+          "status": "modified"
+        },
+        {
+          "additions": 25,
+          "deletions": 15,
+          "filename": "ops/executive_os/os_public_edge_transition.py",
+          "sha": "96985ed0db552285162c824914c4fe7c58f7cb57",
+          "status": "modified"
+        },
+        {
+          "additions": 2,
+          "deletions": 0,
+          "filename": "requirements/executive-control-aead-macos-arm64-py312.in",
+          "sha": "777e339359be611ccec94e31af5fe37f7ee96ee8",
+          "status": "added"
+        },
+        {
+          "additions": 153,
+          "deletions": 0,
+          "filename": "requirements/executive-control-aead-macos-arm64-py312.lock",
+          "sha": "4103d87f82803ebef6c12fa540d6033710a83145",
+          "status": "added"
+        },
+        {
+          "additions": 88,
+          "deletions": 6,
+          "filename": "scripts/executive_os_phase1c.py",
+          "sha": "adcae75ddc7fe67ecec0446f1cc4ee1567b5c88f",
+          "status": "modified"
+        },
+        {
+          "additions": 5,
+          "deletions": 1,
+          "filename": "scripts/executive_os_phase1c_control_wrapper.py",
+          "sha": "6cd353338072664ad03c23cb190d5f17f020dcd6",
+          "status": "modified"
+        },
+        {
+          "additions": 14,
+          "deletions": 4,
+          "filename": "tests/executive_fabric_release_identity_review.py",
+          "sha": "35b2d0b790c2b1a7d4bfffa5ec33e3d19105104c",
+          "status": "modified"
+        },
+        {
+          "additions": 10,
+          "deletions": 2,
+          "filename": "tests/executive_identity_review.py",
+          "sha": "ed12f1666f5dab00da8f3d7e8e7f11d9af157d38",
+          "status": "modified"
+        },
+        {
+          "additions": 10,
+          "deletions": 1,
+          "filename": "tests/test_autonomy_session_materialization_source_law.py",
+          "sha": "445ceef3af16393acb981373305af023af7341d2",
+          "status": "modified"
+        },
+        {
+          "additions": 141,
+          "deletions": 0,
+          "filename": "tests/test_bridge_paired_mcp_composition.py",
+          "sha": "d13a59f73efcad3cc0d26b9350a2425b5ac018c0",
+          "status": "added"
+        },
+        {
+          "additions": 9,
+          "deletions": 1,
+          "filename": "tests/test_ceo_submit_armed_composition.py",
+          "sha": "ad3a683bf46f11e103245cb6a7ba90f511ae07db",
+          "status": "modified"
+        },
+        {
+          "additions": 40,
+          "deletions": 0,
+          "filename": "tests/test_coo_policy_merge_bounds.py",
+          "sha": "e03f9b40b3e52955941387955f7021236cd9fe54",
+          "status": "added"
+        },
+        {
+          "additions": 4,
+          "deletions": 0,
+          "filename": "tests/test_dialogue_wake_canary_composition.py",
+          "sha": "146bd5cd4fc1da5d26916684e2e7272d408cee58",
+          "status": "modified"
+        },
+        {
+          "additions": 73,
+          "deletions": 0,
+          "filename": "tests/test_executive_admission_probe_transients.py",
+          "sha": "2c7dc7c6d76938d9ec476e60800ab26725f8890b",
+          "status": "added"
+        },
+        {
+          "additions": 137,
+          "deletions": 0,
+          "filename": "tests/test_executive_agent_capabilities.py",
+          "sha": "9fc08fdf6e6b66de29ad412284b157a6c16cd39f",
+          "status": "modified"
+        },
+        {
+          "additions": 103,
+          "deletions": 0,
+          "filename": "tests/test_executive_authority.py",
+          "sha": "85115579618f7ee23ebbef01c230114e2d54cf24",
+          "status": "modified"
+        },
+        {
+          "additions": 7,
+          "deletions": 2,
+          "filename": "tests/test_executive_autonomy_control.py",
+          "sha": "9f5d76e1c08a8a9a2ac6d5e55aef8c5a8dbbc43a",
+          "status": "modified"
+        },
+        {
+          "additions": 126,
+          "deletions": 0,
+          "filename": "tests/test_executive_control_aead_budget.py",
+          "sha": "86d2d64dd7eb55f777ad7559e5e11c00eb5eadd3",
+          "status": "added"
+        },
+        {
+          "additions": 303,
+          "deletions": 0,
+          "filename": "tests/test_executive_control_aead_profile.py",
+          "sha": "3f58d37de7721e12a8a668419d792844fdeaf599",
+          "status": "added"
+        },
+        {
+          "additions": 95,
+          "deletions": 0,
+          "filename": "tests/test_executive_coo_mcp.py",
+          "sha": "a2a4acf30cbfecee48a0310a924810bb4c476899",
+          "status": "modified"
+        },
+        {
+          "additions": 7,
+          "deletions": 7,
+          "filename": "tests/test_executive_identity_review.py",
+          "sha": "e15621aa1ef3a2c12538bed00d28f51c583cf794",
+          "status": "modified"
+        },
+        {
+          "additions": 15,
+          "deletions": 0,
+          "filename": "tests/test_executive_installed_peer.py",
+          "sha": "4e4e358d5533dd44d8eec70e327bb9db9c20ba2e",
+          "status": "modified"
+        },
+        {
+          "additions": 3,
+          "deletions": 0,
+          "filename": "tests/test_executive_launchd_config.py",
+          "sha": "f6364c3673c0bb356b52bba1093b7a1dfde60df6",
+          "status": "modified"
+        },
+        {
+          "additions": 174,
+          "deletions": 1,
+          "filename": "tests/test_executive_mcp_entry.py",
+          "sha": "1f3bb3588c937aa63de2ccd93598433b56f4cba6",
+          "status": "modified"
+        },
+        {
+          "additions": 138,
+          "deletions": 0,
+          "filename": "tests/test_executive_mcp_session_install_profile.py",
+          "sha": "13154d114b689cbba82a7871d6928487fdcadf16",
+          "status": "modified"
+        },
+        {
+          "additions": 6,
+          "deletions": 3,
+          "filename": "tests/test_executive_release_stage_only.py",
+          "sha": "e8dbe536eb06f98d70cd7d258ac185870cfdcf2b",
+          "status": "modified"
+        },
+        {
+          "additions": 6,
+          "deletions": 1,
+          "filename": "tests/test_executive_service.py",
+          "sha": "ce6b32b4a7be3065226418de79974477037e7fed",
+          "status": "modified"
+        },
+        {
+          "additions": 25,
+          "deletions": 3,
+          "filename": "tests/test_installed_finite_control.py",
+          "sha": "8a5512fe64a458c416bf4612bbea3ba29b10b621",
+          "status": "modified"
+        },
+        {
+          "additions": 194,
+          "deletions": 1,
+          "filename": "tests/test_mastermind_os_session_transport.py",
+          "sha": "a32d0e0d9d44ed12f3823a530f5869540795044b",
+          "status": "modified"
+        },
+        {
+          "additions": 44,
+          "deletions": 0,
+          "filename": "tests/test_native_retained_runtime.py",
+          "sha": "382b887dae1d039248e5fd4922f260733e503acc",
+          "status": "modified"
+        },
+        {
+          "additions": 57,
+          "deletions": 2,
+          "filename": "tests/test_os_public_edge.py",
+          "sha": "1590774793b7aaf2b705643c76fb74d93a016042",
+          "status": "modified"
+        },
+        {
+          "additions": 37,
+          "deletions": 1,
+          "filename": "tests/test_os_public_edge_transition.py",
+          "sha": "42e0f3e4821b63d7a2f8de0ff03147b91655e804",
+          "status": "modified"
+        },
+        {
+          "additions": 1,
+          "deletions": 1,
+          "filename": "tests/test_os_release_assets.py",
+          "sha": "43c8039164bb364f7d1e1b55098aae14bcee8163",
+          "status": "modified"
+        },
+        {
+          "additions": 27,
+          "deletions": 6,
+          "filename": "tests/test_principal_ruling_installed_composition.py",
+          "sha": "0e19e7a214b50a7647199f9bdf48fbc22095a96e",
+          "status": "modified"
+        },
+        {
+          "additions": 1703,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_original_operation_read.py",
+          "sha": "90768eb07e2fea7fce44ebe947b767e089ddb0c8",
+          "status": "modified"
+        },
+        {
+          "additions": 232,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_original_reply_grant.py",
+          "sha": "04f55f311942b1d241e16c933a15ac966eadd66f",
+          "status": "added"
+        },
+        {
+          "additions": 46,
+          "deletions": 9,
+          "filename": "tests/test_session_bridge_parenting_composition.py",
+          "sha": "51aad8b60dc65eccf55e50b39d54ce415eb51020",
+          "status": "modified"
+        },
+        {
+          "additions": 80,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_post_send_unknown.py",
+          "sha": "cf75bc66481ed4c7ce3c992992801b7f298a18fd",
+          "status": "added"
+        },
+        {
+          "additions": 434,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py",
+          "sha": "33eb2550412b7f6c7220a1bb040d727fddc36231",
+          "status": "added"
+        },
+        {
+          "additions": 450,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_reply_event_host_integration.py",
+          "sha": "edd6e27c7eee8b1d555b71152987d079ee931c85",
+          "status": "added"
+        },
+        {
+          "additions": 175,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_runtime_attention.py",
+          "sha": "1ebb924d005a443d0f7c2b20eaa0452625464754",
+          "status": "added"
+        },
+        {
+          "additions": 141,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_runtime_reply_delivery.py",
+          "sha": "f6bb190aaaf32bcd73875b2abc25172e491e0e99",
+          "status": "added"
+        },
+        {
+          "additions": 247,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_runtime_reply_subscriptions.py",
+          "sha": "c073b4909d7ea4457fd9c628c793c3ea479c1c5a",
+          "status": "added"
+        },
+        {
+          "additions": 19,
+          "deletions": 1,
+          "filename": "tests/test_session_bridge_runtime_return.py",
+          "sha": "59487c050238917afadb8296460f9678da1156c9",
+          "status": "modified"
+        },
+        {
+          "additions": 324,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_callback_transport.py",
+          "sha": "b0622a6a75695cf8f11529101e8561fe6c874776",
+          "status": "added"
+        },
+        {
+          "additions": 269,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_delivery.py",
+          "sha": "7cb7f8680d28338c7098d0b55c5c0b3d9c8f68d1",
+          "status": "added"
+        },
+        {
+          "additions": 290,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_event_asgi.py",
+          "sha": "6a539b016db6801c297850e3c73b5ed4da2db2e7",
+          "status": "added"
+        },
+        {
+          "additions": 320,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_event_rpc.py",
+          "sha": "f16d443df174b2e7f72da355a0e5035df0049009",
+          "status": "added"
+        },
+        {
+          "additions": 141,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_subscription_oauth.py",
+          "sha": "278018ee4dacc4665cdd94df7511f2f8849c5bab",
+          "status": "added"
+        },
+        {
+          "additions": 497,
+          "deletions": 0,
+          "filename": "tests/test_session_bridge_web_reply_subscription_owner.py",
+          "sha": "6184af9f3a855d7aef6d10306752701644d3b3d3",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1790,
+      "snapshot_head": "c4d28680813898c9b0f7bd367d67cd7e873744c4",
+      "snapshot_base": "5616ed2990db1fcbbf35108a96a6d1f0020bf076",
+      "head_readback_at_utc": "2026-10-31T06:23:02.407934+00:00",
+      "current_head_readback": "c4d28680813898c9b0f7bd367d67cd7e873744c4",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 116,
+          "deletions": 0,
+          "filename": ".github/workflows/dsh-governed-mcp.yml",
+          "sha": "ff637febf7c85d7f8c270a83c956d90ceae4f4ee",
+          "status": "added"
+        },
+        {
+          "additions": 6,
+          "deletions": 0,
+          "filename": ".gitignore",
+          "sha": "b4f09bb70638e3bb278054c3e9080c5fce85c0c7",
+          "status": "modified"
+        },
+        {
+          "additions": 113,
+          "deletions": 0,
+          "filename": "docs/runbooks/ACP_GOVERNED_TOOL_OBSERVATIONS.md",
+          "sha": "c803440529f40e3bf5dbe982f3bf0c2b7dc18704",
+          "status": "modified"
+        },
+        {
+          "additions": 27,
+          "deletions": 0,
+          "filename": "experiments/harness_convergence/dispatch_binding/README.md",
+          "sha": "3cbbc804c75d918d372d4f0a1cf039431b005ddb",
+          "status": "modified"
+        },
+        {
+          "additions": 44,
+          "deletions": 0,
+          "filename": "experiments/harness_convergence/dispatch_binding/mcp-stdio.test.mjs",
+          "sha": "af6063a1dbe509b51dc5130b1e3da2f9aa119358",
+          "status": "modified"
+        },
+        {
+          "additions": 4,
+          "deletions": 4,
+          "filename": "experiments/harness_convergence/dispatch_binding/verify_mcp.py",
+          "sha": "ac9570e830fca80e6ffbce51ee47cee4ce6c13d9",
+          "status": "modified"
+        },
+        {
+          "additions": 365,
+          "deletions": 0,
+          "filename": "scripts/prepare_dsh_governed_supply.py",
+          "sha": "84e382783102e0ccd7b866734022517a250bdc31",
+          "status": "added"
+        },
+        {
+          "additions": 252,
+          "deletions": 0,
+          "filename": "scripts/qualify_dsh_governed_worker.py",
+          "sha": "9844ebf3323bf6ad874e1e7cc18d1c69a052732e",
+          "status": "added"
+        },
+        {
+          "additions": 131,
+          "deletions": 0,
+          "filename": "tests/harness_convergence/test_dsh_governed_qualification.py",
+          "sha": "ae8b40ebe3811b8bc294139f84272b15fe06fa7c",
+          "status": "added"
+        },
+        {
+          "additions": 252,
+          "deletions": 0,
+          "filename": "tests/harness_convergence/test_dsh_governed_supply_preparer.py",
+          "sha": "a94f8b2e9af5d335b96381f181cac818efa331b3",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1841,
+      "snapshot_head": "dc0016ec6f27a5e45014917adb3c8a4043ff46ab",
+      "snapshot_base": "e00e97b81a5d41cb8a570ad080316279a0f3853f",
+      "head_readback_at_utc": "2026-10-31T06:23:03.176650+00:00",
+      "current_head_readback": "dc0016ec6f27a5e45014917adb3c8a4043ff46ab",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 265,
+          "deletions": 0,
+          "filename": "docs/superpowers/plans/2026-10-24-meta-ceo-open-harness-convergence-masterplan.md",
+          "sha": "fc382b007e66b98ed9775f5e354ca0c9fe840a7e",
+          "status": "added"
+        },
+        {
+          "additions": 71,
+          "deletions": 0,
+          "filename": "research/META_CEO_MODEL_CAPACITY_AND_AUTONOMY_DECISION_RECORD_2026-10-24.md",
+          "sha": "c0c2e5368d86d5ff8e3065459a4898b299320073",
+          "status": "added"
+        },
+        {
+          "additions": 64,
+          "deletions": 0,
+          "filename": "research/META_CEO_OPEN_SOURCE_HARNESS_DONOR_ASSESSMENT_2026-10-24.md",
+          "sha": "6eee202329c726e7e04cbeffb0eaa6d4c0cf42e8",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1845,
+      "snapshot_head": "4f45abd0aef46af1ddb160ce50a4fbd0b1b8e492",
+      "snapshot_base": "f608f52f35384dcfa8e4305dc594f1fbe823d5ec",
+      "head_readback_at_utc": "2026-10-31T06:23:04.049789+00:00",
+      "current_head_readback": "4f45abd0aef46af1ddb160ce50a4fbd0b1b8e492",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 42,
+          "deletions": 0,
+          "filename": "experiments/meta_ceo_open_harness/README.md",
+          "sha": "cddad80009e118e97a587afc22c817e7b48646a6",
+          "status": "added"
+        },
+        {
+          "additions": 245,
+          "deletions": 0,
+          "filename": "experiments/meta_ceo_open_harness/smoke_dsh_web.py",
+          "sha": "b13a39e6cfb548fd8204b8cfa9e4faa2028afb6c",
+          "status": "added"
+        },
+        {
+          "additions": 177,
+          "deletions": 0,
+          "filename": "tests/meta_ceo_open_harness/test_smoke_dsh_web.py",
+          "sha": "f163c32eb2e22891fa582b772640eaefb7297a94",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1859,
+      "snapshot_head": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+      "snapshot_base": "3095d09f1789a5b8002503beae872774c297b1a5",
+      "head_readback_at_utc": "2026-10-31T06:23:05.830690+00:00",
+      "current_head_readback": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 38,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/fixtures/mission-result-producer/README.md",
+          "sha": "6f7c9c46d28009f3ca749647a64dbfe6a65f0894",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/fixtures/mission-result-producer/actual-pair.json",
+          "sha": "22a19ce7de1a8e10c518ba3b7a004204e523e186",
+          "status": "added"
+        },
+        {
+          "additions": 38,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/fixtures/mission-result-producer/fixture-provenance.json",
+          "sha": "0ec661c7a733e547fccacbcc95534c6fd8c22bce",
+          "status": "added"
+        },
+        {
+          "additions": 854,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/mission-result-producer.test.ts",
+          "sha": "c063e4576e2dc8c7de7991df9ebb1ac3142bf64d",
+          "status": "added"
+        },
+        {
+          "additions": 134,
+          "deletions": 0,
+          "filename": "common/executive_workspace_mission_result_contract.py",
+          "sha": "45edf658464a97d6d50378c2f33a55ca580285f7",
+          "status": "added"
+        },
+        {
+          "additions": 222,
+          "deletions": 0,
+          "filename": "control_plane/executive_runtime.py",
+          "sha": "0592b4592aebf76300be81460700b327dd03b020",
+          "status": "modified"
+        },
+        {
+          "additions": 17,
+          "deletions": 1,
+          "filename": "control_plane/executive_service.py",
+          "sha": "a4a9b3359e1aab393d9d7538993b323ec89a8b7f",
+          "status": "modified"
+        },
+        {
+          "additions": 176,
+          "deletions": 96,
+          "filename": "control_plane/fabric_job_view.py",
+          "sha": "684bdf5c96b2d880d069c9cde5a81c161e25f055",
+          "status": "modified"
+        },
+        {
+          "additions": 232,
+          "deletions": 0,
+          "filename": "control_plane/workspace_read_service.py",
+          "sha": "3d3bdc1d817055f285197a2ed29f87890f4383f8",
+          "status": "modified"
+        },
+        {
+          "additions": 3,
+          "deletions": 0,
+          "filename": "integrations/executive_mcp/server.py",
+          "sha": "312e5aa140582f74a806267e6102277330d694ac",
+          "status": "modified"
+        },
+        {
+          "additions": 50,
+          "deletions": 1,
+          "filename": "integrations/mastermind_workspace_app/app.py",
+          "sha": "35d4ef2bf1e19c404c6d8c1cfc8c17496f138b98",
+          "status": "modified"
+        },
+        {
+          "additions": 14,
+          "deletions": 0,
+          "filename": "integrations/mastermind_workspace_app/contract.py",
+          "sha": "f981154b3b6e6dac0b0ff4668cb0f5f13f781d11",
+          "status": "modified"
+        },
+        {
+          "additions": 7,
+          "deletions": 0,
+          "filename": "integrations/mastermind_workspace_app/installed.py",
+          "sha": "1b50e188926b6903cd4a09fa5d8b504ce64fe5e1",
+          "status": "modified"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "tests/test_executive_runtime_bounded_read.py",
+          "sha": "ade9b91054721646892cb70665559aff99d47aa0",
+          "status": "modified"
+        },
+        {
+          "additions": 246,
+          "deletions": 0,
+          "filename": "tests/test_executive_runtime_mission_result_read.py",
+          "sha": "f65c403337cffcfaebb245f7b653ea1e3eed0e08",
+          "status": "added"
+        },
+        {
+          "additions": 27,
+          "deletions": 4,
+          "filename": "tests/test_executive_workspace_mount.py",
+          "sha": "519481787ce26e0d66bc894395ce8747d0b62ed7",
+          "status": "modified"
+        },
+        {
+          "additions": 161,
+          "deletions": 0,
+          "filename": "tests/test_workspace_mission_result_contract.py",
+          "sha": "4fb371be02bc0146e9fe7ea4726ac7f4f2d61e56",
+          "status": "added"
+        },
+        {
+          "additions": 522,
+          "deletions": 0,
+          "filename": "tests/test_workspace_mission_result_http.py",
+          "sha": "d3413b5d5285df48547afbab23f429682507bd81",
+          "status": "added"
+        },
+        {
+          "additions": 352,
+          "deletions": 0,
+          "filename": "tests/test_workspace_mission_result_service.py",
+          "sha": "4389ebf7ecec293fa32ae36ad07de87dd11bcfcb",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1861,
+      "snapshot_head": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+      "snapshot_base": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+      "head_readback_at_utc": "2026-10-31T06:23:06.808876+00:00",
+      "current_head_readback": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 875,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/App.mission-result.test.tsx",
+          "sha": "b12c36e8f6eef00a508266b66fd75d9000b5d911",
+          "status": "added"
+        },
+        {
+          "additions": 167,
+          "deletions": 77,
+          "filename": "app/mastermind_os/src/App.tsx",
+          "sha": "e50d123e2eda01e608d535940187aca4dfea2086",
+          "status": "modified"
+        },
+        {
+          "additions": 161,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/host.mission-result.test.ts",
+          "sha": "799ab8ac485f99dd23996c1e6346b95e31c99eee",
+          "status": "added"
+        },
+        {
+          "additions": 37,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/host.ts",
+          "sha": "bf85fad16ea04c31ddcfeef7083719b84caa543f",
+          "status": "modified"
+        },
+        {
+          "additions": 31,
+          "deletions": 7,
+          "filename": "app/mastermind_os/src/meta-ceo/README.md",
+          "sha": "db05a467f09ff633b8023583e3077e3d0888fdbb",
+          "status": "modified"
+        },
+        {
+          "additions": 5,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/meta-ceo/fixtures/mission-result-producer/README.md",
+          "sha": "6f7c9c46d28009f3ca749647a64dbfe6a65f0894",
+          "status": "modified"
+        },
+        {
+          "additions": 145,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/meta-ceo/mission-adapter.test.ts",
+          "sha": "92bc2df06942a981773c0d90af878a56ab90d0db",
+          "status": "modified"
+        },
+        {
+          "additions": 137,
+          "deletions": 1,
+          "filename": "app/mastermind_os/src/meta-ceo/mission-adapter.ts",
+          "sha": "9aa11063176b6db846283a4d8a9137f9e2d34a6a",
+          "status": "modified"
+        },
+        {
+          "additions": 83,
+          "deletions": 13,
+          "filename": "app/mastermind_os/src/meta-ceo/mission-result-producer.test.ts",
+          "sha": "c063e4576e2dc8c7de7991df9ebb1ac3142bf64d",
+          "status": "modified"
+        },
+        {
+          "additions": 39,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/meta-ceo/useOfficeProjection.ts",
+          "sha": "f22f0087427af48047897c6e157b16837e635b7c",
+          "status": "modified"
+        },
+        {
+          "additions": 170,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/mission-result.test.ts",
+          "sha": "d5f61bf4af8d369ce67bf5e0ee0c1d5987dcf7ed",
+          "status": "added"
+        },
+        {
+          "additions": 211,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/mission-result.ts",
+          "sha": "97de13354d2b322fcfaad8cde290dd005de08639",
+          "status": "added"
+        },
+        {
+          "additions": 109,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/web-auth.test.ts",
+          "sha": "1abb00e3c1ca162ed82b1ee211e29fd2e10acd1d",
+          "status": "modified"
+        },
+        {
+          "additions": 23,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/web-auth.ts",
+          "sha": "d507a67e11f83e0fe365bff0182e576e09922682",
+          "status": "modified"
+        },
+        {
+          "additions": 119,
+          "deletions": 0,
+          "filename": "tests/test_workspace_mission_result_http.py",
+          "sha": "d3413b5d5285df48547afbab23f429682507bd81",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1865,
+      "snapshot_head": "7b646fe386c7dc3485bc3bc87974a4653ea75189",
+      "snapshot_base": "a4525e3e7e9251951567a9142392df962bd06ba2",
+      "head_readback_at_utc": "2026-10-31T06:23:09.086863+00:00",
+      "current_head_readback": "7b646fe386c7dc3485bc3bc87974a4653ea75189",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 34,
+          "deletions": 0,
+          "filename": ".github/workflows/hermes-qualification.yml",
+          "sha": "4cae418ab54fd6af0d2801b9b9ba0a6ad577b331",
+          "status": "added"
+        },
+        {
+          "additions": 71,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/README.md",
+          "sha": "36b5e151bb50c32b706c58b02b4de9aaa2b2d9a5",
+          "status": "added"
+        },
+        {
+          "additions": 39,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/example-readonly.config.yaml",
+          "sha": "42d4f6c5d9702cfc85e3b381c144cc23cb1fb0e3",
+          "status": "added"
+        },
+        {
+          "additions": 225,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/preflight.py",
+          "sha": "c47f38bfafe459e618b8b9564acca0c3ee4e09bb",
+          "status": "added"
+        },
+        {
+          "additions": 11,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/profiles/mmmeta/SOUL.md",
+          "sha": "06e8a6d668d7959d48bdde04124c102eee41f817",
+          "status": "added"
+        },
+        {
+          "additions": 39,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/profiles/mmmeta/config.yaml",
+          "sha": "42d4f6c5d9702cfc85e3b381c144cc23cb1fb0e3",
+          "status": "added"
+        },
+        {
+          "additions": 11,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/profiles/mmsecretary/SOUL.md",
+          "sha": "0a87b3c0d51463cf5948dd3c20ed9e74fe3d9ddb",
+          "status": "added"
+        },
+        {
+          "additions": 39,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/profiles/mmsecretary/config.yaml",
+          "sha": "22ca9a5fa30809a4d07fb39f1a5a279b0ede9f71",
+          "status": "added"
+        },
+        {
+          "additions": 111,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/runtime_registry.py",
+          "sha": "1be74f4d2e9fc0dec739a94f7af5055c0b1489ae",
+          "status": "added"
+        },
+        {
+          "additions": 116,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/steward_contract.py",
+          "sha": "8f00da80fb14405ccd4d934efcfef9cee89b578e",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/tests/fixture-cli-toolsets.txt",
+          "sha": "5d59b6bfbb3c34b143eae0fa680b31320bca2714",
+          "status": "added"
+        },
+        {
+          "additions": 194,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/tests/test_preflight.py",
+          "sha": "a2ba0e008ffe4a3ac0ee263a6091cd0750baa128",
+          "status": "added"
+        },
+        {
+          "additions": 43,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/tests/test_roles.py",
+          "sha": "9e9190cf71b2abbf78413dd2ab016a61e29750e0",
+          "status": "added"
+        },
+        {
+          "additions": 60,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/tests/test_runtime_registry.py",
+          "sha": "66acba395aaf810efcb89a5227accbdd9dc87c2a",
+          "status": "added"
+        },
+        {
+          "additions": 101,
+          "deletions": 0,
+          "filename": "integrations/hermes_qualification/tests/test_steward_contract.py",
+          "sha": "38653bdabeec732c8d26cbc12026ce0b01ed7ef2",
+          "status": "added"
+        },
+        {
+          "additions": 57,
+          "deletions": 0,
+          "filename": "research/HERMES_DEPLOYMENT_AND_INCUMBENT_COMPARISON_2026-10-25.md",
+          "sha": "921391152002f4d893c51945607df52fe9907d93",
+          "status": "added"
+        },
+        {
+          "additions": 60,
+          "deletions": 0,
+          "filename": "research/HERMES_STEWARD_INTEGRATION_P2_2026-10-25.md",
+          "sha": "33f15afa4b6ec54a0894e9065ac9acb1a479f6c2",
+          "status": "added"
+        },
+        {
+          "additions": 43,
+          "deletions": 0,
+          "filename": "research/HERMES_VS_DSH_REAL_CANARY_EVIDENCE_2026-10-25.md",
+          "sha": "cb9d6f34e7892c27bf94977f35925bf3db6437fd",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1875,
+      "snapshot_head": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+      "snapshot_base": "7b646fe386c7dc3485bc3bc87974a4653ea75189",
+      "head_readback_at_utc": "2026-10-31T06:23:10.777238+00:00",
+      "current_head_readback": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 40,
+          "deletions": 0,
+          "filename": ".github/workflows/hermes-harness.yml",
+          "sha": "152d49f86ddff91f7755ec59ee8caddf9874bd4d",
+          "status": "added"
+        },
+        {
+          "additions": 23,
+          "deletions": 0,
+          "filename": ".github/workflows/hermes-qualification.yml",
+          "sha": "3bab609e0399e030f9005fea330bd78de5d261cb",
+          "status": "modified"
+        },
+        {
+          "additions": 34,
+          "deletions": 0,
+          "filename": ".github/workflows/hermes-runtime.yml",
+          "sha": "b05139bf386f5719d0ca20f8890933dbb3af4855",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": ".github/workflows/hermes-secretary.yml",
+          "sha": "52c99fec94c3785fc85617c30cc2b86c9b7f3cc2",
+          "status": "added"
+        },
+        {
+          "additions": 266,
+          "deletions": 0,
+          "filename": "docs/hermes/DEPLOY_UBUNTU1.md",
+          "sha": "d27aafbb6012b82cc2eb222c25941b89a0690e14",
+          "status": "added"
+        },
+        {
+          "additions": 67,
+          "deletions": 0,
+          "filename": "docs/hermes/INTEGRATION_DELTAS.md",
+          "sha": "14daa75df0de3a24e0fa9372b617bad2c72365c5",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/README.md",
+          "sha": "c772a827c5ffa4dde3d9122d1dd167e9bbd8d9e9",
+          "status": "added"
+        },
+        {
+          "additions": 16,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/__init__.py",
+          "sha": "740cd4ff1ef70148815e6a2d22ce49696ee58d87",
+          "status": "added"
+        },
+        {
+          "additions": 25,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/admission.py",
+          "sha": "5967a43bcfd88e9b5931447b1b28f0359c1b26ac",
+          "status": "added"
+        },
+        {
+          "additions": 421,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/bridge.py",
+          "sha": "55edadfbea9ef6ca3b55844d630e549fa91a608e",
+          "status": "added"
+        },
+        {
+          "additions": 107,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/carriers.py",
+          "sha": "8ccb02f996bcc53e6e23d786607d0d1e23327ed2",
+          "status": "added"
+        },
+        {
+          "additions": 143,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/handoff.py",
+          "sha": "6b0fd8eb0ccfa3b0af19036ba36646c7f43f8265",
+          "status": "added"
+        },
+        {
+          "additions": 80,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/policy.py",
+          "sha": "abe4d9f1ec646af35ed33975a2db824258f01307",
+          "status": "added"
+        },
+        {
+          "additions": 106,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/schema.py",
+          "sha": "3ad2e682f595990386a3aba3efa3a584fb530253",
+          "status": "added"
+        },
+        {
+          "additions": 738,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/tests/test_delegate.py",
+          "sha": "f5822fc86b83c8f60615004c6c82d3107ceadfb0",
+          "status": "added"
+        },
+        {
+          "additions": 111,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/tool.py",
+          "sha": "1f4310332152a2736f0a7859d47de1780636d2b7",
+          "status": "added"
+        },
+        {
+          "additions": 35,
+          "deletions": 0,
+          "filename": "integrations/hermes_delegate/tool_policy.json",
+          "sha": "5297919d67909a5ee2ff58315dd29a6d158d3e78",
+          "status": "added"
+        },
+        {
+          "additions": 21,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/__init__.py",
+          "sha": "53d204682e303bb6cf52aa695f30365a68bcadd0",
+          "status": "added"
+        },
+        {
+          "additions": 3,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/__main__.py",
+          "sha": "33e7df0e9ef03a4afd870963b69a81849cc54f06",
+          "status": "added"
+        },
+        {
+          "additions": 215,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/cli.py",
+          "sha": "66e8f8a41d530d27fe07c7a1ded0cb7a88900375",
+          "status": "added"
+        },
+        {
+          "additions": 207,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/doctor.py",
+          "sha": "e8c50b88b65ef5bb07bab64eaad51dc2702efd66",
+          "status": "added"
+        },
+        {
+          "additions": 77,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/extensions.py",
+          "sha": "f1a9102f808339a398ebe9039c5e5f8d3594188d",
+          "status": "added"
+        },
+        {
+          "additions": 15,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/hermesctl",
+          "sha": "d89bcfbb0301435f0295b3b37a2728cd661dce91",
+          "status": "added"
+        },
+        {
+          "additions": 89,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/overlays.py",
+          "sha": "62e8c1b2379a73b016f5b68d626780ce4875c0b9",
+          "status": "added"
+        },
+        {
+          "additions": 50,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/placement.py",
+          "sha": "a3c1c64b27b883b74210ed243c577644a03456bf",
+          "status": "added"
+        },
+        {
+          "additions": 25,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/shadow_gate.py",
+          "sha": "da907b17368453d840b5d91164e7dbcb927bdf0d",
+          "status": "added"
+        },
+        {
+          "additions": 129,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/stack.py",
+          "sha": "45fb51a4416d827705dd47e12dda5c64f33a8671",
+          "status": "added"
+        },
+        {
+          "additions": 12,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/expected/ping_scan.jsonl",
+          "sha": "11d955fc6982ce88e045eeb73a221cdd21b17296",
+          "status": "added"
+        },
+        {
+          "additions": 401,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/test_e2e.py",
+          "sha": "a415e66c1cb5a5bc5bccfe17e9b2e33603bdcdd3",
+          "status": "added"
+        },
+        {
+          "additions": 109,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tick.py",
+          "sha": "fe03de97e2172827469b6230dde9edbe25026689",
+          "status": "added"
+        },
+        {
+          "additions": 53,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/README.md",
+          "sha": "c2fbeef8107dd6528877c8922a3b612c6d3c59d4",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/__init__.py",
+          "sha": "284bf08c0aa316186de75ecdb4a84e794f216e70",
+          "status": "added"
+        },
+        {
+          "additions": 10,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/__main__.py",
+          "sha": "ebf667ea3b88b47878ae661ff675ffffc9af3ff2",
+          "status": "added"
+        },
+        {
+          "additions": 35,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/cli.py",
+          "sha": "b8776231e520902293ddc77787605235152014ff",
+          "status": "added"
+        },
+        {
+          "additions": 481,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/client.py",
+          "sha": "4891b77095876aa7426dc99d7f0821cffd1afb6e",
+          "status": "added"
+        },
+        {
+          "additions": 226,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/contract.py",
+          "sha": "b3fc7be1b50910434de51e244ee4e39e0711324b",
+          "status": "added"
+        },
+        {
+          "additions": 111,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/credentials.py",
+          "sha": "43d093810f6a2b62e280f6c7303a6bed061eb7a5",
+          "status": "added"
+        },
+        {
+          "additions": 116,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/metering.py",
+          "sha": "964e4bf0f62667d676e20224e393e789a5b17fb7",
+          "status": "added"
+        },
+        {
+          "additions": 138,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/profile_config.py",
+          "sha": "14ef112cd8b26b49a043c11749ee9f74f519c182",
+          "status": "added"
+        },
+        {
+          "additions": 80,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/profiles/mmmeta.hermes-providers.yaml",
+          "sha": "302895d80a58c57f799b99fbfa77f496b2a83167",
+          "status": "added"
+        },
+        {
+          "additions": 80,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/profiles/mmsecretary.hermes-providers.yaml",
+          "sha": "dc170e1b314fc62a407103955919675c7a33b618",
+          "status": "added"
+        },
+        {
+          "additions": 76,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/router_binding.py",
+          "sha": "3568f6445b6eed6750e22c9f6ee1f7bd08620ece",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/__init__.py",
+          "sha": "ad04c65613b9f1e35c5ec3b673e044806e2b96a5",
+          "status": "added"
+        },
+        {
+          "additions": 112,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/support.py",
+          "sha": "74a9ced93597bba93345ef86e3ffdb88339b8c53",
+          "status": "added"
+        },
+        {
+          "additions": 138,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/test_contract.py",
+          "sha": "098f79c0054f0fac4ba4234a8aac9382051ad31e",
+          "status": "added"
+        },
+        {
+          "additions": 137,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/test_failures.py",
+          "sha": "7877bd7d594d74919c6caa77c8b2ea00e9a29239",
+          "status": "added"
+        },
+        {
+          "additions": 67,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/test_profiles.py",
+          "sha": "2b960f23db6e38b8de0a27dc580e20af091c4841",
+          "status": "added"
+        },
+        {
+          "additions": 216,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/test_secrets.py",
+          "sha": "435c80b772065ac12812f4a735168812ec28f86f",
+          "status": "added"
+        },
+        {
+          "additions": 106,
+          "deletions": 0,
+          "filename": "integrations/hermes_models/tests/test_turns.py",
+          "sha": "132640f2aa530284f584a91f5d5d5ad103610d68",
+          "status": "added"
+        },
+        {
+          "additions": 32,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/__init__.py",
+          "sha": "90b1f54916ff159b49abe2c1ad831d1f879bf8e9",
+          "status": "added"
+        },
+        {
+          "additions": 4,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/__main__.py",
+          "sha": "8fc63fc78e386fad31fa59d23ed2b43012db8433",
+          "status": "added"
+        },
+        {
+          "additions": 129,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/cli.py",
+          "sha": "c561ab8e9cfe02f20a6f65709fa7b26b20f7789f",
+          "status": "added"
+        },
+        {
+          "additions": 57,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/constants.py",
+          "sha": "a012f3cffafbd468885d211b6c9b8451a774b5b7",
+          "status": "added"
+        },
+        {
+          "additions": 65,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/contract.py",
+          "sha": "2454d87fddfb440141de8cb81477c9c112a0e173",
+          "status": "added"
+        },
+        {
+          "additions": 12,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/errors.py",
+          "sha": "7f3ecbc7d878c58faf32cee7e5419250eb2d5ae7",
+          "status": "added"
+        },
+        {
+          "additions": 128,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/gateway.py",
+          "sha": "f8aae8c5181504d3b6ba14f27f3650eb0a572345",
+          "status": "added"
+        },
+        {
+          "additions": 10,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/hermes-runtime",
+          "sha": "04bb33497f98940a39ac305368817cf7930d9beb",
+          "status": "added"
+        },
+        {
+          "additions": 43,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/hermes_config.py",
+          "sha": "bf88b86b494999025bdd526f2e57fb608e603d90",
+          "status": "added"
+        },
+        {
+          "additions": 371,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/install.py",
+          "sha": "eeb2e3ade2b228c82cf841804acee8c4658f2a6a",
+          "status": "added"
+        },
+        {
+          "additions": 91,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/memory.py",
+          "sha": "1013fa7c175584a504578fc8603a2adbda7fa951",
+          "status": "added"
+        },
+        {
+          "additions": 409,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/profile.py",
+          "sha": "6413921d2334c490fd596240f18e01ca5a8c0c8e",
+          "status": "added"
+        },
+        {
+          "additions": 26,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/profiles/mmmeta.yaml",
+          "sha": "7b1c3e8242cd423039eebb9262bab26fc31724df",
+          "status": "added"
+        },
+        {
+          "additions": 26,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/profiles/mmsecretary.yaml",
+          "sha": "cfec872a8493c378830b404cc12775de85a683be",
+          "status": "added"
+        },
+        {
+          "additions": 168,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/registry.py",
+          "sha": "264c39d41935c5863f61470966134d6a86f98a24",
+          "status": "added"
+        },
+        {
+          "additions": 167,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/secrets.py",
+          "sha": "d8a950cfc1d4e26164e3f5e1588cdc599c1ae8db",
+          "status": "added"
+        },
+        {
+          "additions": 231,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/supervisor.py",
+          "sha": "ebb29a170542f8b9c91e32acd6a75ba151b867e4",
+          "status": "added"
+        },
+        {
+          "additions": 98,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/systemd_unit.py",
+          "sha": "075b82d074c7a2dd3899d29c8f2735ea9c9ecc7e",
+          "status": "added"
+        },
+        {
+          "additions": 120,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/_support.py",
+          "sha": "d4e0db12385ff629ac97d6b1bbe1ff673fdab68b",
+          "status": "added"
+        },
+        {
+          "additions": 68,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/fixtures/hermes_stub.py",
+          "sha": "7a4afc4bb8aa05af3c832cea4f640ea215eba249",
+          "status": "added"
+        },
+        {
+          "additions": 232,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
+          "sha": "89fd846849b9356e24251a825eef31f807817855",
+          "status": "added"
+        },
+        {
+          "additions": 312,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/test_install_lifecycle.py",
+          "sha": "545bc96f8df3f647bd8bdedd6689fafcb8ba6d96",
+          "status": "added"
+        },
+        {
+          "additions": 133,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/test_profile_pin.py",
+          "sha": "0fad6260432b193d87c2997fc6c79ab386d6ca09",
+          "status": "added"
+        },
+        {
+          "additions": 163,
+          "deletions": 0,
+          "filename": "integrations/hermes_runtime/tests/test_registry.py",
+          "sha": "b3b97ab970459a173cabde9822ccd066089beef0",
+          "status": "added"
+        },
+        {
+          "additions": 39,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/CUTOVER_AND_ROLLBACK.md",
+          "sha": "9b1dd252715a16018f1f80d58532f473dd844996",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/README.md",
+          "sha": "50bee32fb49467e334cef51bc3ccd126d1fcd54d",
+          "status": "added"
+        },
+        {
+          "additions": 23,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/UNPORTED.md",
+          "sha": "c69be4cc7a885ecf86e25de4f2e85e0f9db52502",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/__init__.py",
+          "sha": "8c99f92b18e2d034139d8940d150a812c3274f65",
+          "status": "added"
+        },
+        {
+          "additions": 57,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/codex_accounts.py",
+          "sha": "8c3059bcef5c0d34c2aefb7701146e92cbca2d41",
+          "status": "added"
+        },
+        {
+          "additions": 10,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/constants.py",
+          "sha": "f7e6cfda49348d01bd905b6032de5f7eeb77b9ff",
+          "status": "added"
+        },
+        {
+          "additions": 28,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/continuity.py",
+          "sha": "24fee1fec693e6a8911dee8173ec3f1db4d87015",
+          "status": "added"
+        },
+        {
+          "additions": 284,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/detect.py",
+          "sha": "6450798c4109a807e5b18abe74677281a37cae3a",
+          "status": "added"
+        },
+        {
+          "additions": 315,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/guards.py",
+          "sha": "89efed886b9f67519900288130b48436f6114916",
+          "status": "added"
+        },
+        {
+          "additions": 139,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/parity.py",
+          "sha": "3a85d7081720a9b84f99f145b1b65f2a3d9ac940",
+          "status": "added"
+        },
+        {
+          "additions": 55,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/roster.json",
+          "sha": "59d6da2c99dd2cfd6b37bffea224acbd8a5ba57c",
+          "status": "added"
+        },
+        {
+          "additions": 364,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/roster.py",
+          "sha": "4441bc9fc4ff377d61db16d07a9684e3327e6ec4",
+          "status": "added"
+        },
+        {
+          "additions": 58,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/routine_catalog.py",
+          "sha": "300678ca170ffb68d57dc9c87e0923004c0d376b",
+          "status": "added"
+        },
+        {
+          "additions": 61,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/routines/grok-secretary-source.md",
+          "sha": "e832a94746f7ebf640233e25affa4cfb461e4fb4",
+          "status": "added"
+        },
+        {
+          "additions": 207,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/routines/jobs.json",
+          "sha": "770861bb57f8e836c23db461f1e71bf0e114165c",
+          "status": "added"
+        },
+        {
+          "additions": 57,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/sessions.py",
+          "sha": "6c9577e436089d7225e6cb2e381e11e26cb62a2d",
+          "status": "added"
+        },
+        {
+          "additions": 138,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/shadow.py",
+          "sha": "bcac6aa3cb3d44ed9e2ac5bf86a36cbca801f67e",
+          "status": "added"
+        },
+        {
+          "additions": 70,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/chatgpt-browser-session-operator/SKILL.md",
+          "sha": "0734072ff292690e82878e6450a1cde501209845",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/chatgpt-browser-session-operator/references/README.md",
+          "sha": "55a0b514d60417bb9626b5a1f9605e3e55758013",
+          "status": "added"
+        },
+        {
+          "additions": 420,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/chatgpt-browser-session-operator/references/grok-secretary-source.md",
+          "sha": "8957640da83d20cbd8a1129a932e4705df678bd9",
+          "status": "added"
+        },
+        {
+          "additions": 69,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-context/SKILL.md",
+          "sha": "81c97613531909ed6a3a7cd09ba810b5884fd39c",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-context/references/README.md",
+          "sha": "c51fb154ef86df5891120eeed1dfe1652056cd14",
+          "status": "added"
+        },
+        {
+          "additions": 53,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-context/references/grok-secretary-source.md",
+          "sha": "fbd8af703ee6960a072ec7ccf3659e46e7e35df5",
+          "status": "added"
+        },
+        {
+          "additions": 62,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-fabric-secretary-local/SKILL.md",
+          "sha": "b47e4c5b19710bc1b8574fd9639ac8487da0ff74",
+          "status": "added"
+        },
+        {
+          "additions": 1,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-fabric-secretary-local/references/README.md",
+          "sha": "19bd4a3eedbfe78cc58b0060fc3e9ca2b151acfd",
+          "status": "added"
+        },
+        {
+          "additions": 40,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/skills/mastermind-fabric-secretary-local/references/grok-secretary-source.md",
+          "sha": "8e934fc332db80ad4a5b4d78f6773347505c9a67",
+          "status": "added"
+        },
+        {
+          "additions": 68,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/slack_readonly.py",
+          "sha": "b8581c736a4b998144b9563c2007b4707e5cbc6c",
+          "status": "added"
+        },
+        {
+          "additions": 40,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tab_sweep.py",
+          "sha": "a1f591a7f4ac28888cea250ec9d15f80d43fd156",
+          "status": "added"
+        },
+        {
+          "additions": 20,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/fixture_loader.py",
+          "sha": "39c6dd6fccb966a77399fe76167733f0a9224fcf",
+          "status": "added"
+        },
+        {
+          "additions": 150,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/fixtures/ping_scan.json",
+          "sha": "f9bd0251e1971308bb8ad69c663c4097f5caa090",
+          "status": "added"
+        },
+        {
+          "additions": 247,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_detect.py",
+          "sha": "a85cc8e5e88b392d595840067f9ab9efc17a4ff2",
+          "status": "added"
+        },
+        {
+          "additions": 287,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_guards.py",
+          "sha": "efe4abb4d8daa11c8569b66839809020061ac979",
+          "status": "added"
+        },
+        {
+          "additions": 121,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_roster.py",
+          "sha": "63342f53557cde88289dd3cd66c3355f168b2542",
+          "status": "added"
+        },
+        {
+          "additions": 191,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_routines.py",
+          "sha": "3e92573b175da9cbc4a6aecab48aba73a0527f24",
+          "status": "added"
+        },
+        {
+          "additions": 136,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_sessions.py",
+          "sha": "2777d570e06b43445b6ed8652365f52ac9a61044",
+          "status": "added"
+        },
+        {
+          "additions": 211,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_shadow.py",
+          "sha": "67edabe1c103fd1ae3763444fe5843f51534247d",
+          "status": "added"
+        },
+        {
+          "additions": 46,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_skills.py",
+          "sha": "6667163b57d4483764eeaf8f34cfb6c7cb3f70cc",
+          "status": "added"
+        },
+        {
+          "additions": 63,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/wake_bridge.py",
+          "sha": "57df683f476942fe13680fd1fcde20ec7f4a9bbc",
+          "status": "added"
+        },
+        {
+          "additions": 33,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/README.md",
+          "sha": "db0a1448364f1143dddefa82d793f96566638ad1",
+          "status": "added"
+        },
+        {
+          "additions": 13,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/__init__.py",
+          "sha": "053a8e6001c2766528f44a168b24d4f14d5b8960",
+          "status": "added"
+        },
+        {
+          "additions": 309,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/client.py",
+          "sha": "9177cf0c9d5315c110dfb686ec745736c3df62c8",
+          "status": "added"
+        },
+        {
+          "additions": 279,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/config_guard.py",
+          "sha": "3b3b23891ea46ed8f9748b3cb7e5fd970ab64768",
+          "status": "added"
+        },
+        {
+          "additions": 57,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/hermes.mcp.yaml",
+          "sha": "82adc91eea90daac482d2505f1f32fe75d84a8bf",
+          "status": "added"
+        },
+        {
+          "additions": 450,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/tests/test_client.py",
+          "sha": "3702b15734280aa9c3ecedf4fe712887bdaab3a8",
+          "status": "added"
+        },
+        {
+          "additions": 175,
+          "deletions": 0,
+          "filename": "integrations/hermes_steward/tests/test_config_guard.py",
+          "sha": "8b4bdebf64d6d0b4d2cd502c67ac4b47f10530b2",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1876,
+      "snapshot_head": "c574f4dadb16149944f3a52986159a6a4ab2e7bc",
+      "snapshot_base": "bb85b429f2ffffd38408080ce4df7d6378c34100",
+      "head_readback_at_utc": "2026-10-31T06:23:11.645462+00:00",
+      "current_head_readback": "c574f4dadb16149944f3a52986159a6a4ab2e7bc",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 48,
+          "deletions": 0,
+          "filename": ".github/workflows/meta-ceo-seat-preflight.yml",
+          "sha": "030bfc788c7b92846ff3e3b84b449114e797f26f",
+          "status": "added"
+        },
+        {
+          "additions": 48,
+          "deletions": 0,
+          "filename": "integrations/meta_ceo_open_harness/README.md",
+          "sha": "07501a2db9add3e4ea18cfa03b30828b94339e8e",
+          "status": "added"
+        },
+        {
+          "additions": 186,
+          "deletions": 0,
+          "filename": "integrations/meta_ceo_open_harness/launch_seat.py",
+          "sha": "4fb55ab60bb3f4a1ee05980a0535875b5ada3388",
+          "status": "added"
+        },
+        {
+          "additions": 27,
+          "deletions": 0,
+          "filename": "integrations/meta_ceo_open_harness/meta-ceo.patch.yml",
+          "sha": "2dfb5c83c75e127c1ad37176ccfca94bc81aeb92",
+          "status": "added"
+        },
+        {
+          "additions": 27,
+          "deletions": 0,
+          "filename": "integrations/meta_ceo_open_harness/secretary.patch.yml",
+          "sha": "f8d71739da13585ae15a78b3de7fb2077bd4e227",
+          "status": "added"
+        },
+        {
+          "additions": 196,
+          "deletions": 0,
+          "filename": "tests/meta_ceo_open_harness/test_launch_seat.py",
+          "sha": "0476a7cbd2a42e5268c970d787d0835d30261681",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1883,
+      "snapshot_head": "10c908a7790d4ca0f8c505de22511a2f14a2a2a7",
+      "snapshot_base": "b8a1514b624e0cb81baabf057778cfe9ff3e2f31",
+      "head_readback_at_utc": "2026-10-31T06:23:13.037651+00:00",
+      "current_head_readback": "10c908a7790d4ca0f8c505de22511a2f14a2a2a7",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 31,
+          "deletions": 0,
+          "filename": "docs/hermes/DEPLOY_UBUNTU1.md",
+          "sha": "9513c84209fa76af1a1cdc234a5d31d42333a5db",
+          "status": "modified"
+        },
+        {
+          "additions": 4,
+          "deletions": 2,
+          "filename": "integrations/hermes_harness/cli.py",
+          "sha": "b18151ab85a7aefa6216ea331b15dbbe31f53b53",
+          "status": "modified"
+        },
+        {
+          "additions": 120,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/native_byok.py",
+          "sha": "88a0e000aa29b04d1b82ff123ec4c2bfe38d2cc2",
+          "status": "added"
+        },
+        {
+          "additions": 32,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/native_model_credential.py",
+          "sha": "07b4b0a67f9f8abe543c4d8145a023906639417c",
+          "status": "added"
+        },
+        {
+          "additions": 114,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/test_native_byok.py",
+          "sha": "3f8e79a66db5e28cc7dc7cfc323da0c5dfa77f75",
+          "status": "added"
+        },
+        {
+          "additions": 8,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/test_native_mcp_install.py",
+          "sha": "8d1377e22f11f002bab0026d8377ce610f3c093e",
+          "status": "modified"
+        },
+        {
+          "additions": 111,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/test_native_model_credentials.py",
+          "sha": "84a7c198611598515cdf1b458c9c10133d05990d",
+          "status": "added"
+        },
+        {
+          "additions": 18,
+          "deletions": 0,
+          "filename": "integrations/hermes_harness/tests/test_native_supervisor.py",
+          "sha": "1ee169949687a842f511f34d9202a9a9d36b32f4",
+          "status": "modified"
+        },
+        {
+          "additions": 30,
+          "deletions": 3,
+          "filename": "integrations/hermes_runtime/supervisor.py",
+          "sha": "5c278af6911d562cf07489cb9d64f15afe2620c9",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1884,
+      "snapshot_head": "df92de6c5f047310f7f0309de6f3638969c71753",
+      "snapshot_base": "10c908a7790d4ca0f8c505de22511a2f14a2a2a7",
+      "head_readback_at_utc": "2026-10-31T06:23:13.687046+00:00",
+      "current_head_readback": "df92de6c5f047310f7f0309de6f3638969c71753",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 14,
+          "deletions": 0,
+          "filename": "docs/hermes/DEPLOY_UBUNTU1.md",
+          "sha": "1fe5511018bb10961222cbf31ebda82bfb662389",
+          "status": "modified"
+        },
+        {
+          "additions": 8,
+          "deletions": 11,
+          "filename": "integrations/hermes_secretary/tests/test_routines.py",
+          "sha": "0cd229a65a6cbeb4e6096d75d5c2ea6e8b8d97d9",
+          "status": "modified"
+        },
+        {
+          "additions": 100,
+          "deletions": 0,
+          "filename": "integrations/hermes_secretary/tests/test_wake_canonical.py",
+          "sha": "7cc61519032fe74404004305e019541aeca3b1ac",
+          "status": "added"
+        },
+        {
+          "additions": 51,
+          "deletions": 39,
+          "filename": "integrations/hermes_secretary/wake_bridge.py",
+          "sha": "3279211adb78d43d0ed80ca70512ab4c60a45bd3",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1885,
+      "snapshot_head": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+      "snapshot_base": "df92de6c5f047310f7f0309de6f3638969c71753",
+      "head_readback_at_utc": "2026-10-31T06:23:18.336225+00:00",
+      "current_head_readback": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 9,
+          "deletions": 0,
+          "filename": "docs/hermes/DEPLOY_UBUNTU1.md",
+          "sha": "7209ebfe363abeba85509329ee7f57770bd3e898",
+          "status": "modified"
+        },
+        {
+          "additions": 26,
+          "deletions": 2,
+          "filename": "integrations/hermes_harness/tests/test_native_model_credentials.py",
+          "sha": "6c93acbbe56811042ca1d7717a61f58659b30405",
+          "status": "modified"
+        },
+        {
+          "additions": 14,
+          "deletions": 1,
+          "filename": "integrations/hermes_runtime/supervisor.py",
+          "sha": "ed451655ee24c773097578ce32c8c708d25c72e3",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1889,
+      "snapshot_head": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+      "snapshot_base": "edcb41ed8c1274839a742c60aea2beba0a5fd055",
+      "head_readback_at_utc": "2026-10-31T06:23:20.236526+00:00",
+      "current_head_readback": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 13,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/App.tsx",
+          "sha": "64dcc978ff7880637eee388fcd5bd718afae7cd7",
+          "status": "modified"
+        },
+        {
+          "additions": 24,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/README.md",
+          "sha": "40ccfe1f22d2a14866002f626b7f04a71e2e46b6",
+          "status": "modified"
+        },
+        {
+          "additions": 109,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/session-context.test.ts",
+          "sha": "54334afd880333ad0de5e8fad31c22722fe14a75",
+          "status": "added"
+        },
+        {
+          "additions": 60,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/session-context.ts",
+          "sha": "1f2761e7b57794f740e0fd33b8f9a2b602d4202d",
+          "status": "added"
+        },
+        {
+          "additions": 10,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/meta-ceo/useOfficeProjection.ts",
+          "sha": "c85c3d6a63a32eb9c76e977eeac3f604a7ed2abb",
+          "status": "modified"
+        },
+        {
+          "additions": 8,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/orchestration/os-executive-session-host.test.ts",
+          "sha": "c8ce5a9776a5b4df23eb6c5f55617e70726dd2e0",
+          "status": "modified"
+        },
+        {
+          "additions": 26,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/orchestration/os-executive-session-host.ts",
+          "sha": "262576312c165bc69b13f65075ea88522d0c81b2",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1891,
+      "snapshot_head": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+      "snapshot_base": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+      "head_readback_at_utc": "2026-10-31T06:23:22.756681+00:00",
+      "current_head_readback": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+      "head_matches_snapshot": true,
+      "base_matches_snapshot": true,
+      "proof_limit": "PR-files projection captured between source snapshots and this head/base readback; not a source-write grant or installed proof",
+      "files": [
+        {
+          "additions": 7,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/App.tsx",
+          "sha": "83d8e79919a4447e4022ff324088db1de3c44427",
+          "status": "modified"
+        },
+        {
+          "additions": 87,
+          "deletions": 0,
+          "filename": "app/mastermind_os/src/meta-ceo/MetaCeoOffice.native-continuation.test.tsx",
+          "sha": "2363bef8690f1769eafc14a7eee8719a5b4b3c19",
+          "status": "added"
+        },
+        {
+          "additions": 24,
+          "deletions": 3,
+          "filename": "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx",
+          "sha": "3c4d0f3afc6e9b0259cfa7b9fd783eede0fe18a8",
+          "status": "modified"
+        },
+        {
+          "additions": 27,
+          "deletions": 2,
+          "filename": "app/mastermind_os/src/meta-ceo/README.md",
+          "sha": "076703d93483e5e813ad914f3f0ca03005db0d2f",
+          "status": "modified"
+        }
+      ]
+    }
+  ]
+}

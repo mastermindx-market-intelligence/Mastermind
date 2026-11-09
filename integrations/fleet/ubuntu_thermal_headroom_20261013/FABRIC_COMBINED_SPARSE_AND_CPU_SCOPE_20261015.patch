@@ -1,0 +1,703 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -412,14 +412,31 @@
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
+     native_return: bool = False,
+     qualification_host: str | None = None,
++    new_macro_worktree: str | None = None,
++    cpu_scope_percent: int | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     env = os.environ.copy()
+     observed_root = resolve_request_root(root_id, env)
++    # An explicit NEW worktree request is not permission to adopt an existing
++    # session, mutate an incumbent checkout, or mint before a host lease.
++    if new_macro_worktree is not None:
++        if (re.fullmatch(r"[0-9a-f]{40}", new_macro_worktree) is None
++                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", rid) is None
++                or cwd != "~/lanes/repos/macro"
++                or not observed_root or not parent_run_id
++                or qualification_host or artifact_names or native_return):
++            raise FabricTaskError("FABRIC_NEW_MACRO_WORKTREE_SCOPE_REFUSED")
++    if cpu_scope_percent is not None:
++        if (type(cpu_scope_percent) is not int
++                or cpu_scope_percent not in (100, 200, 400)
++                or not observed_root or not parent_run_id
++                or artifact_names or native_return or qualification_host):
++            raise FabricTaskError("CPU_SCOPE_REQUEST_UNQUALIFIED")
+     # Explicit empty arguments clear inherited values; None uses the existing
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+@@ -440,16 +457,27 @@
+             **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+             task_complexity=complexity, escalation_reason=reason,
+             requested_model=requested_model, route_key=rid,
+             **({"required_modes": sorted(artifact_production.MODES),
+-                "required_platforms": ["linux"]} if artifact_names else {}),
++                "required_platforms": ["linux"]} if artifact_names else
++               {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+         ))
+     guard = pick.launch_policy(
+         route["MODE"], task_class, route["MODEL"],
+         escalation_reason=reason, task_complexity=complexity,
+     )
+     if not guard.get("allowed"):
+         raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
++    if new_macro_worktree is not None:
++        if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
++            raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
++        if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
++            raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
++    if cpu_scope_percent is not None:
++        if route["HOST"] not in {"ubuntu2", "ubuntu3"}:
++            raise FabricTaskError("CPU_SCOPE_HOST_NOT_QUALIFIED")
++        if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
++            raise FabricTaskError("CPU_SCOPE_MODE_NOT_QUALIFIED")
+     env["POOL_TASK_CLASS"] = task_class
+     if task_complexity is not None or "POOL_TASK_COMPLEXITY" in env:
+         env["POOL_TASK_COMPLEXITY"] = complexity
+     if escalation_reason is not None or "POOL_ESCALATION_REASON" in env:
+@@ -516,8 +544,12 @@
+             route["MODEL"],
+             "--run-id",
+             rid,
+         ]
++        if new_macro_worktree is not None:
++            argv.extend(["--new-macro-worktree", new_macro_worktree])
++        if cpu_scope_percent is not None:
++            argv.extend(["--cpu-scope-quota", str(cpu_scope_percent)])
+         proc = subprocess.run(argv, env=env)
+         return int(proc.returncode)
+     finally:
+         if temp_path is not None:
+@@ -561,8 +593,12 @@
+     p_request.add_argument("--class", dest="task_class", required=True)
+     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
+     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
+     p_request.add_argument("--cwd", default=os.getcwd())
++    p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
++                           help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
++    p_request.add_argument("--cpu-scope-percent", type=int, choices=(100, 200, 400),
++                           help="Explicit per-new-worker user cgroup CPU budget on qualified 9950X hosts")
+     packet_group = p_request.add_mutually_exclusive_group(required=True)
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+     p_request.add_argument("--pool")
+@@ -769,8 +805,10 @@
+                 task_complexity=args.task_complexity,
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
+                 qualification_host=args.qualification_host,
++                new_macro_worktree=args.new_macro_worktree,
++                cpu_scope_percent=args.cpu_scope_percent,
+             )
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))
+             return 0
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -18,8 +18,10 @@
+   cat >&2 <<'USAGE'
+ usage: remote_sub.sh <host|auto> <mode> <packet_file> <remote_cwd> [model]
+                      [--run-id <stable_id>] [--out <local_out>] [--dry-run]
+                      [--max-age <secs>] [--refresh]
++                     [--new-macro-worktree <existing-commit-sha40>]
++                     [--cpu-scope-quota <100|200|400>] (new qualified Linux lane only)
+                      [--expect-output-token <literal-token>]
+ USAGE
+   exit 2
+ }
+@@ -32,8 +34,10 @@
+ LOCAL_OUT=""
+ RUN_ID_ARG=""
+ EXPECT_OUTPUT_TOKEN=""
+ EXPECT_OUTPUT_SPECIFIED=0
++NEW_MACRO_COMMIT=""
++CPU_SCOPE_QUOTA=""
+ DRY_RUN=0
+ MAX_AGE=600
+ MAX_AGE_EXPLICIT=0
+ REFRESH=0
+@@ -43,8 +47,10 @@
+     --run-id) [ "$#" -ge 2 ] || usage; RUN_ID_ARG="$2"; shift ;;
+     --out) [ "$#" -ge 2 ] || usage; LOCAL_OUT="$2"; shift ;;
+     --max-age) [ "$#" -ge 2 ] || usage; MAX_AGE="$2"; MAX_AGE_EXPLICIT=1; shift ;;
+     --refresh) REFRESH=1 ;;
++    --new-macro-worktree) [ "$#" -ge 2 ] || usage; NEW_MACRO_COMMIT="$2"; shift ;;
++    --cpu-scope-quota) [ "$#" -ge 2 ] || usage; CPU_SCOPE_QUOTA="$2"; shift ;;
+     --expect-output-token)
+       [ "$#" -ge 2 ] || usage
+       EXPECT_OUTPUT_TOKEN="$2"
+       EXPECT_OUTPUT_SPECIFIED=1
+@@ -71,8 +77,19 @@
+   go-codex) MODEL="${MODEL:-deepseek-v4.1-flash}" ;;
+   qwen) MODEL="${MODEL:-qwen3.8-flash}" ;;
+   grok|cursor|codex-native|claude-native|oc-free) [ -n "$MODEL" ] || { echo "Native CLI requires explicit model" >&2; exit 2; } ;;
+ esac
++if [ -n "$CPU_SCOPE_QUOTA" ]; then
++  case "$CPU_SCOPE_QUOTA" in
++    100|200|400) ;;
++    *) echo "CPU_SCOPE_QUOTA_UNQUALIFIED" >&2; exit 78 ;;
++  esac
++  [ -n "$RUN_ID_ARG" ] || { echo "CPU_SCOPE_REQUIRES_ORIGINAL_RUN_ID" >&2; exit 78; }
++  case "$MODE" in
++    glm|glm-codex|minimax|qwen) ;;
++    *) echo "CPU_SCOPE_MODE_NOT_QUALIFIED" >&2; exit 78 ;;
++  esac
++fi
+ NATIVE_MODE=0
+ case "$MODE" in grok|cursor|codex-native|claude-native|oc-free) NATIVE_MODE=1;; esac
+ case "$MAX_AGE" in
+   ''|*[!0-9]*) echo "--max-age must be a non-negative integer" >&2; exit 2 ;;
+@@ -102,8 +119,22 @@
+   fi
+   ID="$RUN_ID_ARG"
+ else
+   ID="rs_$(date -u +%Y%m%dT%H%M%SZ)_$$"
++fi
++if [ -n "$NEW_MACRO_COMMIT" ]; then
++  if [[ ! "$NEW_MACRO_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
++     [[ ! "$ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$ ]] ||
++     [ "$REMOTE_CWD" != "~/lanes/repos/macro" ] ||
++     [ -z "${POOL_ORCHESTRATOR_ID:-}" ] ||
++     [ -z "${POOL_PARENT_RUN_ID:-}" ]; then
++    echo "FABRIC_NEW_MACRO_SCOPE_REFUSED before_lease=1" >&2
++    exit 78
++  fi
++  case "$MODE" in
++    glm|glm-codex|minimax|qwen) ;;
++    *) echo "FABRIC_NEW_MACRO_MODE_NOT_QUALIFIED before_lease=1" >&2; exit 78 ;;
++  esac
+ fi
+ # Correlation fields describe this transport; they do not grant admission.
+ RUN_STARTED_SECONDS=$SECONDS
+ USAGE_VALID=0
+@@ -410,8 +441,21 @@
+   read -r SSH_ALIAS CORES MAX_ACTIVE LOAD_GATE MIN_FREE_MEM_GB MAX_CPU_TCTL_C MIN_FREE_DISK_GB <<< "$REGISTRY"
+   LANE_HOST_LOAD_RATIO=$(awk -v g="$LOAD_GATE" -v c="$CORES" 'BEGIN{if(c+0<=0) exit 1; printf "%.4f", (g+0)/(c+0)}') || { log "HOST_POLICY_RATIO_REFUSED"; RC=3; return "$RC"; }
+ }
+ load_host_registry || exit "$RC"
++if [ -n "$NEW_MACRO_COMMIT" ]; then
++  # This initial implementation covers the four Linux fleet hosts only.
++  case "$HOST_ARG" in
++    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
++    *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
++  esac
++fi
++if [ -n "$CPU_SCOPE_QUOTA" ]; then
++  case "$HOST_ARG" in
++    ubuntu2|ubuntu3) ;;
++    *) log "CPU_SCOPE_HOST_NOT_QUALIFIED before_lease=1"; exit 78 ;;
++  esac
++fi
+ 
+ # Economic decision is pure: static model/class policy only, before a lease.
+ # Dry-run stays an inspection path. Real children repeat the same check.
+ if [ "$DRY_RUN" -ne 1 ]; then
+@@ -687,9 +731,9 @@
+ run "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+   'mkdir -p ~/lanes/tmp ~/lanes/ext/active ~/lanes/ext/lanes ~/lanes/orch/fabric' || { RC=$?; log "REMOTE_SETUP_FAILED rc=$RC"; exit "$RC"; }
+ 
+ SUPPORT_FILES=(
+-  pools.yaml fabric_policy_snapshot.py remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
++  pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
+   codex_usage.py go_remote_codex.py go_remote_capsule.py
+   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
+   fabric_client_projection.py studio_mcp_projection.sh
+   mm_feeder_lib.py pool_ledger.py lease_broker.py glm_keys.py bailian_keys.py
+@@ -951,9 +995,9 @@
+ if [ -n "$GLM_CAP_REMOTE" ]; then
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
++LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"
+ if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
+ ADMISSION_WAIT_STARTED_SECONDS=""
+ launch_attempt=0
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -10,8 +10,11 @@
+ import json
+ import hashlib
+ from contextlib import ExitStack
+ import os
++import re
++import stat
++import subprocess
+ import sys
+ from pathlib import Path
+ import native_remote
+ import time
+@@ -109,8 +112,144 @@
+         normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
+         contract=contract,manifest=manifest)
+ 
+ 
++# The exact reviewed Macro sparse-owner blob from draft #9194. This is a
++# deployment fence, not permission to install that draft into an old host.
++# Any source revision requires new review/test and an explicit hash update.
++_MACRO_FABRIC_SPARSE_BLOB = "75297acb10d0cef4d01730a59fdcad19c7cfd3e6"
++
++
++class SparseWorkspaceRefused(ValueError):
++    def __init__(self, reason: str, *, effect_unknown: bool = False):
++        super().__init__(reason)
++        self.effect_unknown = effect_unknown
++
++
++def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
++                         config) -> str:
++    """Optional pre-mint within the incumbent LaneLease, before worker START.
++
++    No parallel worker/queue/authority is created. A failed or uncertain mint
++    leaves its original lease and worktree for original-carrier reconciliation.
++    """
++    commit = os.environ.get("FABRIC_NEW_MACRO_COMMIT", "")
++    if not commit:
++        return cwd
++    if (re.fullmatch(r"[0-9a-f]{40}", commit) is None
++            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", key) is None
++            or os.environ.get("REMOTE_SUB_RUN_ID") != key
++            or not os.environ.get("POOL_ORCHESTRATOR_ID")
++            or not os.environ.get("POOL_PARENT_RUN_ID")
++            or not os.environ.get("POOL_LEASE_ID")):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_SCOPE_REFUSED")
++    donor = Path.home() / "lanes" / "repos" / "macro"
++    try:
++        if Path(cwd).resolve(strict=True) != donor.resolve(strict=True):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_REFUSED")
++    except (OSError, RuntimeError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_DONOR_UNAVAILABLE") from exc
++    helper = donor / "scripts" / "worktree_sparse.py"
++    try:
++        info = helper.lstat()
++        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
++                or info.st_size > 131072 or helper.is_symlink()):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNQUALIFIED")
++        content = helper.read_bytes()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_UNAVAILABLE") from exc
++    # Detect concurrent modification of the shared source between the
++    # verified read and the controlled child start. Git blob proof binds
++    # reviewed code; inode/stat is the ordinary shared-file drift guard.
++    try:
++        after_read = helper.lstat()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED") from exc
++    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
++        after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns
++    ):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
++    git_blob = hashlib.sha1(
++        b"blob " + str(len(content)).encode() + b"\0" + content
++    ).hexdigest()
++    if git_blob != _MACRO_FABRIC_SPARSE_BLOB:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_BLOB_MISMATCH")
++    destination = Path.home() / "lanes" / "wt" / key
++    if os.path.lexists(destination):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_DESTINATION_EXISTS")
++    receipt = here / "lanes" / (key + ".workspace-mint.process.jsonl")
++    if os.path.lexists(receipt):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_RECEIPT_EXISTS")
++    # Only the invocation of the approved Macro owner receives the one-shot
++    # flag. Do not leak it into the subsequent model's shell environment.
++    mint_env = dict(env)
++    mint_env["MASTERMIND_FABRIC_SPARSE_NEW"] = "1"
++    try:
++        result = run_owned_process(
++            [sys.executable, str(helper), "fabric-mint", key, commit],
++            cwd=str(donor), timeout=180.0, env=mint_env, nice=config.nice,
++            label=key + ":workspace-mint", receipt_path=receipt,
++            timeout_returncode=124,
++        )
++    except (OSError, ValueError, LaneRuntimeError, OwnedProcessStartError) as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_EFFECT_UNKNOWN",
++                                     effect_unknown=True) from exc
++    if (result.returncode != 0 or result.timed_out
++            or not result.cleanup_proven or result.stdout_truncated
++            or result.stderr_truncated):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_MINT_UNVERIFIED",
++                                     effect_unknown=True)
++    try:
++        after_mint = helper.lstat()
++        current_helper = helper.read_bytes()
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
++                                     effect_unknown=True) from exc
++    if ((after_mint.st_dev, after_mint.st_ino, after_mint.st_size,
++         after_mint.st_mtime_ns) !=
++        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
++        or current_helper != content):
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_EFFECT_UNKNOWN",
++                                     effect_unknown=True)
++
++    def git_value(root: Path, *args: str) -> str:
++        try:
++            p = subprocess.run(
++                ["git", "--no-optional-locks", "-C", str(root), *args],
++                capture_output=True, text=True, timeout=9, check=False,
++            )
++        except (OSError, subprocess.TimeoutExpired) as exc:
++            raise SparseWorkspaceRefused(
++                "FABRIC_SPARSE_VERIFY_UNKNOWN", effect_unknown=True
++            ) from exc
++        if p.returncode or len(p.stdout) > 8192:
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_VERIFY_REFUSED",
++                                         effect_unknown=True)
++        return p.stdout.strip()
++
++    try:
++        dstat = destination.lstat()
++        gstat = (destination / ".git").lstat()
++        donor_git = (donor / ".git").resolve(strict=True)
++        gitdir = Path(git_value(destination, "rev-parse", "--path-format=absolute",
++                                "--git-dir")).resolve(strict=True)
++        if (not stat.S_ISDIR(dstat.st_mode) or destination.is_symlink()
++                or dstat.st_uid != os.getuid()
++                or not stat.S_ISREG(gstat.st_mode)
++                or (destination / ".git").is_symlink()
++                or gitdir.parent != donor_git / "worktrees"
++                or git_value(destination, "rev-parse", "HEAD") != commit
++                or git_value(destination, "branch", "--show-current") != "lane/" + key
++                or git_value(destination, "config", "--get", "core.sparseCheckout") != "true"
++                or git_value(destination, "status", "--porcelain=v1", "-uall")):
++            raise SparseWorkspaceRefused("FABRIC_SPARSE_POSTCONDITION_REFUSED",
++                                         effect_unknown=True)
++    except OSError as exc:
++        raise SparseWorkspaceRefused("FABRIC_SPARSE_POSTCONDITION_UNKNOWN",
++                                     effect_unknown=True) from exc
++    return str(destination)
++
++
+ def _execute(argv: list[str], state: dict) -> int:
+     if len(argv) != 6:
+         return _fail(
+             "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
+@@ -218,8 +357,35 @@
+     try:
+         with lease, ExitStack() as artifact_stack:
+             artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
+                               if artifact_contract is not None else None)
++            # Physical admission + original provider lease already succeeded.
++            # Mint only this explicitly NEW, pinned workspace before worker START.
++            try:
++                cwd = _new_macro_workspace(key, cwd, here, child_env, config)
++            except SparseWorkspaceRefused as exc:
++                if exc.effect_unknown:
++                    lease.hold_for_reconciliation("sparse_workspace_effect_unknown")
++                return _fail(str(exc), 76 if exc.effect_unknown else 78)
++            child_env.pop("MASTERMIND_FABRIC_SPARSE_NEW", None)
++            child_env.pop("FABRIC_NEW_MACRO_COMMIT", None)
++            if os.environ.get("FABRIC_NEW_MACRO_COMMIT"):
++                child_env["FABRIC_WORKSPACE_READY"] = "1"
++                child_env["FABRIC_WORKSPACE_RUN_ID"] = key
++            # Do not alter any ordinary/legacy worker argv. Only a qualified
++            # brand-new sparse checkout needs its CWD rebound before START.
++            if os.environ.get("FABRIC_NEW_MACRO_COMMIT"):
++                if mode in ("glm", "minimax", "qwen"):
++                    command = ["bash", str(here / "sub.sh"), "--prompt-file", mode,
++                               str(packet_path.resolve()), cwd]
++                else:
++                    command = ["bash", str(here / "sub.sh"), mode, prompt, cwd]
++                if model:
++                    command.append(model)
++                if mode in native_remote.MODES:
++                    command = native_remote.command(
++                        mode, model, prompt, cwd, packet_path=packet_path.resolve()
++                    )
+             if mode in native_remote.MODES:
+                 child_env = native_remote.environment(mode, model, key, here, child_env)
+             # Worker-spawned shell tools inherit PATH. The immutable, reviewed
+             # "yes" shim bounds CPU-stealer lifetime even when an agent leaves
+@@ -229,8 +395,26 @@
+                 if (not guard.is_file() or guard.is_symlink()
+                         or not os.access(guard, os.X_OK)):
+                     return _fail("FABRIC_CPU_STRESS_GUARD_UNAVAILABLE", 78)
+                 child_env["PATH"] = str(here) + os.pathsep + child_env.get("PATH", "/usr/bin:/bin")
++            # Optional CPU fan-out budget is subordinate to the incumbent
++            # physical LaneLease, not a replacement owner or a new worker.
++            cpu_scope = None
++            if child_env.get("FABRIC_CPU_SCOPE_QUOTA_PCT"):
++                try:
++                    import fabric_cpu_scope
++                except ImportError:
++                    return _fail("FABRIC_CPU_SCOPE_LIBRARY_UNAVAILABLE", 78)
++                try:
++                    cpu_scope = fabric_cpu_scope.prepare_scope(key, mode, command, child_env)
++                except fabric_cpu_scope.CpuScopeRefused:
++                    return _fail("FABRIC_CPU_SCOPE_PRESTART_REFUSED", 78)
++                except fabric_cpu_scope.CpuScopeEffectUnknown:
++                    lease.hold_for_reconciliation("cpu_scope_prestart_unknown")
++                    return _fail("FABRIC_CPU_SCOPE_EFFECT_UNKNOWN", 76)
++                if cpu_scope is not None:
++                    command = list(cpu_scope.command)
++                    child_env = dict(cpu_scope.env)
+             install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
+             try:
+                 state["started"] = True
+                 result = run_owned_process(
+@@ -248,8 +432,21 @@
+                 state["started"] = False
+                 number = str(exc.error_number) if exc.error_number is not None else "unknown"
+                 return _fail("REMOTE_SUB_EXEC_NOT_STARTED errno=" + number, 78)
+             finally:
++                # run_owned_process owns the original process GROUP. When a
++                # child calls setsid(), it can leave that group and survive
++                # cleanup_proven=true. The original worker lease must not be
++                # released until the exact quota cgroup also has no PIDs.
++                if cpu_scope is not None and state["started"]:
++                    try:
++                        state["cpu_scope_settlement"] = fabric_cpu_scope.settle_scope(cpu_scope)
++                    except fabric_cpu_scope.CpuScopeEffectUnknown:
++                        state["cpu_scope_effect_unknown"] = True
++                        lease.hold_for_reconciliation("cpu_scope_cleanup_unproven")
++                    except (OSError, ValueError, TypeError):
++                        state["cpu_scope_effect_unknown"] = True
++                        lease.hold_for_reconciliation("cpu_scope_cleanup_unproven")
+                 if state["started"]:
+                     proven = False
+                     try:
+                         row = json.loads(receipt.read_text().splitlines()[-1])
+@@ -257,8 +454,10 @@
+                     except (OSError, ValueError, IndexError):
+                         pass
+                     if not proven:
+                         lease.hold_for_reconciliation("worker_cleanup_unproven")
++            if state.get("cpu_scope_effect_unknown"):
++                return _fail("REMOTE_CPU_SCOPE_UNSETTLED", 76)
+ 
+             display_stdout = result.stdout
+             if mode == "grok":
+                 # Normalize even when the provider rc is nonzero. Never
+--- a/support_bundle.py
++++ b/support_bundle.py
+@@ -43,11 +43,14 @@
+ POLICY_SOURCE_FILES = SOURCE_FILES
+ SOURCE_FILES = POLICY_SOURCE_FILES | {"fabric_operator_diagnostics.py"}
+ PRE_CPU_STRESS_SOURCE_FILES = SOURCE_FILES
+ SOURCE_FILES = PRE_CPU_STRESS_SOURCE_FILES | {"yes"}
+-# Old immutable support generations remain readable while new workers receive
+-# the bounded CPU-stress tool. Never retroactively alter a published release.
+-SOURCE_GENERATIONS = (SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
++PRE_CPU_SCOPE_SOURCE_FILES = SOURCE_FILES
++# Add the optional original-worker user-cgroup helper to NEW immutable support
++# generations only. Every preceding immutable generation remains accepted.
++SOURCE_FILES = PRE_CPU_SCOPE_SOURCE_FILES | {"fabric_cpu_scope.py"}
++# Old immutable generations continue to authenticate their exact closures.
++SOURCE_GENERATIONS = (SOURCE_FILES, PRE_CPU_SCOPE_SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
+ 
+ # Fixed symlinks inside ext -> stable_ext/<name>
+ _EXT_SYMLINKS = frozenset({
+     "active","lanes","slots","state","broker","lane_bin",
+--- /dev/null
++++ b/fabric_cpu_scope.py
+@@ -0,0 +1,203 @@
++#!/usr/bin/env python3
++"""Optional Linux CPU budget beneath the original Fabric LaneLease.
++
++NOT a scheduler, lease, retry authority or daemon. The original remote_sub_exec
++still owns worker START and settlement. The quota is per original run, and
++post-run verification requires the entire user-owned cgroup to be empty.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import stat
++import subprocess
++import sys
++from typing import Mapping, Sequence
++
++
++class CpuScopeRefused(ValueError):
++    """Before first process scope write; never fallback to unbounded execution."""
++
++
++class CpuScopeEffectUnknown(RuntimeError):
++    """A scope might contain live descendants. Preserve original Fabric lease."""
++
++
++@dataclass(frozen=True)
++class CpuScopePlan:
++    unit: str
++    quota_percent: int
++    env: dict[str, str]
++    command: tuple[str, ...]
++    cgroup_path: Path
++
++
++_MODES = frozenset({"glm", "glm-codex", "minimax", "qwen"})
++_HOSTS = frozenset({"ubuntu2", "ubuntu3"})
++_QUOTAS = frozenset({"100", "200", "400"})
++_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\Z")
++
++
++def _properties(unit: str, env: Mapping[str, str]) -> dict[str, str]:
++    try:
++        q = subprocess.run(
++            ["/usr/bin/systemctl", "--user", "show", unit,
++             "--property=LoadState,ActiveState,ControlGroup", "--no-pager"],
++            env=dict(env), capture_output=True, text=True, timeout=4,
++            check=False,
++        )
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        raise CpuScopeEffectUnknown("cpu_scope_manager_unavailable") from exc
++    if q.returncode != 0 or len(q.stdout) > 2048:
++        raise CpuScopeEffectUnknown("cpu_scope_status_unverifiable")
++    values = {}
++    for line in q.stdout.splitlines():
++        if "=" not in line:
++            raise CpuScopeEffectUnknown("cpu_scope_status_malformed")
++        k, v = line.split("=", 1)
++        if k in values or k not in ("LoadState", "ActiveState", "ControlGroup"):
++            raise CpuScopeEffectUnknown("cpu_scope_status_malformed")
++        values[k] = v
++    if set(values) != {"LoadState", "ActiveState", "ControlGroup"}:
++        raise CpuScopeEffectUnknown("cpu_scope_status_missing_fields")
++    return values
++
++
++def _remaining_pids(path: Path) -> list[int]:
++    # The exact path belongs to a hashed, newly created original-run scope.
++    if not path.exists():
++        return []
++    try:
++        s = path.lstat()
++        if not stat.S_ISDIR(s.st_mode) or path.is_symlink():
++            raise CpuScopeEffectUnknown("cpu_scope_cgroup_path_unsafe")
++        data = (path / "cgroup.procs").read_text(encoding="ascii")
++        if len(data) > 8192:
++            raise CpuScopeEffectUnknown("cpu_scope_procs_too_large")
++        values = [int(x) for x in data.split()]
++        if any(x <= 0 for x in values):
++            raise CpuScopeEffectUnknown("cpu_scope_procs_invalid")
++        return values
++    except (OSError, ValueError) as exc:
++        raise CpuScopeEffectUnknown("cpu_scope_procs_unreadable") from exc
++
++
++def prepare_scope(
++    key: str,
++    mode: str,
++    command: Sequence[str],
++    env: Mapping[str, str],
++) -> CpuScopePlan | None:
++    """Validate a *new original worker* and preflight the user systemd scope.
++
++    Caller MUST already hold its incumbent physical LaneLease and provider
++    custody; this helper neither acquires nor asserts those permissions.
++    """
++    raw = env.get("FABRIC_CPU_SCOPE_QUOTA_PCT", "")
++    if not raw:
++        return None
++    if (raw not in _QUOTAS or sys.platform != "linux"
++            or env.get("LANE_REMOTE_HOST") not in _HOSTS or mode not in _MODES
++            or _RUN_ID.fullmatch(key) is None
++            or env.get("REMOTE_SUB_RUN_ID") != key
++            or not all(isinstance(env.get(f), str) and
++                       0 < len(env[f]) <= 256
++                       for f in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID",
++                                 "POOL_LEASE_ID", "SUPPORT_DIGEST"))
++            or not command or any(type(c) is not str or not c or "\x00" in c
++                                   for c in command)):
++        raise CpuScopeRefused("cpu_scope_qualification_refused")
++    uid = os.getuid()
++    bus = Path("/run/user") / str(uid) / "bus"
++    try:
++        info = bus.lstat()
++        if (not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid
++                or bus.is_symlink()):
++            raise CpuScopeRefused("cpu_scope_user_bus_unqualified")
++    except OSError as exc:
++        raise CpuScopeRefused("cpu_scope_user_bus_unavailable") from exc
++    user_env = dict(env)
++    user_env["XDG_RUNTIME_DIR"] = str(bus.parent)
++    user_env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(bus)
++    for path in ("/usr/bin/systemd-run", "/usr/bin/systemctl", "/usr/bin/env"):
++        if not Path(path).is_file() or not os.access(path, os.X_OK):
++            raise CpuScopeRefused("cpu_scope_runtime_unavailable")
++    binding = json.dumps([key, env["POOL_LEASE_ID"],
++                          env["POOL_ORCHESTRATOR_ID"],
++                          env["POOL_PARENT_RUN_ID"],
++                          env["LANE_REMOTE_HOST"],
++                          env["SUPPORT_DIGEST"]], separators=(",", ":"))
++    unit = "mmx-fabric-cpu-" + hashlib.sha256(binding.encode()).hexdigest()[:28] + ".scope"
++    cgroup = (Path("/sys/fs/cgroup/user.slice") / ("user-" + str(uid) + ".slice") /
++              ("user@" + str(uid) + ".service") / "app.slice" / unit)
++    try:
++        state = _properties(unit, user_env)
++        if (state["LoadState"] != "not-found" or
++                state["ActiveState"] != "inactive" or state["ControlGroup"] or
++                cgroup.exists()):
++            raise CpuScopeRefused("cpu_scope_preexisting_run_refused")
++    except CpuScopeEffectUnknown as exc:
++        raise CpuScopeRefused(str(exc)) from exc
++    # Using /usr/bin/env strips user-bus metadata from the actual provider.
++    # The newly created unit itself is bounded by CPUQuota for all descendants.
++    scoped_command = (
++        "/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect",
++        "--slice=app.slice", "--unit=" + unit,
++        "-p", "CPUQuota=" + raw + "%",
++        "/usr/bin/env", "-u", "DBUS_SESSION_BUS_ADDRESS",
++        "-u", "XDG_RUNTIME_DIR", "-u", "FABRIC_CPU_SCOPE_QUOTA_PCT",
++        *tuple(command),
++    )
++    return CpuScopePlan(unit, int(raw), user_env, scoped_command, cgroup)
++
++
++def settle_scope(plan: CpuScopePlan) -> dict[str, object]:
++    """Account for detached descendants before existing Fabric lease release.
++
++    Any unreadable/unknown/occupied result is EFFECT_UNKNOWN. This function
++    never touches other units; only the exact original-run hashed scope name.
++    """
++    before = _properties(plan.unit, plan.env)
++    desired_path = "/" + str(plan.cgroup_path).removeprefix("/sys/fs/cgroup/").lstrip("/")
++    if (before["ControlGroup"] and
++            before["ControlGroup"] != desired_path):
++        raise CpuScopeEffectUnknown("cpu_scope_owner_mismatch")
++    if before["LoadState"] not in ("loaded", "not-found"):
++        raise CpuScopeEffectUnknown("cpu_scope_state_unknown")
++    if before["LoadState"] == "not-found" and (
++            before["ActiveState"] != "inactive" or before["ControlGroup"]):
++        raise CpuScopeEffectUnknown("cpu_scope_unexpected_missing_state")
++    pids_before = _remaining_pids(plan.cgroup_path)
++    needed_stop = before["LoadState"] == "loaded" and (
++        before["ActiveState"] != "inactive" or bool(pids_before)
++    )
++    if needed_stop:
++        try:
++            p = subprocess.run(
++                ["/usr/bin/systemctl", "--user", "stop", plan.unit],
++                env=plan.env, capture_output=True, text=True, timeout=8,
++                check=False,
++            )
++        except (OSError, subprocess.TimeoutExpired) as exc:
++            raise CpuScopeEffectUnknown("cpu_scope_stop_unverifiable") from exc
++        if p.returncode:
++            raise CpuScopeEffectUnknown("cpu_scope_stop_refused")
++    after = _properties(plan.unit, plan.env)
++    if (after["ActiveState"] != "inactive" or
++            after["LoadState"] not in ("loaded", "not-found") or
++            (after["ControlGroup"] and after["ControlGroup"] != desired_path) or
++            _remaining_pids(plan.cgroup_path)):
++        raise CpuScopeEffectUnknown("cpu_scope_descendants_not_settled")
++    return {
++        "schema": "mastermind.fabric_cpu_scope_settlement.v1",
++        "unit": plan.unit,
++        "quota_percent": plan.quota_percent,
++        "killed_remaining_child_processes": bool(pids_before),
++        "stop_issued": needed_stop,
++        "remaining_pids": 0,
++        "scope_inactive": True,
++    }

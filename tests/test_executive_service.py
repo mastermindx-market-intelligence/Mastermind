@@ -21,9 +21,104 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def _phase3_dialogue_material(parent, candidate, obligation, route):
+    from control_plane.dialogue_source_resolution import (
+        DialogueSourceObservation, PhysicalDialogueSourceIdentity,
+        attention_source_ref, correlated_source_ref,
+    )
+    from control_plane.session_targets import route_digest
+    from control_plane.wake_events import mint_obligation
+
+    _progress, continuation, _successor = _phase3_source_messages(parent, candidate)
+    source = DialogueSourceObservation(
+        workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+        thread_ts="1788000000.123456",
+        predecessor_message_key=continuation["message_key"],
+        predecessor_message_fingerprint=continuation["fingerprint"],
+    )
+    attention = mint_obligation(
+        wake_kind=obligation.wake_kind, source_kind=obligation.source_kind,
+        source_ref=attention_source_ref(
+            parent_fingerprint=parent["fingerprint"],
+            message_key=source.predecessor_message_key,
+            target_seat=obligation.declared_target_seat,
+        ),
+        declared_target_seat=obligation.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=obligation.workstream,
+        source_workstream=parent["work_ref"],
+        source_created_at=obligation.source_created_at, emitted_at=obligation.emitted_at,
+    )
+    attention_route = dataclasses.replace(route, obligation_id=attention.obligation_id)
+    logical = correlated_source_ref(
+        attention_source_ref=attention.source_ref,
+        parent_fingerprint=parent["fingerprint"], operation_key=parent["operation_key"],
+        candidate=candidate.to_dict(),
+    )
+    correlated = mint_obligation(
+        wake_kind=attention.wake_kind, source_kind=attention.source_kind,
+        source_ref=logical, declared_target_seat=attention.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=attention.workstream,
+        source_workstream=attention.source_workstream,
+        source_created_at=attention.source_created_at, emitted_at=attention.emitted_at,
+    )
+    correlated_route = dataclasses.replace(
+        attention_route, obligation_id=correlated.obligation_id,
+        route_digest=route_digest(
+            obligation_id=correlated.obligation_id,
+            destination=attention_route.destination_digest,
+            policy_digest=attention_route.policy_digest,
+        ),
+    )
+    physical = PhysicalDialogueSourceIdentity.create(
+        logical_source_ref=logical, obligation_id=correlated.obligation_id,
+        observation=source, parent_fingerprint=parent["fingerprint"],
+        operation_key=parent["operation_key"], target_seat=correlated.declared_target_seat,
+        candidate=candidate.to_dict(),
+    )
+    return attention, attention_route, correlated, correlated_route, source, physical
+
+
+def _phase3_source_messages(parent, candidate):
+    from integrations.slack_agent_dialogue.contract_v2 import build_message_v2
+    common = {
+        "schema": "mastermind.agent_dialogue.v2",
+        "work_ref": parent["work_ref"], "commission_ref": parent["commission_ref"],
+        "session_ref": parent["session_ref"],
+        "applies_to": {"kind": "repository", "repository": "mastermindx-market-intelligence/Mastermind", "head_sha": "a" * 40, "pr": "mastermindx-market-intelligence/Mastermind#170"},
+        "summary": "Bounded source transition.", "evidence_refs": [],
+        "requires_response": False,
+    }
+    progress = build_message_v2({
+        **common, "message_key": "asd-progress-001", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "executive_surface", "seat": "coo", "reasoning_surface": "codex"},
+        "reply_to_message_key": None,
+        "body": {"stage": "source", "completed": "Wake accepted.", "next": "Await Sol."},
+        "created_at": "2026-09-03T01:00:00Z",
+    })
+    continuation = build_message_v2({
+        **common, "message_key": "asd-continue-001", "message_type": "CONTINUE",
+        "actor_ref": {"kind": "executive_surface", "seat": "ceo", "reasoning_surface": "codex"},
+        "reply_to_message_key": progress["message_key"],
+        "body": {"instruction": "Continue the bounded source.", "stop_condition": "Stop on conflict.", "scope_change": False},
+        "created_at": "2026-09-03T01:00:01Z",
+    })
+    successor = build_message_v2({
+        **common, "message_key": "asd-progress-002", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "worker_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "applies_to": {"kind": "executive_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "reply_to_message_key": continuation["message_key"],
+        "body": {"stage": "source", "completed": "Continuation consumed.", "next": "Continue."},
+        "created_at": "2026-09-03T01:00:02Z",
+    })
+    return progress, continuation, successor
+
 from common.redaction import TRUNCATION_MARKER
 from control_plane import ceo_intent as ceo_intent_mod
 from control_plane import executive_dialogue_observation as observation_mod
+from control_plane.model_router import ModelRouter
 from control_plane import executive_ceo_ingress as ceo_ingress_mod
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -33,6 +128,7 @@ from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
     StateConflict,
+    WorkerStatus,
 )
 from control_plane.executive_canary import (
     PrincipalIdentity,
@@ -793,9 +889,11 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
         SCHEMA as TARGET_SCHEMA,
         SessionTarget,
         SessionTargetRegistry,
+        route_digest,
         route_obligation,
     )
-    from control_plane.wake_ledger import WakeRetryPolicy
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
     from control_plane.executive_dialogue_observation import (
         DialogueWakeRequest,
     )
@@ -967,13 +1065,48 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     assert production_result == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
     assert len(operator.calls) == 2
 
+    (
+        _generic_attention,
+        _generic_attention_route,
+        generic_v2_obligation,
+        generic_v2_route,
+        generic_v2_source,
+        generic_v2_physical,
+    ) = _phase3_dialogue_material(
+        production_request.parent,
+        production_request.candidate,
+        production_obligation,
+        production_request.proposed_route,
+    )
+    generic_v2_request = dataclasses.replace(
+        production_request,
+        obligation=generic_v2_obligation,
+        proposed_route=generic_v2_route,
+        source_observation=generic_v2_source,
+        physical_source=generic_v2_physical,
+        transport_schema="mastermind.dialogue_wake_request/v2",
+    )
+    assert asyncio.run(
+        production_bridge(runtime, generic_v2_request)
+    ) == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    generic_v2_history = WakeLedgerRepository(runtime).list_records(
+        generic_v2_obligation.obligation_id
+    )
+    # Generic armed delivery must retain the same physical source as canary
+    # delivery; dropping it leaves the recipient's reply reference stale.
+    assert generic_v2_history[0].record.physical_source == generic_v2_physical
+    assert len(operator.calls) == 3
+    assert asyncio.run(production_bridge(runtime, generic_v2_request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 3  # Same physical request, no second native turn.
+
     moved = dataclasses.replace(
         request,
         proposed_route=dataclasses.replace(route, binding_generation=99),
     )
     refused = asyncio.run(bridge(runtime, moved))
     assert refused == DialogueWakeResult("MISSING", "WAKE_ROUTE_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
 
     stale_binding_bridge = ExecutiveDialogueWakeBridge(
         target_provider=lambda *_args: dataclasses.replace(
@@ -988,7 +1121,7 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     )
     stale = asyncio.run(stale_binding_bridge(runtime, request))
     assert stale == DialogueWakeResult("MISSING", "CURRENT_BINDING_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
 
     monkeypatch.setattr(
         runtime.operator_harness,
@@ -1000,7 +1133,3155 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     )
     writer_refused = asyncio.run(bridge(runtime, request))
     assert writer_refused == DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
-    assert len(operator.calls) == 2
+    assert len(operator.calls) == 3
+
+
+def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
+    tmp_path: Path,
+) -> None:
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryCurrentFacts,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+    )
+    from control_plane.executive_dialogue_observation import DialogueWakeRequest
+    from control_plane.operator_harness_contract import AttentionTurnObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
+    from tests.test_wake_ack_ingress import _admitted_runtime
+
+    runtime, sealed, generation = _admitted_runtime(tmp_path / "canary-bridge")
+    parent = dialogue_parent()
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={"JOB-100": {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id="JOB-100",
+        source_workstream=parent["work_ref"],
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    candidate = DialogueCandidateReference(
+        mode="ACTIVE_CURRENT_WORKER",
+        root_job_id="JOB-100",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        evidence_digest="4" * 64,
+    )
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+    facts = DialogueWakeCanaryCurrentFacts(
+        **{name: getattr(grant, name) for name in (
+            "installed_release_sha", "operation_key", "source_root_job_id",
+            "source_job_id", "source_attempt_id", "source_worker_id",
+            "source_semantic_digest", "obligation_id", "target_seat",
+            "target_session_alias", "target_attempt_id", "binding_id",
+            "binding_generation", "process_generation_id", "policy_digest",
+        )}
+    )
+
+    class Operator:
+        calls = 0
+
+        def deliver_attention(self, **kwargs):
+            self.calls += 1
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-canary-1",
+                accepted=True,
+                delivered=True,
+            )
+
+    operator = Operator()
+
+    def factory(**kwargs):
+        if kwargs["historical_only"]:
+            return PersistedWakeCarrier(
+                repository=WakeLedgerRepository(runtime),
+                dispatchers=WakeDispatcherRegistry(),
+                current_binding_for=lambda _route: None,
+                retry_policy=kwargs["retry_policy"],
+                canary_profile=kwargs["canary_profile"],
+                historical_context_for=kwargs["historical_context_for"],
+                physical_source=kwargs.get("physical_source"),
+            )
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=operator,
+            generation=kwargs["generation"],
+            attempt_id=sealed.attempt_id,
+            runtime_binding=binding,
+            pre_submit_guard=kwargs["pre_submit_guard"],
+        )
+        return PersistedWakeCarrier(
+            repository=WakeLedgerRepository(runtime),
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+            ),
+            current_binding_for=lambda _route: binding,
+            retry_policy=kwargs["retry_policy"],
+            target_registry=registry,
+            canary_profile=kwargs["canary_profile"],
+            historical_context_for=kwargs["historical_context_for"],
+            physical_source=kwargs.get("physical_source"),
+        )
+
+    resolved = DialogueWakeTarget(
+        registry=registry,
+        runtime_binding=binding,
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        operator_adapter=operator,
+    )
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=lambda *_args: resolved,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_current_facts_for=lambda *_args: facts,
+        canary_now_epoch_seconds=lambda: 1_700_000_100,
+    )
+    request = DialogueWakeRequest(
+        operation=SUBMIT_WAKE,
+        parent=parent,
+        thread_ts="1788000000.123456",
+        candidate=candidate,
+        obligation=obligation,
+        proposed_route=route,
+        source_observation=source_observation,
+        physical_source=physical_source,
+        transport_schema="mastermind.dialogue_wake_request/v2",
+    )
+
+    forged = dataclasses.replace(
+        request,
+        candidate=dataclasses.replace(request.candidate, evidence_digest="f" * 64),
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "MISSING", "WAKE_REQUEST_REFUSED"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert operator.calls == 1
+    phases = [
+        item.record.phase
+        for item in WakeLedgerRepository(runtime).list_records(
+            obligation.obligation_id
+        )
+    ]
+    assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
+
+def _strict_dialogue_runtime(tmp_path, monkeypatch, *, provider_session_id="PROVIDER-SESSION-1"):
+    """Admit the real CEO root, current OHF writer and immutable dialogue source."""
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        CapabilityIdentity, CapabilityManifest, ObservedCapabilityIdentity,
+        OperationId, ProcessIdentityObservation,
+    )
+    from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA, SessionTarget, SessionTargetRegistry,
+    )
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2, build_parent_v2
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    source = _terminal_dialogue_source()
+    runtime = Runtime.at(tmp_path / "runtime")
+    execution_binding = {
+        "eligible_quota_classes": ["default"],
+        "provider": "openai-codex",
+        "model": "fixture-model",
+        "effort": "medium",
+        "cost_class": "small",
+        "base_sha": "b" * 40,
+        "routing_policy_version": "fixture-policy-v1",
+        "execution_profile_id": "fixture-profile-v1",
+        "execution_profile_digest": "1" * 64,
+        "capability_policy_version": "fixture-capabilities-v1",
+        "capability_policy_digest": "2" * 64,
+        "operator_eligible_quota_classes": ["default"],
+        "operator_provider": "openai-codex",
+        "operator_model": "fixture-model",
+        "operator_effort": "medium",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fixture-policy-v1",
+        "operator_execution_profile_id": "fixture-profile-v1",
+        "operator_execution_profile_digest": "1" * 64,
+        "operator_capability_policy_version": "fixture-capabilities-v1",
+        "operator_capability_policy_digest": "2" * 64,
+        "operator_harness_binary_digest": "a" * 64,
+        "operator_harness_version": "1",
+        "operator_harness_armed": True,
+    }
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="openai-codex",
+        account_label="account-a",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "openai-codex",
+                "model": "fixture-model",
+                "effort": "medium",
+                "capabilities": ["read"],
+                "cost_class": "small",
+                "metadata": {
+                    "execution_profile_id": "fixture-profile-v1",
+                    "execution_profile_digest": "1" * 64,
+                    "capability_policy_version": "fixture-capabilities-v1",
+                    "capability_policy_digest": "2" * 64,
+                },
+            }
+        },
+    )
+    admitted = submit_intent(
+        runtime,
+        {**ack_fixtures._intent(), "workstream": source["work_ref"]},
+        execution_binding=execution_binding,
+        dialogue_source=source,
+        require_dialogue_source=True,
+    )
+    root = runtime.jobs.get_job(admitted["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert dispatch is not None and dispatch.lease_token is not None
+    mcp_capability = CapabilityIdentity(
+        name="mastermind-company-dialogue",
+        harness_binary_digest="a" * 64,
+        kind="mcp_server",
+        tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+        mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+        mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+    )
+    profile = dataclasses.replace(
+        ack_fixtures._profile(dispatch),
+        capabilities=CapabilityManifest(required=(mcp_capability,)),
+    )
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start_operation = OperationId("ohf-op:canary-socket-start")
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start_operation,
+    )
+    process = ProcessIdentityObservation(4101, 4101, "start-4101", "boot-fixture")
+    runtime.operator_harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=start_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id=provider_session_id,
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=generation.process_generation_id,
+        provider_session_id=provider_session_id,
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/wake-canary-home",
+            "device": 1,
+            "inode": 2,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    attestation = dataclasses.replace(
+        ack_fixtures._attestation(profile),
+        capabilities=(
+            ObservedCapabilityIdentity(
+                kind="mcp_server",
+                name=mcp_capability.name,
+                tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+            ),
+        ),
+    )
+    runtime.operator_harness.seal_attestation(
+        generation=generation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=attestation,
+        principal_observation=principal,
+    )
+
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": source["work_ref"],
+            "commission_ref": source["commission_ref"],
+            "session_ref": f"asd-session-exec-{sealed.job_id.lower()}",
+            "operation_key": f"exec-{sealed.job_id.lower()}",
+            "watch_mode": source["watch_mode"],
+            "allowed_sol_user_ids": ["U0BRETDUAS2"],
+            "created_at": "2026-09-03T01:00:00Z",
+        }
+    )
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    ceo_target = SessionTarget(
+        session_alias="CEO-CANARY",
+        target_seat="ceo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-socket-test",
+        default_alias_by_seat={
+            "coo": target.session_alias,
+            "ceo": ceo_target.session_alias,
+        },
+        workstream_alias_by_seat={},
+        root_job_bindings={
+            root.job_id: {
+                "coo": target.session_alias,
+                "ceo": ceo_target.session_alias,
+            }
+        },
+        targets={
+            target.session_alias: target,
+            ceo_target.session_alias: ceo_target,
+        },
+    )
+    monkeypatch.setattr(
+        "control_plane.session_targets.load_session_targets", lambda: registry
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    facts_reader = object.__new__(ExecutiveControlService)
+    source_facts = facts_reader._runtime_dialogue_observation_facts(runtime, parent)
+    source_response = reduce_dialogue_observation(
+        parent=parent,
+        thread_ts="1788000000.123456",
+        facts=source_facts,
+    )
+    assert source_response.get("state") == "RESOLVED", (
+        source_response,
+        dataclasses.asdict(source_facts),
+    )
+    material = source_response["observation"]
+    candidate = DialogueCandidateReference(
+        mode=source_response["mode"],
+        root_job_id=material["root_job_id"],
+        job_id=material["job_id"],
+        attempt_id=material["attempt_id"],
+        worker_id=material["worker_id"],
+        evidence_digest=material["evidence_digest"],
+    )
+    return SimpleNamespace(
+        attestation=attestation,
+        execution_binding=execution_binding,
+        facts_reader=facts_reader,
+        mcp_capability=mcp_capability,
+        principal=principal,
+        profile=profile,
+        source=source,
+        runtime=runtime,
+        root=root,
+        dispatch=dispatch,
+        sealed=sealed,
+        epoch=epoch,
+        generation=generation,
+        process=process,
+        parent=parent,
+        target=target,
+        ceo_target=ceo_target,
+        registry=registry,
+        binding=binding,
+        candidate=candidate,
+    )
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production carrier crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
+    attestation = fixture.attestation
+    execution_binding = fixture.execution_binding
+    facts_reader = fixture.facts_reader
+    mcp_capability = fixture.mcp_capability
+    principal = fixture.principal
+    profile = fixture.profile
+    source = fixture.source
+    runtime = fixture.runtime
+    root = fixture.root
+    dispatch = fixture.dispatch
+    sealed = fixture.sealed
+    epoch = fixture.epoch
+    generation = fixture.generation
+    process = fixture.process
+    parent = fixture.parent
+    target = fixture.target
+    ceo_target = fixture.ceo_target
+    registry = fixture.registry
+    binding = fixture.binding
+    candidate = fixture.candidate
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id=root.job_id,
+        source_workstream=str(source["work_ref"]),
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+
+    call_order: list[tuple[str, int]] = []
+    initial_thread = threading.get_ident()
+    original_read = runtime.store.read
+
+    @contextmanager
+    def observed_read():
+        thread_id = threading.get_ident()
+        call_order.append(("read-enter", thread_id))
+        with original_read() as connection:
+            yield connection
+        call_order.append(("read-exit", thread_id))
+
+    monkeypatch.setattr(runtime.store, "read", observed_read)
+
+    active_operator_state = {
+        "generation": generation,
+        "binding": binding,
+        "process": process,
+        "obligation": obligation,
+        "target_attempt_id": sealed.attempt_id,
+        "provider_turn_id": "turn-canary-1",
+    }
+
+    class Operator:
+        deliver_calls = 0
+        reconcile_calls = 0
+        emit_ack = False
+
+        def deliver_attention(self, **kwargs):
+            self.deliver_calls += 1
+            call_order.append(("deliver", threading.get_ident()))
+            active_generation = active_operator_state["generation"]
+            active_binding = active_operator_state["binding"]
+            active_provider_turn_id = active_operator_state["provider_turn_id"]
+            return AttentionTurnObservation(
+                process_generation_id=active_generation.process_generation_id,
+                provider_session_id=active_binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id=active_provider_turn_id,
+                accepted=True,
+                delivered=False,
+            )
+
+        def reconcile(self, observed_generation):
+            self.reconcile_calls += 1
+            active_generation = active_operator_state["generation"]
+            active_binding = active_operator_state["binding"]
+            active_process = active_operator_state["process"]
+            active_obligation = active_operator_state["obligation"]
+            active_target_attempt_id = active_operator_state["target_attempt_id"]
+            active_provider_turn_id = active_operator_state["provider_turn_id"]
+            assert observed_generation == active_generation
+            call_order.append(("reconcile", threading.get_ident()))
+            return ReconcileObservation(
+                process_liveness=ProcessLiveness.ALIVE,
+                observed_process=active_process,
+                provider_session_reachable=True,
+                provider_writer_state=ProviderWriterState.HELD,
+                observed_provider_session_id=active_binding.native_handle,
+                late_attention_observation=AttentionTurnObservation(
+                    process_generation_id=active_generation.process_generation_id,
+                    provider_session_id=active_binding.native_handle,
+                    nudge_id=next(
+                        record.record.nudge_id
+                        for record in WakeLedgerRepository(runtime).list_records(
+                            active_obligation.obligation_id
+                        )
+                        if record.record.phase is LedgerPhase.ACCEPTED
+                    ),
+                    provider_native_turn_id=active_provider_turn_id,
+                    accepted=True,
+                    delivered=True,
+                    wake_ack_projection=(
+                        WorkerLocalWakeAckProjection(
+                            target_attempt_id=active_target_attempt_id,
+                            process_generation_id=active_generation.process_generation_id,
+                            binding_id=active_binding.binding_id,
+                            binding_generation=active_binding.binding_generation,
+                            provider_session_id=active_binding.native_handle,
+                            provider_native_turn_id=active_provider_turn_id,
+                            nudge_id=next(
+                                record.record.nudge_id
+                                for record in WakeLedgerRepository(runtime).list_records(
+                                    active_obligation.obligation_id
+                                )
+                                if record.record.phase is LedgerPhase.ACCEPTED
+                            ),
+                            obligation_ids=(active_obligation.obligation_id,),
+                            terminal_ack_trailer=True,
+                        )
+                        if self.emit_ack else None
+                    ),
+                ),
+            )
+
+    operator = Operator()
+
+    # Exercise the installed composer, including historical conversion and the
+    # final native pre-submit guard. An injected copy hid missing production wiring.
+    carrier_factory = service_cli._build_executive_dialogue_wake_carrier
+
+    clock = 1_700_000_100
+
+    def now_epoch_seconds():
+        call_order.append(("clock", threading.get_ident()))
+        return clock
+
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=None,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=carrier_factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_now_epoch_seconds=now_epoch_seconds,
+        installed_release_sha=grant.installed_release_sha,
+    )
+    actual_current_facts = bridge._current_canary_facts
+
+    def observed_current_facts(*args):
+        call_order.append(("current-enter", threading.get_ident()))
+        result = actual_current_facts(*args)
+        call_order.append(("current-exit", threading.get_ident()))
+        return result
+
+    actual_historical_target = bridge._resolve_historical_target
+    historical_resolution_enabled = True
+
+    def observed_historical_target(*args):
+        call_order.append(("historical-enter", threading.get_ident()))
+        if not historical_resolution_enabled:
+            raise StateConflict("diagnostic historical resolver removal")
+        result = actual_historical_target(*args)
+        call_order.append(("historical-exit", threading.get_ident()))
+        return result
+
+    monkeypatch.setattr(bridge, "_current_canary_facts", observed_current_facts)
+    monkeypatch.setattr(bridge, "_resolve_historical_target", observed_historical_target)
+    request = {
+        "schema": "mastermind.dialogue_wake_request/v2",
+        "operation": SUBMIT_WAKE,
+        "parent": parent,
+        "source_observation": source_observation.to_dict(),
+        "candidate": candidate.to_dict(),
+        "attention_obligation": attention_obligation.to_dict(),
+        "route": attention_route.to_dict(),
+    }
+
+    async def exchange(
+        path: Path, payload: dict[str, object] = request
+    ) -> dict[str, object]:
+        return await _raw_request(
+            path,
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n",
+        )
+
+    async def exercise() -> None:
+        monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+        observation_path = short_socket_root / "canary-defaults" / "dialogue.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path / "service", socket_root=short_socket_root / "operator",
+                    runtime_root=runtime.store.root),
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_wake_handler=bridge,
+        )
+        await service.start()
+        try:
+            import integrations.slack_agent_dialogue.runtime as relay_runtime
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
+                DialogueSourceMessage,
+                DialogueSourceSnapshot,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
+            )
+            from integrations.slack_agent_dialogue.engine import (
+                DialogueEngine,
+                DialoguePolicy,
+                SlackMessage,
+            )
+            from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+            from integrations.slack_agent_dialogue.executive_observation_client import (
+                ExecutiveDialogueObservationClient,
+                ExecutiveObservationClientError,
+            )
+            from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+            from integrations.slack_agent_dialogue.service import (
+                AgentDialogueService,
+                ServiceConfig as RelayServiceConfig,
+            )
+            from integrations.slack_agent_dialogue.contract_v2 import (
+                render_message_v2,
+                render_parent_v2,
+            )
+            from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+                ActiveWaiterKey,
+            )
+            from tests.test_slack_agent_dialogue_engine_v2 import (
+                ExactV2AuthorityPolicy,
+            )
+
+            source_progress, source_continuation, source_successor = (
+                _phase3_source_messages(parent, candidate)
+            )
+            composition_messages = tuple(
+                build_message_v2(
+                    {
+                        **message,
+                        "applies_to": {
+                            "kind": "executive_attempt",
+                            "job_id": candidate.job_id,
+                            "attempt_id": candidate.attempt_id,
+                            "worker_id": candidate.worker_id,
+                        },
+                        "fingerprint": "",
+                    }
+                )
+                for message in (source_progress, source_continuation)
+            )
+            slack_client = InMemorySlackClient(
+                relay_bot_user_id="U0RELAY001"
+            )
+            slack_client.add_parent(
+                SlackMessage(
+                    ts="1788000000.123456",
+                    author_user_id="U0RELAY001",
+                    text=render_parent_v2(parent),
+                )
+            )
+            for index, message in enumerate(
+                composition_messages,
+                start=1,
+            ):
+                slack_client.add_reply(
+                    SlackMessage(
+                        ts=f"178800000{index}.123456",
+                        author_user_id="U0RELAY001",
+                        text=render_message_v2(message),
+                        thread_ts="1788000000.123456",
+                    )
+                )
+            dialogue_policy = DialoguePolicy(
+                workspace_id=source_observation.workspace_id,
+                channel_id=source_observation.channel_id,
+                relay_bot_user_id="U0RELAY001",
+                allowed_sol_user_ids=("U0BRETDUAS2",),
+                allowed_parent_user_ids=("U0RELAY001",),
+                poll_interval_seconds=0,
+                method_timeout_seconds=1,
+            )
+            authority = ExactV2AuthorityPolicy()
+            active_waiters = relay_runtime.ActiveWaiterRegistry()
+            dialogue_service = AgentDialogueService(
+                RelayServiceConfig(
+                    socket_path=short_socket_root / "relay" / "agent-relay.sock",
+                    allowed_peer_uids=(os.geteuid(),),
+                ),
+                DialogueEngine(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                ),
+                engine_v2=DialogueEngineV2(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                    active_waiter_registry=active_waiters,
+                ),
+            )
+            monkeypatch.setattr(
+                relay_runtime,
+                "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+                observation_path,
+            )
+            observation_client = ExecutiveDialogueObservationClient(
+                observation_path,
+                timeout_seconds=1,
+            )
+            turn_runtime = relay_runtime.build_turn_runtime(
+                dialogue_service,
+                registry=registry,
+                observation_client=observation_client,
+                emitted_at=lambda: "2026-09-03T01:00:02Z",
+            )
+            active_waiters.register(
+                ActiveWaiterKey.from_parent(parent, target_seat="coo")
+            )
+            source_rpc_calls = 0
+            source_rpc_results = []
+            actual_source_reconcile = bridge.reconcile_dialogue_sources
+
+            def observed_source_reconcile(*args):
+                nonlocal source_rpc_calls
+                source_rpc_calls += 1
+                result = actual_source_reconcile(*args)
+                source_rpc_results.append(result)
+                return result
+
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                observed_source_reconcile,
+            )
+            composition_receipts = await turn_runtime.reconcile_once()
+            assert len(composition_receipts) == 1
+            assert source_rpc_calls == 1, composition_receipts
+            assert source_rpc_results == [
+                {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+            ]
+            assert composition_receipts[0].outcome.value == "ACTIVE_WAITER_SUPPRESSED"
+            assert composition_receipts[0].reason == "EXACT_ACTIVE_WAITER"
+            assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+            with pytest.raises(
+                ExecutiveObservationClientError,
+                match="RESPONSE_REFUSED",
+            ):
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=source_observation.thread_ts,
+                        parent_fingerprint=parent["fingerprint"],
+                        operation_key=parent["operation_key"],
+                        messages=tuple(
+                            DialogueSourceMessage.create(message)
+                            for message in composition_messages
+                        ),
+                    )
+                )
+
+            # The concrete observation client is bound to the Runtime's one
+            # invocation-local ContextVar.  Prove that exceptional and
+            # cancelled candidates reset it, and concurrent candidates cannot
+            # observe one another's thread scope.
+            candidate_batch = await turn_runtime._candidate_collector.collect()
+            assert len(candidate_batch) == 1
+            composition_candidate = candidate_batch[0]
+            wake_context = observation_client._wake_context
+            assert wake_context is not None and wake_context.get() is None
+            original_candidate_inner = turn_runtime._reconcile_candidate_inner
+
+            async def failing_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                raise RuntimeError("diagnostic candidate failure")
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                failing_candidate_inner,
+            )
+            failed_receipt = await turn_runtime._reconcile_candidate(
+                composition_candidate
+            )
+            assert failed_receipt.reason == "TURN_CANDIDATE_PROCESSING_FAILED"
+            assert wake_context.get() is None
+
+            candidate_started = asyncio.Event()
+            candidate_release = asyncio.Event()
+
+            async def cancelled_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                candidate_started.set()
+                await candidate_release.wait()
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                cancelled_candidate_inner,
+            )
+            async def cancelled_scope_probe():
+                try:
+                    return await turn_runtime._reconcile_candidate(
+                        composition_candidate
+                    )
+                except asyncio.CancelledError:
+                    assert wake_context.get() is None
+                    with pytest.raises(
+                        ExecutiveObservationClientError,
+                        match="RESPONSE_REFUSED",
+                    ):
+                        await observation_client.reconcile_dialogue_sources(
+                            DialogueSourceSnapshot(
+                                workspace_id=source_observation.workspace_id,
+                                channel_id=source_observation.channel_id,
+                                thread_ts=source_observation.thread_ts,
+                                parent_fingerprint=parent["fingerprint"],
+                                operation_key=parent["operation_key"],
+                                messages=(),
+                            )
+                        )
+                    raise
+
+            cancelled_task = asyncio.create_task(cancelled_scope_probe())
+            await candidate_started.wait()
+            cancelled_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled_task
+            assert wake_context.get() is None
+
+            parallel_seen: list[tuple[str, str]] = []
+            parallel_ready = asyncio.Event()
+            parallel_count = 0
+
+            async def parallel_exchange(source_request):
+                nonlocal parallel_count
+                own_thread = wake_context.get().thread_ts
+                sent_thread = source_request["snapshot"]["thread_ts"]
+                parallel_count += 1
+                if parallel_count == 2:
+                    parallel_ready.set()
+                await parallel_ready.wait()
+                parallel_seen.append((own_thread, sent_thread))
+                return {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "NOT_APPLICABLE",
+                    "reason": "TEST_PARALLEL_SCOPE",
+                }
+
+            async def parallel_candidate_inner(_candidate):
+                scope = wake_context.get()
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=scope.thread_ts,
+                        parent_fingerprint=scope.parent_fingerprint,
+                        operation_key=scope.operation_key,
+                        messages=(),
+                    )
+                )
+                return composition_receipts[0]
+
+            original_exchange = observation_client._exchange
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                parallel_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                parallel_candidate_inner,
+            )
+            second_candidate = dataclasses.replace(
+                composition_candidate,
+                thread_ts="1788000000.123457",
+            )
+            await asyncio.gather(
+                turn_runtime._reconcile_candidate(composition_candidate),
+                turn_runtime._reconcile_candidate(second_candidate),
+            )
+            assert sorted(parallel_seen) == [
+                ("1788000000.123456", "1788000000.123456"),
+                ("1788000000.123457", "1788000000.123457"),
+            ]
+            assert wake_context.get() is None
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                original_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                original_candidate_inner,
+            )
+
+            composition_source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": list(composition_messages),
+                },
+            }
+            blocked_for_ceo = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-blocked-source-target",
+                    "message_type": "BLOCKED",
+                    "reply_to_message_key": None,
+                    "body": {
+                        "blocker_code": "SOURCE_MOVED",
+                        "reason": "The protected source moved.",
+                        "needed_from": "sol",
+                        "work_paused": True,
+                    },
+                    "requires_response": True,
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            from integrations.slack_agent_dialogue.turn_watcher import (
+                TurnRoutingFacts,
+                classify_turn,
+            )
+            blocked_decision = classify_turn(
+                parent=parent,
+                messages=[blocked_for_ceo],
+                routing=TurnRoutingFacts(
+                    bound_operation_key=parent["operation_key"],
+                    bound_commission_fingerprint=parent["fingerprint"],
+                    root_job_id=candidate.root_job_id,
+                    routing_workstream=None,
+                    source_workstream=parent["work_ref"],
+                    ceo_target_bound=True,
+                    coo_target_bound=True,
+                ),
+            )
+            assert blocked_decision.action.value == "WAKE_CEO", blocked_decision
+
+            def mismatched_target_grant(message, *, target_seat):
+                mismatched_attention = attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=message["message_key"],
+                    target_seat=target_seat,
+                )
+                mismatched_logical = correlated_source_ref(
+                    attention_source_ref=mismatched_attention,
+                    parent_fingerprint=parent["fingerprint"],
+                    operation_key=parent["operation_key"],
+                    candidate=candidate.to_dict(),
+                )
+                return dataclasses.replace(
+                    grant,
+                    obligation_id=mint_obligation_id(
+                        source_kind="agent_dialogue_attention",
+                        source_ref=mismatched_logical,
+                        wake_kind="dialogue_turn_pending",
+                    ),
+                    target_seat=target_seat,
+                )
+
+            target_mismatch_cases = (
+                (
+                    composition_source_frame,
+                    mismatched_target_grant(
+                        composition_messages[-1], target_seat="ceo"
+                    ),
+                ),
+                (
+                    {
+                        **composition_source_frame,
+                        "snapshot": {
+                            **composition_source_frame["snapshot"],
+                            "messages": [blocked_for_ceo],
+                        },
+                    },
+                    mismatched_target_grant(blocked_for_ceo, target_seat="coo"),
+                ),
+            )
+            for mismatch_frame, mismatch_grant in target_mismatch_cases:
+                bridge._canary_profile = DialogueWakeCanaryProfile(mismatch_grant)
+                assert await exchange(observation_path, mismatch_frame) == {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "UNKNOWN",
+                    "reason": "SOURCE_GRANT_DISAGREES",
+                }
+                assert WakeLedgerRepository(runtime).list_records(
+                    mismatch_grant.obligation_id
+                ) == ()
+                assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+
+            terminal_mode_candidate = dataclasses.replace(
+                candidate,
+                mode="TERMINAL_RESULT",
+            )
+            (
+                _terminal_attention,
+                _terminal_attention_route,
+                terminal_mode_obligation,
+                _terminal_mode_route,
+                _terminal_source,
+                _terminal_physical,
+            ) = _phase3_dialogue_material(
+                parent,
+                terminal_mode_candidate,
+                obligation,
+                route,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_mode_obligation.obligation_id,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id="WAKE-" + "f" * 32,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "ADVANCED_WITHOUT_REQUEST",
+            }
+            import control_plane.dialogue_source_resolution as source_resolution_mod
+            import control_plane.wake_events as wake_events_mod
+
+            actual_dialogue_mint = source_resolution_mod.mint_obligation_id
+            actual_wake_mint = wake_events_mod.mint_obligation_id
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            dual_mode = await exchange(observation_path, composition_source_frame)
+            assert dual_mode == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_CANDIDATE_AMBIGUOUS",
+            }
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                actual_dialogue_mint,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint,
+            )
+
+            first = await exchange(observation_path)
+            assert first == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": [source_progress, source_continuation],
+                },
+            }
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
+            )
+            initial_key = f"asd-initial-{parent['fingerprint']}"
+            initial_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=initial_key,
+                target_seat="coo",
+            )
+            initial_logical = correlated_source_ref(
+                attention_source_ref=initial_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            initial_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=initial_logical,
+                declared_target_seat="coo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:00:00Z",
+                emitted_at="2026-09-03T01:00:01Z",
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(grant, obligation_id=initial_obligation.obligation_id)
+            )
+            initial_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {**source_frame["snapshot"], "messages": []},
+                },
+            )
+            assert initial_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            provider_before_source = (operator.deliver_calls, operator.reconcile_calls)
+            present_source = await exchange(observation_path, source_frame)
+            assert present_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            advanced_source = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert advanced_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "TARGET_ACK_REQUIRED",
+            }
+            assert (operator.deliver_calls, operator.reconcile_calls) == provider_before_source
+            deliver_index = next(
+                index for index, item in enumerate(call_order) if item[0] == "deliver"
+            )
+            worker_thread = call_order[deliver_index][1]
+            assert worker_thread != initial_thread
+            worker_prefix = [
+                name for name, thread_id in call_order[:deliver_index]
+                if thread_id == worker_thread
+            ]
+            final_guard_start = len(worker_prefix) - 1 - worker_prefix[::-1].index(
+                "current-enter"
+            )
+            assert worker_prefix[final_guard_start:] == [
+                "current-enter",
+                "read-enter",
+                "clock",
+                "read-exit",
+                "current-exit",
+            ]
+
+            persisted_before_profile_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            provider_calls_before_profile_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            )
+            null_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(None),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            changed_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(
+                    dataclasses.replace(grant, source_semantic_digest="f" * 64)
+                ),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            for incompatible in (null_bridge, changed_bridge):
+                service._dialogue_wake_handler = incompatible
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    refused = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert refused == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "EFFECT_UNKNOWN",
+                        "reason": "WAKE_EFFECT_UNKNOWN",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_calls_before_profile_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_profile_checks
+            service._dialogue_wake_handler = bridge
+
+            turn_operation = OperationId("ohf-op:canary-socket-turn")
+            turn = runtime.operator_harness.reserve_turn(
+                epoch=epoch,
+                generation=generation,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            runtime.operator_harness.acknowledge_turn(
+                turn=turn,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                observation=TurnStartObservation("NATIVE-CANARY-G1", True),
+            )
+            runtime.operator_harness.record_reconcile_observation(
+                generation=generation,
+                observation=ReconcileObservation(
+                    ProcessLiveness.PROVEN_DEAD,
+                    process,
+                    True,
+                    ProviderWriterState.RELEASED,
+                    binding.native_handle,
+                ),
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            resume = OperationId("ohf-op:canary-socket-resume")
+            generation2 = runtime.operator_harness.reserve_same_epoch_resume(
+                epoch=epoch,
+                old_generation=generation,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            process2 = ProcessIdentityObservation(
+                4102, 4102, "start-4102", "boot-fixture"
+            )
+            runtime.operator_harness.bind_resume_result(
+                epoch=epoch,
+                generation=generation2,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                provider_session_id=binding.native_handle,
+                process=process2,
+            )
+            runtime.operator_harness.seal_attestation(
+                generation=generation2,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                requested=profile,
+                attestation=attestation,
+                principal_observation=OperatorPrincipalObservation.from_dict(
+                    {
+                        **principal.to_dict(),
+                        "process_generation_id": generation2.process_generation_id,
+                        "process_identity": {
+                            "pid": process2.pid,
+                            "pgid": process2.pgid,
+                            "process_start_identity": process2.process_start_identity,
+                            "boot_id": process2.boot_id,
+                        },
+                    }
+                ),
+            )
+
+            class BridgeWrapper:
+                canary_profile = bridge.canary_profile
+
+                async def __call__(self, opened, wake_request):
+                    return await bridge(opened, wake_request)
+
+                async def historical_only(self, opened, wake_request):
+                    return await bridge.historical_only(opened, wake_request)
+
+            class FakeHistoricalHandler:
+                canary_profile = bridge.canary_profile
+
+                async def historical_only(self, _opened, _wake_request):
+                    raise AssertionError("fake handler must not receive forced fallback")
+
+            noncanary = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+            )
+            counts_before_exact_class_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            )
+            persisted_before_exact_class_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            for excluded in (BridgeWrapper(), FakeHistoricalHandler(), noncanary):
+                service._dialogue_wake_handler = excluded
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    excluded_response = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert excluded_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "MISSING",
+                        "reason": "CANDIDATE_BINDING_REQUIRED",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            ) == counts_before_exact_class_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_exact_class_checks
+            service._dialogue_wake_handler = bridge
+
+            phases_before_counterfactual = [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ]
+            nonlocal historical_resolution_enabled
+            historical_resolution_enabled = False
+            blocked = await exchange(observation_path)
+            assert blocked == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "EFFECT_UNKNOWN",
+                "reason": "WAKE_EFFECT_UNKNOWN",
+            }
+            assert operator.reconcile_calls == 0
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ] == phases_before_counterfactual
+
+            historical_resolution_enabled = True
+            replay = await exchange(observation_path)
+            assert replay == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            assert operator.reconcile_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == 2
+            assert [name for name, _thread_id in call_order].count(
+                "historical-exit"
+            ) == 1
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ].count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
+            delayed_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            pending_ack = await exchange(observation_path, delayed_source_payload)
+            assert pending_ack == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "DELIVERED_ACK_PENDING",
+                "source_observation": source_observation.to_dict(),
+            }
+            provider_before_delayed_ack = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            )
+            canonical_ack_frame = {
+                "schema": "mastermind.dialogue_delayed_ack_request/v1",
+                "operation": "RECONCILE_WAKE_ACK",
+                "parent": parent,
+                "source_observation": pending_ack["source_observation"],
+            }
+            for excluded in (BridgeWrapper(), FakeHistoricalHandler(), noncanary):
+                service._dialogue_wake_handler = excluded
+                assert await exchange(observation_path, canonical_ack_frame) == {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "NOT_APPLICABLE",
+                    "reason": "NONCANARY_PROFILE",
+                }
+            service._dialogue_wake_handler = bridge
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            delayed_ack_mutations = []
+            for field in pending_ack["source_observation"]:
+                mutated_source = dict(pending_ack["source_observation"])
+                mutated_source[field] = (
+                    "T0BRD2AQXQW" if field == "workspace_id"
+                    else "C0BSBM78V1P" if field == "channel_id"
+                    else "1788000000.123457" if field == "thread_ts"
+                    else "asd-other-source-01" if field == "predecessor_message_key"
+                    else "f" * 64
+                )
+                delayed_ack_mutations.append((field, {
+                    **canonical_ack_frame,
+                    "source_observation": mutated_source,
+                }))
+            delayed_ack_mutations.extend((
+                ("operation_key", {
+                    **canonical_ack_frame,
+                    "parent": build_parent_v2({
+                        **parent, "operation_key": "other-operation-001",
+                        "fingerprint": "",
+                    }),
+                }),
+                ("parent_fingerprint", {
+                    **canonical_ack_frame,
+                    "parent": build_parent_v2({
+                        **parent,
+                        "session_ref": f"{parent['session_ref']}-other",
+                        "fingerprint": "",
+                    }),
+                }),
+            ))
+            for mutation_name, mutation in delayed_ack_mutations:
+                refused_ack = await exchange(observation_path, mutation)
+                assert refused_ack["state"] == "HOLD", mutation_name
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == provider_before_delayed_ack, mutation_name
+
+            # A freshly installed grant with the same source and target
+            # identities but a different policy must not reuse the persisted
+            # G1 route or enter the historical provider resolver.
+            changed_policy_grant = dataclasses.replace(
+                grant,
+                policy_digest="c" * 16,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_policy_grant
+            )
+            historical_before_policy_change = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            changed_policy_ack = await exchange(
+                observation_path,
+                canonical_ack_frame,
+            )
+            assert changed_policy_ack["schema"] == (
+                "mastermind.dialogue_delayed_ack_response/v1"
+            )
+            assert changed_policy_ack["state"] in {"HOLD", "EFFECT_UNKNOWN"}
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_before_policy_change
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            # A present closed canary profile whose grant was removed is a
+            # fail-closed canary state, not the generic/non-canary path.
+            service._dialogue_wake_handler = null_bridge
+            null_grant_ack = await exchange(observation_path, canonical_ack_frame)
+            assert null_grant_ack == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_GRANT_UNAVAILABLE",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            service._dialogue_wake_handler = bridge
+            operator.emit_ack = True
+            delayed_ack = await exchange(
+                observation_path,
+                canonical_ack_frame,
+            )
+            assert delayed_ack == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "EFFECT_UNKNOWN",
+                "reason": "ACK_EFFECT_UNKNOWN",
+            }
+            assert operator.deliver_calls == provider_before_delayed_ack[0]
+            assert operator.reconcile_calls == provider_before_delayed_ack[1] + 1
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ].count(LedgerPhase.TARGET_ACKNOWLEDGED) == 0
+
+            resolver_calls = operator.reconcile_calls
+            historical_calls = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            delivered_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            terminal_replay = await exchange(observation_path)
+            assert terminal_replay == replay
+            terminal_reconcile = await exchange(
+                observation_path,
+                {**request, "operation": RECONCILE_WAKE},
+            )
+            assert terminal_reconcile == replay
+            assert operator.reconcile_calls == resolver_calls
+            assert operator.deliver_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_calls
+            replayed_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            assert replayed_history == delivered_history
+            assert sum(
+                record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                for record in replayed_history
+            ) == 1
+
+            # A second physical source uses the now-current resumed generation.
+            # This proves the whole delayed-ACK path rather than combining the
+            # separate dispatcher and socket fixtures by inference.
+            parent2 = parent
+            source_response2 = reduce_dialogue_observation(
+                parent=parent2,
+                thread_ts=source_observation.thread_ts,
+                facts=facts_reader._runtime_dialogue_observation_facts(
+                    runtime, parent2
+                ),
+            )
+            material2 = source_response2["observation"]
+            candidate2 = DialogueCandidateReference(
+                mode=source_response2["mode"],
+                root_job_id=material2["root_job_id"],
+                job_id=material2["job_id"],
+                attempt_id=material2["attempt_id"],
+                worker_id=material2["worker_id"],
+                evidence_digest=material2["evidence_digest"],
+            )
+            target_intent = {
+                **ack_fixtures._intent(),
+                "intent_id": "CEO-WAKE-ACK-TARGET-002",
+                "objective": "Provide a distinct hermetic delayed ACK target.",
+            }
+            target_admission = submit_intent(
+                runtime,
+                target_intent,
+                execution_binding=execution_binding,
+            )
+            target_root = runtime.jobs.get_job(target_admission["job_id"])
+            assert target_root is not None
+            target_planner = runtime.jobs.create_cycle_planner(
+                target_root.job_id,
+                command_id=f"coo-cycle:{target_root.job_id}:create-planner:0",
+            )
+            runtime.workers.register_worker(
+                "worker-b",
+                provider="openai-codex",
+                account_label="account-b",
+                worker_type="fixture",
+                capabilities=["read"],
+                quota_classes={
+                    "default": {
+                        "provider": "openai-codex",
+                        "model": "fixture-model",
+                        "effort": "medium",
+                        "capabilities": ["read"],
+                        "cost_class": "small",
+                        "metadata": {
+                            "execution_profile_id": "fixture-profile-v1",
+                            "execution_profile_digest": "1" * 64,
+                            "capability_policy_version": "fixture-capabilities-v1",
+                            "capability_policy_digest": "2" * 64,
+                        },
+                    }
+                },
+            )
+            target_dispatch = runtime.attempts.dispatch_cycle_job(
+                target_planner.job_id,
+                command_id=(
+                    f"coo-cycle:{target_root.job_id}:dispatch:"
+                    f"{target_planner.job_id}:attempt:1"
+                ),
+                worker_id="worker-b",
+            )
+            assert target_dispatch is not None
+            assert target_dispatch.lease_token is not None
+            target_profile = dataclasses.replace(
+                ack_fixtures._profile(target_dispatch),
+                capabilities=CapabilityManifest(required=(mcp_capability,)),
+            )
+            target_sealed = runtime.operator_harness.seal_operator_harness_attempt(
+                target_dispatch.attempt.attempt_id,
+                fence_generation=target_dispatch.attempt.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                requested=target_profile,
+            )
+            target_start = OperationId("ohf-op:canary-delayed-ack-target")
+            target_epoch, target_generation = runtime.operator_harness.reserve_start(
+                target_sealed.attempt_id,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                operation_id=target_start,
+            )
+            target_process = ProcessIdentityObservation(
+                4201, 4201, "start-4201", "boot-fixture"
+            )
+            runtime.operator_harness.bind_start_result(
+                epoch=target_epoch,
+                generation=target_generation,
+                operation_id=target_start,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                provider_session_id="PROVIDER-SESSION-2",
+                process=target_process,
+            )
+            target_principal = dataclasses.replace(
+                principal,
+                attempt_id=target_sealed.attempt_id,
+                worker_id="worker-b",
+                process_generation_id=target_generation.process_generation_id,
+                provider_session_id="PROVIDER-SESSION-2",
+                process_identity={
+                    "pid": target_process.pid,
+                    "pgid": target_process.pgid,
+                    "process_start_identity": target_process.process_start_identity,
+                    "boot_id": target_process.boot_id,
+                },
+                observed_at_ms=runtime.store.now_ms(),
+            )
+            target_attestation = dataclasses.replace(
+                ack_fixtures._attestation(target_profile),
+                capabilities=(
+                    ObservedCapabilityIdentity(
+                        kind="mcp_server",
+                        name=mcp_capability.name,
+                        tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                        mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                        mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+                    ),
+                ),
+            )
+            runtime.operator_harness.seal_attestation(
+                generation=target_generation,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                requested=target_profile,
+                attestation=target_attestation,
+                principal_observation=target_principal,
+            )
+            binding2 = project_runtime_binding(
+                runtime, target_sealed.attempt_id, target
+            )
+            continuation2 = build_message_v2({
+                **source_continuation,
+                "message_key": "asd-continue-002",
+                "applies_to": {
+                    "kind": "executive_attempt",
+                    "job_id": candidate2.job_id,
+                    "attempt_id": candidate2.attempt_id,
+                    "worker_id": candidate2.worker_id,
+                },
+                "reply_to_message_key": source_successor["message_key"],
+                "created_at": "2026-09-03T01:00:03Z",
+                "fingerprint": "",
+            })
+            successor2 = build_message_v2({
+                **source_successor,
+                "message_key": "asd-progress-003",
+                "reply_to_message_key": continuation2["message_key"],
+                "created_at": "2026-09-03T01:00:04Z",
+                "fingerprint": "",
+            })
+            source_observation2 = DialogueSourceObservation(
+                workspace_id=source_observation.workspace_id,
+                channel_id=source_observation.channel_id,
+                thread_ts=source_observation.thread_ts,
+                predecessor_message_key=continuation2["message_key"],
+                predecessor_message_fingerprint=continuation2["fingerprint"],
+            )
+            attention2 = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref=attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=continuation2["message_key"],
+                    target_seat="coo",
+                ),
+                declared_target_seat="coo",
+                job_id=candidate2.job_id,
+                attempt_id=candidate2.attempt_id,
+                root_job_id=candidate2.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=parent["work_ref"],
+                source_created_at=obligation.source_created_at,
+                emitted_at="2026-09-03T01:00:03Z",
+            )
+            attention_route2 = route_obligation(
+                attention2, registry, binding=binding2
+            )
+            logical2 = correlated_source_ref(
+                attention_source_ref=attention2.source_ref,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate2.to_dict(),
+            )
+            obligation2 = mint_obligation(
+                wake_kind=attention2.wake_kind,
+                source_kind=attention2.source_kind,
+                source_ref=logical2,
+                declared_target_seat="coo",
+                job_id=candidate2.job_id,
+                attempt_id=candidate2.attempt_id,
+                root_job_id=candidate2.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=parent["work_ref"],
+                source_created_at=attention2.source_created_at,
+                emitted_at=attention2.emitted_at,
+            )
+            route2 = dataclasses.replace(
+                attention_route2,
+                obligation_id=obligation2.obligation_id,
+                route_digest=route_digest(
+                    obligation_id=obligation2.obligation_id,
+                    destination=attention_route2.destination_digest,
+                    policy_digest=attention_route2.policy_digest,
+                ),
+            )
+            grant2 = dataclasses.replace(
+                grant,
+                operation_key=parent2["operation_key"],
+                source_root_job_id=candidate2.root_job_id,
+                source_job_id=candidate2.job_id,
+                source_attempt_id=candidate2.attempt_id,
+                source_worker_id=candidate2.worker_id,
+                source_semantic_digest=candidate2.evidence_digest,
+                obligation_id=obligation2.obligation_id,
+                target_attempt_id=target_sealed.attempt_id,
+                binding_id=binding2.binding_id,
+                binding_generation=binding2.binding_generation,
+                process_generation_id=target_generation.process_generation_id,
+                policy_digest=route2.policy_digest,
+            )
+            bridge2 = ExecutiveDialogueWakeBridge(
+                target_provider=lambda *_args: DialogueWakeTarget(
+                    registry=registry,
+                    runtime_binding=binding2,
+                    target_attempt_id=target_sealed.attempt_id,
+                    process_generation_id=target_generation.process_generation_id,
+                    operator_adapter=operator,
+                ),
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(grant2),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant2.installed_release_sha,
+                operation_key=grant2.operation_key,
+            )
+            service._dialogue_wake_handler = bridge2
+            active_operator_state.update({
+                "generation": target_generation,
+                "binding": binding2,
+                "process": target_process,
+                "obligation": obligation2,
+                "target_attempt_id": target_sealed.attempt_id,
+                "provider_turn_id": "turn-canary-2",
+            })
+            operator.emit_ack = False
+            wake2 = {
+                "schema": "mastermind.dialogue_wake_request/v2",
+                "operation": SUBMIT_WAKE,
+                "parent": parent2,
+                "source_observation": source_observation2.to_dict(),
+                "candidate": candidate2.to_dict(),
+                "attention_obligation": attention2.to_dict(),
+                "route": attention_route2.to_dict(),
+            }
+            parsed_wake2 = observation_mod.parse_wake_request(
+                json.dumps(wake2, sort_keys=True, separators=(",", ":")).encode()
+            )
+            assert parsed_wake2.operation == SUBMIT_WAKE
+            assert parsed_wake2.obligation.obligation_id == obligation2.obligation_id
+            delivered2 = await exchange(observation_path, wake2)
+            assert delivered2 == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }, (
+                delivered2,
+                wake2["operation"],
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [
+                    item.record.phase
+                    for item in WakeLedgerRepository(runtime).list_records(
+                        obligation2.obligation_id
+                    )
+                ],
+            )
+            assert await exchange(
+                observation_path, {**wake2, "operation": RECONCILE_WAKE}
+            ) == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            source_frame2 = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent2,
+                "snapshot": {
+                    "workspace_id": source_observation2.workspace_id,
+                    "channel_id": source_observation2.channel_id,
+                    "thread_ts": source_observation2.thread_ts,
+                    "parent_fingerprint": parent2["fingerprint"],
+                    "operation_key": parent2["operation_key"],
+                    "complete": True,
+                    "messages": [
+                        source_progress,
+                        source_continuation,
+                        source_successor,
+                        continuation2,
+                        successor2,
+                    ],
+                },
+            }
+            pending2 = await exchange(observation_path, source_frame2)
+            assert pending2 == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "DELIVERED_ACK_PENDING",
+                "source_observation": source_observation2.to_dict(),
+            }
+            ack2 = {
+                "schema": "mastermind.dialogue_delayed_ack_request/v1",
+                "operation": "RECONCILE_WAKE_ACK",
+                "parent": parent2,
+                "source_observation": pending2["source_observation"],
+            }
+            calls_before_ack2 = (operator.deliver_calls, operator.reconcile_calls)
+            operator.emit_ack = True
+            for index, message in enumerate(
+                (source_successor, continuation2, successor2), start=3
+            ):
+                slack_client.add_reply(
+                    SlackMessage(
+                        ts=f"178800000{index}.123456",
+                        author_user_id="U0RELAY001",
+                        text=render_message_v2(message),
+                        thread_ts=source_observation2.thread_ts,
+                    )
+                )
+            original_ack_sender = service._send_dialogue_observation
+            dropped_ack_response = False
+
+            async def drop_first_ack_response(writer, payload):
+                nonlocal dropped_ack_response
+                if (
+                    not dropped_ack_response
+                    and payload.get("schema")
+                    == "mastermind.dialogue_delayed_ack_response/v1"
+                    and payload.get("state") == "RECORDED"
+                ):
+                    dropped_ack_response = True
+                    writer.close()
+                    return
+                await original_ack_sender(writer, payload)
+
+            monkeypatch.setattr(
+                service, "_send_dialogue_observation", drop_first_ack_response
+            )
+            first_connected_pass = await turn_runtime.reconcile_once()
+            assert len(first_connected_pass) == 1
+            assert first_connected_pass[0].outcome.value == "RECONCILIATION_INCOMPLETE", first_connected_pass
+            assert (
+                first_connected_pass[0].reason
+                == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+            )
+            assert dropped_ack_response
+            assert sum(
+                item.record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 1
+            assert sum(
+                item.record.phase is LedgerPhase.SOURCE_RESOLVED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 0
+            monkeypatch.setattr(
+                service, "_send_dialogue_observation", original_ack_sender
+            )
+            replay_calls = operator.reconcile_calls
+            concurrent_ack_wires = await asyncio.gather(
+                exchange(observation_path, ack2),
+                exchange(observation_path, ack2),
+                return_exceptions=True,
+            )
+            assert concurrent_ack_wires == [
+                {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "RECORDED",
+                    "reason": "ACK_ALREADY_RECORDED",
+                },
+                {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "RECORDED",
+                    "reason": "ACK_ALREADY_RECORDED",
+                },
+            ]
+            ack2_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            )
+            assert sum(
+                record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+                for record in ack2_history
+            ) == 1
+            assert sum(
+                record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                for record in ack2_history
+            ) == 1
+            assert operator.deliver_calls == calls_before_ack2[0]
+            assert operator.reconcile_calls == calls_before_ack2[1] + 1
+            assert operator.reconcile_calls == replay_calls
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "RECORDED",
+                "reason": "ACK_ALREADY_RECORDED",
+            }
+            assert operator.reconcile_calls == replay_calls
+            terminal_policy_grant = dataclasses.replace(
+                grant2,
+                policy_digest="d" * 16,
+            )
+            bridge2._canary_profile = DialogueWakeCanaryProfile(
+                terminal_policy_grant
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert operator.reconcile_calls == replay_calls
+            bridge2._canary_profile = DialogueWakeCanaryProfile(grant2)
+
+            # The same validator that gates the terminal replay refuses a
+            # second attempt and an incomplete nudge command group.
+            from integrations.slack_agent_dialogue import (
+                persisted_wake_carrier as carrier_mod,
+            )
+
+            persisted_ack2 = WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            )
+            attempt_event = next(
+                item
+                for item in persisted_ack2
+                if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                (*persisted_ack2, attempt_event),
+                grant2,
+            ) is None
+            malformed_attempt = dataclasses.replace(
+                attempt_event,
+                record=dataclasses.replace(
+                    attempt_event.record,
+                    nudge_attempt_command_ids=(
+                        *attempt_event.record.nudge_attempt_command_ids,
+                        f"{obligation2.obligation_id}:A2",
+                    ),
+                ),
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                tuple(
+                    malformed_attempt if item is attempt_event else item
+                    for item in persisted_ack2
+                ),
+                grant2,
+            ) is None
+
+            # A syntactically valid alternate nudge identity on both durable
+            # attempt phases remains causal, but must not receive terminal
+            # replay credit because it was not minted from the destination
+            # and singleton command group.
+            alternate_nudge_id = "NUDGE-" + "f" * 32
+            forged_nudge_history = tuple(
+                dataclasses.replace(
+                    item,
+                    record=dataclasses.replace(
+                        item.record,
+                        nudge_id=alternate_nudge_id,
+                    ),
+                )
+                if item.record.phase in {
+                    LedgerPhase.DELIVERY_ATTEMPT,
+                    LedgerPhase.DELIVERED,
+                }
+                else item
+                for item in persisted_ack2
+            )
+            from control_plane.wake_ledger import assert_causal
+
+            assert_causal(tuple(item.record for item in forged_nudge_history))
+            original_list_records = WakeLedgerRepository.list_records
+
+            def forged_terminal_history(repository_self, obligation_id):
+                if obligation_id == obligation2.obligation_id:
+                    return forged_nudge_history
+                return original_list_records(repository_self, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                forged_terminal_history,
+            )
+            calls_before_forged_terminal = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            ) == calls_before_forged_terminal
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                original_list_records,
+            )
+            assert WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            ) == persisted_ack2
+            second_connected_pass = await turn_runtime.reconcile_once()
+            assert len(second_connected_pass) == 1
+            assert second_connected_pass[0].outcome.value == "NO_ACTION"
+            assert operator.reconcile_calls == replay_calls
+            assert sum(
+                item.record.phase is LedgerPhase.SOURCE_RESOLVED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 1
+
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            active_operator_state.update({
+                "generation": generation,
+                "binding": binding,
+                "process": process,
+                "obligation": obligation,
+                "target_attempt_id": sealed.attempt_id,
+                "provider_turn_id": "turn-canary-1",
+            })
+
+            repository = WakeLedgerRepository(runtime)
+            for index, terminal_phase in enumerate(
+                (
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                ),
+                start=1,
+            ):
+                terminal_obligation = mint_obligation(
+                    wake_kind="dialogue_turn_pending",
+                    source_kind="agent_dialogue_attention",
+                    source_ref="agent_dialogue_attention:"
+                    + format(index, "x") * 64,
+                    declared_target_seat="coo",
+                    job_id=sealed.job_id,
+                    attempt_id=sealed.attempt_id,
+                    root_job_id=root.job_id,
+                    source_workstream=str(source["work_ref"]),
+                    source_created_at="2026-09-03T01:00:00Z",
+                    emitted_at=f"2026-09-03T01:00:0{index + 1}Z",
+                )
+                terminal_route = route_obligation(
+                    terminal_obligation, registry, binding=binding
+                )
+                terminal_grant = dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_obligation.obligation_id,
+                    policy_digest=terminal_route.policy_digest,
+                )
+                terminal_profile = DialogueWakeCanaryProfile(terminal_grant)
+                effective_terminal_route = effective_dialogue_wake_canary_route(
+                    terminal_profile, terminal_route
+                )
+                delivery_attempt = make_delivery_attempt(
+                    terminal_obligation,
+                    effective_terminal_route,
+                    attempt_n=1,
+                )
+                rows = [
+                    (requested_record(terminal_obligation), terminal_obligation),
+                    (
+                        attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERY_ATTEMPT
+                        ),
+                        terminal_obligation,
+                    ),
+                ]
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(
+                                delivery_attempt, LedgerPhase.DELIVERED
+                            ),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    ack = acknowledge(
+                        terminal_obligation,
+                        trusted=TrustedAckContext(
+                            ack_mode=AckMode.REASONING_SESSION,
+                            target_seat="coo",
+                            session_alias=binding.session_alias,
+                            reasoning_surface=binding.reasoning_surface,
+                            binding_id=binding.binding_id,
+                            binding_generation=binding.binding_generation,
+                            acknowledged_at="2026-09-03T01:01:00Z",
+                        ),
+                        claimed_obligation_ids=(
+                            terminal_obligation.obligation_id,
+                        ),
+                        delivered_command_id=attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERED
+                        ).command_id,
+                    )
+                    rows.append((ack_record(terminal_obligation, ack), terminal_obligation))
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    resolution = SourceResolution(
+                        obligation_id=terminal_obligation.obligation_id,
+                        code=SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
+                        health=SourceReadHealth.HEALTHY,
+                        source_present=False,
+                        source_kind=terminal_obligation.source_kind.value,
+                        source_ref=terminal_obligation.source_ref,
+                        snapshot_digest="ab" * 16,
+                        resolved_at="2026-09-03T01:01:00Z",
+                    )
+                    rows.append(
+                        (
+                            resolved_record(terminal_obligation, resolution),
+                            terminal_obligation,
+                        )
+                    )
+                elif terminal_phase in {
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(delivery_attempt, terminal_phase),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    with pytest.raises(
+                        WakeLedgerError,
+                        match="source resolution code does not match the obligation source",
+                    ):
+                        repository.append_records_atomic(rows)
+                    assert repository.list_records(
+                        terminal_obligation.obligation_id
+                    ) == ()
+                    continue
+                repository.append_records_atomic(rows)
+                terminal_bridge = ExecutiveDialogueWakeBridge(
+                    target_provider=None,
+                    retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                    operator_adapter=operator,
+                    carrier_factory=carrier_factory,
+                    canary_profile=terminal_profile,
+                    canary_now_epoch_seconds=now_epoch_seconds,
+                    installed_release_sha=terminal_grant.installed_release_sha,
+                    operation_key=terminal_grant.operation_key,
+                )
+                terminal_resolver_calls = 0
+                actual_terminal_resolver = terminal_bridge._resolve_historical_target
+
+                def observed_terminal_resolver(*args):
+                    nonlocal terminal_resolver_calls
+                    terminal_resolver_calls += 1
+                    return actual_terminal_resolver(*args)
+
+                monkeypatch.setattr(
+                    terminal_bridge,
+                    "_resolve_historical_target",
+                    observed_terminal_resolver,
+                )
+                service._dialogue_wake_handler = terminal_bridge
+                terminal_request = {
+                    "schema": "mastermind.dialogue_wake_request/v1",
+                    "operation": SUBMIT_WAKE,
+                    "parent": parent,
+                    "thread_ts": "1788000000.123456",
+                    "candidate": candidate.to_dict(),
+                    "obligation": terminal_obligation.to_dict(),
+                    "route": terminal_route.to_dict(),
+                }
+                before_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                calls_before_terminal_socket = (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                )
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    terminal_response = await exchange(
+                        observation_path,
+                        {**terminal_request, "operation": operation},
+                    )
+                    assert terminal_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "RECORDED",
+                        "reason": "WAKE_RECORDED",
+                    }
+                assert terminal_resolver_calls == 0
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_terminal_socket
+                after_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                assert after_terminal_socket == before_terminal_socket
+                assert sum(
+                    record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                    for record in after_terminal_socket
+                ) == 1
+            service._dialogue_wake_handler = bridge
+            main_records = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            delivered = next(
+                record for record in main_records if record.phase is LedgerPhase.DELIVERED
+            )
+            ack = acknowledge(
+                obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="coo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:02:00Z",
+                ),
+                claimed_obligation_ids=(obligation.obligation_id,),
+                delivered_command_id=delivered.command_id,
+            )
+            repository.append_record(ack_record(obligation, ack), obligation=obligation)
+            calls_before_resolution = (operator.deliver_calls, operator.reconcile_calls)
+            history_before_false_absence = tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            )
+            edited_predecessor = build_message_v2(
+                {
+                    **source_continuation,
+                    "body": {
+                        "instruction": "Edited after delivery.",
+                        "stop_condition": "Stop on conflict.",
+                        "scope_change": False,
+                    },
+                    "fingerprint": "",
+                }
+            )
+            fork_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-fork",
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            wrong_actor_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-wrong-actor",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "applies_to": source_progress["applies_to"],
+                    "created_at": "2026-09-03T01:00:04Z",
+                    "fingerprint": "",
+                }
+            )
+            false_absence_histories = {
+                "deleted_predecessor": [source_progress, source_successor],
+                "orphan_successor": [source_successor],
+                "edited_predecessor": [
+                    source_progress,
+                    edited_predecessor,
+                    source_successor,
+                ],
+                "forked_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    source_successor,
+                    fork_successor,
+                ],
+                "wrong_actor_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    wrong_actor_successor,
+                ],
+            }
+            for false_case, false_messages in false_absence_histories.items():
+                false_response = await exchange(
+                    observation_path,
+                    {
+                        **source_frame,
+                        "snapshot": {
+                            **source_frame["snapshot"],
+                            "messages": false_messages,
+                        },
+                    },
+                )
+                assert false_response["state"] != "RECORDED", (
+                    false_case,
+                    false_response,
+                )
+                assert tuple(
+                    item.record
+                    for item in repository.list_records(obligation.obligation_id)
+                ) == history_before_false_absence
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_resolution
+            resolved_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            original_source_send = service._send_dialogue_observation
+            dropped_resolution_response = False
+            first_resolution_barrier = threading.Barrier(2)
+            first_resolution_results = []
+
+            def synchronized_first_resolution(*args):
+                # Both requests are admitted to the test barrier before either
+                # handler opens RuntimeStore's real BEGIN IMMEDIATE transaction.
+                first_resolution_barrier.wait(timeout=2)
+                result = actual_source_reconcile(*args)
+                first_resolution_results.append(result)
+                return result
+
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                synchronized_first_resolution,
+            )
+
+            async def drop_first_resolution_response(writer, payload):
+                nonlocal dropped_resolution_response
+                if (
+                    not dropped_resolution_response
+                    and payload.get("schema")
+                    == "mastermind.dialogue_source_reconcile_response/v1"
+                    and payload.get("state") == "RECORDED"
+                ):
+                    dropped_resolution_response = True
+                    writer.close()
+                    return
+                await original_source_send(writer, payload)
+
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                drop_first_resolution_response,
+            )
+            first_resolution_wire = await asyncio.gather(
+                exchange(observation_path, resolved_source_payload),
+                exchange(observation_path, resolved_source_payload),
+                return_exceptions=True,
+            )
+            assert dropped_resolution_response
+            assert sorted(
+                item["reason"] for item in first_resolution_results
+            ) == ["SOURCE_ALREADY_RESOLVED", "SOURCE_RESOLVED"]
+            assert sum(isinstance(item, json.JSONDecodeError) for item in first_resolution_wire) == 1
+            assert sum(
+                isinstance(item, dict)
+                and item.get("reason") in {"SOURCE_RESOLVED", "SOURCE_ALREADY_RESOLVED"}
+                for item in first_resolution_wire
+            ) == 1
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                original_source_send,
+            )
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                observed_source_reconcile,
+            )
+            resolved_response = await exchange(
+                observation_path,
+                resolved_source_payload,
+            )
+            assert resolved_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            resolution_history = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            assert sum(record.phase is LedgerPhase.SOURCE_RESOLVED for record in resolution_history) == 1
+            original_resolution = next(
+                record for record in resolution_history
+                if record.phase is LedgerPhase.SOURCE_RESOLVED
+            )
+            later_healthy_ack = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-ack-later-healthy",
+                    "message_type": "ACK",
+                    "reply_to_message_key": source_successor["message_key"],
+                    "body": {"acknowledged": True},
+                    "created_at": "2026-09-03T01:04:00Z",
+                    "fingerprint": "",
+                }
+            )
+            later_history_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                            later_healthy_ack,
+                        ],
+                    },
+                },
+            )
+            assert later_history_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            after_later_history = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            assert after_later_history == resolution_history
+            assert next(
+                record for record in after_later_history
+                if record.phase is LedgerPhase.SOURCE_RESOLVED
+            ) == original_resolution
+            replay_resolution = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert replay_resolution == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+
+            concurrent_resolution_replays = await asyncio.gather(
+                exchange(observation_path, resolved_source_payload),
+                exchange(observation_path, resolved_source_payload),
+            )
+            assert concurrent_resolution_replays == [
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+            ]
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            await service.close()
+            reopened_runtime = Runtime.at(tmp_path / "runtime")
+            reopened_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(grant),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            service._runtime_factory = lambda _root: reopened_runtime
+            service._dialogue_wake_handler = reopened_bridge
+            await service.start()
+            assert await exchange(
+                observation_path,
+                resolved_source_payload,
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(reopened_runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            service._dialogue_wake_handler = bridge
+
+            actual_wake_mint_after_request = wake_events_mod.mint_obligation_id
+            post_request_mints = []
+
+            def observed_post_request_mint(**kwargs):
+                post_request_mints.append(kwargs)
+                return actual_wake_mint_after_request(**kwargs)
+
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                observed_post_request_mint,
+            )
+            assert await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            # Four calls are the closed obligation/physical hydration checks.
+            # Re-entering the two-mode pre-request branch adds two more.
+            assert len(post_request_mints) == 4
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint_after_request,
+            )
+
+            resolver_counts_before_resolved_wake = (
+                [name for name, _thread_id in call_order].count("current-enter"),
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            )
+            for wake_operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                assert await exchange(
+                    observation_path,
+                    {**request, "operation": wake_operation},
+                ) == {
+                    "schema": WAKE_RESPONSE_SCHEMA,
+                    "state": "RECORDED",
+                    "reason": "WAKE_RECORDED",
+                }
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            assert (
+                [name for name, _thread_id in call_order].count("current-enter"),
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            ) == resolver_counts_before_resolved_wake
+
+            original_connection_read = (
+                WakeLedgerRepository.list_ledger_records_on_connection
+            )
+            noncausal_history = tuple(
+                record
+                for record in resolution_history
+                if record.phase in {
+                    LedgerPhase.WAKE_REQUESTED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }
+            )
+
+            def noncausal_connection_read(self, connection, obligation_id):
+                if obligation_id == obligation.obligation_id:
+                    return noncausal_history
+                return original_connection_read(self, connection, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                noncausal_connection_read,
+            )
+            noncausal_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            )
+            assert noncausal_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                original_connection_read,
+            )
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+
+            changed_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest="f" * 64,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(changed_grant)
+            changed_grant_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert changed_grant_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_GRANT_DISAGREES",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            changed_candidate = dataclasses.replace(
+                candidate,
+                evidence_digest="9" * 64,
+            )
+            (
+                _changed_attention,
+                _changed_attention_route,
+                changed_obligation,
+                changed_route,
+                _changed_source_observation,
+                _changed_physical_source,
+            ) = _phase3_dialogue_material(
+                parent,
+                changed_candidate,
+                obligation,
+                route,
+            )
+            changed_identity_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest=changed_candidate.evidence_digest,
+                obligation_id=changed_obligation.obligation_id,
+                policy_digest=changed_route.policy_digest,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_identity_grant
+            )
+            changed_identity_source = await exchange(
+                observation_path,
+                source_frame,
+            )
+            assert changed_identity_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            assert repository.list_records(changed_obligation.obligation_id) == ()
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            result_message = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-result-invalid-interior",
+                    "message_type": "RESULT",
+                    "actor_ref": {
+                        "kind": "worker_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "applies_to": {
+                        "kind": "executive_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "reply_to_message_key": None,
+                    "body": {"status": "PASS", "result": "Result awaiting a Sol response."},
+                    "created_at": "2026-09-03T01:03:00Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_ruling = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-ruling-invalid-interior",
+                    "message_type": "RULING",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "reply_to_message_key": result_message["message_key"],
+                    "body": {
+                        "authority_class": "WITHIN_COMMISSION",
+                        "selected_option": "opt-continue",
+                        "decision": "Continue.",
+                        "rationale": "Exercise the invalid interior transition.",
+                        "canonical_ref": None,
+                    },
+                    "created_at": "2026-09-03T01:03:01Z",
+                    "fingerprint": "",
+                }
+            )
+            later_progress = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-after-invalid-interior",
+                    "reply_to_message_key": invalid_ruling["message_key"],
+                    "created_at": "2026-09-03T01:03:02Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=result_message["message_key"],
+                target_seat="ceo",
+            )
+            invalid_logical = correlated_source_ref(
+                attention_source_ref=invalid_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            invalid_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=invalid_logical,
+                declared_target_seat="ceo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:03:00Z",
+                emitted_at="2026-09-03T01:03:01Z",
+            )
+            invalid_base_route = dataclasses.replace(
+                route,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                route_digest=route_digest(
+                    obligation_id=invalid_obligation.obligation_id,
+                    destination=route.destination_digest,
+                    policy_digest=route.policy_digest,
+                ),
+            )
+            invalid_grant = dataclasses.replace(
+                grant,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                policy_digest=invalid_base_route.policy_digest,
+            )
+            invalid_physical = PhysicalDialogueSourceIdentity.create(
+                logical_source_ref=invalid_logical,
+                obligation_id=invalid_obligation.obligation_id,
+                observation=DialogueSourceObservation(
+                    workspace_id=source_observation.workspace_id,
+                    channel_id=source_observation.channel_id,
+                    thread_ts=source_observation.thread_ts,
+                    predecessor_message_key=result_message["message_key"],
+                    predecessor_message_fingerprint=result_message["fingerprint"],
+                ),
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                target_seat="ceo",
+                candidate=candidate.to_dict(),
+            )
+            invalid_effective_route = effective_dialogue_wake_canary_route(
+                DialogueWakeCanaryProfile(invalid_grant), invalid_base_route
+            )
+            invalid_attempt = make_delivery_attempt(
+                invalid_obligation, invalid_effective_route, attempt_n=1
+            )
+            invalid_delivered = attempt_record(invalid_attempt, LedgerPhase.DELIVERED)
+            invalid_ack = acknowledge(
+                invalid_obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="ceo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:04:00Z",
+                ),
+                claimed_obligation_ids=(invalid_obligation.obligation_id,),
+                delivered_command_id=invalid_delivered.command_id,
+            )
+            repository.append_records_atomic(
+                (
+                    (requested_record(invalid_obligation, physical_source=invalid_physical), invalid_obligation),
+                    (attempt_record(invalid_attempt, LedgerPhase.DELIVERY_ATTEMPT), invalid_obligation),
+                    (invalid_delivered, invalid_obligation),
+                    (ack_record(invalid_obligation, invalid_ack), invalid_obligation),
+                )
+            )
+            invalid_before = tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(invalid_grant)
+            invalid_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [result_message, invalid_ruling, later_progress],
+                    },
+                },
+            )
+            assert invalid_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_REFUSED",
+            }
+            assert tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            ) == invalid_before
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
 
 
 def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
@@ -2320,15 +5601,25 @@ def test_close_drains_terminal_flight_created_by_dispatch_shutdown_race(
         service._dispatch_tasks[planner.job_id] = dispatch_task
 
         close_task = asyncio.create_task(service.close())
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        while not service._closing:
+            await asyncio.sleep(0)
         finish_release.set()
         await asyncio.wait_for(projector_entered.wait(), timeout=1)
-        await asyncio.sleep(0.15)
-        assert close_task.done() is False
+        with pytest.raises(
+            ServiceError,
+            match="terminal service work has not drained; custody retained",
+        ):
+            await asyncio.wait_for(close_task, timeout=1)
+        assert len(service._terminal_return_flights) == 1
+        _digest, terminal_flight = next(
+            iter(service._terminal_return_flights.values())
+        )
+        assert terminal_flight.done() is False
+        assert terminal_flight.cancelled() is False
 
         projector_release.set()
-        await asyncio.wait_for(close_task, timeout=1)
+        await asyncio.wait_for(asyncio.shield(terminal_flight), timeout=1)
+        await asyncio.wait_for(service.close(), timeout=1)
         assert service._terminal_return_flights == {}
         assert [
             event.event_type
@@ -4264,6 +7555,25 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
 
             registered = await _request(service, "register-worker")
             assert registered["result"]["worker_id"] == "codex-01"
+            # Fresh registration must produce the canonical proof + dormant COO
+            # quota set; the proof quota is the only ``codex-native`` row.
+            assert set(registered["result"]["quota_classes"]) == {
+                service.config.quota_class,
+                service.config.coo_quota_class,
+                service.config.coo_default_quota_class,
+            }
+            codex_native = service.runtime.workers.get_quota_class(
+                service.config.worker_id, service.config.quota_class
+            )
+            assert codex_native is not None
+            assert codex_native.model == service.config.model
+            assert (
+                service.runtime.workers.get_quota_class(
+                    service.config.worker_id,
+                    service.config.coo_operator_quota_class,
+                )
+                is None
+            )
             # Registration is idempotent only for the exact configured identity.
             assert (await _request(service, "register-worker"))["ok"] is True
 
@@ -4384,7 +7694,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["routing_policy_version"] == "2026-10-14.attended-qualification"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )
@@ -4669,6 +7979,371 @@ def test_bounded_service_tick_persists_one_refusal_without_mutating_root(
     asyncio.run(exercise())
 
 
+def test_armed_service_advances_review_repair_without_web_continue(
+    tmp_path: Path,
+    short_socket_root: Path,
+):
+    async def wait_until(service, predicate, *, timeout: float = 30.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(
+            "bounded service did not reach aggregation handoff: "
+            f"last_error={service._coo_last_error} "
+            f"last_outcome={service._coo_last_outcome} "
+            f"dispatch_errors={service._dispatch_errors}"
+        )
+
+    class TypedCooSupervisor(_FakeSupervisor):
+        def __init__(self, runtime: Runtime, *, service_config: ServiceConfig):
+            super().__init__(runtime)
+            self.service_config = service_config
+            self.dispatches: dict[str, OrchestrationDispatchOutcome] = {}
+
+        async def start_cycle_job(self, job_id: str, *, command_id: str):
+            job = self.runtime.jobs.get_job(job_id)
+            assert job is not None
+            if job.orchestration_role != "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01",
+                    WorkerStatus.OFFLINE,
+                    quota_class=self.service_config.coo_quota_class,
+                )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.OFFLINE
+                )
+            outcome = self.runtime.attempts.dispatch_cycle_job(
+                job_id,
+                command_id=command_id,
+                lease_owner="service-typed-fixture",
+            )
+            if outcome is None:
+                raise StateConflict(f"typed fixture capacity unavailable for {job_id}")
+            self.started_jobs.append(job_id)
+            self.dispatches[job_id] = outcome
+            if outcome.lease_token is None:
+                raise RuntimeError(
+                    "OUTCOME TOKEN MISSING " + repr((job_id, command_id))
+                )
+            return _Active(
+                lease=AttemptLease(
+                    attempt=outcome.attempt,
+                    lease_token=str(outcome.lease_token),
+                )
+            )
+
+        async def finish_job(self, active: _Active):
+            dispatch = self.dispatches[active.lease.attempt.job_id]
+            attempt = active.lease.attempt
+            assert dispatch.lease_token is not None
+            assert active.lease.lease_token is not None
+            assert self.started_jobs[-1] == attempt.job_id
+            job = self.runtime.jobs.get_job(attempt.job_id)
+            assert job is not None and job.orchestration_role
+            plan_job = next(
+                item
+                for item in self.runtime.jobs.list_jobs()
+                if item.root_job_id == job.root_job_id
+                and item.orchestration_role == "plan"
+            )
+            if job.orchestration_role == "plan":
+                plan_body = {
+                    "schema_version": "mastermind.execution_plan/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": attempt.attempt_id,
+                    "steps": [
+                        {
+                            "ordinal": 0,
+                            "step_id": "step-1",
+                            "objective": "Perform one bounded read-only task.",
+                            "business_impact": "routine",
+                            "review_required": True,
+                            "requested_authorities": ["READ"],
+                            "allowed_write_paths": [],
+                            "validation_ids": [],
+                            "attempt_limit": 1,
+                            "cost_class": "small",
+                        }
+                    ],
+                }
+            else:
+                plan_terminal = plan_job.result
+                assert plan_terminal is not None
+                plan_body = plan_terminal["result_envelope"]["role_result"]
+            plan_digest = canonical_digest(plan_body)
+
+            if job.orchestration_role == "plan":
+                body = plan_body
+            elif job.orchestration_role in {"work", "repair"}:
+                body = {
+                    "schema_version": "mastermind.work_result/v1"
+                    if job.orchestration_role == "work"
+                    else "mastermind.repair_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": job.plan_attempt_id,
+                    "plan_digest": plan_digest,
+                    "plan_step_id": job.plan_step_id,
+                    "repair_round": job.repair_round,
+                    "artifacts": [],
+                    "evidence_digests": [],
+                }
+                if job.orchestration_role == "repair":
+                    assert job.supersedes_job_id and job.orchestration_provenance
+                    rejected_review_id = job.orchestration_provenance["source_id"]
+                    rejected_review = self.runtime.jobs.get_job(rejected_review_id)
+                    assert rejected_review is not None and rejected_review.result
+                    body["supersedes_job_id"] = job.supersedes_job_id
+                    body["rejected_review_job_id"] = rejected_review_id
+                    rejected_envelope = rejected_review.result["result_envelope"]
+                    body["rejected_review_result_digest"] = canonical_digest(
+                        rejected_envelope["role_result"]
+                    )
+            elif job.orchestration_role == "review":
+                assert job.reviews_job_id
+                reviewed = self.runtime.jobs.get_job(job.reviews_job_id)
+                reviewed_result = reviewed.result if reviewed is not None else None
+                reviewed_envelope = (
+                    reviewed_result.get("result_envelope")
+                    if reviewed_result is not None
+                    else None
+                )
+                reviewed_body = (
+                    reviewed_envelope.get("role_result")
+                    if reviewed_envelope is not None
+                    else None
+                )
+                assert reviewed_body is not None and reviewed_body[
+                    "schema_version"
+                ] in {
+                    "mastermind.work_result/v1",
+                    "mastermind.repair_result/v1",
+                }
+                assert reviewed_envelope is not None
+                body = _review_body(
+                    root_id=job.root_job_id,
+                    plan_attempt_id=str(job.plan_attempt_id),
+                    plan_digest=plan_digest,
+                    target_job_id=reviewed.job_id,
+                    target_attempt_id=str(reviewed.current_attempt_id),
+                    target_result_digest=canonical_digest(
+                        reviewed_envelope["role_result"]
+                    ),
+                    repair_round=int(job.repair_round or 0),
+                    verdict="reject" if job.repair_round == 0 else "approve",
+                )
+            else:
+                assert job.orchestration_role == "aggregation"
+                handoff = self.runtime.jobs.get_cycle_handoff(job.job_id)
+                body = {
+                    "schema_version": "mastermind.aggregation_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "handoff_digest": handoff["handoff_digest"],
+                    "policy_sha": handoff["policy_sha"],
+                    "plan_attempt_id": handoff["plan_attempt_id"],
+                    "plan_digest": handoff["plan_digest"],
+                    "revisions": [
+                        {
+                            key: item[key]
+                            for key in {
+                                "ordinal",
+                                "plan_step_id",
+                                "current_job_id",
+                                "current_attempt_id",
+                                "current_result_digest",
+                                "repair_round",
+                                "review_required",
+                                "qualifying_review_job_id",
+                                "qualifying_review_attempt_id",
+                                "qualifying_review_result_digest",
+                            }
+                        }
+                        for item in handoff["revisions"]
+                    ],
+                    "aggregate_summary": "One bounded repaired result is ready.",
+                    "evidence_digests": [],
+                }
+
+            seal, _terminal = _complete_ohf_role(
+                self.runtime,
+                dispatch,
+                body,
+                identity_seed=8400 + len(self.started_jobs),
+            )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.OFFLINE
+                )
+            return seal
+
+    async def exercise() -> None:
+        base_config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        config = base_config
+        object.__setattr__(base_config, "coo_tick_interval_seconds", 0.01)
+
+        def runtime_factory(root: Path):
+            return prewarm_runtime
+
+        def supervisor_factory(runtime: Runtime):
+            return TypedCooSupervisor(runtime, service_config=config)
+
+        service = ExecutiveControlService(
+            config,
+            runtime_factory=runtime_factory,
+            supervisor_factory=supervisor_factory,
+            autonomy_guard=lambda: None,
+        )
+        binding = service._coo_execution_binding
+        reviewer_capabilities = list(
+            ModelRouter.load()
+            .model_aliases[config.coo_model_alias]
+            .capabilities
+        )
+        prewarm_runtime = Runtime.at(config.runtime_root)
+        prewarm_runtime.workers.register_worker(
+            "codex-reviewer-01",
+            provider=str(binding["provider"]),
+            account_label=f"{config.worker_account_label}-reviewer",
+            worker_type=config.worker_type,
+            quota_classes={
+                config.coo_quota_class: {
+                    "provider": str(binding["provider"]),
+                    "model": str(binding["model"]),
+                    "effort": str(binding["effort"]),
+                    "cost_class": str(binding["cost_class"]),
+                    "capabilities": reviewer_capabilities,
+                    "metadata": {
+                        "routing_policy_version": binding[
+                            "routing_policy_version"
+                        ],
+                        "execution_profile_id": binding["execution_profile_id"],
+                        "execution_profile_digest": binding[
+                            "execution_profile_digest"
+                        ],
+                        "capability_policy_version": binding[
+                            "capability_policy_version"
+                        ],
+                        "capability_policy_digest": binding[
+                            "capability_policy_digest"
+                        ],
+                    },
+                    "status": WorkerStatus.OFFLINE,
+                }
+            },
+            metadata={"service_managed": True},
+        )
+        # ``ExecutiveControlService.start`` must reconcile this existing Runtime,
+        # not construct an unrelated instance that drops the reviewer identity.
+        await service.start()
+        try:
+            service._register_worker()
+            runtime = service.runtime
+            submitted = service._submit_service_intent(
+                _coo_intent(config, "offline-delivery")
+            )
+            root_id = str(submitted["job_id"])
+            runtime = service.runtime
+            assert runtime is not None
+            await wait_until(
+                service, lambda: _handoff_ready(runtime, root_id)
+            )
+            assert service._coo_last_error is None
+            assert service._coo_last_tick_at is not None
+            def all_children_completed() -> bool:
+                children = [
+                    job
+                    for job in runtime.jobs.list_jobs()
+                    if job.root_job_id == root_id and job.orchestration_role
+                ]
+                return len(children) == 6 and all(
+                    job.status is JobStatus.COMPLETED for job in children
+                )
+
+            await wait_until(service, all_children_completed)
+            handoff = runtime.jobs.get_cycle_handoff(root_id)
+            revision = handoff["revisions"][0]
+            assert revision["repair_round"] == 1
+            roles = {
+                (job.orchestration_role, int(job.repair_round or 0)): job
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id and job.orchestration_role
+            }
+            assert roles[("review", 0)].status is JobStatus.COMPLETED
+            assert roles[("repair", 1)].status is JobStatus.COMPLETED
+            assert revision["current_job_id"] == roles[("repair", 1)].job_id
+            assert (
+                revision["qualifying_review_job_id"]
+                != roles[("review", 0)].job_id
+            )
+            assert sum(
+                job.orchestration_role == "repair"
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id
+            ) == 1
+            for child in roles.values():
+                assert child.status is JobStatus.COMPLETED
+            assert service._dispatch_errors == {}
+            pre_close_handoff = handoff
+        finally:
+            await service.close()
+
+        restart_service = ExecutiveControlService(
+            config,
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda runtime: TypedCooSupervisor(
+                runtime, service_config=config
+            ),
+            autonomy_guard=lambda: None,
+        )
+        await restart_service.start()
+        try:
+            await wait_until(
+                restart_service,
+                lambda: restart_service._startup_reconciliation is not None,
+            )
+            assert restart_service._coo_last_error is None
+            restart_handoff = runtime.jobs.get_cycle_handoff(root_id)
+            assert restart_handoff == pre_close_handoff
+            role_counts = {}
+            for job in runtime.jobs.list_jobs():
+                if job.root_job_id == root_id and job.orchestration_role:
+                    role_counts[job.orchestration_role] = (
+                        role_counts.get(job.orchestration_role, 0) + 1
+                    )
+            assert role_counts == {
+                "plan": 1,
+                "work": 1,
+                "review": 2,
+                "repair": 1,
+                "aggregation": 1,
+            }
+        finally:
+            await restart_service.close()
+
+    asyncio.run(exercise())
+
+
+def _handoff_ready(runtime: Runtime, root_id: str) -> bool:
+    try:
+        runtime.jobs.get_cycle_handoff(root_id)
+    except StateConflict:
+        return False
+    return True
+
+
 def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(
     tmp_path: Path, short_socket_root: Path
 ):
@@ -4701,11 +8376,107 @@ def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(
     asyncio.run(exercise())
 
 
+def _seed_existing_worker_with_dormant_coo_quotas(
+    tmp_path: Path,
+    config: ServiceConfig,
+    service: ExecutiveControlService,
+    *,
+    stale: bool = True,
+    drift_codex_native: bool = False,
+) -> dict[str, object]:
+    """Seed one pre-existing worker with the exact codex-native quota plus two
+    dormant COO quota rows.  When ``stale`` is True, the dormant rows carry an
+    older ``capability_policy_digest`` than the current host binding.  When
+    ``drift_codex_native`` is True, the codex-native quota is seeded with a
+    different model so the existing-worker identity check rejects it.
+
+    Returns the seeded metadata snapshot for both dormant quota rows so
+    callers can assert exact equality before/after ``register-worker``.
+    """
+
+    runtime = Runtime.at(config.runtime_root)
+    binding = service._coo_execution_binding
+    coo_capabilities = list(
+        ModelRouter.load().model_aliases[config.coo_model_alias].capabilities
+    )
+    stale_digest = "f" * 64
+    current_digest = str(binding["capability_policy_digest"])
+    effective_digest = (
+        stale_digest
+        if stale and current_digest != stale_digest
+        else (current_digest if not stale else "e" * 64)
+    )
+    coo_metadata = {
+        "service_managed": True,
+        "purpose": "executive-coo-cycle",
+        "model_alias": config.coo_model_alias,
+        "routing_policy_version": str(binding["routing_policy_version"]),
+        "execution_profile_id": str(binding["execution_profile_id"]),
+        "execution_profile_digest": str(binding["execution_profile_digest"]),
+        "capability_policy_version": str(
+            binding["capability_policy_version"]
+        ),
+        "capability_policy_digest": effective_digest,
+    }
+    coo_default_metadata = dict(coo_metadata)
+    coo_default_metadata.pop("model_alias", None)
+    coo_default_metadata["capacity_variant"] = "default"
+    codex_native_model = (
+        "drifted-model"
+        if drift_codex_native
+        else config.model
+    )
+    runtime.workers.register_worker(
+        config.worker_id,
+        provider=config.provider,
+        account_label=config.worker_account_label,
+        worker_type=config.worker_type,
+        capabilities=["code", "research", "tests"],
+        quota_classes={
+            config.quota_class: {
+                "provider": config.provider,
+                "model": codex_native_model,
+                "effort": config.effort,
+                "cost_class": config.cost_class,
+                "capabilities": ["code", "research", "tests"],
+            },
+            config.coo_quota_class: {
+                "provider": str(binding["provider"]),
+                "model": str(binding["model"]),
+                "effort": str(binding["effort"]),
+                "cost_class": str(binding["cost_class"]),
+                "capabilities": coo_capabilities,
+                "metadata": coo_metadata,
+            },
+            config.coo_default_quota_class: {
+                "provider": str(binding["provider"]),
+                "model": str(binding["model"]),
+                "effort": str(binding["effort"]),
+                "cost_class": "default",
+                "capabilities": coo_capabilities,
+                "metadata": coo_default_metadata,
+            },
+        },
+        metadata={"service_managed": True},
+    )
+    seeded = {
+        "coo": runtime.workers.get_quota_class(
+            config.worker_id, config.coo_quota_class
+        ),
+        "coo_default": runtime.workers.get_quota_class(
+            config.worker_id, config.coo_default_quota_class
+        ),
+    }
+    return {"runtime": runtime, "quotas": seeded}
+
+
 def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise() -> None:
-        config = _config(tmp_path, socket_root=short_socket_root)
+        config = _config(
+            tmp_path, socket_root=short_socket_root, coo_autonomy_armed=True
+        )
         runtime = Runtime.at(config.runtime_root)
         runtime.workers.register_worker(
             config.worker_id,
@@ -4753,6 +8524,116 @@ def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
                     and event.worker_id == config.worker_id
                 ]
             ) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_disarmed_register_worker_leaves_stale_dormant_coo_quotas_untouched(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        seeded = _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path, config, service, stale=True
+        )
+        before_coo = seeded["quotas"]["coo"]
+        before_default = seeded["quotas"]["coo_default"]
+        assert before_coo is not None and before_default is not None
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert (
+                registered["result"]["worker_id"]
+                == config.worker_id
+            )
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "disarmed register-worker must not produce Job effects"
+            quota_events = [
+                event
+                for event in runtime.events.list_events()
+                if event.event_type == "WORKER_QUOTA_REGISTERED"
+                and event.worker_id == config.worker_id
+            ]
+            assert quota_events == []
+            after_coo = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_quota_class
+            )
+            after_default = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_default_quota_class
+            )
+            assert after_coo == before_coo
+            assert after_default == before_default
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_register_worker_refuses_stale_dormant_coo_quotas(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(
+            tmp_path, socket_root=short_socket_root, coo_autonomy_armed=True
+        )
+        service, _holder = _service(tmp_path, config=config)
+        seeded = _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path, config, service, stale=True
+        )
+        before_coo = seeded["quotas"]["coo"]
+        before_default = seeded["quotas"]["coo_default"]
+        assert before_coo is not None and before_default is not None
+        await service.start()
+        try:
+            refused = await _request(service, "register-worker")
+            assert refused["ok"] is False
+            assert "different policy" in refused["error"]["message"]
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "armed refusal must not produce Job effects"
+            after_coo = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_quota_class
+            )
+            after_default = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_default_quota_class
+            )
+            assert after_coo == before_coo
+            assert after_default == before_default
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_disarmed_register_worker_refuses_codex_native_quota_drift(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path,
+            config,
+            service,
+            stale=True,
+            drift_codex_native=True,
+        )
+        await service.start()
+        try:
+            refused = await _request(service, "register-worker")
+            assert refused["ok"] is False
+            assert "different policy" in refused["error"]["message"]
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "refusal must not produce Job effects"
         finally:
             await service.close()
 
@@ -4978,7 +8859,11 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
             assert hashlib.sha256(receipt_bytes).hexdigest() == rotation["receipt_sha256"]
             receipt = json.loads(receipt_bytes)
             assert receipt["old_workspace"]["inode"] == interrupted_inode
-            assert receipt["old_workspace"]["status_dirty"] is True
+            # Untracked-only dirt is owned by the dedicated all-untracked
+            # observation; the tracked-status scan deliberately skips it.
+            assert receipt["old_workspace"]["status_dirty"] is False
+            assert receipt["old_workspace"]["all_untracked_dirty"] is True
+            assert receipt["old_workspace"]["launch_clean"] is False
             assert receipt["new_workspace"]["head"] == service.config.proof_base_sha
             assert receipt["new_workspace"]["status_dirty"] is False
             assert receipt["new_workspace"]["all_untracked_dirty"] is False
@@ -5417,11 +9302,32 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             "control_environment_attestation_path": str(
                 tmp_path / "control-environment-attestation.json"
             ),
+            "python_runtime_provenance_digest": "d" * 64,
         }
         unarmed_path = tmp_path / "control-unarmed.json"
         unarmed_path.write_text(json.dumps(raw), encoding="utf-8")
         unarmed_path.chmod(0o400)
         unarmed = service_cli.load_control_config(unarmed_path)
+        assert unarmed["python_runtime_provenance_digest"] == "d" * 64
+        for index, invalid_digest in enumerate(
+            ("D" * 64, "d" * 63, "g" * 64, 7, None)
+        ):
+            invalid_path = tmp_path / (
+                "control-invalid-python-runtime-provenance-"
+                f"{index}-{type(invalid_digest).__name__}.json"
+            )
+            invalid_path.write_text(
+                json.dumps(
+                    {**raw, "python_runtime_provenance_digest": invalid_digest}
+                ),
+                encoding="utf-8",
+            )
+            invalid_path.chmod(0o400)
+            with pytest.raises(
+                ServiceError,
+                match="python_runtime_provenance_digest must be lowercase 64-hex",
+            ):
+                service_cli.load_control_config(invalid_path)
         assert not (
             {
                 "terminal_return_armed",
@@ -5484,6 +9390,41 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
         assert observation_loaded["dialogue_bridge_armed"] is False
+        assert observation_loaded["dialogue_wake_canary_activation"] is None
+
+        from tests.test_dialogue_wake_canary_activation import valid_wire
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationGrant, DialogueWakeCanaryProfile,
+        )
+        grant_wire = valid_wire(installed_release_sha=raw["proof_base_sha"])
+        for suffix, grant_value in (("null", None), ("exact", grant_wire)):
+            canary_path = tmp_path / f"control-dialogue-canary-{suffix}.json"
+            canary_path.write_text(json.dumps({
+                **raw, **observation_fields,
+                "dialogue_wake_canary_activation": grant_value}))
+            canary_path.chmod(0o400)
+            parsed_config = service_cli.load_control_config(canary_path)
+            parsed_grant = parsed_config["dialogue_wake_canary_activation"]
+            if grant_value is None:
+                assert parsed_grant is None
+            else:
+                assert type(parsed_grant) is DialogueWakeCanaryActivationGrant
+                assert parsed_grant.to_dict() == grant_value
+        for index, bad_grant in enumerate((
+            {}, {**grant_wire, "production_armed": True},
+            {**grant_wire, "expires_at_epoch_seconds": grant_wire["valid_from_epoch_seconds"] + 901},
+        )):
+            bad_path = tmp_path / f"control-dialogue-canary-invalid-{index}.json"
+            bad_path.write_text(json.dumps({
+                **raw, **observation_fields, "dialogue_wake_canary_activation": bad_grant}))
+            bad_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="canary activation is invalid"):
+                service_cli.load_control_config(bad_path)
+        orphan_path = tmp_path / "control-dialogue-canary-orphan.json"
+        orphan_path.write_text(json.dumps({**raw, "dialogue_wake_canary_activation": None}))
+        orphan_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="requires the observation configuration"):
+            service_cli.load_control_config(orphan_path)
 
         armed_observation_path = tmp_path / "control-observation-armed.json"
         armed_observation_path.write_text(
@@ -5516,7 +9457,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": True,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -5526,7 +9467,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_loaded = service_cli.load_control_config(terminal_return_path)
         assert terminal_loaded["terminal_return_armed"] is True
         assert terminal_loaded["terminal_return_socket_path"] == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
         terminal_unarmed_path.write_text(
@@ -5535,7 +9476,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": False,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -5545,6 +9486,74 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_unarmed_loaded = service_cli.load_control_config(
             terminal_unarmed_path
         )
+
+        # The only alternate terminal socket admitted by the installed
+        # Control loader is historical A2 recovery while ALL return arms are
+        # disabled; arbitrary sockets and armed legacy routes remain refused.
+        legacy_path = tmp_path / "control-old-a2-recovery.json"
+        legacy_raw = {
+            **raw,
+            "terminal_return_armed": False,
+            "terminal_return_socket_path":
+                "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "ceo_submit_armed": False,
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+            "coo_foreground_only": False,
+        }
+        legacy_path.write_text(json.dumps(legacy_raw))
+        legacy_path.chmod(0o400)
+        old_loaded = service_cli.load_control_config(legacy_path)
+        assert old_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        # Ordinary clients (including Company Consultation, Session Bridge,
+        # Product Acceptance and Principal Dialogue) must follow exactly the
+        # same reviewed recovery route as the Control return projector.
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=False,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=True,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+        # Exercise the actual Control composition, not only the selector helper:
+        # this legacy disarmed configuration must still instantiate the native
+        # service and carry the normalized old A2 path into its ServiceConfig.
+        captured_legacy: dict[str, object] = {}
+        with monkeypatch.context() as patch_legacy:
+            patch_legacy.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            patch_legacy.setattr(
+                service_cli, "ExecutiveControlService",
+                lambda service_config, **kwargs: (
+                    captured_legacy.update(config=service_config, kwargs=kwargs),
+                    object(),
+                )[1],
+            )
+            service_cli._service_from_config(
+                old_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        assert service_cli._agent_relay_readside_socket_for_control(
+            captured_legacy["config"]
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        for unsafe in (
+            {**legacy_raw, "terminal_return_armed": True},
+            {**legacy_raw, "ceo_submit_armed": True},
+            {**legacy_raw, "terminal_return_socket_path": "/tmp/foreign.sock"},
+        ):
+            legacy_path.chmod(0o600)
+            legacy_path.write_text(json.dumps(unsafe))
+            legacy_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="legacy A2 recovery path"):
+                service_cli.load_control_config(legacy_path)
 
         stale_policy_path = tmp_path / "control-stale-policy.json"
         stale_policy_path.write_text(
@@ -5643,6 +9652,26 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             observation_kwargs["dialogue_wake_handler"],
             ExecutiveDialogueWakeBridge,
         )
+        handler = observation_kwargs["dialogue_wake_handler"]
+        assert type(handler.canary_profile) is DialogueWakeCanaryProfile
+        assert handler.canary_profile.grant is None
+        assert handler._operation_key is None
+        assert handler._installed_release_sha == raw["proof_base_sha"]
+
+        # The factory must consume only the trusted profile produced by the
+        # publication/verification owner. A raw config grant alone is not
+        # sufficient authority to arm the canary lane.
+        trusted_grant = DialogueWakeCanaryActivationGrant.from_dict(grant_wire)
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
+            composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
+            service_cli._service_from_config(
+                {**armed_observation_loaded, "dialogue_wake_canary_activation": trusted_grant},
+                dialogue_canary_profile=DialogueWakeCanaryProfile(trusted_grant),
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")))
+        handler = captured["kwargs"]["dialogue_wake_handler"]
+        assert handler.canary_profile.grant.to_dict() == grant_wire
+        assert handler._operation_key is None
 
         captured.clear()
         with monkeypatch.context() as composition_patch:
@@ -5661,7 +9690,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert isinstance(unarmed_composed_config, ServiceConfig)
         assert unarmed_composed_config.terminal_return_armed is False
         assert unarmed_composed_config.terminal_return_socket_path == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         assert isinstance(unarmed_composed_kwargs, dict)
         assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
@@ -5843,7 +9872,7 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         )
 
 
-def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
+def test_awaiting_canary_quarantine_preserves_readiness_and_activation(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise():
@@ -5908,6 +9937,225 @@ def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
             assert repeated["ok"] is False
             assert loader_calls == [True]
         finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_allows_provider_independent_backup_and_verify(
+    tmp_path: Path, short_socket_root: Path
+):
+    """DR backup/verify are local-only (real `control_plane.executive_backup`
+    helper, no fake) and must not depend on worker-provider canary
+    readiness: they run while AWAITING_CANARY, leave `service_state`
+    unchanged, and touch no canary/provider/worker surface."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            before = await _request(service, "status")
+            assert before["result"]["service_state"] == "AWAITING_CANARY"
+
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            receipt = created["result"]
+            database_path = Path(receipt["database_path"])
+            assert database_path.is_file()
+            assert database_path.parent == service.config.backup_root.resolve()
+            assert stat.S_IMODE(database_path.stat().st_mode) == 0o600
+            manifest_path = Path(receipt["manifest_path"])
+            assert manifest_path.is_file()
+
+            verified = await _request(
+                service, "verify-backup", {"name": database_path.name}
+            )
+            assert verified["ok"] is True, verified
+            assert (
+                verified["result"]["database_sha256"] == receipt["database_sha256"]
+            )
+
+            after = await _request(service, "status")
+            assert after["result"]["service_state"] == "AWAITING_CANARY"
+            # No canary verdict was ever loaded and the fake supervisor never
+            # observed a restart/requeue call from this path — backup/verify
+            # never reaches the supervisor, canary loader, or any worker.
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_refuses_lifecycle_and_worker_mutations(
+    tmp_path: Path, short_socket_root: Path
+):
+    """Worker and lifecycle mutations stay refused while AWAITING_CANARY,
+    and `service_state` never moves as a side effect of the attempt."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            for command, args in (
+                ("register-worker", {}),
+                ("create-proof-job", {}),
+                ("dispatch", {"job_id": "JOB-nonexistent"}),
+                ("run-coo-cycle", {"root_job_id": "JOB-nonexistent"}),
+                ("reconcile", {}),
+                ("requeue", {"job_id": "JOB-nonexistent"}),
+                ("cancel", {"job_id": "JOB-nonexistent"}),
+            ):
+                denied = await _request(service, command, args)
+                assert denied["ok"] is False, (command, denied)
+                assert "AWAITING_CANARY" in denied["error"]["message"], (
+                    command,
+                    denied,
+                )
+                assert service.service_state == "AWAITING_CANARY"
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_quarantined_state_refuses_backup_and_verify_backup(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The backup/verify decoupling preserves the QUARANTINED refusal;
+    only READY and AWAITING_CANARY admit the local backup routes."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            service._service_state = "QUARANTINED"
+            denied_backup = await _request(service, "backup")
+            assert denied_backup["ok"] is False
+            assert "QUARANTINED" in denied_backup["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_backup["error"]["message"]
+            denied_verify = await _request(
+                service, "verify-backup", {"name": "fixture.sqlite3"}
+            )
+            assert denied_verify["ok"] is False
+            assert "QUARANTINED" in denied_verify["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_verify["error"]["message"]
+            assert backend.created == []
+            assert backend.verified == []
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_backup_stays_confined_to_the_configured_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY admission reuses the existing closed root and name
+    handling rather than a second backup surface: the configured root is
+    created owner-only, a name that is not a simple ``.sqlite3`` file name is
+    refused, and a backup with no canonical manifest is refused before the
+    backend is reached."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            assert Path(created["result"]["database_path"]).parent == service.config.backup_root
+            assert stat.S_IMODE(service.config.backup_root.stat().st_mode) == 0o700
+            assert stat.S_IMODE(backend.created[0].stat().st_mode) == 0o600
+
+            escaped = await _request(
+                service, "verify-backup", {"name": "../executive.sqlite3"}
+            )
+            assert escaped["ok"] is False
+            assert "simple .sqlite3 file name" in escaped["error"]["message"]
+            assert backend.verified == []
+
+            unrestorable = await _request(
+                service, "verify-backup", {"name": "absent.sqlite3"}
+            )
+            assert unrestorable["ok"] is False
+            assert "no canonical manifest" in unrestorable["error"]["message"]
+            assert backend.verified == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+class _BlockingBackup(_FakeBackup):
+    """Blocks inside the physical backup call so the owned-physical-worker
+    registration and the cancellation behaviour stay observable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def create_online_backup(self, store, destination_dir: Path):
+        self.entered.set()
+        assert self.release.wait(timeout=30)
+        return super().create_online_backup(store, destination_dir)
+
+
+def test_awaiting_canary_backup_keeps_the_owned_physical_effect(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY backup still runs through the service's owned
+    physical worker (`_run_physical` → `_run_owned_coroutine`): the effect is
+    registered as service-owned while it runs, a cancelled request does not
+    abandon it, and it completes rather than being dropped. A bare
+    `asyncio.to_thread` body would register no owned physical worker and its
+    effect would be abandoned on cancellation."""
+
+    async def exercise():
+        backend = _BlockingBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            request = {
+                "version": CONTROL_PROTOCOL_VERSION,
+                "command": "backup",
+                "args": {},
+            }
+            task = asyncio.create_task(service._dispatch_request(request))
+            for _ in range(500):
+                if backend.entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert backend.entered.is_set(), "the backup never reached the backend"
+            # The effect is owned by the service, not by a bare thread.
+            assert len(service._physical_workers) == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # Cancellation of the request does not abandon the physical effect.
+            assert service._physical_workers
+            backend.release.set()
+            await asyncio.wait(tuple(service._physical_workers), timeout=30)
+            assert (service.config.backup_root / "fixture.sqlite3").is_file()
+        finally:
+            backend.release.set()
             await service.close()
 
     asyncio.run(exercise())
@@ -6315,3 +10563,643 @@ def test_ambient_process_and_invalid_provider_result_fail_job_keep_service_ready
             await service.close()
 
     asyncio.run(exercise())
+
+def test_service_schedules_recovered_runs_through_existing_dispatch_registry() -> None:
+    async def scenario() -> None:
+        attempt = type(
+            "AttemptFixture",
+            (),
+            {"attempt_id": "ATT-recovered", "job_id": "JOB-recovered"},
+        )()
+        active = type(
+            "ActiveFixture",
+            (),
+            {"lease": type("LeaseFixture", (), {"attempt": attempt})()},
+        )()
+
+        class Supervisor:
+            def __init__(self) -> None:
+                self.values = [active]
+                self.finished: list[object] = []
+
+            def take_recovered_runs(self):
+                values = tuple(self.values)
+                self.values.clear()
+                return values
+
+            async def finish_job(self, value):
+                self.finished.append(value)
+
+        supervisor = Supervisor()
+        service = object.__new__(es_mod.ExecutiveControlService)
+        service.supervisor = supervisor
+        service._dispatch_tasks = {}
+        service._dispatch_errors = {}
+        service._service_state = "READY"
+
+        async def no_projection(_job_id, *, expected_attempt_id):
+            assert expected_attempt_id == "ATT-recovered"
+
+        service._project_terminal_return = no_projection
+        await service._schedule_recovered_runs()
+        tasks = tuple(service._dispatch_tasks.values())
+        assert len(tasks) == 1
+        await asyncio.gather(*tasks)
+        assert supervisor.finished == [active]
+        assert service._dispatch_tasks == {}
+
+    asyncio.run(scenario())
+
+
+async def _requeued_missing_proof(service, *, reason="process identity absent during supervisor restart"):
+    await _request(service, "register-worker")
+    created = await _request(service, "create-proof-job")
+    job_id = created["result"]["job_id"]
+    runtime = service.runtime
+    lease = runtime.broker.claim(job_id, lease_owner="lost-fixture")
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, provider_session_id="missing-proof-session")
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token)
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason=reason, verified_process_absent=True)
+    Path(created["result"]["worktree"]).chmod(0o700)
+    requeued = await _request(service, "requeue", {"job_id": job_id})
+    assert requeued["ok"], requeued
+    return job_id, runtime.attempts.get_attempt(lease.attempt.attempt_id)
+
+
+def _proof_absence(attempt):
+    from datetime import datetime, timezone, timedelta
+    from control_plane.executive_worker_broker import UIDSweepReceipt, UID_SWEEP_SCHEMA_VERSION
+    startup_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    assert datetime.fromisoformat(attempt.started_at) < startup_at <= now
+    sweep = UIDSweepReceipt(
+        schema_version=UID_SWEEP_SCHEMA_VERSION, observed_at=now.isoformat(),
+        reason="status_absence", worker_uid=451, broker_pid=42419,
+        residual_pids_before=(), residual_pids_after=(), signal_name="SIGKILL",
+        signal_sent=False, quiescent_observations=2).to_dict()
+    startup = dict(sweep, observed_at=startup_at.isoformat(), reason="broker_startup")
+    return dict(sweep, preceding_broker_startup_sweep=startup)
+
+
+def test_proof_recovery_requalifies_once_and_replays_after_fresh_claim(tmp_path, short_socket_root):
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        calls = []
+        def observe(attempt):
+            assert service._dispatch_lock.locked() and service._workspace_lock.locked()
+            calls.append(attempt.attempt_id)
+            return _proof_absence(attempt)
+        service._proof_capacity_recovery_observer = observe
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            job_id, lost = await _requeued_missing_proof(service)
+            runtime = service.runtime
+            quota = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            assert quota.status.value == "ERROR" and quota.active_attempt_id is None
+            assert runtime.broker.claim(job_id, lease_owner="still-error") is None
+            args = {"job_id": job_id, "lost_attempt_id": lost.attempt_id}
+            recovered = await _request(service, "recover-proof-capacity", args)
+            assert recovered["ok"], recovered
+            receipt = recovered["result"]
+            assert receipt["status"] == "AVAILABLE"
+            assert receipt["previous_snapshot"]["fence_generation"] == lost.fence_generation
+            fresh = runtime.broker.claim(job_id, lease_owner="fresh")
+            assert fresh is not None
+            assert fresh.attempt.attempt_id != lost.attempt_id
+            assert fresh.attempt.fence_generation > lost.fence_generation
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            replay = await _request(service, "recover-proof-capacity", args)
+            assert replay == recovered
+            assert runtime.workers.get_quota_class(lost.worker_id, lost.quota_class) == before
+            assert calls == [lost.attempt_id]
+            events = runtime.events.list_events(job_id=job_id)
+            assert len([e for e in events if e.event_type == "PROOF_CAPACITY_RECOVERED"]) == 1
+            assert runtime.attempts.get_attempt(lost.attempt_id) == lost
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault", [
+    "observer_failed", "missing_startup", "wrong_uid", "wrong_broker",
+    "wrong_reason", "startup_before_attempt", "stale_absence", "residual",
+    "quota_aba", "worker_offline", "job_cancelled", "held_quota",
+    "active_dispatch", "no_observer", "foreign_attempt", "extra_argument",
+    "wrong_fence", "wrong_lost_reason", "foreign_job", "quarantined_service",
+])
+def test_proof_recovery_refuses_ambiguity_without_capacity_effect(tmp_path, short_socket_root, fault):
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        calls = []
+        def observe(attempt):
+            from datetime import datetime, timezone, timedelta
+            calls.append(attempt.attempt_id)
+            if fault == "observer_failed":
+                raise ValueError("broker unavailable")
+            sweep = _proof_absence(attempt)
+            if fault == "missing_startup":
+                sweep.pop("preceding_broker_startup_sweep")
+            elif fault == "wrong_uid":
+                sweep["worker_uid"] = 452
+            elif fault == "wrong_broker":
+                sweep["preceding_broker_startup_sweep"]["broker_pid"] += 1
+            elif fault == "wrong_reason":
+                sweep["reason"] = "run_terminal"
+            elif fault == "startup_before_attempt":
+                sweep["preceding_broker_startup_sweep"]["observed_at"] = attempt.started_at
+            elif fault == "stale_absence":
+                sweep["observed_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+            elif fault == "residual":
+                sweep["residual_pids_after"] = [992]
+            elif fault == "quota_aba":
+                # A resource administrator can change ERROR -> OFFLINE -> ERROR
+                # while broker I/O runs; same status/fence is insufficient.
+                from control_plane.executive_runtime import WorkerStatus
+                for status in (WorkerStatus.OFFLINE, WorkerStatus.ERROR):
+                    service.runtime.workers.set_worker_status(
+                        attempt.worker_id, status, quota_class=attempt.quota_class)
+            return sweep
+        service._proof_capacity_recovery_observer = observe if fault != "no_observer" else None
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        blocker = None
+        try:
+            job_id, lost = await _requeued_missing_proof(
+                service, reason=("lease expired" if fault == "wrong_lost_reason"
+                                 else "process identity absent during supervisor restart"))
+            runtime = service.runtime
+            args = {"job_id": job_id, "lost_attempt_id": lost.attempt_id}
+            if fault == "worker_offline":
+                runtime.workers.set_worker_status(lost.worker_id, "OFFLINE")
+            elif fault == "job_cancelled":
+                runtime.jobs.cancel_job(job_id)
+            elif fault == "wrong_fence":
+                with runtime.store.transaction() as conn:
+                    conn.execute("UPDATE worker_quota_classes SET fence_counter=fence_counter+1 WHERE worker_id=? AND quota_class=?",
+                                 (lost.worker_id, lost.quota_class))
+            elif fault == "foreign_job":
+                foreign = runtime.jobs.create_job("foreign recovery target")
+                args["job_id"] = foreign.job_id
+            elif fault == "quarantined_service":
+                service._service_state = "AWAITING_CANARY"
+            elif fault == "held_quota":
+                # Corrupt fixture models a foreign hold. No production SQL writer.
+                with runtime.store.transaction() as conn:
+                    conn.execute("UPDATE worker_quota_classes SET held_attempt_id=? WHERE worker_id=? AND quota_class=?",
+                                 (lost.attempt_id, lost.worker_id, lost.quota_class))
+            elif fault == "active_dispatch":
+                blocker = asyncio.create_task(asyncio.Event().wait())
+                service._dispatch_tasks[job_id] = blocker
+            elif fault == "foreign_attempt":
+                args["lost_attempt_id"] = "ATT-foreign"
+            elif fault == "extra_argument":
+                args["worker_uid"] = 451
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            response = await _request(service, "recover-proof-capacity", args)
+            assert response["ok"] is False, response
+            after = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            assert after.status.value != "AVAILABLE"
+            if fault != "quota_aba":
+                assert after == before
+            assert not any(e.event_type == "PROOF_CAPACITY_RECOVERED"
+                           for e in runtime.events.list_events(job_id=job_id))
+            assert runtime.attempts.get_attempt(lost.attempt_id) == lost
+        finally:
+            if blocker is not None:
+                blocker.cancel()
+                await asyncio.gather(blocker, return_exceptions=True)
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_proof_recovery_cli_exposes_only_job_and_lost_attempt():
+    from scripts.executive_os_phase1c import _parser, _client_request
+    args = _parser().parse_args(["--socket", "/tmp/control.sock",
+                                "recover-proof-capacity", "JOB-2", "ATT-lost"])
+    assert _client_request(args) == (
+        "recover-proof-capacity", {"job_id": "JOB-2", "lost_attempt_id": "ATT-lost"})
+
+
+@pytest.mark.parametrize("fault", ["extra_key", "wrong_target", "snapshot", "sweep", "time"])
+def test_proof_recovery_rejects_malformed_durable_replay(tmp_path, short_socket_root, fault):
+    from datetime import datetime, timezone
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer = lambda attempt: pytest.fail("replay observed broker")
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            job_id, lost = await _requeued_missing_proof(service)
+            runtime = service.runtime
+            target = dict(worker_id=lost.worker_id, quota_class=lost.quota_class)
+            began = datetime.now(timezone.utc)
+            sweep = _proof_absence(lost)
+            ended = datetime.now(timezone.utc)
+            payload = dict(
+                schema_version="mastermind.executive_proof_capacity_recovery/v1",
+                job_id=job_id, lost_attempt_id=lost.attempt_id, **target, status="AVAILABLE",
+                previous_snapshot=runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost.attempt_id, **target),
+                uid_sweep=sweep, observation_started_at=began.isoformat(),
+                observation_finished_at=ended.isoformat())
+            if fault == "extra_key":
+                payload["unreviewed"] = True
+            elif fault == "wrong_target":
+                payload["lost_attempt_id"] = "ATT-foreign"
+            elif fault == "snapshot":
+                payload["previous_snapshot"]["quota_version"] = True
+            elif fault == "sweep":
+                payload["uid_sweep"]["preceding_broker_startup_sweep"]["broker_pid"] += 1
+            elif fault == "time":
+                payload["observation_finished_at"] = "invalid"
+            # Insert a deliberately corrupt event as fixture input, without
+            # disabling immutability triggers or modifying a real receipt.
+            with runtime.store.transaction() as conn:
+                runtime.store.append_event(
+                    conn, aggregate_type="quota_class",
+                    aggregate_id=f"{lost.worker_id}:{lost.quota_class}",
+                    event_type="PROOF_CAPACITY_RECOVERED", actor="executive-control-service",
+                    job_id=job_id, attempt_id=lost.attempt_id, **target, payload=payload,
+                    command_id=runtime.workers._proof_recovery_command(job_id, lost.attempt_id))
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            result = await _request(service, "recover-proof-capacity",
+                                    {"job_id": job_id, "lost_attempt_id": lost.attempt_id})
+            assert result["ok"] is False
+            assert "receipt" in result["error"]["message"]
+            assert runtime.workers.get_quota_class(lost.worker_id, lost.quota_class) == before
+            assert len([e for e in runtime.events.list_events(job_id=job_id)
+                        if e.event_type == "PROOF_CAPACITY_RECOVERED"]) == 1
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("uid", [None, 0, -1, True, "451"])
+def test_proof_recovery_observer_requires_positive_fixed_uid(tmp_path, uid):
+    with pytest.raises(ValueError, match="fixed observer and worker UID"):
+        ExecutiveControlService(_config(tmp_path), proof_capacity_recovery_observer=lambda a: {},
+                                proof_capacity_recovery_worker_uid=uid)
+
+
+@pytest.mark.parametrize("schema", ["v1", "v2"])
+@pytest.mark.parametrize("fault", [None, "root", "history", "extra_event", "quota", "fence"])
+def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, short_socket_root, fault, schema):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer = _proof_absence
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            if schema == "v1":
+                old_id, old_lost = await _requeued_missing_proof(service)
+            else:
+                assert (await _request(service, "register-worker"))["ok"]
+                old = await _request(service, "create-proof-job")
+                assert old["ok"], old
+                old_id = old["result"]["job_id"]
+                assert (await _request(service, "dispatch", {"job_id": old_id}))["ok"]
+                await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+                assert service.runtime.jobs.get_job(old_id).status.value == "COMPLETED"
+            runtime = service.runtime
+            root_receipt = service._submit_service_intent(_coo_intent(service.config,"maintenance"))
+            root_id = root_receipt["job_id"]
+            database = service.config.runtime_root/"data/control_plane/executive.sqlite3"
+            before = maintenance.snapshot(database)
+            descriptor = dict(schema_version=maintenance.SCHEMA if schema == "v1" else maintenance.SCHEMA_V2,
+                              worker_id=service.config.worker_id, quota_class=service.config.quota_class,
+                              successor_sha=service.config.proof_base_sha)
+            if schema == "v1":
+                descriptor.update(recovery_job_id=old_id, recovery_attempt_id=old_lost.attempt_id)
+                await service._recover_proof_capacity(old_id,old_lost.attempt_id)
+            else:
+                descriptor["template_proof_job_id"] = old_id
+            first = await _request(service,"create-proof-job")
+            first_id = first["result"]["job_id"]
+            assert (await _request(service,"dispatch",{"job_id":first_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            second_id, second_lost = await _requeued_missing_proof(service)
+            await service._recover_proof_capacity(second_id,second_lost.attempt_id)
+            assert (await _request(service,"dispatch",{"job_id":second_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            after = maintenance.snapshot(database)
+            if fault=="root":
+                next(r for r in after["tables"]["jobs"] if r["job_id"]==root_id)["version"] += 1
+            elif fault=="history":
+                next(e for e in after["tables"]["events"] if e["job_id"] == root_id and e["event_type"] == "JOB_CREATED")["actor"]="foreign"
+            elif fault=="extra_event":
+                event=dict(after["tables"]["events"][-1],event_id=9999,job_id=root_id)
+                after["tables"]["events"].append(event)
+            elif fault=="quota":
+                after["tables"]["worker_quota_classes"][0]["metadata_json"]='{"foreign":true}'
+            elif fault=="fence":
+                after["tables"]["worker_quota_classes"][0]["fence_counter"] += 1
+            if fault:
+                with pytest.raises(maintenance.MaintenanceError):
+                    maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+            else:
+                maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_recovery_never_authorizes_predecessor_dispatch(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path,socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer=_proof_absence
+        service._proof_capacity_recovery_worker_uid=451
+        await service.start()
+        try:
+            job_id,lost=await _requeued_missing_proof(service)
+            previous=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            job=service.runtime.jobs.get_job(job_id)
+            assert job.constraints["base_sha"]==previous
+            assert not service._is_fixed_proof_job(job)
+            monkeypatch.setattr(maintenance,"recovery_permitted",
+                lambda candidate,attempt_id,*args: candidate.job_id==job_id and attempt_id==lost.attempt_id)
+            assert service._is_maintenance_recovery_job(job,lost.attempt_id)
+            receipt=await service._recover_proof_capacity(job_id,lost.attempt_id)
+            assert receipt["status"]=="AVAILABLE"
+            assert not service._is_fixed_proof_job(job)
+            response=await _request(service,"dispatch",{"job_id":job_id})
+            assert response["ok"] is False
+            service.config=dataclasses.replace(service.config,ceo_submit_armed=True)
+            assert not service._is_maintenance_recovery_job(job,lost.attempt_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault",[None,"profile","event","summary","missing","other_root"])
+def test_maintenance_root_binding_keeps_frozen_base_and_harness(tmp_path, short_socket_root, monkeypatch,fault):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"frozen"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            predecessor=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40,
+                coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            # Explicitly refresh the current binding fixture after host config transition.
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=predecessor,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            summary_raw=b"reviewed acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),
+                acceptance_summary_sha256=hashlib.sha256(summary_raw).hexdigest())
+            if fault=="profile":
+                root=dataclasses.replace(root,constraints=dict(root.constraints,execution_profile_digest="c"*64))
+            elif fault=="event":
+                descriptor["root_event_sha256"]="c"*64
+                carry["descriptor_sha256"]=maintenance.digest(descriptor)
+            elif fault=="summary":
+                carry["acceptance_summary_sha256"]="c"*64
+            elif fault=="other_root":
+                descriptor["root_job_id"]="JOB-other"
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},summary_raw))
+            def read(path):
+                if fault=="missing": raise FileNotFoundError(path)
+                return carry
+            monkeypatch.setattr(maintenance,"sealed_json",read)
+            if fault=="other_root":
+                assert not service._is_bound_coo_root(root)
+            elif fault:
+                with pytest.raises(StateConflict):
+                    service._is_bound_coo_root(root)
+            else:
+                assert service._is_bound_coo_root(root)
+                effective=service._coo_binding_for_root(root)
+                assert effective["base_sha"]==predecessor
+                assert effective["operator_harness_armed"] is False
+                assert service._require_initial_coo_workspace(root)["head"]==predecessor
+                service.config=dataclasses.replace(service.config,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+                with pytest.raises(StateConflict,match="not armed"):
+                    await service._run_coo_cycle_once(root.job_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_preparation_publishes_complete_baseline_and_refuses_drift(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        host=tmp_path/"host"
+        config=_config(tmp_path,runtime_root=host/"control/db",socket_root=short_socket_root)
+        service,_=_service(tmp_path,config=config)
+        await service.start()
+        try:
+            old_id,lost=await _requeued_missing_proof(service)
+            receipt=service._submit_service_intent(_coo_intent(config,"prepare"))
+        finally:
+            await service.close()
+        system=tmp_path/"system"
+        (system/"config").mkdir(parents=True)
+        values=dict(runtime_root=str(config.runtime_root),proof_workspace_root=str(config.proof_workspace_root),
+            worker_id=config.worker_id,quota_class=config.quota_class,proof_base_sha=config.proof_base_sha,
+            ceo_submit_armed=False,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+        for key in ("worker_runs_root","receipts_root","backup_root"):
+            path=host/key
+            path.mkdir()
+            values[key]=str(path)
+        fixtures=host/"canary-fixtures"
+        fixtures.mkdir()
+        (fixtures/"sentinel").write_text("preserved fixture")
+        prior_canary=host/"prior-canary.json"
+        prior_canary.write_text('{"passed":true}')
+        values["secret_canary_receipt_path"]=str(prior_canary)
+        (system/"config/control.json").write_text(json.dumps(values))
+        (system/"config/worker-codex.json").write_text('{"operator_harness_armed":false}')
+        actual_uid=os.getuid()
+        monkeypatch.setattr(maintenance,"SYSTEM_ROOT",system)
+        monkeypatch.setattr(maintenance,"_TRUSTED_UID",actual_uid)
+        monkeypatch.setattr(maintenance,"_sealed_ancestors",lambda path:[])
+        monkeypatch.setattr(maintenance,"require_stopped",lambda:None)
+        monkeypatch.setattr(maintenance.os,"geteuid",lambda:0)
+        monkeypatch.setattr(maintenance,"sys",SimpleNamespace(platform="darwin"))
+        args=SimpleNamespace(predecessor_sha=config.proof_base_sha,successor_sha="b"*40,
+            root_job_id=receipt["job_id"],recovery_job_id=old_id,recovery_attempt_id=lost.attempt_id)
+        bundle=maintenance.prepare(args)
+        descriptor=maintenance.descriptor_for(args.successor_sha)
+        assert descriptor["root_job_id"]==receipt["job_id"]
+        assert (bundle/"prestate.sqlite3").is_file()
+        assert (bundle/"baseline.json").stat().st_mode & 0o777 == 0o400
+        assert (bundle/"descriptor.json").stat().st_mode & 0o777 == 0o444
+        assert not list(bundle.parent.glob(".preparing-*"))
+        with pytest.raises(maintenance.MaintenanceError,match="already exists"):
+            maintenance.prepare(args)
+        altered=dict(values,proof_base_sha=args.successor_sha)
+        prior_canary.write_text('{"passed":false}')
+        with pytest.raises(maintenance.MaintenanceError,match="prestate drifted"):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert not (bundle/"run-started.json").exists()
+        prior_canary.write_text('{"passed":true}')
+        maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert (bundle/"run-started.json").is_file()
+        with pytest.raises(FileExistsError):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, short_socket_root, monkeypatch,frozen):
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"selector"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
+                                     depth=1,orchestration_role="plan")
+            service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            actual_get_job=service.runtime.jobs.get_job
+            monkeypatch.setattr(service.runtime.jobs,"get_job",
+                                lambda job_id:plan if job_id==plan.job_id else actual_get_job(job_id))
+            monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
+            monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
+            monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))
+            calls=[]
+            class Selected(Exception): pass
+            class Supervisor:
+                def __init__(self,name): self.name=name
+                async def start_cycle_job(self,*args,**kw):
+                    calls.append(self.name)
+                    raise Selected()
+            monkeypatch.setattr(service,"_require_supervisor",lambda:Supervisor("sealed"))
+            monkeypatch.setattr(service,"_require_operator_supervisor",lambda:Supervisor("operator"))
+            with pytest.raises(Selected):
+                await service._dispatch_cycle_job_exact(plan.job_id,"selection-proof")
+            assert calls == ["operator" if frozen else "sealed"]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            intent=_coo_intent(service.config,"materialize")
+            name="auto-"+"a"*32
+            worktree=service.config.proof_workspace_root/name
+            intent["execution_contract"].update(worktree=str(worktree),branch="codex/"+name)
+            receipt=service._submit_service_intent(intent)
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            old_base=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=old_base,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            raw=b"complete acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},raw))
+            monkeypatch.setattr(maintenance,"sealed_json",lambda path:carry)
+            calls=[]
+            original=es_mod.prepare_credentialless_clone
+            def prepare(*args,**kwargs):
+                calls.append(kwargs)
+                return original(*args,**kwargs)
+            monkeypatch.setattr(es_mod,"prepare_credentialless_clone",prepare)
+            assert service._maintenance_workspace_pending(root)
+            assert service._next_bound_coo_root()==root.job_id
+            await service._prepare_maintenance_root_workspace(root)
+            assert not service._maintenance_workspace_pending(root)
+            assert service._require_initial_coo_workspace(root)["head"]==old_base
+            await service._prepare_maintenance_root_workspace(root)
+            assert len(calls)==1
+            assert calls[0]["base_sha"]==old_base
+            assert calls[0]["branch"]==root.branch
+            assert "commission_dependency" not in calls[0]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+@pytest.mark.parametrize("fault", [
+    None, "parent", "root", "depth", "role", "provenance", "worktree", "branch",
+    "profile", "base", "quota", "binary", "native_to_closed",
+])
+def test_ceo_only_root_keeps_sealed_binding_after_same_release_arm(
+    tmp_path, short_socket_root, monkeypatch, fault
+):
+    from ops.executive_os import acceptance_maintenance as maintenance
+
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt = service._submit_service_intent(_coo_intent(service.config, "same-base"))
+            root = service.runtime.jobs.get_job(receipt["job_id"])
+            admitted = root.to_dict()
+            service.config = dataclasses.replace(
+                service.config, coo_autonomy_armed=True, coo_operator_harness_armed=True
+            )
+            service._coo_execution_binding = service._load_coo_execution_binding()
+            # Same-release roots cannot borrow the maintenance carry exception.
+            def no_maintenance(sha):
+                raise AssertionError("same-base root consulted maintenance evidence")
+            monkeypatch.setattr(maintenance, "descriptor_for", no_maintenance)
+            changes = {
+                "parent": {"parent_job_id": "JOB-other"},
+                "root": {"root_job_id": "JOB-other"},
+                "depth": {"depth": 1},
+                "role": {"orchestration_role": "plan"},
+                "provenance": {"orchestration_provenance": {
+                    **root.orchestration_provenance, "creator": "other"
+                }},
+                "worktree": {"worktree": None},
+                "branch": {"branch": None},
+                "profile": {"constraints": dict(root.constraints, execution_profile_digest="c"*64)},
+                "quota": {"constraints": dict(root.constraints, operator_eligible_quota_classes=["other"])},
+                "binary": {"constraints": dict(root.constraints, operator_harness_binary_digest="c"*64)},
+            }
+            if fault == "base":
+                # A base mismatch must still take the existing maintenance path.
+                monkeypatch.setattr(maintenance, "descriptor_for", lambda sha: None)
+                root = dataclasses.replace(root, constraints=dict(root.constraints, base_sha="c"*40))
+            elif fault == "native_to_closed":
+                root = dataclasses.replace(root, constraints=dict(root.constraints, operator_harness_armed=True))
+                service.config = dataclasses.replace(
+                    service.config, coo_autonomy_armed=False, coo_operator_harness_armed=False
+                )
+                service._coo_execution_binding = service._load_coo_execution_binding()
+            elif fault:
+                root = dataclasses.replace(root, **changes[fault])
+            if fault:
+                assert not service._is_bound_coo_root(root)
+                return
+            assert service._is_bound_coo_root(root)
+            assert service._coo_binding_for_root(root)["operator_harness_armed"] is False
+            planner = service.runtime.jobs.create_cycle_planner(
+                root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+            )
+            assert planner.constraints["execution_profile_id"] == root.constraints["execution_profile_id"]
+            assert planner.constraints["eligible_quota_classes"] == root.constraints["eligible_quota_classes"]
+            assert "harness_binary_digest" not in planner.constraints
+            assert "harness_version" not in planner.constraints
+            assert service._require_bound_coo_job(planner).job_id == root.job_id
+            assert service.runtime.jobs.get_job(root.job_id).to_dict() == admitted
+        finally:
+            await service.close()
+    asyncio.run(scenario())

@@ -1,0 +1,367 @@
+'use strict';
+// Actual checkout source; synthetic DOM and Chrome read boundary only.
+const assert = require('node:assert/strict');
+const {test} = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const {createHash} = require('node:crypto');
+const EXT = path.resolve(__dirname, '../integrations/chairman_surfaces/web_sol_extension');
+const controller = fs.readFileSync(path.join(EXT, 'census.js'), 'utf8');
+const html = fs.readFileSync(path.join(EXT, 'census.html'), 'utf8');
+const core = require(path.join(EXT, 'census_core.js'));
+const INSTANCE = 'a'.repeat(64);
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.text = ''; this.className = ''; this.events = {}; this.disabled = false; }
+  set textContent(value) { this.text = String(value); this.children = []; }
+  get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = []; this.text = ''; this.append(...nodes); }
+  addEventListener(name, callback) { this.events[name] = callback; }
+  set innerHTML(_) { throw Error('HTML_WRITE_FORBIDDEN'); }
+}
+const tick = () => new Promise(resolve => setImmediate(resolve));
+function mount(next, options = {}) {
+  const ids = ['summary', 'status', 'adapter', 'scope', 'timestamp', 'rows', 'refresh'];
+  const nodes = Object.fromEntries(ids.map(id => [id, new Element('div')]));
+  for (const id of ids) assert.ok(html.includes(`id="${id}"`), `actual HTML missing ${id}`);
+  const tabs = options.tabs || Object.freeze({});
+  const instanceId = options.instanceId || INSTANCE;
+  const configVersion = options.configVersion || options.version || '0.3.0';
+  const config = options.configured === false ? undefined : Object.freeze({
+    schema: options.configSchema || 'mastermind.web_sol_instance_config.v1',
+    instanceId,
+    nativeHost: options.nativeHost || `com.mastermind.web_sol_surface.${instanceId.slice(0, 24)}`,
+    protocolMajor: options.protocolMajor ?? 1,
+    clientPackageVersion: options.clientPackageVersion || configVersion,
+    nativePackageVersion: options.nativePackageVersion || configVersion,
+    extensionPackageVersion: options.extensionPackageVersion || configVersion,
+    capabilityDigest: options.capabilityDigest || 'b'.repeat(64),
+  });
+  let calls = 0, schedulingCalls = 0; const lifecycle = {};
+  const received = [];
+  const context = {MMX_WEB_SOL_INSTANCE: config,
+    document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
+    createElement: tag => new Element(tag)}, chrome: {runtime: {
+      id: options.runtimeId || 'kmpbpccecbofdnhpcmjogofgmdodpnko',
+      getManifest() { return {version: options.version || '0.3.0'}; },
+      sendMessage(message) {
+        assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
+        calls++; received.push([tabs, config?.instanceId]); return next(tabs, config?.instanceId);
+      }}},
+    addEventListener(name, callback) { lifecycle[name] = callback; },
+    setTimeout() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); },
+    setInterval() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); }};
+  context.self = {}; context.top = options.iframe ? {} : context.self;
+  vm.runInNewContext(controller, context, {timeout: 1000, filename: path.join(EXT, 'census.js')});
+  return {nodes, received, pagehide() { lifecycle.pagehide(); }, get calls() { return calls; }, get schedulingCalls() { return schedulingCalls; },
+    refresh() { return nodes.refresh.events.click(); }};
+}
+async function settled(ui) {
+  for (let n = 0; n < 100 && ui.nodes.refresh.disabled; n++)
+    await new Promise(resolve => setTimeout(resolve, 2));
+  assert.equal(ui.nodes.refresh.disabled, false, 'refresh failed to settle');
+  return ui;
+}
+const metrics = ui => ui.nodes.summary.children.map(node => node.children[0].textContent);
+const tab = (id, suffix = '11111111-1111-4111-8111-111111111111') => Object.freeze({
+  id, windowId: 1, url: `https://chatgpt.com/c/${suffix}`, status: 'complete',
+  discarded: true, frozen: false, incognito: false, active: false});
+async function snapshot(rows, options = {}) {
+  let queries = 0;
+  return core.collect({query: async () => { queries++;
+    if (options.fail || (options.finalFail && queries === 2)) throw Error('PRIVATE_ERROR');
+    return rows; }, get() { throw Error('UNEXPECTED_LOOKUP'); },
+    sendMessage() { throw Error('UNEXPECTED_PROBE'); }}, options.unconfigured ? null : INSTANCE);
+}
+
+// Preserve all fifteen original support scenarios, now loading actual checkout paths.
+test('static guidance separates inventory, probe coverage and unimplemented model telemetry', () => {
+  assert.match(html, /Browser inventory and document-probe coverage are separate/);
+  assert.match(html, /Model and effort telemetry are not implemented in census v1/);
+  assert.match(html, /unknown cue is not proof of idle capacity/);
+});
+test('healthy discarded duplicate rows retain measured counts and unknown model', async () => {
+  const ui = await settled(mount(() => snapshot([tab(1), tab(2)])));
+  assert.deepEqual(metrics(ui), ['2', '0/2', '0', '2']);
+  assert.equal(ui.nodes.summary.children[1].children[1].textContent, 'Document probes');
+  assert.match(ui.nodes.scope.textContent, /1 distinct observed conversation locators/);
+  assert.match(ui.nodes.scope.textContent, /1 extra conversation view/);
+  assert.equal(ui.nodes.rows.children.length, 2);
+  assert.match(ui.nodes.rows.textContent, /Served model: unknown/);
+  assert.match(ui.nodes.rows.textContent, /Model\/effort telemetry is not implemented in census v1/);
+  assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.3\.0 · Captured /);
+});
+test('successful empty inventory remains distinguishable as measured zero', async () => {
+  const ui = await settled(mount(() => snapshot([])));
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+  assert.match(ui.nodes.scope.textContent, /0\/0 document probes sampled/);
+  assert.match(ui.nodes.rows.textContent, /No normal ChatGPT tabs were sampled/);
+  assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
+});
+test('installed extension version is visible without changing census semantics', async () => {
+  const ui = await settled(mount(() => snapshot([]), {version: '0.4.0'}));
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.4\.0 · Captured /);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+});
+test('coherent profile package declaration is visible without claiming live native transport', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    version: '0.4.0', configVersion: '0.4.0', capabilityDigest: 'c'.repeat(64),
+  }));
+  assert.doesNotMatch(ui.nodes.adapter.className, /warning|error/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: coherent/);
+  assert.match(ui.nodes.adapter.textContent, /extension 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /protocol 1/);
+  assert.match(ui.nodes.adapter.textContent, /capability cccccccc…/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /instanceId|nativeHost|com\.mastermind|kmpbpcce/);
+});
+test('package version disagreement is surfaced without pretending the native host was observed', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    version: '0.4.0', configVersion: '0.4.0', clientPackageVersion: '0.3.0',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: version mismatch/);
+  assert.match(ui.nodes.adapter.textContent, /manifest 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /client 0\.3\.0/);
+  assert.match(ui.nodes.adapter.textContent, /native 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /extension pin 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('invalid profile package declaration fails closed without echoing malformed values', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    protocolMajor: 2, capabilityDigest: 'PRIVATE_SENTINEL',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /PRIVATE_SENTINEL/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('wrong running extension identity invalidates the profile package declaration', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    runtimeId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|kmpbpcce/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('missing profile package declaration stays unavailable rather than looking healthy', async () => {
+  const ui = await settled(mount(() => snapshot([], {unconfigured: true}), {configured: false}));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: unavailable/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('complete inventory with unreachable content probes is visibly degraded and actionable', async () => {
+  const row = {...tab(1), discarded: false};
+  const boundary = {
+    query: async () => structuredClone([row]),
+    get: async () => structuredClone(row),
+    sendMessage: async () => { throw Error('PRIVATE_SENTINEL'); },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /Document probes unreachable \(0\/1\)/);
+  assert.match(ui.nodes.status.textContent, /reload one affected ChatGPT tab/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /PRIVATE_SENTINEL/);
+  assert.match(ui.nodes.scope.textContent, /0\/1 document probes sampled/);
+  assert.match(ui.nodes.rows.textContent, /Content probe unreachable/);
+  assert.match(ui.nodes.rows.textContent, /reload it once and refresh/);
+});
+test('partial document-probe failure stays distinct from healthy inventory coverage', async () => {
+  const rows = [
+    {...tab(1, '11111111-1111-4111-8111-111111111111'), discarded: false},
+    {...tab(2, '22222222-2222-4222-8222-222222222222'), discarded: false},
+  ];
+  const boundary = {
+    query: async () => structuredClone(rows),
+    get: async id => structuredClone(rows.find(row => row.id === id)),
+    sendMessage: async (id, request) => {
+      if (id === 2) throw Error('SECOND_TAB_PRIVATE_FAILURE');
+      const fingerprint = createHash('sha256').update(rows[0].url).digest('hex');
+      assert.equal(request.expected_conversation_fingerprint, fingerprint);
+      return {kind: 'MMX_WEB_SOL_PROBE', conversation_fingerprint: fingerprint,
+        observation: {schema: 'mastermind.web_sol_surface_probe.v1', target_present: true,
+          exact_conversation_loaded: true, page_responsive: true, document_ready_state: 'complete',
+          visibility: 'visible', composer_available: true, generation_state: 'idle',
+          auth_required: false, provider_error_present: false}};
+    },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /Document probe coverage degraded \(1\/2\); 1 tab could not be sampled/);
+  assert.match(ui.nodes.status.textContent, /Unknown cue state is not evidence/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /SECOND_TAB_PRIVATE_FAILURE/);
+  assert.match(ui.nodes.scope.textContent, /1\/2 document probes sampled/);
+  assert.match(ui.nodes.rows.children[0].textContent, /Cue sampled/);
+  assert.match(ui.nodes.rows.children[1].textContent, /Content probe unreachable/);
+});
+test('omitted tabs are never described as proven-unreachable document probes', async () => {
+  const rows = Array.from({length: 129}, (_, index) => ({...tab(index + 1), discarded: false}));
+  const boundary = {
+    query: async () => structuredClone(rows),
+    get: async id => structuredClone(rows.find(row => row.id === id)),
+    sendMessage: async () => { throw Error('OMITTED_TAB_PRIVATE_FAILURE'); },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /bounded reader did not sample every returned tab/);
+  assert.match(ui.nodes.status.textContent, /Document probe coverage degraded \(0\/129\); 128 tabs could not be sampled/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /Document probes unreachable/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /OMITTED_TAB_PRIVATE_FAILURE/);
+});
+for (const [label, input, options] of [
+  ['unconfigured', [], {unconfigured: true}], ['query failure', [], {fail: true}],
+  ['invalid inventory', {}, {}], ['inventory overflow', Array(4097).fill(tab(1)), {}],
+]) test(`${label} never renders unmeasured counts as zero`, async () => {
+  const ui = await settled(mount(() => snapshot(input, options)));
+  assert.deepEqual(metrics(ui), ['—', '—', '—', '—']);
+  assert.doesNotMatch(ui.nodes.scope.textContent, /0\/0 document probes sampled|0 distinct/);
+  assert.match(ui.nodes.rows.textContent, /not evidence that no sessions exist/);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.3\.0 · Attempted /);
+});
+test('refresh clears the previous scope while a new result is pending', async () => {
+  const prior = await snapshot([tab(1), tab(2)]); let resolve; let call = 0;
+  const ui = await settled(mount(() => ++call === 1 ? prior : new Promise(done => { resolve = done; })));
+  const refresh = ui.refresh();
+  try {
+    assert.equal(ui.nodes.scope.textContent, '');
+    assert.equal(ui.nodes.rows.children.length, 0);
+    assert.equal(ui.nodes.summary.children.length, 0);
+    assert.equal(ui.nodes.timestamp.textContent, '');
+    assert.equal(ui.nodes.refresh.disabled, true);
+  } finally { resolve(prior); await refresh; }
+});
+test('failed refresh cannot retain a prior successful scope', async () => {
+  const prior = await snapshot([tab(1)]); let call = 0;
+  const ui = await settled(mount(() => ++call === 1 ? prior : Promise.reject(Error('PRIVATE_FAILURE'))));
+  await ui.refresh();
+  assert.equal(ui.nodes.scope.textContent, '');
+  assert.equal(ui.nodes.summary.children.length, 0);
+  assert.equal(ui.nodes.rows.children.length, 0);
+  assert.equal(ui.nodes.timestamp.textContent, '');
+  assert.match(ui.nodes.status.textContent, /Snapshot unavailable/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /PRIVATE_FAILURE/);
+  assert.equal(ui.nodes.refresh.disabled, false);
+  let release;
+  const closing=mount(()=>new Promise(r=>{release=r;}));closing.pagehide();release(prior);
+  await tick();await tick();assert.equal(closing.nodes.rows.children.length,0);
+  assert.equal(closing.nodes.summary.children.length,0);assert.equal(closing.nodes.scope.textContent,'');
+});
+test('partial render failure clears all partially rendered snapshot data', async () => {
+  const valid = await snapshot([tab(1)]);
+  const ui = await settled(mount(() => ({...valid, rows: null})));
+  assert.equal(ui.nodes.summary.children.length, 0);
+  assert.equal(ui.nodes.scope.textContent, '');
+  assert.equal(ui.nodes.timestamp.textContent, '');
+  assert.equal(ui.nodes.rows.children.length, 0);
+  assert.match(ui.nodes.status.textContent, /Snapshot unavailable/);
+});
+test('partial inventory retains observed rows and explicit coverage warning', async () => {
+  const ui = await settled(mount(() => snapshot([tab(1), tab(2)], {finalFail: true})));
+  assert.deepEqual(metrics(ui), ['2', '0/2', '0', '2']);
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /completeness is unknown/);
+  assert.equal(ui.nodes.rows.children.length, 2);
+});
+test('overflow is unknown but still reports its explicit omission count', async () => {
+  const ui = await settled(mount(() => snapshot(Array(4097).fill(tab(1)))));
+  assert.match(ui.nodes.scope.textContent, /4097 returned entries omitted/);
+  assert.match(ui.nodes.status.className, /warning/);
+});
+test('a synchronous collection error remains payload-free and re-enables refresh', async () => {
+  const ui = await settled(mount(() => { throw Error('PRIVATE_THROW'); }));
+  assert.match(ui.nodes.status.textContent, /Snapshot unavailable/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /PRIVATE_THROW/);
+});
+test('busy refresh does not dispatch additional collection work', async () => {
+  const prior = await snapshot([]); let resolve;
+  const ui = mount(() => new Promise(done => { resolve = done; }));
+  await ui.refresh(); await ui.refresh();
+  assert.equal(ui.calls, 1);
+  const frame=mount(()=>{throw Error('IFRAME_ACQUISITION');},{iframe:true});
+  await tick();assert.equal(frame.calls,0);assert.equal(frame.nodes.rows.children.length,0);
+  resolve(prior); await settled(ui);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+});
+test('manual refresh recovers after failure without automatic retries', async () => {
+  const prior = await snapshot([tab(1)]); let call = 0;
+  const ui = await settled(mount(() => ++call === 1 ? Promise.reject(Error('FAIL')) : prior));
+  assert.equal(ui.calls, 1); await tick(); assert.equal(ui.calls, 1);
+  await ui.refresh();
+  assert.equal(ui.calls, 2);
+  assert.deepEqual(metrics(ui), ['1', '0/1', '0', '1']);
+  assert.equal(ui.nodes.rows.children.length, 1);
+  assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
+});
+test('successful snapshot data is not mutated by rendering', async () => {
+  const prior = await snapshot([tab(1)]); const before = JSON.stringify(prior);
+  Object.freeze(prior); for (const row of prior.rows) Object.freeze(row);
+  Object.freeze(prior.rows);
+  await settled(mount(() => prior));
+  assert.equal(JSON.stringify(prior), before);
+});
+
+// Additional assertions required by the current source coordinator.
+test('controller requests the same worker broker on initial and manual reads', async () => {
+  const boundary = Object.freeze({query: async () => [], get() { throw Error('UNEXPECTED_LOOKUP'); },
+    sendMessage() { throw Error('UNEXPECTED_PROBE'); }});
+  const exactInstance = 'b'.repeat(64);
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId),
+    {tabs: boundary, instanceId: exactInstance}));
+  await ui.refresh();
+  assert.equal(ui.received.length, 2);
+  for (const [api, instanceId] of ui.received) { assert.equal(api, boundary); assert.equal(instanceId, exactInstance); }
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+});
+test('selected model and effort remain explicitly unverified in each actual rendered row', async () => {
+  const ui = await settled(mount(() => snapshot([tab(1), tab(2)])));
+  for (const row of ui.nodes.rows.children) {
+    assert.match(row.textContent, /Unverified \/ Unverified/);
+    assert.match(row.textContent, /Served model: unknown/);
+    assert.match(row.textContent, /Model\/effort telemetry is not implemented in census v1/);
+  }
+});
+test('positive generation and disagreeing duplicate cues reach the real controller from the real collector', async () => {
+  const rows = [1, 2].map(id => ({...tab(id), discarded: false}));
+  const boundary = {
+    query: async () => structuredClone(rows),
+    get: async id => structuredClone(rows.find(row => row.id === id)),
+    sendMessage: async (id, request, target) => {
+      assert.deepEqual(target, {frameId: 0});
+      const fingerprint = createHash('sha256').update(rows[0].url).digest('hex');
+      assert.equal(request.expected_conversation_fingerprint, fingerprint);
+      return {kind: 'MMX_WEB_SOL_PROBE', conversation_fingerprint: fingerprint,
+        observation: {schema: 'mastermind.web_sol_surface_probe.v1', target_present: true,
+          exact_conversation_loaded: true, page_responsive: true, document_ready_state: 'complete',
+          visibility: 'visible', composer_available: true, generation_state: id === 1 ? 'active' : 'idle',
+          auth_required: false, provider_error_present: false}};
+    }};
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.deepEqual(metrics(ui), ['2', '2/2', '1', '0']);
+  assert.match(ui.nodes.rows.children[0].textContent, /Cue present/);
+  assert.match(ui.nodes.rows.children[1].textContent, /No cue observed/);
+  for (const row of ui.nodes.rows.children) {
+    assert.match(row.textContent, /Cue observations differ/);
+    assert.match(row.textContent, /Document visibility: visible/);
+    assert.match(row.textContent, /Probe observed: \d{2}:\d{2}:\d{2} UTC/);
+  }
+});
+test('controller schedules no retry timer on failure, settlement, or manual recovery', async () => {
+  let fail = true;
+  const ui = await settled(mount(() => fail ? Promise.reject(Error('SYNTHETIC_FAILURE')) : snapshot([])));
+  await tick(); await tick();
+  assert.equal(ui.calls, 1); assert.equal(ui.schedulingCalls, 0);
+  fail = false; await ui.refresh(); await tick();
+  assert.equal(ui.calls, 2); assert.equal(ui.schedulingCalls, 0);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+});
+test('missing instance configuration is forwarded as missing and never touches browser APIs', async () => {
+  let browserCalls = 0;
+  const boundary = Object.freeze({query() { browserCalls++; return []; }, get() { browserCalls++; },
+    sendMessage() { browserCalls++; }});
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary, configured: false}));
+  assert.equal(ui.received[0][0], boundary); assert.equal(ui.received[0][1], undefined);
+  assert.equal(browserCalls, 0); assert.deepEqual(metrics(ui), ['—', '—', '—', '—']);
+});

@@ -77,6 +77,31 @@ async def _sdk_wire_tool_call(config: dict, tool_name: str, arguments: dict) -> 
         query.close_receive_stream()
 
 
+def _count_vendored_read(tmp_path, monkeypatch, relative_path, payload):
+    """Count the selected file read through the unchanged checked producer."""
+    _write_vendored(tmp_path, relative_path, payload)
+    selected = tmp_path / relative_path
+    original_read = Path.read_text
+    reads = {"count": 0}
+
+    def counted_read(path, *args, **kwargs):
+        if path == selected:
+            reads["count"] += 1
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    monkeypatch.setattr(Path, "read_text", counted_read)
+    return reads
+
+
+def _isolate_regime_enrichment(monkeypatch):
+    from brain import decision_context, pm_conviction
+
+    monkeypatch.setattr(pm_conviction, "_read_market_view", lambda: None)
+    monkeypatch.setattr(pm_conviction, "_market_view_enrichment", lambda _view: None)
+    monkeypatch.setattr(decision_context, "prompt_summary", lambda **_kwargs: None)
+
+
 def test_read_tools_return_real_data():
     reg = json.loads(_text(asyncio.run(bot_mcp.get_regime.handler({}))))
     if reg.get("quad") is None:
@@ -266,68 +291,54 @@ def test_json_transport_refuses_oversized_non_object_roots(root):
     assert result["is_error"] is True
 
 
-def test_real_decorated_handler_sets_sdk_wire_error_once(monkeypatch):
-    producer_calls = 0
+def test_real_decorated_handler_sets_sdk_wire_error_once(tmp_path, monkeypatch):
     handler_calls = 0
     original_handler = bot_mcp.get_regime.handler
-
-    def invalid_regime(_path):
-        nonlocal producer_calls
-        producer_calls += 1
-        return {"quad": "Q1", "sector_rs": [float("nan")]}
+    reads = _count_vendored_read(tmp_path, monkeypatch, "data/regime/latest.json", {
+        "quad": "Q1", "sector_rs": [float("nan")],
+    })
+    _isolate_regime_enrichment(monkeypatch)
 
     async def counted_handler(args):
         nonlocal handler_calls
         handler_calls += 1
         return await original_handler(args)
 
-    monkeypatch.setattr(bot_mcp, "_read_json", invalid_regime)
     monkeypatch.setattr(bot_mcp.get_regime, "handler", counted_handler)
-
     wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
 
-    assert handler_calls == 1
-    assert producer_calls == 1
+    assert handler_calls == reads["count"] == 1
     assert wire["isError"] is True
     assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
 
-
-def test_real_decorated_handler_preserves_multilingual_success_through_sdk(monkeypatch):
-    producer_calls = 0
+def test_real_decorated_handler_preserves_multilingual_success_through_sdk(tmp_path, monkeypatch):
     handler_calls = 0
     original_handler = bot_mcp.get_regime.handler
-
-    def regime_fixture(_path):
-        nonlocal producer_calls
-        producer_calls += 1
-        return {"quad": "Q1", "cycle_tag": "電力", "growth_score": 0, "liquidity_overlay": False,
-                "sector_rs": ["🚀"], "data_quality": None}
+    reads = _count_vendored_read(tmp_path, monkeypatch, "data/regime/latest.json", {
+        "quad": "Q1", "cycle_tag": "電力", "growth_score": 0, "liquidity_overlay": False,
+        "sector_rs": ["🚀"], "data_quality": None,
+    })
+    _isolate_regime_enrichment(monkeypatch)
 
     async def counted_handler(args):
         nonlocal handler_calls
         handler_calls += 1
         return await original_handler(args)
 
-    monkeypatch.setattr(bot_mcp, "_read_json", regime_fixture)
     monkeypatch.setattr(bot_mcp.get_regime, "handler", counted_handler)
     wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
     parsed = _strict_json(wire["content"][0]["text"])
 
-    assert handler_calls == producer_calls == 1
+    assert handler_calls == reads["count"] == 1
     assert wire.get("isError", False) is False
     assert _utf8_bytes(wire["content"][0]["text"]) <= 8_000
     assert parsed["cycle_tag"] == "電力" and parsed["growth_score"] == 0
     assert parsed["liquidity_overlay"] is False
 
-
 def test_real_intel_hub_handler_compacts_multilingual_fixture_through_sdk(tmp_path, monkeypatch):
-    producer_calls = 0
     handler_calls = 0
-    original_read_json = bot_mcp._read_json
     original_handler = bot_mcp.get_intel_hub.handler
-    hub_path = tmp_path / "site" / "intel_hub" / "hub.json"
-    hub_path.parent.mkdir(parents=True)
-    hub_path.write_text(json.dumps({
+    reads = _count_vendored_read(tmp_path, monkeypatch, "site/intel_hub/hub.json", {
         "as_of": "2026-09-06",
         "macro_context": {"label": "電力", "confidence": 0, "risk_off": False, "note": None},
         "desks": {"research": {"active": True}},
@@ -343,26 +354,19 @@ def test_real_intel_hub_handler_compacts_multilingual_fixture_through_sdk(tmp_pa
             for index in range(24)
         ],
         "divergence_alerts": {"early_edge": []}, "sector_heat": [], "how_to_use": "研究用",
-    }, ensure_ascii=False))
-
-    def counted_read_json(path):
-        nonlocal producer_calls
-        producer_calls += 1
-        return original_read_json(path)
+    })
 
     async def counted_handler(args):
         nonlocal handler_calls
         handler_calls += 1
         return await original_handler(args)
 
-    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
-    monkeypatch.setattr(bot_mcp, "_read_json", counted_read_json)
     monkeypatch.setattr(bot_mcp.get_intel_hub, "handler", counted_handler)
     wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_intel_hub", {"top": 24}))
     text = wire["content"][0]["text"]
     parsed = _strict_json(text)
 
-    assert handler_calls == producer_calls == 1
+    assert handler_calls == reads["count"] == 1
     assert wire.get("isError", False) is False
     assert _utf8_bytes(text) <= 8_000
     assert parsed["_transport_truncated"] is True
@@ -374,8 +378,7 @@ def test_real_intel_hub_handler_compacts_multilingual_fixture_through_sdk(tmp_pa
 
 
 @pytest.mark.parametrize("invalid", (float("nan"), "\ud800"))
-def test_real_handler_rejects_invalid_data_before_compaction_can_omit_it(monkeypatch, invalid):
-    producer_calls = 0
+def test_real_handler_rejects_invalid_data_before_compaction_can_omit_it(tmp_path, monkeypatch, invalid):
     handler_calls = 0
     original_handler = bot_mcp.get_themes.handler
     retained_control = {"id": "late-control", "name": None, "category": False, "n_members": 0}
@@ -383,27 +386,24 @@ def test_real_handler_rejects_invalid_data_before_compaction_can_omit_it(monkeyp
         {"id": f"basket-{index}", "name": "電" * 400, "category": "research", "n_members": index}
         for index in range(24)
     ] + [retained_control, {"id": "invalid-late", "perf": {"20d": {"rel": invalid}}}]
-
-    def oversized_fixture(_path):
-        nonlocal producer_calls
-        producer_calls += 1
-        return {"as_of": "2026-09-05", "baskets": baskets}
+    # _write_vendored escapes a lone surrogate so the fixture file is valid UTF-8;
+    # rejection must occur in the actual handler's transport serialization.
+    reads = _count_vendored_read(tmp_path, monkeypatch, "site/basketdata/baskets.json", {
+        "as_of": "2026-09-05", "baskets": baskets,
+    })
 
     async def counted_handler(args):
         nonlocal handler_calls
         handler_calls += 1
         return await original_handler(args)
 
-    monkeypatch.setattr(bot_mcp, "_read_json", oversized_fixture)
     monkeypatch.setattr(bot_mcp.get_themes, "handler", counted_handler)
-
     wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_themes", {}))
 
-    assert handler_calls == producer_calls == 1
+    assert handler_calls == reads["count"] == 1
     assert wire["isError"] is True
     assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
     assert retained_control == {"id": "late-control", "name": None, "category": False, "n_members": 0}
-
 
 def test_sdk_does_not_treat_camel_case_handler_error_as_an_error():
     @tool("camel_only", "Negative handler-key control.", {})
@@ -478,3 +478,283 @@ def test_intel_hub_tool(tmp_path, monkeypatch):
     one = json.loads(_text(asyncio.run(bot_mcp.get_intel_hub.handler({"ticker": "nvda"}))))
     assert one["ticker"] == "NVDA" and one["composite_conviction"] == 100
     assert "ZZZZ not in" in _text(asyncio.run(bot_mcp.get_intel_hub.handler({"ticker": "ZZZZ"})))
+
+
+# --- D2 boundary freshness (news estate 2026-10-31) -------------------------------------------
+def _write_vendored(root, rel, payload):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(payload))
+
+
+_NEWS_REC = {"n_recent": 3, "sentiment_lean": "pos", "n_pos": 2, "n_neg": 0,
+             "baskets": ["ai"], "sectors": ["tech"], "is_mag7": True,
+             "top": [{"title": "t", "source": "Reuters", "url": "u", "summary": "s",
+                      "sentiment": "pos", "date": "2026-10-30",
+                      "item_id": "massive:reuters.com:abc123",
+                      "published_utc": "2026-10-30T14:05:00+00:00"}]}
+
+
+def test_get_news_carries_freshness_and_evidence_grade(tmp_path, monkeypatch):
+    """T5: a found ticker carries the vendored file's clocks; existing keys stay unchanged."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "is_context_only": True, "asof": "2026-10-31",
+        "source_asof": "2026-10-30T22:00:00+00:00", "source_asof_basis": "financial_news.fetched_at",
+        "retained_from_previous_build": True, "retained_reason": "candidate_darker_than_existing",
+        "tickers": {"NVDA": _NEWS_REC}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "nvda"}))))
+    assert {"ticker", "news", "note"} <= set(out)
+    assert out["ticker"] == "NVDA" and out["news"]["n_recent"] == 3
+    assert out["evidence_grade"] == "vendored_snapshot"
+    assert out["freshness"] == {
+        "asof": "2026-10-31", "source_asof": "2026-10-30T22:00:00+00:00",
+        "retained_from_previous_build": True, "generated_utc": None,
+        "basis": "vendored_macro_file", "source_file": "site/news/by_ticker.json"}
+    assert "missing_reason" not in out and "fallback" not in out
+    # a pre-D2 producer file (no source clock) reports null, never an invented clock
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "asof": "2026-10-29", "tickers": {"NVDA": _NEWS_REC}})
+    old = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "NVDA"}))))
+    assert old["freshness"]["asof"] == "2026-10-29"
+    assert old["freshness"]["source_asof"] is None
+    assert old["freshness"]["retained_from_previous_build"] is None
+    # an absent ticker keeps the existing plain-text contract
+    assert "no news-flow signal for ZZZZ" in _text(
+        asyncio.run(bot_mcp.get_news.handler({"ticker": "ZZZZ"})))
+
+
+def test_get_intelligence_labels_primary_and_legacy_fallback(tmp_path, monkeypatch):
+    """T6: the unified read is graded vendored_snapshot; the standalone-feed composition is
+    labelled legacy_fallback with its reason and the news file's clocks."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "schema": "intelligence.v1", "is_context_only": True, "as_of": "2026-10-31",
+        "generated_utc": "2026-10-31T06:10:00+00:00",
+        "tickers": {"NVDA": {"ticker": "NVDA", "news": _NEWS_REC, "alt": None,
+                             "has_news": True, "has_alt": False}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "asof": "2026-10-31",
+        "source_asof": "2026-10-31T05:00:00+00:00", "retained_from_previous_build": False,
+        "tickers": {"AMD": _NEWS_REC}})
+    _write_vendored(tmp_path, "site/altdata/mastermind.json", {
+        "as_of": "2026-10-30", "signals": [{"ticker": "AMD", "signal_score": 61}]})
+
+    primary = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert primary["has_news"] is True and "note" in primary
+    assert primary["evidence_grade"] == "vendored_snapshot"
+    assert primary["freshness"]["asof"] == "2026-10-31"
+    assert primary["freshness"]["generated_utc"] == "2026-10-31T06:10:00+00:00"
+    assert primary["freshness"]["source_file"] == "site/intelligence/by_ticker.json"
+    assert primary["freshness"]["basis"] == "vendored_macro_file"
+    assert "missing_reason" not in primary and "fallback" not in primary
+
+    legacy = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "AMD"}))))
+    assert legacy["has_news"] is True and legacy["has_alt"] is True
+    assert legacy["missing_reason"] == "ticker_absent_in_vendored_file"
+    assert legacy["fallback"] == "standalone_news_and_altdata_feeds"
+    assert legacy["evidence_grade"] == "legacy_fallback"
+    assert legacy["freshness"]["source_file"] == "site/news/by_ticker.json"
+    assert legacy["freshness"]["source_asof"] == "2026-10-31T05:00:00+00:00"
+    assert legacy["freshness"]["retained_from_previous_build"] is False
+    assert legacy["alt_freshness"]["asof"] == "2026-10-30"
+
+
+def test_freshness_survives_transport_compaction(tmp_path, monkeypatch):
+    """T6b: the 8k transport budget never drops the freshness block or the grade."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    wide = dict(_NEWS_REC, top=[dict(_NEWS_REC["top"][0], summary="x" * 3000) for _ in range(40)])
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "asof": "2026-10-31", "source_asof": "2026-10-31T05:00:00+00:00",
+        "tickers": {"NVDA": wide}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "NVDA"}))))
+    assert out["_transport_truncated"] is True
+    assert out["freshness"]["source_asof"] == "2026-10-31T05:00:00+00:00"
+    assert out["evidence_grade"] == "vendored_snapshot"
+    tiny = json.loads(_text(bot_mcp._json({"freshness": {"asof": "2026-10-31"}, "evidence_grade": "g",
+                                            **{f"k{i}": {"v": "y" * 200} for i in range(400)}})))
+    assert tiny["freshness"] == {"asof": "2026-10-31"} and tiny["evidence_grade"] == "g"
+
+
+_NEWS_ORIGIN = {
+    "source_asof": "2026-10-29T21:00:00+00:00",
+    "source_asof_basis": "financial_news.fetched_at",
+    "retained_from_previous_build": True,
+    "retained_reason": "candidate_darker_than_existing",
+}
+
+
+def test_unified_intelligence_keeps_news_origin_separate(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "generated_utc": "2026-11-08T05:00:00+00:00",
+        "news_freshness": _NEWS_ORIGIN,
+        "tickers": {"NVDA": {"news": _NEWS_REC, "has_news": True, "alt": None}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "source_asof": "2026-11-08T06:00:00+00:00", "retained_from_previous_build": False,
+        "tickers": {"NVDA": dict(_NEWS_REC, n_recent=99)}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert out["news_freshness"] == _NEWS_ORIGIN
+    assert out["freshness"]["asof"] == "2026-11-08"
+    assert out["freshness"]["source_asof"] is None
+    assert out["freshness"]["source_file"] == "site/intelligence/by_ticker.json"
+    assert out["news"] == _NEWS_REC
+    assert out["evidence_grade"] == "vendored_snapshot"
+
+
+@pytest.mark.parametrize("metadata", [None, [], "bad", {}, {
+    "source_asof": 12, "source_asof_basis": [], "retained_from_previous_build": "false",
+    "retained_reason": {"reason": "old"}}, {
+    "source_asof": " ", "source_asof_basis": "", "retained_from_previous_build": 0}])
+def test_unified_news_unknown_metadata_never_borrows_newer_standalone(tmp_path, monkeypatch, metadata):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "news_freshness": metadata,
+        "tickers": {"NVDA": {"news": _NEWS_REC, "has_news": True}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        **_NEWS_ORIGIN, "retained_from_previous_build": False, "tickers": {"NVDA": _NEWS_REC}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert out["news_freshness"] == {
+        "source_asof": None, "source_asof_basis": None,
+        "retained_from_previous_build": None, "retained_reason": None}
+    assert out["news"] == _NEWS_REC
+
+
+@pytest.mark.parametrize("mode", ["compact", "scalar_fallback"])
+def test_unified_news_origin_survives_actual_tool_transport(tmp_path, monkeypatch, mode):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    news = dict(_NEWS_REC, top=[{"title": "x" * 3000} for _ in range(40)])
+    if mode == "scalar_fallback":
+        news.update({f"wide_{i}": {"nested": "x" * 500} for i in range(250)})
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "news_freshness": _NEWS_ORIGIN,
+        "tickers": {"NVDA": {"news": news, "has_news": True}}})
+    text = _text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"})))
+    out = json.loads(text)
+    assert out["_transport_truncated"] is True
+    assert len(text) <= 8000
+    assert out["news_freshness"] == _NEWS_ORIGIN
+    assert out["freshness"]["asof"] == "2026-11-08"
+    assert out["evidence_grade"] == "vendored_snapshot"
+    if mode == "scalar_fallback":
+        assert "news" not in out
+
+
+@pytest.mark.parametrize("shape", ["structured", "nested_fallback", "scalar_prefix"])
+def test_json_transport_preserves_late_source_qualification(shape):
+    qualification = {
+        "freshness": {"asof": "2026-11-08", "source_asof": None, "basis": "vendored_macro_file"},
+        "alt_freshness": {"asof": "2026-11-07", "source_asof": "2026-11-06T05:00:00Z"},
+        "news_freshness": dict(_NEWS_ORIGIN),
+        "evidence_grade": "legacy_fallback",
+        "missing_reason": "unified_artifact_absent",
+        "fallback": "standalone_news_and_altdata_feeds",
+        "read_status": "partial",
+        "failed_sources": [f"source_{i}" for i in range(30)],
+        "degraded_sources": ["lenses", "intake"],
+        "note": "Evidence remains incomplete. " * 25 + "Missing fields are unknown.",
+        "live": False,
+        "status": "available_with_gaps",
+        "portfolio_id": "fixture",
+        "active": False,
+        "lifecycle": None,
+    }
+    if shape == "structured":
+        bulk = {"rows": [{"detail": "電" * 1000} for _ in range(100)]}
+    elif shape == "nested_fallback":
+        bulk = {f"key_{i}": {"value": "x" * 500} for i in range(400)}
+    else:
+        bulk = {f"key_{i}": i for i in range(1500)}
+    original = {**bulk, **qualification}
+    before = json.dumps(original, ensure_ascii=False)
+    result = bot_mcp._json(original)
+    text = _text(result)
+    out = _strict_json(text)
+
+    assert result.get("is_error") is not True
+    assert out["_transport_truncated"] is True
+    assert _utf8_bytes(text) <= 8000
+    assert {key: out[key] for key in qualification} == qualification
+    assert json.dumps(original, ensure_ascii=False) == before
+    assert bot_mcp._json(original) == result
+    if shape == "scalar_prefix":
+        assert out["key_0"] == 0
+
+
+def test_json_transport_retains_nested_lens_restrictions_with_its_values():
+    lenses = {
+        "confluence": 0,
+        "data_degraded": True,
+        "stockdata_present": False,
+        "n_scored": 0,
+        "thin_evidence": True,
+        "size_authority": "blocked",
+        "vetoes": [f"veto_{i}" for i in range(30)],
+        "note": "Evidence is thin. " * 30 + "Do not derive size from this result.",
+    }
+    result = bot_mcp._json({
+        "rows": [{"detail": "x" * 1000} for _ in range(100)],
+        "lenses": lenses,
+    })
+    out = _strict_json(_text(result))
+
+    assert out["_transport_truncated"] is True
+    assert out["lenses"] == lenses
+    assert _utf8_bytes(_text(result)) <= 8000
+
+
+@pytest.mark.parametrize("outcome_key", ["proposal_queued", "paper_saved"])
+def test_json_transport_keeps_unknown_write_outcome_and_retry_fence(outcome_key):
+    fence = {
+        "write_status": "unknown",
+        outcome_key: None,
+        "error": "fixture_outcome_unknown",
+        "note": "Canonical outcome is unknown. " * 20 + "Reconcile it before considering retry.",
+    }
+    result = bot_mcp._json({**{f"k{i}": i for i in range(1500)}, **fence})
+    out = _strict_json(_text(result))
+
+    assert result.get("is_error") is not True
+    assert out["_transport_truncated"] is True
+    assert {key: out[key] for key in fence} == fence
+    assert _utf8_bytes(_text(result)) <= 8000
+
+
+def test_json_transport_preserves_gate_unknowns_after_wide_scalar_fallback():
+    gate = {
+        "read_status": "unavailable",
+        "gate_status": "unavailable",
+        "failed_sources": ["decision_matrix"],
+        "error": "advisor_gate_unavailable",
+        "passed": None,
+        "size_authority": None,
+        "vetoes": None,
+        "reason": "Preliminary gate unavailable; engine evidence did not complete.",
+    }
+    result = bot_mcp._json({**{f"k{i}": i for i in range(1500)}, **gate})
+    out = _strict_json(_text(result))
+
+    assert {key: out[key] for key in gate} == gate
+    assert out["_transport_truncated"] is True
+    assert _utf8_bytes(_text(result)) <= 8000
+
+
+@pytest.mark.parametrize("qualification", [
+    {"freshness": {"source_file": "源" * 3000}},
+    {"news_freshness": {"source_asof": None, "retained_reason": "x" * 9000}},
+    {"read_status": "partial", "failed_sources": ["source_" + "x" * 500] * 30},
+    {"write_status": "unknown", "paper_saved": None, "note": "x" * 9000},
+])
+def test_json_transport_errors_if_complete_qualification_cannot_fit(qualification):
+    result = bot_mcp._json({"value": 0, **qualification})
+
+    assert result["is_error"] is True
+    assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_TOO_LARGE"}
+    assert _utf8_bytes(_text(result)) <= 8000
+
+
+def test_json_transport_does_not_replace_only_unfit_entry_with_metadata():
+    result = bot_mcp._json({"k" * 9000: {"nested": "x" * 500}})
+
+    assert result["is_error"] is True
+    assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_TOO_LARGE"}

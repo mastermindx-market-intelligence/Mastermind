@@ -1,0 +1,1754 @@
+{
+  "capture": {
+    "capture_dir": "/Volumes/Mastermind/evidence/pbr/research-capture-20261022T073549Z",
+    "captured_utc": "2026-10-22T07:35:49Z",
+    "manifest_sha256": "4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa"
+  },
+  "case_id": "mu_2026-10-22_planless_summary",
+  "case_role": "regression",
+  "defect_ref": "A15",
+  "derived": {
+    "mu_exit_decisions": [
+      {
+        "entry": {
+          "action": "exit",
+          "evidence": [
+            {
+              "iso_dates": [],
+              "length": 96,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 59,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 64,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+              "terms": [
+                "held_without_active_plan"
+              ]
+            },
+            {
+              "iso_dates": [],
+              "length": 57,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+              "terms": []
+            }
+          ],
+          "falsifier": {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+            "terms": []
+          },
+          "reason": {
+            "iso_dates": [],
+            "length": 597,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+            "terms": [
+              "held_without_active_plan",
+              "no live thesis"
+            ]
+          },
+          "reason_code": "risk_limit",
+          "ticker": "MU",
+          "why_now": {
+            "iso_dates": [],
+            "length": 172,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+            "terms": []
+          }
+        },
+        "line_index_0based": 89
+      }
+    ],
+    "mu_requested_exit_decisions": [
+      {
+        "entry": {
+          "action": "exit",
+          "evidence": [
+            {
+              "iso_dates": [],
+              "length": 96,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 59,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 64,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+              "terms": [
+                "held_without_active_plan"
+              ]
+            },
+            {
+              "iso_dates": [],
+              "length": 57,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+              "terms": []
+            }
+          ],
+          "falsifier": {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+            "terms": []
+          },
+          "reason": {
+            "iso_dates": [],
+            "length": 597,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+            "terms": [
+              "held_without_active_plan",
+              "no live thesis"
+            ]
+          },
+          "reason_code": "risk_limit",
+          "ticker": "MU",
+          "why_now": {
+            "iso_dates": [],
+            "length": 172,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+            "terms": []
+          }
+        },
+        "line_index_0based": 89
+      }
+    ],
+    "prior_thesis_refs": [
+      {
+        "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 210,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+          "terms": [
+            "earnings"
+          ]
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-10-22"
+          ],
+          "length": 209,
+          "period_labels": [
+            "Q4 FY2026"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+          "terms": []
+        },
+        "line_index_0based": 75
+      },
+      {
+        "decision_id": "decision.v1.978d5a72e61fdefbaad6c902",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 189,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "f4e984a3a404701fd1bbd427168177b620211de76d2e19eabc052f5e432198fa",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 167,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "72c5a841697d9342932d87953846d41d54b5c9ef7bce83790ee139e7bff38f21",
+          "terms": []
+        },
+        "line_index_0based": 76
+      }
+    ],
+    "summary_and_memo_sentences": [
+      {
+        "field": "summary",
+        "line_index_0based": 89,
+        "sentence": {
+          "iso_dates": [],
+          "length": 296,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "8daac7d25c42c869b56e06c4a5df4ef3269700c80660a94a539bcb2102a4d509",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        }
+      },
+      {
+        "field": "decision_memo.alternatives",
+        "line_index_0based": 89,
+        "sentence": {
+          "iso_dates": [],
+          "length": 93,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "8582eb0cbd7c535f931527a8907403cf617dc7f1409013b8cb05a7483e07b6b4",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.changes",
+        "line_index_0based": 89,
+        "sentence": {
+          "iso_dates": [],
+          "length": 14,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1376a88de4836cd07cc0e6ec2a1590f44e06a2ab5a235c61ab2951d33025eccd",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.rejected",
+        "line_index_0based": 89,
+        "sentence": {
+          "iso_dates": [],
+          "length": 103,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fad52d2f8af4b706c696f540910ef646b9c33541a2392647aea9f1ad30509581",
+          "terms": [
+            "no live thesis"
+          ]
+        }
+      },
+      {
+        "field": "summary",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 64,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fb1c6f8f86713962614e511ea1263c37eefa4e93be8d9c582390f0da88f28792",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.alternatives",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 205,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "75144bc070fd7701f3c34a1d5daff55b144bab46e3b2ea42a40891cf1d1edec4",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.changes",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 84,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1e62aae0c2ced95d24b913eed7c62bbe02acccc5c65ac64aa6be22a53579116b",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.delegation_summary",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 154,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bfaceeb1b8d735d2b4df32473635e32ce3bf5617ddd15d9a9ab30e3a4c5c9337",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.selected",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 77,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "82547989e62d3b8d698ff03cddd5120d206ad15e55e1875fefd8b636db034e82",
+          "terms": []
+        }
+      },
+      {
+        "field": "decision_memo.timing",
+        "line_index_0based": 78,
+        "sentence": {
+          "iso_dates": [],
+          "length": 85,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9445083022746329bc87375005a181a1c5a7b29b7b2b93b2293fe75ee75cd0ac",
+          "terms": []
+        }
+      }
+    ],
+    "ticker_in_holdings": {
+      "78": true,
+      "89": false
+    }
+  },
+  "external_facts": [],
+  "fills": [],
+  "linkage_note": "decision.v1.8d700b90434853b846f2ef2e settled_asof 2026-10-05, settlement_fill_ids[0]=c9ec0d95... = fills.jsonl MU buy 92 sh @ 1069.68 value 98410.56, transaction_id b222043d...",
+  "provenance": [
+    {
+      "decision_id": "decision.v1.cbf98cc5bfd573cec5ba33e0",
+      "line_index_0based": 89,
+      "line_sha256": "3561d19ffb9a3f193ab7153c04d2152bfcac823a0730f8cce9f094fd3e18b5df",
+      "source_book": "autonomous",
+      "source_file_sha256": "c82e2270adf611919118175b50313a1b5bb8ce9238e676f2ba734a3547e37f76",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/autonomous/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/autonomous/decisions.jsonl"
+    },
+    {
+      "decision_id": "decision.v1.9b919e509e3e2d663fa6ae1a",
+      "line_index_0based": 78,
+      "line_sha256": "410bcf6d2fab29d7262a1d4d97db4679272c9bc46b3c81c67ebdd0d55b1fe575",
+      "source_book": "autonomous",
+      "source_file_sha256": "c82e2270adf611919118175b50313a1b5bb8ce9238e676f2ba734a3547e37f76",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/autonomous/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/autonomous/decisions.jsonl"
+    }
+  ],
+  "records": [
+    {
+      "case_effective_holding": null,
+      "case_holding": null,
+      "case_row_falsifiers": [],
+      "decision_id": "decision.v1.cbf98cc5bfd573cec5ba33e0",
+      "line_index_0based": 89,
+      "row": {
+        "accepted_asof": "2026-10-22",
+        "allocation_review": {
+          "cash": 0.7299,
+          "cash_rationale_present": true,
+          "cash_rationale_required": true,
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
+        },
+        "asof": "2026-10-22",
+        "brain_text": {
+          "iso_dates": [],
+          "length": 2176,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "04ed1fed51bca6de58b547deb00d8797b9f69d35765e5a527c4cb301ca3912e1",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 953,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "166f1786e0154f61f2824e31c6d260b86e0f71b216433ff04cdd88b4f5e6d2c7",
+          "terms": []
+        },
+        "cost_usd": 1.0257219999999998,
+        "decision_effective": true,
+        "decision_id": "decision.v1.cbf98cc5bfd573cec5ba33e0",
+        "decision_memo": {
+          "alternatives": {
+            "iso_dates": [],
+            "length": 315,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "da5a6ed49b679c5e197f574ddb5bf0b4e18b6c89bd788b09be9d7744936b2f90",
+            "terms": []
+          },
+          "candidate_funnel": {
+            "admitted": [],
+            "reason_none_added": {
+              "iso_dates": [],
+              "length": 217,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "307c90b8bf30563a2be0934e2af27b44b3a315c5bbd07aa951623513ab48e5d6",
+              "terms": []
+            },
+            "reviewed_for_add": [
+              {
+                "iso_dates": [],
+                "length": 22,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2b85c97dd3d0ab5a1255d7a1bb648c769e125737c104332b0cc4549c351a50c3",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 22,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "c5718cafea95cede99fe20df6ee3418abe5782246965c7b190e366fd7c090ff1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 23,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "8f4ae5707149206c9a83637362569d1fd825678bf54425b4b7f01e1b204ec5d6",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 23,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "3af56dca93bebcff57e4ebce27acfa2a55e790b345bee00cdacef04be670e02b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 32,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e6705f026adea5e1aa75fef7f410ab9a65f1186f2c3936567dd300222185c87f",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 31,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ff1afeccda710f025f808767aebd2c3fddd6e770172ad510820a2b7e9d5c367f",
+                "terms": []
+              }
+            ]
+          },
+          "changes": {
+            "iso_dates": [],
+            "length": 56,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "15d9be2667a0c59ea1c02d0a0bcf3b69be2af21f7dcd2c296209e1cf43616e12",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [],
+            "length": 239,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "94e17f0a4439287148a54447524a0b077ee2e1be0fff076963e87dd088a88f36",
+            "terms": []
+          },
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 178,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9b11930849efe6d4b4e0c42de5ff1b31ef45e573f1208bc2ba338d29f821b5ee",
+            "terms": []
+          },
+          "lessons_applied": [
+            "lesson.v1.US_ONLY.cash_opportunity_cost"
+          ],
+          "market_frame": {
+            "iso_dates": [],
+            "length": 435,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "17c1b5af628a6ee063331aab9435bb184305136a69dec83f7ea75896c75f4e8f",
+            "terms": []
+          },
+          "rejected": {
+            "iso_dates": [],
+            "length": 103,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "fad52d2f8af4b706c696f540910ef646b9c33541a2392647aea9f1ad30509581",
+            "terms": [
+              "no live thesis"
+            ]
+          },
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 464,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2462a5dd23118dce654fd211dc54ac3d7a999782bcd7cc81ee71bfbaad89ff0c",
+            "terms": []
+          },
+          "selected": {
+            "iso_dates": [],
+            "length": 141,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4e1874c21dea264c3b0e02265fa67ea2ba04b31d76ffc82064e8182f89a7230b",
+            "terms": []
+          },
+          "timing": {
+            "iso_dates": [],
+            "length": 171,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "712c085021720e63b331abcc15b51f58cd0446c25c548b46cd7721b9563a10c6",
+            "terms": []
+          }
+        },
+        "effective_holdings": [],
+        "error": null,
+        "evidence_planes": [
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "077735a676cd432156bf16c956a638d9380785a1f39d16e9424d0e29e6fa174d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 135,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "de8cc0329634d79ae1e8980ffc77856334ece25439d8114fb4c4e7965d811321",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 53,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "355dd5f606ff1cb0437f2aaf481988334ee21d7f8c5e0c0b885642b277c45a67",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 38,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ca78ced7454bf4126d2e43b72e25ba993f05fe8c79f19538bdb4bbd70a41f76c",
+            "terms": []
+          }
+        ],
+        "executed": [],
+        "exit_decisions": [
+          {
+            "action": "exit",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 96,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 64,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+                "terms": [
+                  "held_without_active_plan"
+                ]
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+                "terms": []
+              }
+            ],
+            "falsifier": {
+              "iso_dates": [],
+              "length": 133,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+              "terms": []
+            },
+            "reason": {
+              "iso_dates": [],
+              "length": 597,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+              "terms": [
+                "held_without_active_plan",
+                "no live thesis"
+              ]
+            },
+            "reason_code": "risk_limit",
+            "ticker": "MU",
+            "why_now": {
+              "iso_dates": [],
+              "length": 172,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+              "terms": []
+            }
+          }
+        ],
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 384,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "4cad2a555686e94d5dcb108f28a4bbfae1ac97d75c142db0d9155c8b66dc4b77",
+          "terms": []
+        },
+        "falsifiers": [
+          {
+            "iso_dates": [],
+            "length": 174,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c42726e89f4f39c0d7688c7a09bb056606a85590ee7a0b1d45c942e22ba83810",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 147,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c6813006d5091cd98f4d131413e8d7cf98068f3e7a44086074e4337aa7f968c4",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 117,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "013109f828964d9853c83b692d673dfa6a5922cdae620d3bc17e109e28fe1d0a",
+            "terms": []
+          }
+        ],
+        "holdings": [],
+        "lesson_application_ids": [
+          "application.v1.41a40d693e5cecf4a5b5cbab"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.US_ONLY.cash_opportunity_cost"
+        ],
+        "lesson_presentation_id": "presentation.v1.1576b926b3a1672288b49eeb",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_queued",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 130,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9086095d792ca89dc1e7292addde6f691f2330cc6eb3574ede1574c5984b09eb",
+          "terms": []
+        },
+        "model": "opus",
+        "packet_id": "abcb5e46432cc23a",
+        "requested_exit_decisions": [
+          {
+            "action": "exit",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 96,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 64,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+                "terms": [
+                  "held_without_active_plan"
+                ]
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+                "terms": []
+              }
+            ],
+            "falsifier": {
+              "iso_dates": [],
+              "length": 133,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+              "terms": []
+            },
+            "reason": {
+              "iso_dates": [],
+              "length": 597,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+              "terms": [
+                "held_without_active_plan",
+                "no live thesis"
+              ]
+            },
+            "reason_code": "risk_limit",
+            "ticker": "MU",
+            "why_now": {
+              "iso_dates": [],
+              "length": 172,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+              "terms": []
+            }
+          }
+        ],
+        "risk_posture": "caution",
+        "run_id": "2026-10-22T06-20-17-535Z00-00",
+        "schema": "mastermind.target_book.v2",
+        "skipped_unpriceable": [],
+        "sold_note": {
+          "iso_dates": [],
+          "length": 204,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "02bd13a13ecd500e12f1e813a028ca6fdbe0dc9f7ee6f30b7234d1ae2d90940d",
+          "terms": [
+            "no live thesis"
+          ]
+        },
+        "source_provenance": [
+          "mcp__bot__get_overnight_tape",
+          "mcp__desk__get_market_packet",
+          "mcp__desk__get_my_book",
+          "mcp__bot__get_quote"
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "XOM",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MSFT",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "AAPL",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.15,
+              "low": 0.05,
+              "medium": 0.1
+            },
+            "max_single_weight": 0.15,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_conviction_allocator.v2",
+            "posture_target_gross": 0.6,
+            "protected_gross": 0.270135,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.270134,
+              "raw_gross": 0.27013455255757884
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "b6a0e21374e1ef245fd2cf0d6a2a076cfff6848fad52d81b017b50548d9721a4",
+        "summary": {
+          "iso_dates": [],
+          "length": 1001,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6b01ad7f6074efc664fd196d193e033d804043e10f43a9e6c20dcd80ee7122c3",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        },
+        "target_sha256": "ab7284a5cc720413cf7480d429612f9002ac6f2f25fb4ca9d482d412030c8cee",
+        "target_status": "queued",
+        "tools_used": [
+          "ToolSearch",
+          "mcp__desk__get_my_book",
+          "mcp__bot__get_overnight_tape",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_quote",
+          "mcp__desk__submit_book"
+        ],
+        "ts": "2026-10-22T06:23:03.763904+00:00"
+      }
+    },
+    {
+      "case_effective_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "low",
+        "evidence": [
+          {
+            "iso_dates": [],
+            "length": 131,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 24,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+            "terms": []
+          }
+        ],
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 134,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 44,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 213,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+          "terms": []
+        },
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": {
+          "iso_dates": [],
+          "length": 578,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__bot__evaluate_gate(MU)",
+          "mcp__desk__get_sector_rotation",
+          "mcp__desk__get_my_book"
+        ],
+        "ticker": "MU",
+        "weight": 0.100413,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": {
+          "iso_dates": [],
+          "length": 156,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+          "terms": []
+        }
+      },
+      "case_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "low",
+        "evidence": [
+          {
+            "iso_dates": [],
+            "length": 131,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 24,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+            "terms": []
+          }
+        ],
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 134,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 44,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 213,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+          "terms": []
+        },
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": {
+          "iso_dates": [],
+          "length": 578,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__bot__evaluate_gate(MU)",
+          "mcp__desk__get_sector_rotation",
+          "mcp__desk__get_my_book"
+        ],
+        "ticker": "MU",
+        "weight": 0.100413,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": {
+          "iso_dates": [],
+          "length": 156,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+          "terms": []
+        }
+      },
+      "case_row_falsifiers": [
+        {
+          "iso_dates": [],
+          "length": 152,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "af5c402e475ca6d2b2b0a269882c9110667474a879ac26a8f0038a7c8202e200",
+          "terms": []
+        }
+      ],
+      "decision_id": "decision.v1.9b919e509e3e2d663fa6ae1a",
+      "line_index_0based": 78,
+      "row": {
+        "accepted_asof": "2026-10-07",
+        "allocation_review": {
+          "cash": 0.5736,
+          "cash_rationale_present": true,
+          "cash_rationale_required": true,
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
+        },
+        "asof": "2026-10-07",
+        "brain_text": {
+          "iso_dates": [],
+          "length": 2186,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1ddaea5c0140367c4331d64b9503eec257a667688f2bab601789df620ef9b328",
+          "terms": []
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 1107,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "12c278e095b6ecea1b68a19130f104cedf7821512155f12f272b0fcb6e034ab1",
+          "terms": []
+        },
+        "cost_usd": 2.854124,
+        "decision_effective": true,
+        "decision_id": "decision.v1.9b919e509e3e2d663fa6ae1a",
+        "decision_memo": {
+          "alternatives": {
+            "iso_dates": [],
+            "length": 312,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c8da723a39a058723a36ed4cc2a85a50c954a28ff2aa4b1e549fd9f5614d083a",
+            "terms": []
+          },
+          "candidate_funnel": {
+            "iso_dates": [],
+            "length": 282,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2afc6dd3a79e7192b7497b39adc2bb2f17102e5a59da74dac9c152fd59341877",
+            "terms": []
+          },
+          "changes": {
+            "iso_dates": [],
+            "length": 100,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a3ac01b0bde1f46394c346bb2f852440f16e5832a7807954dc5178523346a2ec",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [
+              "2026-06-30",
+              "2026-08-07",
+              "2026-10-06"
+            ],
+            "length": 250,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1235d43f54365a6146b8f6fc9be0bcb07f60c44bdd2e8b6ce646801ec43aed50",
+            "terms": []
+          },
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 487,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "8ede7e5aad547eb42cd3be36f563f78cdf6be3b8bc75a2f47cd3b1ff78787314",
+            "terms": []
+          },
+          "lessons_applied": [
+            "lesson.v1.US_ONLY.cash_opportunity_cost"
+          ],
+          "market_frame": {
+            "iso_dates": [],
+            "length": 344,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c8c1318236c4913d2dfb43e7ad00562afb87b5ac93a28476b13c1f131789ee7f",
+            "terms": []
+          },
+          "rejected": [
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 148,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2fd5383241bd1a2690eaf01d8fc210fb962ed583a55c768014397135051045b7",
+                "terms": []
+              },
+              "ticker": "GEV"
+            },
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 81,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "dac61dd89c7cdf26405ca295e5acd128b31522fd9eaa4588308c6305cd8e19df",
+                "terms": []
+              },
+              "ticker": "VRT"
+            },
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 106,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "d28a6be83d4db8d20ee1251bef7a328e97088334fd92a93e49fa1bbf882cf51a",
+                "terms": []
+              },
+              "ticker": "CEG"
+            },
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a1b646ca8dd56b7187687386b059e7d3d66db28d662a8335eab6dad3627aa5fe",
+                "terms": []
+              },
+              "ticker": "LRCX"
+            },
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 97,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2cb78fd4b540d03d40620e17dcb5946601a2d3cd4bea54523a5a25078030f653",
+                "terms": []
+              },
+              "ticker": "ACMR"
+            },
+            {
+              "reason": {
+                "iso_dates": [],
+                "length": 109,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "5b91d3324cd550701c7588bc415b221d47fefc5b62ecac16d75268e6f40c4d74",
+                "terms": []
+              },
+              "ticker": "AMD/PFE/GOOGL/TSM"
+            }
+          ],
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 317,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "dc8991dc14cb730e8f002405845e7114d86dfa259953b2e09b0b7f90c2ff2614",
+            "terms": []
+          },
+          "selected": {
+            "iso_dates": [],
+            "length": 214,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "42b9ffca5c1a035ab660b407415759de02a207dfb6400aaa361df69699637472",
+            "terms": []
+          },
+          "timing": {
+            "iso_dates": [
+              "2026-10-08",
+              "2026-10-14"
+            ],
+            "length": 177,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c6550682956e1f698a51afbc2a53a1a442d493495df89829b5104d9c6d229941",
+            "terms": [
+              "earnings"
+            ]
+          }
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "low",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 131,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 24,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+                "terms": []
+              }
+            ],
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 134,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 44,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 213,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+              "terms": []
+            },
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": {
+              "iso_dates": [],
+              "length": 578,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+              "terms": []
+            },
+            "source_provenance": [
+              "mcp__bot__evaluate_gate(MU)",
+              "mcp__desk__get_sector_rotation",
+              "mcp__desk__get_my_book"
+            ],
+            "ticker": "MU",
+            "weight": 0.100413,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": {
+              "iso_dates": [],
+              "length": 156,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+              "terms": []
+            }
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          {
+            "iso_dates": [],
+            "length": 97,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "3999172e5f637297c71937382533279d366682bfb130d9cdad409b2ec2d6bc35",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 80,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "cb9c6d2cdf58e43672e2edc243f4541f97b390654febf8b1ab9d98aefc1b4ebc",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 66,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "39bb37ef7bf7df89d6ae3186e0954c7ebef9e1c6bf93f01e7877f9af7107a6c2",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 59,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e0fa5e27a087ffb85a39f9ec7bbc0a02f6b0575de592dae479294179ac5a1edb",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 72,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "272fe11a87291ac8946861852acfdfc57695cc51638e5031f53037e0565a680a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 62,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "cd6a4ecae55899f5e1b55ce5e4adb738f9d95a6e089a38d294d96073f4770734",
+            "terms": []
+          }
+        ],
+        "executed": [],
+        "exit_decisions": [],
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 447,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "82fc258c36c77fa6e5c0f0dc80f446b3b6503851d504fc4eb0d74f431a095400",
+          "terms": []
+        },
+        "falsifiers": [
+          {
+            "iso_dates": [],
+            "length": 102,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "42091582e817c4e910f99597e4bf92fbc0eff30746809f79298e4b2a49044bfc",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 152,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "af5c402e475ca6d2b2b0a269882c9110667474a879ac26a8f0038a7c8202e200",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "fafad8fcdd21c47af945cbbbf183847de943a87fad70f5ad5cf7bc1c957b4fee",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 147,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9e20fcc028a5585d6d900bd0d67787e92de8aa87d634fb57960ba623eab931df",
+            "terms": []
+          }
+        ],
+        "holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "low",
+            "evidence": [
+              {
+                "iso_dates": [],
+                "length": 131,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 24,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+                "terms": []
+              }
+            ],
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 134,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 44,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 213,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+              "terms": []
+            },
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": {
+              "iso_dates": [],
+              "length": 578,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+              "terms": []
+            },
+            "source_provenance": [
+              "mcp__bot__evaluate_gate(MU)",
+              "mcp__desk__get_sector_rotation",
+              "mcp__desk__get_my_book"
+            ],
+            "ticker": "MU",
+            "weight": 0.100413,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": {
+              "iso_dates": [],
+              "length": 156,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+              "terms": []
+            }
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.753d20dc103066da9fdb289b"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.US_ONLY.cash_opportunity_cost"
+        ],
+        "lesson_presentation_id": "presentation.v1.3c30ef6129ff9f036dfd95b9",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_queued",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 132,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "77f2480425f119f61e81f46408a44994025494f78a4355da87c4dd59a798b0f7",
+          "terms": []
+        },
+        "model": "opus",
+        "packet_id": "00ebedf2760a80b3",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": "2026-10-07T23-10-08-610Z00-00",
+        "schema": "mastermind.target_book.v2",
+        "skipped_unpriceable": [],
+        "sold_note": {
+          "iso_dates": [],
+          "length": 150,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e39b0a7db751e6a502130628ce51f3ef185cc277ff0d2aebdeec24df05ef83ab",
+          "terms": []
+        },
+        "source_provenance": [
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__desk__get_sector_rotation",
+          "mcp__bot__get_regime",
+          "mcp__bot__get_intake_candidates",
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ed2ce88c603ff7a44a351a0c3b0adbce2f184af05e4c938815c5b57e45f9a414",
+            "terms": []
+          }
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MSFT",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "XOM",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "AAPL",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MU",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.15,
+              "low": 0.05,
+              "medium": 0.1
+            },
+            "max_single_weight": 0.15,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_conviction_allocator.v2",
+            "posture_target_gross": 0.6,
+            "protected_gross": 0.327029,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.426433,
+              "raw_gross": 0.4264333422781651
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "832389f6b593833b355518a40d89b7c5348557ec1d077edff2779cd32a9f5d27",
+        "summary": {
+          "iso_dates": [],
+          "length": 1129,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "48f8f12cfe172515dca80225b790ac58d4afdc0d8a76d771d8875381a2de59cf",
+          "terms": []
+        },
+        "target_sha256": "80f63ee1bb70fcd0fd247e7b7a531d81dd64c5e51b649b635bcf098d69091d7e",
+        "target_status": "queued",
+        "tools_used": [
+          "ToolSearch",
+          "ToolSearch",
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_regime",
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_standouts",
+          "mcp__desk__get_sector_rotation",
+          "mcp__bot__evaluate_gate",
+          "TaskCreate",
+          "Agent",
+          "Agent",
+          "Agent",
+          "mcp__bot__evaluate_gate",
+          "mcp__bot__evaluate_gate",
+          "mcp__bot__evaluate_gate",
+          "Read",
+          "mcp__bot__evaluate_gate",
+          "mcp__bot__evaluate_gate",
+          "mcp__bot__evaluate_gate",
+          "mcp__desk__submit_book"
+        ],
+        "ts": "2026-10-07T23:20:15.357489+00:00"
+      }
+    }
+  ],
+  "records_sha256": "d8964068d3773b9301067abf068ffbcdb9b68642c89a05cd211ea2a10490fe20",
+  "redaction": {
+    "dropped_row_fields": [
+      {
+        "dropped_fields": [
+          "perception_input"
+        ],
+        "line_index_0based": 89
+      },
+      {
+        "dropped_fields": [],
+        "line_index_0based": 78
+      }
+    ],
+    "other_holdings": [
+      {
+        "conviction": "high",
+        "line_index_0based": 89,
+        "ticker": "XOM",
+        "weight": 0.162735
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 89,
+        "ticker": "MSFT",
+        "weight": 0.099952
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 89,
+        "ticker": "AAPL",
+        "weight": 0.007447
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 78,
+        "ticker": "MSFT",
+        "weight": 0.15
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 78,
+        "ticker": "XOM",
+        "weight": 0.150911
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 78,
+        "ticker": "AAPL",
+        "weight": 0.025109
+      }
+    ],
+    "policy": "drop perception_input; filter holdings and effective_holdings to the case ticker; in records, fills and derived, replace every whitespace-bearing string (narrative / PM prose) with a pbr.prose_digest.v1 object; keep whitespace-free strings and all numbers verbatim",
+    "prose_digest": {
+      "applies_to": [
+        "records",
+        "fills",
+        "derived"
+      ],
+      "declared_terms": [
+        "earnings",
+        "held_without_active_plan",
+        "no live thesis",
+        "single-source",
+        "starter"
+      ],
+      "iso_date_pattern": "(?<![0-9])([0-9]{4}-[0-9]{2}-[0-9]{2})(?![0-9])",
+      "length_unit": "unicode code points",
+      "originals": "outside the repository; set PBR_DECISION_CASE_INPUT_DIR to verify",
+      "period_label_pattern": "\\b(Q[1-4] ?FY ?[0-9]{2,4}|FY ?[0-9]{4})\\b",
+      "prose_rule": "a string value is prose when it contains any whitespace character",
+      "schema": "pbr.prose_digest.v1",
+      "sha256_over": "utf-8 bytes of the original string"
+    }
+  },
+  "schema": "pbr.decision_case_fixture.v1",
+  "ticker": "MU"
+}
