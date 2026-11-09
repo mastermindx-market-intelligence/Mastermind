@@ -38,9 +38,11 @@ from control_plane.execution_return_projection import (
     project_execution_return,
 )
 from control_plane.executive_orchestration_principal import digest as orchestration_digest
-from integrations.session_bridge.hermes_native_return import (
-    HermesExecutionReturnDeliverer,
-)
+# The deliverer is INJECTED by the composing service (an
+# ``integrations.session_bridge.hermes_native_return.HermesExecutionReturnDeliverer``
+# in production); control_plane never imports the integrations package
+# (tests/test_hermes_selected_child_ingress.py pins that law). Duck type:
+# ``async deliver(record) -> receipt mapping``.
 
 #: Event type of the durable delivery receipt (an events row, not a table).
 EXECUTION_RETURN_DELIVERY_EVENT = "EXECUTION_RETURN_DELIVERY"
@@ -93,13 +95,13 @@ class ExecutionReturnWiring:
         self,
         *,
         store: Any,
-        deliverer: HermesExecutionReturnDeliverer,
+        deliverer: Any,
         github: GitHubEvidenceSource | None = None,
         t3_adapter: Any = None,
         t3_run_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
-        if not isinstance(deliverer, HermesExecutionReturnDeliverer):
-            raise TypeError("deliverer must be a HermesExecutionReturnDeliverer")
+        if not callable(getattr(deliverer, "deliver", None)):
+            raise TypeError("deliverer must expose an async deliver(record) method")
         self._store = store
         self._deliverer = deliverer
         self._github = github
@@ -404,7 +406,7 @@ class _AsyncContextUnavailable(Exception):
 def install_execution_return_seam(
     runtime: Any,
     *,
-    deliverer: HermesExecutionReturnDeliverer,
+    deliverer: Any,
     github: GitHubEvidenceSource | None = None,
     t3_adapter: Any = None,
     t3_run_resolver: Callable[[str], str | None] | None = None,

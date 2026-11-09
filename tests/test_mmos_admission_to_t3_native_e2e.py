@@ -692,9 +692,13 @@ def test_nm15_lawful_direct_shape_reaches_the_binding_gate(
     assert "unobservable launch" not in reason
     assert ("binding" in reason.lower()
             or "receipt" in reason.lower()), reason
-    # The real claimed binding's schema label (v1.1 join) is exactly what
-    # the guard's restated v1-only law refuses — the documented gap.
-    assert "schema must be ExecutionBinding.v1" in reason
+    # The real claimed binding's v1.1 label is admitted by the guard's shape
+    # law (allowlist landed with the r6 review); the lawful shape therefore
+    # reaches binding law proper and is refused for the honest reason that
+    # this test environment has no owner placement-receipt channel — never
+    # for the schema label, and never as "unobservable launch".
+    assert "schema must be" not in reason
+    assert "placement" in reason.lower() and "receipt" in reason.lower()
 
 
 # --- 8. v1.2 sparse block digest compatibility ---------------------------------
