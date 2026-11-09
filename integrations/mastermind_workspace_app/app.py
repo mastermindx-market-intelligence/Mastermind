@@ -65,6 +65,7 @@ _PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
 _MODEL_CONFIGURATION_ROUTE = "/workspace/resources/models/current"
+_CAPACITY_FABRIC_ROUTE = "/workspace/resources/fabric/current"
 _HOST_OBSERVATION_ROUTE = "/workspace/resources/host-observation/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
@@ -1684,6 +1685,7 @@ class _RawPathFence:
     #: Starlette also binds HEAD for GET routes; the exact map refuses it.
     _READ_ROUTES = (
         "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -1702,6 +1704,7 @@ class _RawPathFence:
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
         _MODEL_CONFIGURATION_ROUTE,
+        _CAPACITY_FABRIC_ROUTE,
         _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
@@ -1814,6 +1817,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def native_authorization_identity_endpoint(request: Request):
+        from .native_authorization_identity import acquisition_identity_current
+        return await acquisition_identity_current(request, config=config)
+
     async def native_draft_identity_endpoint(request: Request):
         from .native_draft_identity import native_draft_identity_current
         return await native_draft_identity_current(request, config=config)
@@ -1883,6 +1890,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         from integrations.mastermind_workspace_app.model_configuration import model_configuration_current
         return await model_configuration_current(request, config=config)
 
+    async def capacity_fabric_endpoint(request: Request) -> Response:
+        from integrations.mastermind_workspace_app.capacity_fabric import capacity_fabric_current
+        return await capacity_fabric_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1923,6 +1934,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route("/workspace/native-draft-identity/current", native_draft_identity_endpoint, methods=["GET"]),
+        Route("/workspace/native-authorization-identity/acquisition/current", native_authorization_identity_endpoint, methods=["GET"]),
         Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
@@ -1946,6 +1958,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
         Route(_MODEL_CONFIGURATION_ROUTE, model_configuration_endpoint, methods=["GET"]),
+        Route(_CAPACITY_FABRIC_ROUTE, capacity_fabric_endpoint, methods=["GET"]),
         Route(_HOST_OBSERVATION_ROUTE, host_observation_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),

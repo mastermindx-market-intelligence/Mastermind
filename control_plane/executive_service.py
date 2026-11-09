@@ -5867,17 +5867,25 @@ class ExecutiveControlService:
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             from common import workspace_model_configuration_contract as model_configuration_wire
+            from common import workspace_capacity_fabric_contract as capacity_fabric_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA, capacity_fabric_wire.FRAME_SCHEMA,
                     project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == capacity_fabric_wire.FRAME_SCHEMA:
+                    ceiling = capacity_fabric_wire.MAX_RESPONSE_BYTES
+                    try:
+                        capacity_fabric_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
                     ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
                     try:
                         model_configuration_wire.validate_frame(parsed)
@@ -6487,6 +6495,29 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from control_plane import protected_memory_evaluation_assignment as evaluation
+            if isinstance(parsed, dict) and parsed.get('schema') == evaluation.INGRESS:
+                if (not app_peer or not app_binding.principal_admission_armed
+                        or not callable(app_binding.principal_facts_factory)):
+                    await self._send_ceo_ingress_error(writer, 'peer_denied', 'evaluation ingress unavailable')
+                    return
+                try:
+                    if self._closing or self._service_state not in {'READY', 'AWAITING_CANARY'}:
+                        raise ValueError('evaluation unavailable')
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    supervisor = self._require_supervisor()
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(
+                        evaluation.assess_from_installed_app, connection, parsed, provider, supervisor)))
+                    if self._closing or self._ceo_ingress_app_binding is not app_binding:
+                        await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                        return
+                    await self._send_ceo_ingress_response(writer, result)
+                except evaluation.AssessmentCommitUnknown:
+                    await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
+                return
             from common import coo_agentos_context_contract as context_wire
             if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):

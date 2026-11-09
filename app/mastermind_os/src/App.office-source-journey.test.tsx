@@ -30,7 +30,7 @@ async function setup(hold=false){
  return{initialPlanReads,invoke,resolve,host:composed.host,notify:(payload:unknown)=>events.get('mastermind-auth-state')?.forEach(fn=>fn({payload})),count:(n:string)=>invoke.mock.calls.filter(([c])=>c===n).length};
 }
 it('composes exact rootless project, authored objective and accepted Direction without inferred Mission or Send; draft survives project return',async()=>{
- const e=await setup();const office=screen.getByRole('region',{name:'Meta-CEO office'});expect(within(office).getByText('Source-backed programme')).toBeTruthy();
+ const e=await setup();const office=screen.getByRole('region',{name:'Meta-CEO office'});expect(within(office).getByRole('heading',{level:2,name:'Source-backed programme'})).toBeTruthy();
  expect(e.count('read_project_plan')).toBe(e.initialPlanReads);expect(e.count('read_project_direction')).toBe(0);expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);
  const draft=within(office).getByRole('textbox',{name:'Direction to Meta-CEO'});fireEvent.change(draft,{target:{value:'Keep this exact unsent direction.\nSecond line.'}});
  fireEvent.click(within(office).getByText('Authored project objective'));fireEvent.click(within(office).getByRole('button',{name:'Read programme objective'}));

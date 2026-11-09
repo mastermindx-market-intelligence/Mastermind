@@ -1,3 +1,4 @@
+import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
@@ -146,6 +147,7 @@ import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
 import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
 import { ModelConfigurationRead } from "./resources/ModelConfigurationRead";
+import { CapacityFabricRead } from "./resources/CapacityFabricRead";
 import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
@@ -180,6 +182,7 @@ import {
   type WorkDocument,
 } from "./work";
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
+import { nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
@@ -3659,6 +3662,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     }
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision, launchHandoff]);
+  const partialNativeAuth = native && authState
+    ? nativePartialAuthPresentation(authState, locale) : null;
   // Presentation reuses the incumbent explicit auth action and its guards.
   const authenticationControl = authState ? (
                 <button
@@ -4079,7 +4084,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </div>
           <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
+        {native && authState?.acquisition && authState.content ? <TransportDiagnosticFields
+          connectionDetails
+          onConnectionDetailsOpen={() => setDiagnosticTick((n) => n + 1)}
+          refreshNativeDiagnostics={refreshNativeDiagnostics}
+          snapshot={missionDiagnostics()}
+          programsPhase={programsReadPhase}
+          programsReason={programsReadReason}
+          locale={locale}
+        ><code>{COMMAND_ROUTE_UNAVAILABLE}</code></TransportDiagnosticFields> : <><p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
         <details
           className="reason-details"
           onToggle={(event) => {
@@ -4095,7 +4108,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             programsReason={programsReadReason}
             locale={locale}
           />
-        </details>
+        </details></>}
         {heldKind === "launch" ? checkStatusControl : null}
       </section>
     );
@@ -5037,6 +5050,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
+  const todayCatalogueFrame = useRef({active, index, epoch: programIndexEpoch});
+  todayCatalogueFrame.current = {active, index, epoch: programIndexEpoch};
+  const currentTodayCatalogue = () => todayCatalogueFrame.current.active === "Today" &&
+    todayCatalogueFrame.current.index === index && todayCatalogueFrame.current.epoch === programIndexEpoch &&
+    currentProgramsRead();
   const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
     const host = window.MastermindMissionHost, selected = projectJourney.selection;
     try {
@@ -5311,6 +5329,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     </>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
+      currentCatalogue={{value: index, current: currentTodayCatalogue}}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return;
+        const cards = index.programs.filter(card => card.workRef === workRef);
+        if (cards.length !== 1) return;
+        const card = cards[0];
+        // Reuse current-catalogue navigation; only its actual singleton root
+        // may enter Mission. A rootless card opens project details instead.
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return;
+        }
+        setCatalogueProject({workRef, authRevision, epoch: programIndexEpoch});
+        setProjectTab("More"); setActive("Projects");
+      }}
       composer={commandPanel}
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
@@ -5808,14 +5840,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <p className="muted">{locale === "zh-CN" ? "所选项目" : "Selected project"} · {currentProjectCards[0].title || projectWorkRef}</p>
         <button type="button" onClick={() => {if (!resourcesOwnerCurrent()) return;setProjectTab("Conversation");setActive("Projects");}}>{locale === "zh-CN" ? "返回项目" : "Back to project"}</button>
       </div> : null}
-      <div ref={resourcesView}><ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale} headingLevel={1}
+      <div ref={resourcesView}>
+      <h1 tabIndex={-1}>{locale === "zh-CN" ? "资源与系统" : "Resources & systems"}</h1>
+      <CapacityFabricRead key={`capacity:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
+      <details className="reason-details" open={Boolean(projectWorkRef && resourcesOwnerCurrent())}><summary>{locale === "zh-CN" ? "系统与工作量证据" : "Systems & workload evidence"}</summary>
+      <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale} headingLevel={2}
         onOpenWork={root => {if (!resourcesCanOpenWork(root) || !selection) return;
           pendingResourcesFocus.current={kind:"work",root:selection.rootJobId,auth:authRevision,host:resourcesHost,epoch:resourcesHost?.invalidationGeneration?.()};
           setResourcesWorkOrigin({auth:authRevision,workRef:selection.workRef,rootJobId:selection.rootJobId});
           setProjectTab("Work");setActive("Projects");}}
         canOpenWork={resourcesCanOpenWork}
-        onReviewSources={() => setActive("Sources")}/></div>
-      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
+        onReviewSources={() => setActive("Sources")}/></details></div>
+      <details className="reason-details"><summary>{locale === "zh-CN" ? "模型与路由配置" : "Models & routing configuration"}</summary>
+      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/></details>
       <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,
@@ -5969,7 +6006,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </button>
           {freshEntryUnavailableReason ? <p id="new-conversation-unavailable" className="sidebar-new-entry-hint">{freshEntryUnavailableReason}</p> : null}
           </div>
-          <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+          <button type="button" className="sidebar-search" data-agent-route="Search" aria-current={active === "Search" ? "page" : undefined}
             onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
           </button>
@@ -5979,6 +6016,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {primaryNavigation.map((x) => (
                 <button
                   key={x}
+                  data-agent-route={x}
                   className={active === x ? "active" : ""}
                   aria-label={navigationLabel(x, locale)}
                   aria-current={active === x ? "page" : undefined}
@@ -6015,6 +6053,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {advancedNavigation.map((x) => (
                   <button
                     key={x}
+                    data-agent-route={x}
                     className={active === x ? "active" : ""}
                     aria-label={advancedLabel(x, locale)}
                     aria-current={active === x ? "page" : undefined}
@@ -6039,8 +6078,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <div ref={preferencesPane}>{preferencesControl}</div>
           {authState ? (
             <div className="nav-account">
-              <small>{copy.authStatus[authState.status]}</small>
-              {authState.reason && authState.status !== "unconfigured" ? (
+              <small>{partialNativeAuth?.label ?? copy.authStatus[authState.status]}</small>
+              {partialNativeAuth ? <p className="muted">{partialNativeAuth.description}</p>
+                : authState.reason && authState.status !== "unconfigured" ? (
                 <p className="muted">
                   {authState.reason === "POPUP_BLOCKED"
                     ? copy.allowPopup
@@ -6055,6 +6095,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 </p>
               ) : null}
               {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
+              {native && <NativeAuthorizationContinuationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale}/>}
             </div>
           ) : null}
         </div>

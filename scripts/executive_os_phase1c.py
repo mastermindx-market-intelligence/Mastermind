@@ -290,6 +290,10 @@ _CONFIG_REQUIRED = frozenset(
 )
 _CONFIG_OPTIONAL = frozenset(
     {
+        "memory_native_issuer",
+        "memory_evaluation",
+        "protected_memory_execution",
+        "memory_original_result_access",
         "content_observer",
         "content_observer_profile_path",
         "company_consultation",
@@ -1004,6 +1008,38 @@ def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, A
     }
 
 
+def _validate_memory_control_config(config: dict[str, Any]) -> None:
+    """Reuse closed pure Memory shapes; no host read or current permission.
+
+    Both offline successor preparation and the installed loader call this same
+    owner. Source/configuration validity never establishes service enrollment,
+    original recipient authority, Linux permission or execution admission.
+    """
+    keys = set(config)
+    try:
+        if 'memory_native_issuer' in keys:
+            from control_plane.executive_memory_issuer import validate_transport_document
+            config['memory_native_issuer']=validate_transport_document(config['memory_native_issuer'])
+        if 'memory_evaluation' in keys:
+            from control_plane.protected_memory_evaluation_source import configured
+            config['memory_evaluation']=configured(config)
+            transport=config.get('memory_native_issuer')
+            if type(transport) is not dict or transport.get('protocol')!='memory.e0.native_issuer.v3':
+                raise ValueError('evaluation requires its existing explicit protected transport')
+        if 'protected_memory_execution' in keys:
+            from control_plane.protected_memory_profile import validate_profile_document
+            config['protected_memory_execution']=validate_profile_document(config['protected_memory_execution'])
+        if 'memory_original_result_access' in keys:
+            from control_plane.protected_memory_result_access import validate_access_document
+            config['memory_original_result_access']=validate_access_document(config['memory_original_result_access'])
+            transport=config.get('memory_native_issuer')
+            if (type(transport) is not dict or transport.get('protocol')!='memory.e0.native_issuer.v3'
+                    or transport.get('service_key_fingerprint')!=config['memory_original_result_access']['ssh_key_fingerprint']):
+                raise ValueError('completed Memory service access requires its explicit v3 transport')
+    except (ValueError,TypeError,KeyError):
+        raise ServiceError('protected Memory configuration refused') from None
+
+
 def load_control_config(
     path: str | Path, *, enforce_current_uid: bool = True
 ) -> dict[str, Any]:
@@ -1038,6 +1074,7 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    _validate_memory_control_config(config)
     hermes_configuration = config.get("hermes_attended_configuration_sha256")
     if "hermes_attended_configuration_sha256" in config and (
             type(hermes_configuration) is not str
@@ -1863,7 +1900,16 @@ def _service_from_config(
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
     byok_roles_reader: Callable[..., Any] | None = None,
+    capacity_fabric_source: Any | None = None,
 ) -> ExecutiveControlService:
+    # Only the installed owner may inject this existing pure observation
+    # source. Validate before adopting listeners; never select it from JSON,
+    # a browser request, environment, or a guessed host path.
+    if capacity_fabric_source is not None:
+        from control_plane.workspace_capacity_fabric import ExistingCapacityFabricSource
+        if (type(capacity_fabric_source) is not ExistingCapacityFabricSource
+                or "workspace_acquisition" not in raw):
+            raise ServiceError("capacity source requires exact installed Workspace composition")
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
         # refuses the legacy TCP port stanza and accepts no port or
@@ -2596,6 +2642,7 @@ def _service_from_config(
                 # No control.json/browser selection or local M2 fallback. Until a
                 # trusted remote host observer is supplied this remains unbound.
                 byok_roles_reader=byok_roles_reader,
+                capacity_fabric_source=capacity_fabric_source,
                 project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 instruction_admission_permissions=instruction_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,

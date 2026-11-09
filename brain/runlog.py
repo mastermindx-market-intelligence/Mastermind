@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import stat
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from typing import Any
 _RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "brain" / "runs"
 _INDEX = _RUNS_DIR / "index.jsonl"
 _LOCK = threading.RLock()          # index writes are rare; single lock is fine
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -36,8 +38,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+_RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}")
+
+
+def validate_run_id(run_id: object) -> str:
+    """Boundary allowlist for run ids (API query params land here).
+
+    Plain token only: alnum first, then alnum/`_`/`.`/`:`/`-`, max 96 chars,
+    never `..` — same charset as ``portfolio_id`` so ids stay compatible.
+    Raises ``ValueError`` (fixed text, no caller data) on anything else.
+    """
+    if type(run_id) is not str or not _RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
+        raise ValueError("invalid run_id")
+    return run_id
+
+
 def _run_path(run_id: str) -> Path:
-    return _RUNS_DIR / f"{run_id}.jsonl"
+    # Validation lives here, at the filesystem boundary, so every caller
+    # (read_run, log_step, start_run, ...) is covered — not just the API.
+    run_id = validate_run_id(run_id)
+    base = os.path.normpath(str(_RUNS_DIR))
+    candidate = os.path.normpath(os.path.join(base, f"{run_id}.jsonl"))
+    # Containment guard: the normalized candidate must sit directly inside the
+    # runs directory. Redundant with the allowlist by construction, kept as the
+    # explicit check so the join can never escape even if the charset changes.
+    if not candidate.startswith(base + os.sep) or os.path.dirname(candidate) != base:
+        raise ValueError("invalid run_id")
+    return Path(candidate)
 
 
 def _ensure_dir():
@@ -147,6 +174,13 @@ def read_run(run_id: str | None = None) -> dict:
                 return {"run_id": None, "ts": None, "kind": None, "steps": []}
             run_id = idx[0]["run_id"]
 
+        try:
+            run_id = validate_run_id(run_id)
+        except ValueError:
+            # Rejected at the boundary; the id is attacker data — not echoed.
+            return {"run_id": None, "ts": None, "kind": None, "steps": [],
+                    "error": "invalid run_id"}
+
         with portfolio_lock():
             entry = next((row for row in _portfolio_index()
                           if row.get("run_id") == run_id and "_fabric_portfolio" in row), None)
@@ -171,8 +205,12 @@ def read_run(run_id: str | None = None) -> dict:
             except Exception:
                 pass
         return {"run_id": run_id, "ts": ts, "kind": kind, "title": title, "steps": steps}
-    except Exception as exc:
-        return {"run_id": run_id, "ts": None, "kind": None, "steps": [], "error": str(exc)}
+    except Exception:
+        # Never surface exception text: this dict is the /api/runlog response
+        # body. Detail stays server-side only (stack-trace-exposure guard).
+        _log.exception("runlog read failed")
+        return {"run_id": run_id, "ts": None, "kind": None, "steps": [],
+                "error": "runlog read failed"}
 
 
 # ---------------------------------------------------------------------------

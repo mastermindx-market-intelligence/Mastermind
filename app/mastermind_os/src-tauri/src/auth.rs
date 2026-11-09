@@ -8,6 +8,7 @@ mod draft_continuity;
 mod transport_diagnostics;
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
 pub mod native_draft_identity;
+pub mod authorization_continuation;
 #[cfg(test)]
 mod draft_recovery_tests;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -100,6 +101,7 @@ struct Pending {
     resource: Resource,
     expires: Instant,
     generation: u64,
+    continuation: Option<authorization_continuation::ContentContinuation>,
 }
 struct Inner {
     draft_continuity: draft_continuity::DraftContinuity,
@@ -118,6 +120,7 @@ struct Inner {
     content: Option<Token>,
     reason: Option<&'static str>,
     restoring: bool,
+    content_timeout: Option<authorization_continuation::ContentTimeout>,
 }
 impl Inner {
     fn new(client: Option<&str>) -> Self {
@@ -144,6 +147,7 @@ impl Inner {
             content: None,
             reason: None,
             restoring: false,
+            content_timeout: None,
         }
     }
     fn token(&self, resource: Resource) -> Option<&Token> {
@@ -258,6 +262,7 @@ impl Inner {
         self.acquisition = None;
         self.content = None;
         self.reason = None;
+        self.content_timeout = None;
     }
     fn transaction(&mut self, resource: Resource) -> Result<String> {
         if resource == Resource::Executive {
@@ -281,6 +286,7 @@ impl Inner {
             resource,
             expires: Instant::now() + TRANSACTION_TTL,
             generation: self.generation,
+            continuation: None,
         });
         Ok(url)
     }
@@ -303,11 +309,13 @@ impl Inner {
         }
         let Some(pending) = self.pending.take() else { return false; };
         self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+        self.remember_content_timeout(&pending);
         true
     }
     fn consume(&mut self, callback: &str) -> Result<(Pending, String, String)> {
         // Malformed or unrelated callbacks cannot cancel another transaction.
         let (state, code, error) = parse_callback(callback)?;
+        if error && self.observe_timed_out_refusal(&state) { return Err("AUTHORIZATION_REFUSED".into()); }
         let pending = self.pending.as_ref().ok_or("AUTH_CALLBACK_UNEXPECTED")?;
         if state != pending.state {
             return Err("AUTH_STATE_MISMATCH".into());
@@ -315,6 +323,7 @@ impl Inner {
         let pending = self.pending.take().ok_or("AUTH_CALLBACK_UNEXPECTED")?;
         if pending.expires <= Instant::now() || pending.generation != self.generation {
             self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+            if !error { self.remember_content_timeout(&pending); }
             return Err("AUTH_TRANSACTION_EXPIRED".into());
         }
         if error {
@@ -322,6 +331,7 @@ impl Inner {
             return Err("AUTHORIZATION_REFUSED".into());
         }
         self.exchanging = true;
+        self.continuation_exchange_guard(&pending)?;
         if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
         Ok((
             pending,
@@ -490,6 +500,13 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
         let mut inner = state.lock()?;
         // Serialize browser handoff with logout and replacement transactions.
         if inner.generation != generation || inner.pending.is_none() {
+            return Err("AUTHENTICATION_CHANGED".into());
+        }
+        if !inner.continuation_handoff_current() {
+            let resource = inner.pending.take().ok_or("AUTHENTICATION_CHANGED")?.resource;
+            inner.fail_transaction(resource, "AUTHENTICATION_CHANGED");
+            drop(inner);
+            emit(app);
             return Err("AUTHENTICATION_CHANGED".into());
         }
         if app.opener().open_url(url, None::<&str>).is_err() {
@@ -672,6 +689,14 @@ pub async fn callback(app: AppHandle, raw: String) {
         }
     };
     let (pending, code, client) = transaction;
+    // A continuation cannot exchange a fresh code against an expired or
+    // replaced retained Acquisition grant. Rejoin again immediately before
+    // constructing the request, after consume's own continuation fence.
+    if pending.continuation.is_some() && state.lock()
+        .and_then(|mut inner| inner.continuation_exchange_guard(&pending)).is_err() {
+        emit(&app);
+        return;
+    }
     let response = state
         .http
         .post(format!("{ISSUER}oauth/token"))
@@ -687,7 +712,7 @@ pub async fn callback(app: AppHandle, raw: String) {
     let token = match response {
         Ok(r) => bounded_json(r, 32768).await.and_then(|v| {
             let access = parse_token(v.clone(), pending.resource)?;
-            if pending.resource.persistent() {
+            if pending.continuation.is_none() && pending.resource.persistent() {
                 let refresh = v.get("refresh_token").and_then(Value::as_str)
                     .filter(|s| crate::native_refresh::valid_refresh(s))
                     .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
@@ -703,6 +728,10 @@ pub async fn callback(app: AppHandle, raw: String) {
         }),
         Err(_) => Err("TOKEN_EXCHANGE_FAILED".into()),
     };
+    if let Some(witness) = pending.continuation.as_ref() {
+        authorization_continuation::finish_callback(&app, &pending, witness, token).await;
+        return;
+    }
     let expiry = token.as_ref().ok().map(|token| (token.expires, token.wall_expires));
     let mut inner = match state.lock() {
         Ok(i) => i,
@@ -2272,6 +2301,36 @@ impl RetainedActivitySelection {
 const MODEL_CONFIGURATION_PATH: &str = "/workspace/resources/models/current";
 const MODEL_CONFIGURATION_SCHEMA: &str = "mastermind.workspace_model_configuration.v1";
 const MODEL_CONFIGURATION_CAP: usize = 278_528;
+
+/// Fixed current-capacity read through the existing Workspace identity.
+/// The native caller cannot supply a URL, account, provider or source path.
+#[tauri::command]
+pub async fn read_capacity_fabric(app: AppHandle) -> Result<Value> {
+    const SCHEMA: &str = "mastermind.workspace_capacity_fabric.v1";
+    const CAP: usize = 262_144;
+    let url = Url::parse(&format!("{ORIGIN}/workspace/resources/fabric/current"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, CAP).await
+            .and_then(|value| typed_unavailable(value, SCHEMA, false))
+    } else {
+        bounded_json(response, CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
 
 /// Fixed read of configured routing through the existing Workspace identity.
 /// No caller URL, policy path, model activation, credentials or mutation.

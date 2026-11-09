@@ -1,3 +1,4 @@
+import {bindNativeAuthorizationContinuation, type NativeAuthorizationContinuationOwner} from "./native-authorization-continuation-host";
 import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
@@ -18,6 +19,7 @@ import {instructionHostMethods,instructionPublicRequest,type InstructionRawMetho
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeModelConfiguration, type ModelConfigurationRead } from "./resources/model-configuration";
+import { decodeCapacityFabric, type CapacityFabricRead } from "./resources/capacity-fabric";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
@@ -83,6 +85,8 @@ import {
 } from "./control-room";
 
 export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  readAuthorizationContinuation?(request: {signal: AbortSignal}): Promise<unknown>;
+  continueAuthorization?(): Promise<unknown>;
   /** Explicit fixed local metadata read; never refreshes an authorization owner. */
   readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Native-owned privacy metadata only; never reconstructed from an event. */
@@ -124,6 +128,7 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readModelConfiguration?(request: { signal: AbortSignal }): Promise<unknown>;
+  readCapacityFabric?(request: { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -183,6 +188,7 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readonly authorizationContinuation?: NativeAuthorizationContinuationOwner;
   readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<NativeExecutiveObservation>;
   readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
@@ -217,6 +223,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readModelConfiguration?: (request: { signal: AbortSignal }) => Promise<ModelConfigurationRead>;
+  readCapacityFabric?: (request: { signal: AbortSignal }) => Promise<CapacityFabricRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -451,6 +458,7 @@ export function bindMissionHost(
       sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
+  const authorizationContinuation = bindNativeAuthorizationContinuation(client, () => epoch);
   const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
   const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
   const companySubscribe=companyTransport?.subscribe;
@@ -498,6 +506,7 @@ export function bindMissionHost(
     ...(projectFilesSearch ? {projectFilesSearch} : {}),
     ...(memoryRead ? {readProjectKnowledgeMemory: memoryRead} : {}),
     ...(sourceRead ? {readProjectKnowledgeSource: sourceRead} : {}),
+    ...(authorizationContinuation ? {authorizationContinuation} : {}),
     auth: {
       getState: () => client.getState(),
       subscribe: (listener) => client.subscribe(listener),
@@ -694,6 +703,22 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readCapacityFabric && client.invalidationGeneration ? {
+      async readCapacityFabric({ signal }: { signal: AbortSignal }) {
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readCapacityFabric!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readCapacityFabric)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("CAPACITY_FABRIC_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { signal });
+        verify();
+        return decodeCapacityFabric(raw);
       },
     } : {}),
     ...(client.readModelConfiguration && client.invalidationGeneration ? {
@@ -1130,6 +1155,7 @@ export async function createNativeClient(
     previous.abort();
   };
   let control = 0;
+  let continuationPending = false;
   const update = (raw: unknown) => {
     current = authState(raw);
     invalidateReads();
@@ -1147,6 +1173,7 @@ export async function createNativeClient(
   if (initial === epoch) update(status);
   async function read(
     command:
+      | "read_authorization_continuation"
       | "executive_auth_status"
       | "read_programs"
       | "read_byok_roles"
@@ -1184,6 +1211,7 @@ export async function createNativeClient(
       | "read_retained_activity"
       | "read_resource_capacity"
       | "read_model_configuration"
+      | "read_capacity_fabric"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
@@ -1233,6 +1261,16 @@ export async function createNativeClient(
   }
   return {
     readNativeExecutiveDiagnostics: ({ signal }) => read("executive_auth_status", signal, { diagnostics: true }),
+    readAuthorizationContinuation: ({signal}) => read("read_authorization_continuation", signal),
+    async continueAuthorization() {
+      if (continuationPending) throw new Error("AUTH_CONTINUATION_INELIGIBLE");
+      continuationPending = true;
+      const ticket = ++control, started = epoch;
+      try {
+        const result = await invoke("continue_authorization");
+        if (ticket === control && started === epoch) update(result);
+      } finally {continuationPending = false;}
+    },
     nativeDraftRecovery,
     terminalSharing,
     executive: executive.transport,
@@ -1418,6 +1456,7 @@ export async function createNativeClient(
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
     readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
+    readCapacityFabric: ({ signal }) => read("read_capacity_fabric", signal),
     readHostObservation: request => {
       const selection=hostObservationPublicSelection(request);
       return selection ? read("read_host_observation",request.signal,{selection})

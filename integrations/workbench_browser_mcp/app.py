@@ -17,9 +17,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 from control_plane.browser_resource_contract import (
-    ALLOWED_BROWSER_TOOLS,
-    READ_ONLY_BROWSER_TOOLS,
     WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    APP_CONTROL_TOOL_SCHEMA_DIGEST,
+    browser_tools_for_digest,
+    browser_read_tools_for_digest,
 )
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.business_mcp_auth.contracts import (
@@ -126,14 +127,15 @@ def _validated_catalog(
         ):
             raise ValueError("browser tool catalog is invalid")
         by_name[name] = copy.deepcopy(dict(row))
-    if not ALLOWED_BROWSER_TOOLS <= set(by_name):
+    allowed = browser_tools_for_digest(expected_digest)
+    if not allowed <= set(by_name):
         raise ValueError("browser tool catalog lacks a granted tool")
     selected = {
-        "tools": {name: by_name[name] for name in sorted(ALLOWED_BROWSER_TOOLS)}
+        "tools": {name: by_name[name] for name in sorted(allowed)}
     }
     if observed_mcp_tool_schema_digest(selected) != expected_digest:
         raise ValueError("browser tool catalog schema drift")
-    return {name: by_name[name] for name in ALLOWED_BROWSER_TOOLS}
+    return {name: by_name[name] for name in allowed}
 
 
 def _with_browser_ref(native_schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -154,6 +156,8 @@ def _with_browser_ref(native_schema: Mapping[str, Any]) -> dict[str, Any]:
     if "browser_ref" not in required:
         required.append("browser_ref")
     schema["required"] = required
+    if "minProperties" in schema:
+        schema["minProperties"] += 1
     schema["additionalProperties"] = False
     return schema
 
@@ -261,6 +265,7 @@ class BrowserToolSurface:
     validators: Mapping[str, Draft202012Validator]
     prepare_tool_to_native: Mapping[str, str]
     tools: tuple[Tool, ...]
+    read_tools: frozenset[str]
 
 
 def build_browser_tool_surface(
@@ -269,6 +274,10 @@ def build_browser_tool_surface(
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
     credentials_enabled: bool = False,
 ) -> BrowserToolSurface:
+    if credentials_enabled and expected_tool_schema_digest == APP_CONTROL_TOOL_SCHEMA_DIGEST:
+        raise ValueError("app control and vault profiles are not jointly qualified")
+    allowed_tools = browser_tools_for_digest(expected_tool_schema_digest)
+    read_tools = browser_read_tools_for_digest(expected_tool_schema_digest)
     catalog = _validated_catalog(
         tool_catalog,
         expected_digest=expected_tool_schema_digest,
@@ -288,9 +297,9 @@ def build_browser_tool_surface(
         raise ValueError("credential surface switch is invalid")
     if credentials_enabled:
         schemas[PREPARE_CREDENTIAL_TOOL] = _snapshot(_CREDENTIAL_PREPARE_SCHEMA, 32768)
-    for name in sorted(ALLOWED_BROWSER_TOOLS):
+    for name in sorted(allowed_tools):
         wrapped = _snapshot(_with_browser_ref(catalog[name]["inputSchema"]), 32768)
-        if name in READ_ONLY_BROWSER_TOOLS:
+        if name in read_tools:
             schemas[name] = wrapped
         else:
             prepare_name = "prepare_" + name
@@ -334,7 +343,7 @@ def build_browser_tool_surface(
             ),
         ),
     ]
-    for name in sorted(READ_ONLY_BROWSER_TOOLS):
+    for name in sorted(read_tools):
         native = catalog[name]
         annotations = native.get("annotations", {})
         rows.append(
@@ -345,7 +354,7 @@ def build_browser_tool_surface(
                 annotations=ToolAnnotations(
                     readOnlyHint=True,
                     destructiveHint=False,
-                    idempotentHint=True,
+                    idempotentHint=not name.startswith("mastermind_os_"),
                     openWorldHint=bool(annotations.get("openWorldHint", True)),
                 ),
             )
@@ -358,6 +367,7 @@ def build_browser_tool_surface(
                 description=(
                     f"Prepare {native_name} against one browser resource. "
                     "This does not execute the browser action."
+                    + (" " + str(native.get("description", "")) if native_name.startswith("mastermind_os_") else "")
                 ),
                 inputSchema=schemas[prepare_name],
                 annotations=ToolAnnotations(
@@ -406,6 +416,7 @@ def build_browser_tool_surface(
         validators=validators,
         prepare_tool_to_native=prepare_tool_to_native,
         tools=tuple(rows),
+        read_tools=read_tools,
     )
 
 
@@ -555,7 +566,7 @@ def create_authenticated_browser_server(
                 observed = await start_resource(caller, request["start_ref"])
             elif name == RECONCILE_RESOURCE_TOOL:
                 observed = await reconcile_resource(caller, request["start_ref"])
-            elif name in READ_ONLY_BROWSER_TOOLS:
+            elif name in surface.read_tools:
                 native_args = dict(request)
                 browser_ref = native_args.pop("browser_ref")
                 direct_native = await read_tool(caller, browser_ref, name, native_args)
