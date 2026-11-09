@@ -119,11 +119,14 @@ it("shows the typed refusal as an honest refusal, never a healthy projection", a
 });
 
 it("signed-out or absent reader is unknown-with-reason and never fetches", async () => {
-  const { ui, reader, revoke, refresh } = owner([]);
-  render(ui);
+  const { host, ui, reader, revoke, refresh } = owner([]);
+  const view = render(ui);
   await refresh();
   expect(reader).toHaveBeenCalledTimes(1);
+  // A bound host bumps its epoch on auth change and the parent remounts/re-renders
+  // the block; the block itself carries no auth subscription.
   await act(async () => { revoke(); });
+  view.rerender(<T3AttemptFleetBlock host={host} attemptId={GOOD_ID} />);
   const button = screen.getByRole("button", { name: "Read attempt" }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
   expect(screen.getByTestId("t3-attempt-fleet-state").textContent).toContain("Sign in with Workspace access");
