@@ -394,3 +394,23 @@ Improve everyday Team operation with four connected journeys: attention triage, 
 Direct Paper composition and source integration are retained by the principal for PRINCIPAL_JUDGMENT and LOWER_TOTAL_OVERHEAD. One native reasoning-only audit reviewed workflow gaps; it performed no writes or runtime actions. Its recommendations were accepted for this bounded design pass, not as a live-canvas completeness verdict. No new daemon, queue, runtime identity, checkout allocator, watcher or integration owner is introduced.
 
 The exact revision-6 masterplan remains unverified unless later primary evidence resolves it. The new Code/session provider design is consumed as a capability choice; this pass does not hardcode a new runtime default or supersede the existing implementation owners.
+
+
+### Native daily-workspace milestone
+
+Four new editable product frames have been composed and inspected as actual Paper screenshots, on the existing product page p-R-0:
+
+| Frame | Node | Journey |
+| --- | --- | --- |
+| HC18 | 1NSP-0 | Needs-you inbox to the exact request, with distinct unread and work filters. |
+| HC19 | 1OAV-0 | Two conversations with separate recipients, drafts, queues and focused composer. |
+| HC20 | 1OVH-0 | Scoped search results to an exact highlighted message, surrounding context and return. |
+| HC21 | 1PB7-0 | Waiting parent, three delegated tasks, selected task dialogue and scoped guidance. |
+
+The native screenshot pass found and repaired the HC18 pinned-list overflow and the HC19 unread divider crossing into the adjacent pane. Search has a designed partial-history disclosure. Every new frame retains the existing Atelier shell and token palette. These are sample product states, not runtime receipts.
+
+Target reconciliation: the first HC18 duplication used a page ID where Paper required a root node ID. Upstream returned a target-not-found error with an unknown-effect classification. A same-carrier read of the original page verified its unchanged 17-board inventory and returned root_node_p-R-0. A materially corrected operation then created 1NSP-0. No blind retry or carrier switch occurred.
+
+The reasoning-only companion audit also identified the prototype's global DOM IDs and current-conversation binding as a split-view hazard. The continuation will parameterize the existing renderer and actions, reuse the existing per-conversation drafts/files/models/streams, and verify side-pane send, queue and Code-origin behavior. No duplicate state engine is planned.
+
+Next proof: recovery and narrow/light/ZH Paper frames, then the updated companion's actual click-through behavior and final source mapping. The design commission remains in progress.
