@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { MissionHost } from "../host";
 import { validT3AttemptId, type DuplicateKind, type InvariantVerdict, type T3Attempt, type T3AttemptFleetRead } from "./t3-attempt-fleet-contract";
 import "./t3-attempt-fleet.css";
@@ -16,8 +16,12 @@ export function T3AttemptFleetBlock({ host, locale = "en", attemptId }: {
   const reader = host?.readT3AttemptFleet, epoch = host?.invalidationGeneration?.();
   // Subscribe to the host's auth store so a sign-out re-renders this block even
   // before any read was issued (a stale "permitted" button must never survive).
-  const noop = () => () => {};
-  const auth = useSyncExternalStore(host?.auth?.subscribe ?? noop, () => host?.auth?.getState(), () => host?.auth?.getState());
+  // The snapshot is a stable primitive key: hosts may mint a fresh state object
+  // per getState() call, and an unstable snapshot would re-render forever.
+  const subscribe = useCallback((onChange: () => void) => host?.auth?.subscribe?.(onChange) ?? (() => {}), [host]);
+  const authKey = () => { const s = host?.auth?.getState(); return s ? `${s.status}|${s.acquisition ? 1 : 0}` : ""; };
+  useSyncExternalStore(subscribe, authKey, authKey);
+  const auth = host?.auth?.getState();
   const permitted = !!host && !!reader && Number.isSafeInteger(epoch) && auth?.status === "signed_in" && auth.acquisition;
   const selectable = validT3AttemptId(attemptId);
   const [owned, setOwned] = useState<{ host: MissionHost; reader: typeof reader; epoch: number; attemptId: string; read: ReadState } | null>(null);
