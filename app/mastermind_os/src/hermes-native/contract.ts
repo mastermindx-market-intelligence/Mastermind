@@ -1,7 +1,8 @@
 /** Stable UI port. Native sessions are not Executive Jobs or accepted outcomes. */
 import type { NativePendingOperation } from "./pending-pointer";
+import { parseTeamRoster, type TeamRoster } from "./team-roster-contract";
 export type NativeOperation =
-  | { operation: "status" | "list" | "recover" }
+  | { operation: "status" | "list" | "recover" | "team_roster" }
   | { operation: "create"; role: "meta-ceo" | "secretary"; requestId: string }
   | { operation: "read"; sessionId: string }
   | { operation: "send"; sessionId: string; requestId: string; text: string }
@@ -21,6 +22,9 @@ export interface NativeSession {
 export interface NativeReceipt {
   id: string; sessionId: string; status: AdmissionState; sequence: number;
   outcome: string | null; executionGeneration: number | null;
+  /** Present only on a terminal failed receipt: the producer's closed failure
+   * classification (bot_failure_reasons vocabulary); never guessed client-side. */
+  failureReason?: ContinuationFailureReason;
 }
 export interface NativeView {
   schema: "mastermind.hermes_native_view.v1"; state: NativeState; authGeneration: number;
@@ -33,12 +37,24 @@ export interface NativeView {
   session?: NativeSession;
   sessions?: { id: string; title: string; running: boolean | null; messageCount: number }[];
   receipt?: NativeReceipt;
+  /** Read-only team roster projection (team_roster operation). */
+  roster?: TeamRoster;
 }
 export interface NativeHermesPort { available(): boolean; request(request: NativeOperation): Promise<NativeView> }
 
 const states = new Set(["READY", "OPENED", "ADMITTED", "REFUSED", "NOT_SENT", "UNAVAILABLE", "EFFECT_UNKNOWN"]);
 const admissions = new Set(["queued", "started", "unknown", "terminal"]);
-const operations = new Set(["status", "list", "create", "read", "send", "receipt", "recover"]);
+const operations = new Set(["status", "list", "create", "read", "send", "receipt", "recover", "team_roster"]);
+/** Closed producer-side failure vocabulary (Hermes tools.bot_failure_reasons). */
+export type ContinuationFailureReason =
+  | "runtime_offline" | "queued_expired" | "delivery_timeout" | "agent_blocked" | "cancelled"
+  | "provider_auth_or_access" | "provider_quota_limit" | "provider_rate_limit"
+  | "provider_server_error" | "context_overflow" | "missing_config" | "model_unavailable"
+  | "target_scope_unresolved" | "unknown";
+const failureReasons = new Set<ContinuationFailureReason>(["runtime_offline", "queued_expired",
+  "delivery_timeout", "agent_blocked", "cancelled", "provider_auth_or_access", "provider_quota_limit",
+  "provider_rate_limit", "provider_server_error", "context_overflow", "missing_config",
+  "model_unavailable", "target_scope_unresolved", "unknown"]);
 const capabilities = new Set(["native_chat", "native_history", "admission_recovery"]);
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 function invalid(): never { throw new Error("NATIVE_RESPONSE_INVALID"); }
@@ -83,7 +99,7 @@ function session(value: unknown): NativeSession {
 }
 
 export function parseNativeView(value: unknown): NativeView {
-  const v = record(value, ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed", "operation", "requestId", "requestSessionId", "code", "runtime", "session", "sessions", "receipt"],
+  const v = record(value, ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed", "operation", "requestId", "requestSessionId", "code", "runtime", "session", "sessions", "receipt", "roster"],
     ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed"]);
   if (v.schema !== "mastermind.hermes_native_view.v1" || !states.has(text(v.state, 24)) || v.delegation !== "NOT_ENABLED" || v.retryAllowed !== false) return invalid();
   const caps = rows(v.capabilities, 8).map(value => text(value, 64));
@@ -122,10 +138,19 @@ export function parseNativeView(value: unknown): NativeView {
     return { id: id(s.id), title: text(s.title, 512), running: s.running === null ? null : flag(s.running), messageCount: number(s.messageCount) };
   });
   if (v.receipt !== undefined) {
-    const r = record(v.receipt, ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration"]);
+    const r = record(v.receipt, ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration", "failureReason"]);
     if (number(r.sequence) < 1) return invalid();
+    if (r.failureReason !== undefined && r.failureReason !== null
+        && (typeof r.failureReason !== "string" || !failureReasons.has(r.failureReason as ContinuationFailureReason))) return invalid();
+    if ((r.failureReason !== undefined && r.failureReason !== null)
+        && (r.status !== "terminal" || r.outcome !== "failed")) return invalid();
     result.receipt = { id: id(r.id), sessionId: id(r.sessionId), status: admission(r.status), sequence: number(r.sequence),
-      outcome: r.outcome === null ? null : text(r.outcome, 240), executionGeneration: r.executionGeneration === null ? null : number(r.executionGeneration) };
+      outcome: r.outcome === null ? null : text(r.outcome, 240), executionGeneration: r.executionGeneration === null ? null : number(r.executionGeneration),
+      ...(r.failureReason ? { failureReason: r.failureReason as ContinuationFailureReason } : {}) };
+  }
+  if (v.roster !== undefined) {
+    if (v.operation !== "team_roster") return invalid();
+    result.roster = parseTeamRoster(v.roster);
   }
   if (result.state === "OPENED" && !result.session || result.state === "ADMITTED" && !result.receipt) return invalid();
   if (new TextEncoder().encode(JSON.stringify(result)).length > 1048576) return invalid();

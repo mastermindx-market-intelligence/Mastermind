@@ -20,7 +20,7 @@ PUBLIC_CAPABILITIES = ["native_chat", "native_history", "admission_recovery"]
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z")
 METHODS = {"create": "session.create", "send": "prompt.submit", "receipt": "prompt.receipt"}
-FIELDS = {"status": {"operation"}, "list": {"operation"},
+FIELDS = {"status": {"operation"}, "list": {"operation"}, "team_roster": {"operation"},
           "create": {"operation", "role", "requestId"}, "read": {"operation", "sessionId"},
           "send": {"operation", "sessionId", "requestId", "text"},
           "receipt": {"operation", "sessionId", "admissionId"},
@@ -93,7 +93,7 @@ def normalize_request(value):
             "queued": False, "finite": True}
     if operation == "receipt":
         return operation, {**session, "admission_id": identifier(value["admissionId"])}
-    if operation == "list":
+    if operation in {"list", "team_roster"}:
         return operation, {}
     return operation, session
 
@@ -277,6 +277,9 @@ async def execute_request(request, runtime):
         if operation == "read":
             observed = await asyncio.to_thread(runtime.read_history, params["session_id"])
             return bound_envelope(request, "READY", operation=operation, runtime=public, **observed)
+        if operation == "team_roster":
+            roster = await asyncio.to_thread(runtime.team_roster, public)
+            return envelope("READY", operation=operation, runtime=public, roster=roster)
         if operation == "recover_create":
             # A deterministic name alone does not prove creation. Read the
             # committed original receipt and history without attaching a viewer.
@@ -297,6 +300,10 @@ async def execute_request(request, runtime):
                 projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity, readonly_omh=readonly_omh)
                 if projected["receipt"]["id"] != target["admission_id"]:
                     raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
+                if projected["receipt"]["status"] == "terminal" \
+                        and projected["receipt"]["outcome"] == "failed":
+                    projected["receipt"]["failureReason"] = await asyncio.to_thread(
+                        runtime.receipt_failure_reason, target["admission_id"])
                 return bound_envelope(request, "ADMITTED", operation="recover", runtime=public, **projected)
             if operation == "send":
                 # The wire owner requires this connection's subscription before
@@ -315,6 +322,10 @@ async def execute_request(request, runtime):
             result = await client.rpc(METHODS[operation], **params)
             expected_session = original_create["session_id"] if original_create else params.get("session_id")
             projected = project_result(operation, result, expected_session, readonly_capacity=readonly_capacity, readonly_omh=readonly_omh)
+            if operation in {"send", "receipt"} and projected["receipt"]["status"] == "terminal" \
+                    and projected["receipt"]["outcome"] == "failed":
+                projected["receipt"]["failureReason"] = await asyncio.to_thread(
+                    runtime.receipt_failure_reason, projected["receipt"]["id"])
             if operation == "send":
                 original_send = await asyncio.to_thread(runtime.resolve_original, "recover_send",
                     {"session_id": params["session_id"], "request_id": request["requestId"]})
@@ -597,6 +608,157 @@ class NativeRuntime:
         if not row or row.get("principal_id") != principal or row.get("target_session_id") != params["session_id"] or row.get("request_id") != params["request_id"]:
             raise BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED")
         return {"session_id": params["session_id"], "admission_id": identifier(row.get("admission_id"))}
+
+    def receipt_failure_reason(self, admission_id):
+        """Closed failure classification of a terminal failed original receipt.
+
+        Reads only the stored per-admission result (already redacted upstream)
+        and prefers its stamped ``failure_reason``; a raw provider error is
+        classified through the pinned vocabulary. Never guessed client-side.
+        """
+        self.require_roster_source()
+        from gateway.session_results import admission_result
+        from tools.bot_failure_reasons import ALL_REASONS, classify_agent_error
+        with self.readonly_database() as db:
+            saved = admission_result(db, identifier(admission_id))
+        value = saved.get("result") if type(saved) is dict else None
+        reason = value.get("failure_reason") if type(value) is dict else None
+        if type(reason) is str and reason in ALL_REASONS:
+            return reason
+        error = value.get("error") if type(value) is dict else None
+        if type(error) is str:
+            return classify_agent_error(error)
+        return "unknown"
+
+    def require_roster_source(self):
+        """Pin the roster mechanism and failure vocabulary actually imported."""
+        if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
+            raise BridgeRefusal("NATIVE_ROSTER_SOURCE_CHANGED")
+        root = self.home / "hermes-agent"
+        hashes = {
+            "tools/bot_mode_probe.py": "d82d160aaa6ef1de2d3479d97950afbb3f6837e235632cb775785c059343e6db",
+            "tools/bot_failure_reasons.py": "cc64ddc95bd958ff031c04208c926703862d16e337a95b1093b82a579f902466",
+        }
+        for name, expected in hashes.items():
+            source = root / name
+            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                raise BridgeRefusal("NATIVE_ROSTER_SOURCE_CHANGED")
+
+    def team_roster(self, public):
+        """mastermind.team_roster/v1 from actual install sources (read-only).
+
+        Mirrors control_plane/team_roster_projection.py (the canonical tested
+        producer) against the real roster mechanism. Every unobserved field
+        carries a typed reason; nothing is fabricated. No secret is read.
+        """
+        self.require_roster_source()
+        import socket
+        import sqlite3
+        import subprocess
+        from datetime import datetime, timezone
+        from tools.bot_mode_probe import (_bots_meta, _display_name, _profile_role,
+                                          _read_yaml_dict, _roster)
+
+        def iso(seconds):
+            try:
+                return datetime.fromtimestamp(float(seconds), timezone.utc).isoformat(timespec="seconds")
+            except (TypeError, ValueError, OSError, OverflowError):
+                return None
+
+        root = self.home
+        entries = _roster(Path(root))
+        names = [name for name, _ in entries]
+        try:
+            table = subprocess.run(["ps", "-axo", "pid=,lstart=,command="],
+                                   capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            table = ""
+        processes = {}
+        for line in table.splitlines():
+            parts = line.strip().split(None, 6)
+            if len(parts) < 7:
+                continue
+            try:
+                started = datetime.strptime(" ".join(parts[2:6]), "%a %b %d %H:%M:%S %Y").timestamp()
+            except ValueError:
+                continue
+            processes[parts[0]] = {"started": started, "command": parts[6]}
+
+        def activity(profile_dir):
+            db_path = profile_dir / "state.db"
+            if not db_path.is_file():
+                return {"lastActivity": None, "activitySummary": None, "activityReason": "NO_STATE_DB"}
+            try:
+                connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+                try:
+                    row = connection.execute(
+                        "select last_activity_at, title, last_activity_description from sessions "
+                        "order by last_activity_at desc limit 1").fetchone()
+                finally:
+                    connection.close()
+            except sqlite3.Error:
+                return {"lastActivity": None, "activitySummary": None,
+                        "activityReason": "STATE_DB_UNREADABLE"}
+            if row is None or row[0] is None:
+                return {"lastActivity": None, "activitySummary": None, "activityReason": "NO_SESSIONS"}
+            moment = iso(row[0])
+            if moment is None:
+                return {"lastActivity": None, "activitySummary": None,
+                        "activityReason": "ACTIVITY_TIMESTAMP_INVALID"}
+            summary = display(row[2] or row[1] or "", 240)
+            return {"lastActivity": moment, "activitySummary": summary or None}
+
+        def gateway_row(profile_dir):
+            """Identify-backed evidence for the primary home; lock+ps for others."""
+            if profile_dir == root:
+                return ({"observed": True, "source": "control_socket_identify",
+                         "instanceId": public.get("instanceId"),
+                         "authorityEpoch": public.get("authorityEpoch"),
+                         "codeVersion": public.get("version"), "pid": None, "state": "ready"},
+                        "ready", "GATEWAY_IDENTIFY_READY")
+            identity = {"observed": False, "source": "none", "instanceId": None,
+                        "authorityEpoch": None, "codeVersion": None, "pid": None, "state": None}
+            try:
+                lock = json.loads((profile_dir / "gateway.lock").read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                lock = None
+            if not isinstance(lock, dict):
+                return identity, "unknown", "NO_GATEWAY_LOCK"
+            pid = lock.get("pid") if type(lock.get("pid")) is int else None
+            identity.update(observed=True, source="gateway_lock", pid=pid, state="lock_only")
+            row = processes.get(str(pid)) if pid else None
+            if row is None:
+                return identity, "degraded", "GATEWAY_PID_NOT_RUNNING"
+            if not re.search(r"gateway|hermes", row["command"], re.I):
+                return identity, "degraded", "GATEWAY_PID_RECYCLED"
+            claimed = lock.get("start_time")
+            if type(claimed) is int and claimed > 0:
+                claimed_s = claimed / 1000.0 if claimed > 10**12 else float(claimed)
+                if abs(row["started"] - claimed_s) > 300.0:
+                    return identity, "degraded", "GATEWAY_PID_START_MISMATCH"
+            return identity, "ready", "GATEWAY_LOCK_PID_VERIFIED"
+
+        bots = []
+        for name, profile_dir in entries:
+            data = _read_yaml_dict(profile_dir / "profile.yaml")
+            gateway, readiness_value, reason = gateway_row(profile_dir)
+            bots.append({
+                "id": name,
+                "displayName": display(_display_name(name, profile_dir, names), 240),
+                "role": display(_profile_role(profile_dir), 160),
+                "profilePath": str(profile_dir),
+                "managed": (_bots_meta(data) is not None) if data is not None else None,
+                "host": socket.gethostname() or "unknown",
+                "gateway": gateway,
+                "readiness": readiness_value,
+                "readinessReason": reason,
+                **activity(profile_dir),
+            })
+            if len(bots) == 64:
+                break
+        return {"schema": "mastermind.team_roster/v1",
+                "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "host": socket.gethostname() or "unknown", "bots": bots}
 
     async def identify(self):
         from hermes_cli.gateway_client import private_control_query
