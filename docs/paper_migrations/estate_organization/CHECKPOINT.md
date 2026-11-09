@@ -74,3 +74,15 @@ Do not redo accepted migration/canaries, copy full files again, create another e
 6. Persist next coherent milestone and continue. Final acceptance needs representative builder lookup proof plus precise remaining comparison/cleanup boundaries.
 
 Read-only native advisers are providing architecture and contradictory-lineage reasoning only. Principal owns all edits. No source merge, deployment, release, Slack message or new background execution is included.
+
+## Checkpoint 2 — taxonomy and verified cleanup separation
+
+All 12 tooling/empty candidates were inspected across all 15 pages. Seven files contain only page roots and zero artboards; five retain small native-fidelity/write-path specimens. Their file names now begin with 90 · Test or 90 · Empty. Four were already archived; their archived state is preserved. [TEST_CLEANUP.json](TEST_CLEANUP.json) records every page count and disposition. No design content was removed.
+
+The first 16 of 53 product/family/recovery naming changes are applied and independently read back. [NAMING.json](NAMING.json) contains original/current names, stable IDs, operation IDs, verified/pending state and the exact continuation cursor. Complete the remaining pending names using fresh target reads; do not redo verified names.
+
+Some rename calls returned EFFECT_UNKNOWN because the immediate after snapshot still showed the previous metadata. Each was reconciled with a later exact-file read through the same Paper carrier showing the requested new name and identity. No write was retried. Preserve each original receipt state alongside the reconciliation in EFFECTS.json; there is no remaining uncertainty about these requested metadata renames.
+
+Read-only retention analysis also establishes: Sector R2 has a genuine dated build direction over earlier studies; R3 and R4 retain different requirements and disagree on some watch-path implementation statuses. News's working journey is Activity & returns p-5-0 (the current directory still needs this correction). Market Memory saved-case research and source-revision evidence are complementary, as are Policy Monitor and the broader Policy Watch studies. Options mobile files contain substantive source-bound amendments. These relationships require guide links and qualified status, not deletion or automatic supersession.
+
+Next exact action: continue NAMING.json from next_index=16; then correct News entry, ambiguous Sector/Macro page labels, build the local Sector retention guide and estate-wide family/cleanup guidance, and save the full retention map. Existing global entry pages and their prior verification remain intact.
