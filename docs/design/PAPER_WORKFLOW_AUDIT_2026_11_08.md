@@ -1,5 +1,9 @@
 # Paper workflow and buildability audit — 8 November 2026
 
+## Current continuation result — 9 November 2026
+
+Further improvements are applied across **18 Paper files**: 55 design edits, two new pages and four builder/reference artboards. The verified source notes use full copyable URLs because Paper's importer stripped href targets in both tested composition paths. See [the final continuation result](#continuation-final--source-routes-workflow-repairs-and-verified-coverage) and [evidence package](evidence/paper-linked-guides-20261108/README.md) for exact targets, source status, coverage and limits. Earlier sections retain their original phase and source-pin context.
+
 This is a scoped amendment and evidence appendix to [the existing Daily Flow specification](MASTERMIND_OS_DAILY_FLOW_SPEC.md), not a new product, task registry, runtime, or design system.
 
 ## Assignment and acceptance
@@ -467,3 +471,79 @@ Applied continuation work so far:
 The three bounded read-only cohort returns are accepted as reasoning, not GitHub approval: architecture (9 files/30 pages; selected content and 8 screenshots), navigation (41 files/130 pages; 12 JSX boards and 2 screenshots), and product clarity (7 files/72 pages; 13 JSX boards and 8 screenshots). All distinguish metadata coverage from deep visual and interaction proof. Their stale Bot finding is explicitly superseded by root readback. Terminal’s additional focused Heatmap/portfolio reasoning identifies source-link and retained-clock clarity work; it does not establish a new accounting defect.
 
 Remaining safe work in this same mission: finish exact readbacks and screenshots of all applied panels, add the independent central builder directory, connect the remaining qualified family sources, repair the Heatmap’s missing retained observation-time disclosure, persist the complete file/page disposition and effects register, and deliver one reviewable source amendment. All inherited unknown effects, localization holds, browser denials and archive/reference boundaries remain intact. This is a saved progress milestone, not parent completion.
+
+
+### Continuation final — source routes, workflow repairs and verified coverage
+
+**Native design outcome:** 55 applied design edits across 18 files, two new pages and four new builder/reference artboards. All 27 targeted final JSX checks passed. Twenty-six screenshot targets were inspected; ten exact native JPEGs are retained in the [continuation evidence package](evidence/paper-linked-guides-20261108/README.md). Eighteen targeted finish calls released only owned artboards. One additional Bot Portfolio note returned DOCUMENT_CHANGED and was reconciled as absent without a retry.
+
+This completes the bounded portfolio/source-link improvement pass described above. The requested clickable-link behavior remains a tool limitation: both useful anchor attempts flattened to text. Full visible URLs labeled **copy URL** are the verified native fallback. Product implementation, runtime acceptance and unvisited screen behavior remain separate work.
+
+#### What changed and where to find it
+
+| File | Native destination / exact targets | Improvement |
+|---|---|---|
+| Mastermind OS | p-E-0 / YD2-0 → YDT-0; p-D-0 / Q9I-0 → ZM6-0 | Existing project-journey guide and interaction/motion reference now have complete source URLs directly in Paper. |
+| News Intelligence | p-3-0 / 2J5-0; leaves 2J8-0, 2JI-0, 2JJ-0 | R3 presentation, R2 behavior/states and design doctrine are directly traceable. |
+| Intelligence Hub | p-C-0 / 73A-0; leaves 73D-0, 73E-0 | Current research-list build contract, incumbent China-intelligence builder and doctrine URLs. |
+| GMI Explorer | p-6-0 / 73O-0; leaves 73R-0, 73S-0 | Existing selected-evidence/return build plan and motion/state reference. |
+| Sector Intelligence R4 | p-5-0 / GOI-0; GOL-0, GOM-0 | Exact local reference pages plus D05 PRs #10703/#10707, explicitly Draft/HOLD. |
+| Market Breadth | p-1-0 / 8-0; old 9-0 → 2H0-0 and C-0 → 2H4-0 | Global Markets is selected; global Overview is inactive. Neutral selected fill/border preserve the visual system. Local Overview was outside the mutation. |
+| AERLOR | new first page p-A-0 / 6M0-0; p-9-1 / 5UX-1, 5WW-1, 5U3-1 | Distinct R5 source lineage, later design directions and existing source owners. Mobile headers say Project list · 0; planner preview says Project stage. R9 contract defines draft, field mapping and truthful download/handoff outcomes. |
+| D06 migrated references | p-1-0 / WB-0, WG-0; new WV-0 and X2-0 | Incomplete heading-only frames are explicitly references and direct builders to complete Terminal p-18-0 designs 1XGS-0/1XGT-0/1XGU-0 and the source record. |
+| Migration Directory | new p-6-0 / 8L-0; existing p-1-0 / BV-0 | Twelve family source entries, source-status qualifications and a visible start-page route. New page ordered after the four existing directory sections. The old decorative green left edge was removed via an exact clone, preserving its migration receipt text. |
+| Terminal | p-O-1 / new 28BB-0; UKA-0, UKN-0, UFB-0; p-1F-0 / 26LN-0 | Explicit heatmap build boundary: narrow current owner versus draft typed-save #778, unapplied 0035, separate evaluator and consumer proof. Retained snapshot discloses unavailable observation time. Portfolio source points to the exact candidate audit. |
+| PROPHET | p-D-0 / 10QN-0 → 10QQ-0 | Exact Phase 2A draft source URL, preserving ZE5-0/original Fabric and save/release ownership. |
+| Terminal Options | p-3-0 / 14A-0 → new 16H-0 | D08 draft handoff URL beside the retained origin/interaction contract. |
+| Expectation Surface | p-2-0 / 3US-0 → new 4AR-0 | Exact incumbent builder/template URLs; existing period, denominator, return and request-generation gaps remain explicit. |
+| Market Memory | p-3-0 / WR-0 → new 1EW-0 | Exact page builder/template URLs beside the historical operand and recovery contract. |
+| Policy Monitor | p-2-0 / RE-0 | Exact candidate #10493 guide and numeric-disclosure source URLs; source candidate remains distinct from protected-main and served behavior. |
+| Options Research Desk | p-1-0 / UA-0 → new 1ZN-0 | Existing workspace specification/template. GEX and Scanner route into the current Macro desk instead of becoming duplicate products. |
+| BioCatalyst blueprint | p-1-0 / 2-0 → new 2B6-0 | Current BioCatalyst and Government Revenue file destinations beside historical p-K-0/p-S-1 routing provenance. No guessed migrated artboard map. |
+| Options mobile study | p-1-0 / new 2V-0 | Separate builder reference to the owning Options product/build pages, keeping implementation detail outside the mobile product frame. |
+
+The four new artboards are 6M0-0 (AERLOR), 8L-0 (shared directory), 28BB-0 (Terminal heatmap build notes) and 2V-0 (Options mobile reference). They were created through the accepted incremental write_html path into the exact page root, not through a held schema.
+
+#### Source comparison and viable build sequence
+
+The continuation reused Mastermind procedure pin 1d0579c0540f5281e52faf069dd7dba2f480c7c6 and Macro product/source pin b5674d8ef898e503d6164922654f5ff89be9981c. Relevant procedure bytes were compared with the prior valid pin and were unchanged. Terminal source was inspected at cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3; AERLOR at c6f7deee41b9d941182130d9bfb95c1e84f8a319. Exact candidate sources retain their own heads.
+
+- **OS:** follow the existing activity → result → unsent draft contract and 180ms evidence-based motion specification. The source links do not add activity facts, permissions or a new execution owner.
+- **Terminal Heatmaps:** current savedViews.ts is an account-scoped workspace_settings owner with narrow thesis filters. Draft #778 at 88f2919a5c2222bcf05f452f2549b9af180dcae6 adds typed definitions and original-UUID receipts. Migration 0035 is source-only and unapplied at that head. Required trust review, CI, normal database application and authenticated Theme Atlas → Memory → save → reopen proof remain. Security resolution and live-query evaluation must be proved independently; typed vocabulary is not an operating evaluator.
+- **Expectation / Memory:** extend the incumbent projection and source readers. Preserve exact periods, operands, units, source versions and request generations. The already-recorded denominator, pairing, retained-value and return gaps remain implementation requirements, not a fresh acceptance claim.
+- **AERLOR:** current main documents R5 as its source-backed release design; adoption of later R7–R9 directions was not established. Route HTML, shared UI, storefront state and local-brief behavior remain with their existing owners. Each preview row mirrors one visible field; a missing stage stays Not selected. Draft recovery and prepared/downloaded/sent/accepted outcomes need actual consumer proof.
+- **D06 / F01 / Bonds / Policy / Options / PROPHET:** each directory row retains its particular completed-design, current-source, draft or BUILT_NOT_PROVEN status. Mechanical allocation stays separate from shadow research. Candidate source does not remove holds or establish release.
+
+Thirty-seven unique source-file URL variants were fetched successfully with blob identities. The three direct implementation PR URLs resolved as open drafts: Macro #10703 at 9fc460ff36345387c3a2c5435b079852e8488da0, #10707 at 74930f6931773b23072f91590319dc39fe5a7d07, and Terminal #778 at 88f2919a5c2222bcf05f452f2549b9af180dcae6. The Portfolio source uses the immutable #2299 candidate head 141502fa0f6ab5e109aa50f6c9b1025ee3a1060a. Twenty-nine Paper destination URLs match known file/page identities. These are source and identity checks, not click-through tests.
+
+#### Complete file/page accounting and concurrent work
+
+The initial complete catalog was 82 resources: 80 entries typed as files and 2 folders. Seventy-nine files had readable design metadata, with 502 real pages; dividers were excluded. The same 82 resource identities remained in the final catalog.
+
+The final reconciled register accounts for **509 known pages**: the 502 initial pages, our two new builder pages and five observed concurrent additions. It uses per-file observation windows rather than claiming a globally simultaneous snapshot. Twenty-seven files received final metadata reads (17 root targets plus a disjoint ten-file supplement); the other 52 readable files retain the initial complete inventory. The supplement observed 00:10:30–00:13:47 UTC on 9 November 2026. Untouched preservation/fixture page lists are retained from the initial inventory where no changed evidence justified another read. See [every file and page with its disposition and inspection depth](evidence/paper-linked-guides-20261108/portfolio-coverage.json), and the [readable file summary](evidence/paper-linked-guides-20261108/portfolio-coverage.md).
+
+The concurrent additions are:
+- News p-5-0: Proposed · News activity journey.
+- Breadth p-2-0: Session evidence · Interaction & build.
+- Memory p-4-0: Period selection & copy outcomes.
+- Policy p-3-0: Mobile disclosures.
+- International Markets p-N-0: User help · Calculation topics (page metadata only).
+
+Bounded read-only conflict reviews of the first four additions found no material contradiction with this continuation's source references or contracts. All five pages remain their other writers' work. The International help page received identity/purpose classification only. News's proposed counting formulas were not source-revalidated by that review. Policy mobile interiors and the Breadth phone were not individually visually reviewed. These qualifications are retained in the concurrent review files.
+
+The initial migration crosswalk reconciled 42 migrated files / 66 pages: 56 relocated design-page equivalents, six historical redirect snapshots and four later proposed pages. All 62 original page names had one equivalent after narrowly normalizing the historical prefix and D06 punctuation. The concurrent Breadth session page is an additional page. Name matching is not the historical 940-artboard fidelity receipt and cannot establish complete content; the D06 heading-only references demonstrate that distinction.
+
+Initial child cohorts were disjoint: 57 files / 232 pages. Their selected content evidence union was 49 unique boards (36 JSX, 18 screenshot and 6 tree targets overlap). The root's final 27 readbacks and 26 screenshot targets are separately registered. No count here means every screen, locale, responsive variant or interaction passed a deep audit.
+
+#### Verification, preservation and delivery
+
+The [operation register](evidence/paper-linked-guides-20261108/portfolio-continuation-effects.json) records 74 dispatched operations: 55 applied design edits, 18 applied targeted finish calls and one rejected Bot note. The rejected mutation's original target was read back and its new block was absent. No replay or alternate carrier followed. The earlier Bot index repairs were already present and are not credited here.
+
+The [readbacks](evidence/paper-linked-guides-20261108/portfolio-continuation-readbacks.json) preserve exact JSX and checks for all 27 targeted subtrees. The selected image files were decoded from original Paper tool bytes, and their computed Git blob SHA values match the uploaded blobs. [Image receipts](evidence/paper-linked-guides-20261108/portfolio-image-receipts.json) preserve byte counts, SHA-256 and Git identities.
+
+Existing original-effect fences remain: OS SPU-0/STU-0 and T0J-0, Terminal 189S-0 and #770, F01 original atlas 710Z-0/711X-0 EFFECT_UNKNOWN and readme 6ZZX-0 DOCUMENT_CHANGED/retry_allowed:false, and PROPHET ZE5-0/original Fabric. No new source link reconciles them. Archives, recovery copies, diagnostic fixtures and useful current contracts remain preserved; no deletion was justified by repeated names alone.
+
+The inherited browser suite remains unverified. No browser denial was reopened, and this pass claims no deployment, data-model qualification, permission/focus behavior, successful save, alert, notification or live consumer. The earlier state-model verification remains evidence for the prior prototype only; these source/reference edits did not create a new executable implementation.
+
+**Delivery state:** native improvements verified; complete source amendment and evidence prepared for one ready PR. The source artifact's GitHub review/merge state remains separate from the already-applied Paper outcome. PLAN_NOT_ORG_LINKED remains explicit; no replacement organization/task registry, watcher or background runner was created.
+
