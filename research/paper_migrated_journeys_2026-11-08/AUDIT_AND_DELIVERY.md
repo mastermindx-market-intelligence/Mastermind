@@ -751,9 +751,41 @@ Root inspected the complete native screenshot and exact text node. The revised l
 
 No current production proof, live data, source implementation, provider change, held source action or Draft promotion is claimed.
 
+
+## BioCatalyst — keep the parent draft when dismissing a dialog
+
+The [BioCatalyst Builder and Acceptance Contracts](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0) contained one older generic instruction that contradicted its later research/comparison states. Component atlas `40-0`, behavior text `7J-0`, said Escape cancels the unsaved draft without identifying the draft's scope.
+
+Root read the incumbent native contract before editing:
+
+- Journey contract `27-0` preserves the draft until explicit save or discard and reuses existing research/export owners.
+- Leave-comparison dialog `E6-0` / footer `EI-0` says closing or Escape keeps the user in the comparison; a save conflict or unknown result does not navigate away.
+- Save-review action `E4-0` says **Cancel · keep editing**.
+
+Only the ambiguous dismissal sentence in `7J-0` changed:
+
+> Dialog focus is trapped. Closing or Escape cancels only this dialog’s unapplied changes, preserves the parent research/comparison draft, and restores focus to the initiating action.
+
+Validation, field errors, input preservation, Saving feedback, repeat-submission prevention, focus behavior and loading resolution remain verbatim around that sentence. The later R9 states and original data, source identities, owners, routes and unknown-result behavior were not modified.
+
+Root inspected the affected native panel screenshot and measured its neighboring layout. The text remains1328×69px, parent `7I-0` remains1376×109px, and following section `7K-0` retains its24px gap. The full atlas remains1440×6810; its final section ends32px above the bottom. Exact replacement readback confirms every other character in the behavior paragraph is unchanged.
+
+Both operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `40-0`.
+
+- `paper-biocatalyst-escape-draft-scope-20261109-c4-sd`
+- `paper-biocatalyst-escape-draft-finish-20261109-c4-sd`
+
+This resolves a design-contract contradiction. It does not claim new application behavior, saved research, export completion or implementation acceptance.
+
+### Government Revenue — verified no additional amendment
+
+A separate bounded read-only audit found the inspected Government Revenue workflows already covered their apparent gaps. Root independently read `1JC-0`: the Since Last Close view visibly names **Demo close19 →20** and its completed-sample/non-live qualification. Root also read `6A-0`, which already requires the prior completed regular-session baseline, current accepted as-of, timezone, comparable scope and unavailable-baseline behavior.
+
+The initial missing-baseline hypothesis came from an extraction that omitted inline line-break content; exact JSX resolved it. No design edit was warranted. The reviewed Funding Bridge and R13 integration contract remain unchanged, and their runtime/source integrations were not recertified. The completed7A/7J mobile return actions remain accepted.
+
 ## Active continuation
 
-The successor now covers twelve design files. Preserve accepted work and all existing holds. Bounded read-only audits are checking BioCatalyst's blueprint/builder contracts and a different Government Revenue workflow beyond the completed mobile return-action repair. Continue only with a concrete source-supported design gap; no feature should be added merely to extend the work.
+The successor now covers thirteen design files. Preserve all accepted work and existing holds. Bounded read-only audits are checking the current Macro Policy Monitor and the MedTech R13 reference authority for one material remaining gap beyond prior accepted work. Do not promote reference/draft surfaces or duplicate already complete contracts; use any real source-supported gap for the next safe phase.
 
 
 ## Acceptance boundary
