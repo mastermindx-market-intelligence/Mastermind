@@ -234,9 +234,16 @@ def save_state(state: dict) -> None:
 # ------------------------------------------------------------- identities ----
 def agent_identity(conf: dict, agent: str) -> dict:
     rec = (conf.get("agents") or {}).get(agent) or {}
+    profile = rec.get("profile") or agent
+    # On M2 the pre-repair 0600 roster still names the nonexistent "hermes"
+    # profile for Meta-CEO. Its chartered native profile is enrolled as
+    # "meta-ceo-uncensored". Preserve the existing owner's roster on disk;
+    # interpret this one known legacy alias at its consumption boundary.
+    if agent == "meta-ceo" and profile == "hermes":
+        profile = "meta-ceo-uncensored"
     return {
         "agent": agent,
-        "profile": rec.get("profile") or agent,
+        "profile": profile,
         "display_name": rec.get("display_name") or agent,
         "emoji": rec.get("emoji") or ":robot_face:",
         "slack_user_id": rec.get("slack_user_id"),
