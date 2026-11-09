@@ -643,17 +643,9 @@ class Fleet:
                 and not any(channel in (rec.get("channels") or [])
                             for rec in routable(conf).values())):
             return None
-        # Non-addressed chatter and unauthorized senders must never consume
-        # an authorized channel's dispatch capacity.
-        now = time.time()
-        with self.lock:
-            hits = [t for t in (self.state.setdefault("recent", {}).get(channel) or [])
-                    if now - t < 60]
-            if len(hits) >= int(conf.get("max_dispatches_per_minute", 6)):
-                log("rate_limited", channel=channel)
-                return None
-            hits.append(now)
-            self.state["recent"][channel] = hits
+        # Admission is pure: do not consume rate capacity before the final
+        # source-timestamp deduplication in handle(). Slack commonly sends
+        # one logical mention through both app_mention and message events.
         return route(conf, text=event.get("text", ""), channel=channel, user=user,
                      is_dm=is_dm, authorizations=authorizations, binding=bound)
 
@@ -704,7 +696,16 @@ class Fleet:
         with self.lock:
             if key in (self.state.get("seen") or {}):
                 return
-            self.state.setdefault("seen", {})[key] = time.time()
+            now = time.time()
+            channel = event.get("channel", "")
+            recent = self.state.setdefault("recent", {})
+            hits = [t for t in (recent.get(channel) or []) if now - t < 60]
+            if len(hits) >= int(self.conf.get("max_dispatches_per_minute", 6)):
+                log("rate_limited", channel=channel)
+                return
+            hits.append(now)
+            recent[channel] = hits
+            self.state.setdefault("seen", {})[key] = now
             save_state(self.state)
         threading.Thread(target=self.work, args=(event, agent, reason, authorizations), daemon=True).start()
 
