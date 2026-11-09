@@ -261,6 +261,19 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         runtime_kind="dsh-acp", descendant_policy="native_fanout_disabled",
         capabilities=_cap_map(),
     ),
+    # Rev 5 DSH lane (D5/D2-DSH): the native DSH-beneath-T3 runtime
+    # identity — runtime=dsh, DISTINCT from model=deepseek.  The
+    # descriptor (control_plane/dsh_acp_runtime.py) carries the T3
+    # Local-ACP-command provider config, probe-backed capability
+    # discovery, the evidence-chosen bounded_native_fanout descendant
+    # policy and the narrow Executive-tools bridge seam.  Registered so
+    # the route can be NAMED; deliberately implemented=False — naming
+    # selects nothing and launches nothing until the full T3→DSH
+    # composition and confinement profile are reviewed (the WO-18
+    # opencode-free-cli discipline).
+    "dsh-acp": AdapterDescriptor(
+        adapter_id="dsh-acp", implemented=False,
+    ),
 }
 
 
