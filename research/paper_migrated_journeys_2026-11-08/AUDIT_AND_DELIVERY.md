@@ -117,9 +117,56 @@ The first headline attempt `paper-breadth-summary-headline-20261108-c4` was refu
 
 That readback also showed additional changes beyond this session's observed calls: completed driver/coverage/action rows,44px tabs, and advancing headers/bodies on the two copies. Those changes are not claimed as this session's operation receipts. The known live overlap is protected; no blind completion or overwrite of those nodes is authorized by this record. Continue independent portfolio/Bonds work, then inspect exact current Breadth targets and reconcile custody before any further mutation. The original-copy/source-hold boundaries remain intact.
 
+## Bonds production-source recovery — verified native design
+
+File [Bonds and Cross-Asset Transmission — Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5), page `p-2-0`. New native artboard `3PO-0`, “R33 · Source publication recovery · EN and ZH390”, was duplicated from the existing index and placed at x2090/y−6207, 1440px wide, beyond the existing right edge with80px clearance. Owned body `3QM-0` was composed incrementally.
+
+### User-facing recovery and build routing
+
+- Desktop English panel `3QT-0` and390px Chinese panel `3RB-0` show publication-service unavailability, unavailable source values, and the unchanged Bonds page. Close, Choose JSON and Reload site publication have44px-or-larger controls. JSON is explicitly local to this tab.
+- Pending specimen `3RX-0` shows source values unavailable until validation completes. Existing Choose JSON and explicit reload remain available; this is not an invented automatic retry loop.
+- Build binding `3S8-0` specifies current reader entry, selection behavior, distinct failure classes, and cancellation/focus return. These are source-derived requirements, not executed prototype wiring or runtime acceptance.
+- Existing Start Here indexes `1-0` and `1T0-0` now point to `p-2-0 /3PO-0`, retaining their accepted reference chips and explicitly separating runtime/release acceptance.
+- Existing captured-snapshot import card `2VK-0` on `2M0-0` is now labeled “LOCAL STUDY · IMPORT UNAVAILABLE”. Its local-study restore behavior is not presented as the production site-reader fallback.
+
+### Exact source and behavior
+
+Root read [Macro#9578](https://github.com/mastermindx-market-intelligence/macro/pull/9578) at head `34a32ff08b9e8296863668440adb208feac126f2`: open, not draft; current returned mergeability was null. Existing BUILT_NOT_PROVEN and merge/release holds remain. Root read `templates/_bonds_source_inspector.js.j2` in full, blob `09000dc5416b7027f4cd27f761a1b86395691743`, at that same head.
+
+The existing inspector uses the same-origin GET `/macro-context-data/decision_workspaces.json`, same-origin credentials, no-store cache, redirect rejection, AbortController,12s timeout,1.5MB limit and strict decoding/schema checks. A new read cancels/supersedes the prior read, clears the inspector source model and field, and resets its section to Overview while retaining query and language. It does not clear the host Bonds page. Explicit reload is the source action; Choose JSON remains a distinct local import with unverified publisher identity.
+
+401,403,404,service,timeout/network,format and schema failures remain distinguishable. No captured/prior source-value fallback, save, monitor, trade, identity, storage or retry owner was added. Close/Escape cancels the pending read and restores focus to Transmission sources. Late/superseded reads are ignored. Reopening an unavailable model reads the site; reopening a valid model does not automatically refresh.
+
+### Verification and release
+
+Root inspected full native screenshots of the finished1440px recovery board, both individual language panels, both modified indexes and the local-study card. All message/action rows fit, with readable text and no added accent rails. This was static/native inspection; no protected-route request or prior denied action was replayed and no browser/runtime tests were rerun. Explicit `finish_working_on_nodes` released only `3PO-0`, `1-0`, `1T0-0`, `2M0-0`.
+
+All20 phase operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-bonds-publication-recovery-copy-20261108-c4`
+- `paper-bonds-publication-recovery-heading-20261108-c4`
+- `paper-bonds-publication-error-en-header-20261108-c4`
+- `paper-bonds-publication-error-en-message-20261108-c4`
+- `paper-bonds-publication-error-en-actions-20261108-c4`
+- `paper-bonds-publication-error-zh-header-20261108-c4`
+- `paper-bonds-publication-error-zh-message-20261108-c4`
+- `paper-bonds-publication-error-zh-actions-20261108-c4`
+- `paper-bonds-publication-en-local-file-note-20261108-c4`
+- `paper-bonds-publication-zh-local-file-note-20261108-c4`
+- `paper-bonds-publication-pending-20261108-c4`
+- `paper-bonds-publication-pending-actions-20261108-c4`
+- `paper-bonds-publication-binding-header-20261108-c4`
+- `paper-bonds-publication-binding-entry-20261108-c4`
+- `paper-bonds-publication-binding-state-20261108-c4`
+- `paper-bonds-publication-binding-failure-20261108-c4`
+- `paper-bonds-publication-binding-return-20261108-c4`
+- `paper-bonds-publication-routing-20261108-c4`
+- `paper-bonds-publication-recovery-name-20261108-c4`
+- `paper-bonds-publication-recovery-finish-20261108-c4`
+
 ## Active continuation
 
-Portfolio mobile journey and source-map/unknown-submission corrections are now verified. Continue the current Bonds production-read recovery, reconcile the live Breadth overlap, and compare Forex R26 source/current design. These remaining phases are not claimed complete.
+Portfolio mobile and Bonds source-recovery phases are now verified. Continue Government Revenue320px return controls, Forex R26 tab/account state clarity, and read-only reconciliation of the live Breadth overlap. These remaining phases are not claimed complete.
 
 ## Acceptance boundary
 
