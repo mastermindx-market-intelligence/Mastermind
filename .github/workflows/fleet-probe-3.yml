@@ -1,0 +1,7 @@
+name: fleet-probe-g7
+on: [pull_request]
+jobs:
+  probe:
+    runs-on: [self-hosted, self-ubuntu]
+    steps:
+      - run: echo "G7_PROBE_OK host=$(hostname)"
