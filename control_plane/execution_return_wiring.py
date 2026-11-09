@@ -291,8 +291,10 @@ class ExecutionReturnWiring:
         # the adapter persisted with the intent/receipt (REVIEW_C_E_OPUS A2:
         # the claim stamps no namespace; an empty caller_namespace is the
         # claim's honest statement, never a value to return).
-        namespace = self._t3_attested_namespace(job) or str(
-            binding.get("caller_namespace") or "")
+        # Review #2 C-2: no fallback to the claim's caller_namespace — it is
+        # empty for every reviewed claim and could only ever carry an
+        # unattested legacy value.
+        namespace = self._t3_attested_namespace(job)
         if not isinstance(requester_block, dict):
             self._record_refusal(
                 store, job, attempt_id, "ORIGINAL_BINDING_MISSING",

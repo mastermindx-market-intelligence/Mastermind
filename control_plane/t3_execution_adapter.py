@@ -2140,10 +2140,10 @@ class T3ExecutionAdapter:
         with the intent and receipt.  The launch must run under EXACTLY the
         claimed key: a drifted ``operation_key`` (or a t3 binding without
         one) is refused typed.  A non-empty ``caller_namespace`` is admitted
-        only when it equals the pinned adapter namespace or the namespace
-        qualified by the PORT-ATTESTED principal — otherwise the broker would
-        believe one upstream command is bound while the adapter launched
-        another.
+        only when it equals the namespace qualified by the PORT-ATTESTED
+        principal (what the launch actually carries) — otherwise the broker
+        would believe one upstream command is bound while the adapter
+        launched another.
         """
         is_t3_binding = binding.runtime_kind == "t3-native"
         operation_key = str(binding.operation_key or "")
@@ -2155,7 +2155,10 @@ class T3ExecutionAdapter:
                 "drifted); never launching under a different upstream key"
             )
         caller_namespace = str(binding.caller_namespace or "")
-        allowed = {T3_REQUEST_NAMESPACE, t3_request_namespace(principal)}
+        # Review #2 C-1: the launch runs under the PORT-attested namespace, so
+        # the only admissible non-empty claim value is exactly that namespace
+        # (the bare pinned namespace is NOT what the launch carries).
+        allowed = {t3_request_namespace(principal)}
         if caller_namespace and caller_namespace not in allowed:
             raise T3BindingJoinDriftError(
                 f"refused: the binding's caller_namespace {caller_namespace!r} "
