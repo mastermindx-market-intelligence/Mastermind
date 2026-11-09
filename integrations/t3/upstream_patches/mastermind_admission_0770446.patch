@@ -1,9 +1,9 @@
 diff --git a/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts b/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts
 new file mode 100644
-index 00000000..a691d9cd
+index 00000000..9645d0c8
 --- /dev/null
 +++ b/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,434 @@
 +import type { CommandId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 +import { describe, expect, it } from "@effect/vitest";
 +import * as Cause from "effect/Cause";
@@ -188,6 +188,88 @@ index 00000000..a691d9cd
 +});
 +
 +// ---------------------------------------------------------------------------
++// 1b. Composition: a decorated incumbent and the undecorated graph share
++//     every dependency, built EXACTLY ONCE (no nested Layer.build fork).
++// ---------------------------------------------------------------------------
++
++describe("MastermindAdmissionAdapter composition", () => {
++  // A shared singleton dependency standing in for ProjectionStore /
++  // CommandOutputHub / Orchestrator / TextGeneration in runtimeLayer.ts.
++  class SharedStore extends Context.Service<SharedStore, { readonly instance: number }>()(
++    "t3/mastermind/MastermindAdmissionAdapter.test/SharedStore",
++  ) {}
++  // An undecorated sibling service that consumes the same shared store.
++  class Sibling extends Context.Service<Sibling, { readonly store: number }>()(
++    "t3/mastermind/MastermindAdmissionAdapter.test/Sibling",
++  ) {}
++
++  const graph = (
++    mode: "disabled" | "enforce",
++    order: "decorated-first" | "undecorated-first",
++  ) => {
++    const counts = { sharedStore: 0, incumbent: 0 };
++    const sharedStoreLayer = Layer.effect(
++      SharedStore,
++      Effect.sync(() => {
++        counts.sharedStore += 1;
++        return { instance: counts.sharedStore };
++      }),
++    );
++    const incumbent = threadLaunchIncumbent([]);
++    const incumbentLayer = Layer.effect(
++      ThreadLaunch.ThreadLaunchService,
++      Effect.gen(function* () {
++        yield* SharedStore;
++        counts.incumbent += 1;
++        return incumbent;
++      }),
++    ).pipe(Layer.provide(sharedStoreLayer));
++    const siblingLayer = Layer.effect(
++      Sibling,
++      Effect.gen(function* () {
++        const store = yield* SharedStore;
++        return { store: store.instance };
++      }),
++    ).pipe(Layer.provide(sharedStoreLayer));
++    const admission = Layer.succeed(
++      MastermindAdmissionService,
++      mode === "disabled"
++        ? makeMastermindAdmissionService(readMastermindAdmissionConfig({}))
++        : admittedService(),
++    );
++    const decorated = decorateThreadLaunch(incumbentLayer).pipe(Layer.provide(admission));
++    const merged =
++      order === "decorated-first"
++        ? Layer.mergeAll(decorated, siblingLayer)
++        : Layer.mergeAll(siblingLayer, decorated);
++    return { counts, incumbent, merged };
++  };
++
++  for (const mode of ["disabled", "enforce"] as const) {
++    for (const order of ["decorated-first", "undecorated-first"] as const) {
++      it.effect(`shared dependency is built exactly once (${mode}, ${order})`, () =>
++        Effect.gen(function* () {
++          const { counts, incumbent, merged } = graph(mode, order);
++          const services = yield* Layer.build(merged);
++          // One shared singleton for the whole graph; the decorated incumbent
++          // and the undecorated sibling see the SAME instance.
++          expect(counts.sharedStore).toBe(1);
++          expect(counts.incumbent).toBe(1);
++          expect(Context.get(services, Sibling).store).toBe(1);
++          const launch = Context.get(services, ThreadLaunch.ThreadLaunchService);
++          if (mode === "disabled") {
++            // Pure passthrough at composition level, not just per instance.
++            expect(launch).toBe(incumbent);
++          } else {
++            expect(launch).not.toBe(incumbent);
++          }
++        }),
++      );
++    }
++  }
++});
++
++// ---------------------------------------------------------------------------
 +// 2. A blocked launch surfaces the typed cause
 +// ---------------------------------------------------------------------------
 +
@@ -358,10 +440,10 @@ index 00000000..a691d9cd
 +});
 diff --git a/apps/server/src/mastermind/MastermindAdmissionAdapter.ts b/apps/server/src/mastermind/MastermindAdmissionAdapter.ts
 new file mode 100644
-index 00000000..f4424158
+index 00000000..1ec5109f
 --- /dev/null
 +++ b/apps/server/src/mastermind/MastermindAdmissionAdapter.ts
-@@ -0,0 +1,694 @@
+@@ -0,0 +1,704 @@
 +/**
 + * Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
 + *
@@ -761,10 +843,20 @@ index 00000000..f4424158
 +/**
 + * Wraps an incumbent service layer. When admission is disabled the incumbent
 + * service is returned untouched (zero behavior change); otherwise `wrap` gets
-+ * the built incumbent service plus the admission service. `Layer.build` runs
-+ * inside the layer's own build scope, and `Layer.effect` provides that scope
-+ * automatically, so the incumbent layer is built exactly once and memoized as
-+ * upstream would.
++ * the incumbent service plus the admission service.
++ *
++ * Composition rule (built exactly once): the decorator NEVER runs
++ * `Layer.build` itself. `Layer.build` inside a layer's effect forks the
++ * current memo map (effect 4.1.2 `CurrentMemoMap.forkOrCreate`), so any
++ * dependency first allocated inside that fork is NOT written back to the
++ * outer graph — the outer graph would then build shared singletons
++ * (ProjectionStore, CommandOutputHub, Orchestrator, TextGeneration, ...) a
++ * second time, BEFORE the `mode === "disabled"` check could pass anything
++ * through. Instead the decorator layer simply requires the incumbent service
++ * tag from its context and the incumbent layer is wired in with
++ * `Layer.provide`, which builds it through the SAME memo map as the rest of
++ * the graph — so the incumbent and every dependency it shares with the
++ * undecorated graph is built exactly once, exactly as upstream would.
 + */
 +const decorateServiceLayer = <I, S, E, RIn>(
 +  tag: Context.Key<I, S>,
@@ -775,14 +867,14 @@ index 00000000..f4424158
 +    tag,
 +    Effect.gen(function* () {
 +      const admission = yield* MastermindAdmissionService;
-+      const services = yield* Layer.build(incumbent);
-+      const inner = Context.get(services, tag);
++      // The incumbent service instance, provided by the outer graph below.
++      const inner = yield* tag;
 +      if (admission.config.mode === "disabled") {
 +        return inner;
 +      }
 +      return wrap(inner, admission);
 +    }),
-+  );
++  ).pipe(Layer.provide(incumbent));
 +
 +// a. ThreadLaunchService: admit BEFORE the first preparation effect, bind the
 +// root/binding onto the launched thread. Manual UI launches pass through the

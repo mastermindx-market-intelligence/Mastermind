@@ -3,12 +3,47 @@
 - **Repo (donor):** https://github.com/pingdotgg/t3code
 - **Pinned SHA:** `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` (verified: shared clone HEAD, clean tree)
 - **Patch file:** `mastermind_admission_0770446.patch`
-- **Patch sha256:** `f78413fb5364be4b7a382276d9207fc429cf235e9c3c477b2e627a82aa5caa87`
-- **Diff stat:** 3 files changed, 1075 insertions(+), 6 deletions(-)
-  - `apps/server/src/mastermind/MastermindAdmissionAdapter.ts` — new, 694 lines
-  - `apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts` — new, 352 lines (colocated vitest suite)
+- **Patch sha256:** `5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f`
+- **Diff stat:** 3 files changed, 1167 insertions(+), 6 deletions(-)
+  - `apps/server/src/mastermind/MastermindAdmissionAdapter.ts` — new, 704 lines
+  - `apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts` — new, 434 lines (colocated vitest suite)
   - `apps/server/src/orchestration-v2/runtimeLayer.ts` — modified, +29/−6
 - **Attribution (also carried in the module docstring):** Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4 — adapt existing seams, never rebuild.
+
+## Rework A3 (2026-11-09) — audit finding #2: no nested `Layer.build`
+
+The distinct Opus audit (`integrations/t3/docs/AUDIT_T3_DURABLE_ADAPTER_OPUS_20261109.md`,
+finding #2, BLOCKER) showed the previous bytes (sha256 `f78413fb…caa87`) were NOT a pure
+passthrough at composition level: `decorateServiceLayer` ran `Layer.build(incumbent)` inside
+the decorator's own `Layer.effect`. In effect 4.1.2 `Layer.build` forks the current memo map
+(`CurrentMemoMap.forkOrCreate`), so any dependency first allocated inside that fork is never
+written back to the outer graph, and the outer graph built shared singletons a SECOND time —
+before the `mode === "disabled"` check could pass anything through.
+
+Fix (this sha): the decorator never builds anything itself. It is
+`Layer.effect(tag, gen { admission; inner = yield* tag; disabled ? inner : wrap(inner) })
+.pipe(Layer.provide(incumbent))` — the incumbent service is a dependency wired by
+`Layer.provide`, which builds it through the SAME memo map as the rest of the graph.
+`runtimeLayer.ts` is unchanged (same six `decorateX(incumbent).pipe(Layer.provide(layer))`
+wraps). Regression: the colocated suite's `MastermindAdmissionAdapter composition` block
+builds `mergeAll(decorated, undecorated)` (both orders, disabled and enforce) over one shared
+counting dependency and asserts it is built exactly once and that the disabled decorator
+returns the incumbent instance itself. Against the previous bytes the decorated-first cases
+FAIL (`expected 2 to be 1`, shared dependency built twice); against these bytes all 4 pass.
+
+Verification of THIS sha (private APFS clone `/tmp/a3-t3-patch` of the scratch tree at the pin;
+the shared pinned clone was only read with `git apply --check` and left clean):
+
+```
+$ git -C ~/.hermes/profiles/engineering/mmos/t3code-src apply --check mastermind_admission_0770446.patch
+(exit 0; clone `git status --porcelain` empty before and after)
+$ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+exit=0        # 0 errors; 491 suggestions (unchanged; 2 are the patch's TaggedError brands)
+$ node <vitest@5.0.5>/vitest.mjs run src/orchestration-v2/ThreadLaunchService.test.ts \
+    src/mastermind/MastermindAdmissionAdapter.test.ts
+Test Files  2 passed (2)
+     Tests  59 passed (59)   # 13 admission (9 prior + 4 composition) + 46 upstream
+```
 
 ## Inert upstream default
 
@@ -69,7 +104,7 @@ $ cd apps/server
 $ node "$(ls -d ../../node_modules/.pnpm/vitest@5.0.5*/node_modules/vitest | head -1)/vitest.mjs" \
     run src/mastermind/MastermindAdmissionAdapter.test.ts
 Test Files  1 passed (1)
-     Tests  9 passed (9)
+     Tests  9 passed (9)   # historical (pre-A3 bytes); A3 bytes: 13 passed, see above
 ```
 
 The suite pins: disabled mode is pure passthrough (decorators return the incumbent service INSTANCE, no fetch consulted); a blocked launch fails `launch` with `ThreadLaunchError` whose cause is `MastermindAdmissionBlockedError` before any preparation effect; an admitted launch proceeds and binds the thread in the ledger; stale lease blocks `provider-turn.start` and `provider-turn.restart` (whole compound effect — the original turn is never interrupted by a stale holder) with the typed cause; `provider-turn.interrupt` is never decorated (admission never even consulted — `fetch` count 0); `provider-turn.steer` records but proceeds. The suite also exposed and drove out a real defect in the earlier patch bytes: the executor/turn-start/session-open decorators double-wrapped the blocked error (`OrchestrationEffectExecutionError{cause: OrchestrationEffectExecutionError{cause: BlockedError}}`); the fixed bytes fail with the raw blocked error and let each `mapError` wrap exactly once.
