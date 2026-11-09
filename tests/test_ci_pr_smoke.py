@@ -1,7 +1,7 @@
 """PR smoke selects bounded source-proximate modules; merge queue owns full tests."""
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
 from pathlib import Path
 
@@ -9,8 +9,8 @@ import pytest
 
 from scripts.ci_pr_smoke import (
     SmokeUnqualified, check_changed_python, select_modules,
-    _IDENTITY_PIN_REGISTRIES, _MAX_SELECTED_MODULES, _registry_keys,
-    _reviewed_registries,
+    _IDENTITY_PIN_REGISTRIES, _MAX_SELECTED_MODULES, _registry_blob,
+    _registry_keys, _reviewed_registries,
 )
 
 _FABRIC_REGISTRY, FABRIC_TESTS = _IDENTITY_PIN_REGISTRIES[0]
@@ -531,6 +531,20 @@ def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypa
     "from side import REVIEWED_FILES as D\n"
     "MORE = D\n"
     "REVIEWED_FILES.update(D)\n",
+    # A same-module function laundered through an untracked alias must not
+    # reach a decorator or def-time call (each would add runtime-only keys).
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def shadow(f):\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n    return f\n"
+    "SHADOW = shadow\n"
+    "@SHADOW\ndef g():\n    pass\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def shadow(f):\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n    return f\n"
+    "MORE = {'dec': shadow}\n"
+    "@MORE['dec']\ndef g():\n    pass\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def _m():\n    REVIEWED_FILES['ops/smuggled.py'] = {}\n"
+    "CALLER = _m\n"
+    "def g(q=CALLER()):\n    pass\n",
 ])
 
 
@@ -616,22 +630,26 @@ def test_live_identity_registries_extract_to_their_runtime_reviewed_files():
     The selector reads registries only from the trusted base, so a registry
     edit is never parsed against its own new bytes. Without this guard a
     registry rewritten into a refused shape would merge cleanly and then
-    fail every later smoke candidate closed. The extracted keys must equal
-    the module's runtime REVIEWED_FILES, so the static reading cannot drift
-    from what the owning pin tests actually enforce.
+    fail every later smoke candidate closed. The registry is parsed from the
+    committed HEAD blob (imports are followed at HEAD too) and compared with
+    the module imported under the exact dotted name the owning pin tests use,
+    so a __name__-gated mutation cannot show the guard a different set.
     """
     root = Path(__file__).resolve().parents[1]
-    head = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        check=True, stdout=subprocess.PIPE,
-    ).stdout.decode("ascii").strip()
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True, stdout=subprocess.PIPE, timeout=12,
+        ).stdout.decode("ascii").strip()
+    except (subprocess.SubprocessError, OSError) as error:
+        pytest.fail(f"cannot resolve HEAD for the live registry guard: {error}")
     for path, _tests in _IDENTITY_PIN_REGISTRIES:
-        extracted = _registry_keys(
-            root, head, path, (root / path).read_bytes(), frozenset())
-        spec = importlib.util.spec_from_file_location(
-            "_live_registry_" + Path(path).stem, root / path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        blob = _registry_blob(root, head, path)
+        assert blob is not None, (
+            f"wired identity registry {path} is absent at HEAD; "
+            "update _IDENTITY_PIN_REGISTRIES with the registry change")
+        extracted = _registry_keys(root, head, path, blob, frozenset())
+        module = importlib.import_module(path[:-len(".py")].replace("/", "."))
         assert extracted == set(module.REVIEWED_FILES), path
         assert extracted, path
 

@@ -281,7 +281,8 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
                 root = decorator
                 while isinstance(root, (ast.Attribute, ast.Subscript)):
                     root = root.value
-                if isinstance(root, ast.Name) and root.id in module_defs:
+                if isinstance(root, ast.Name) and (
+                        root.id in module_defs or root.id in literals):
                     raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
             module_defs.add(node.name)
             continue
@@ -337,13 +338,13 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
                         # A helper dict that references an earlier helper or
                         # an imported alias aliases the same runtime object;
                         # refuse the alias, and never rebind an alias.
-                        if (_mentions_any(node.value, {*literals, *imports})
+                        if (_mentions_any(node.value, {*literals, *imports, *module_defs})
                                 or target.id in imports):
                             raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
                         literals[target.id] = named
                     elif (_mentions_name(node, "REVIEWED_FILES")
                             or target.id in imports
-                            or _mentions_any(node, {*literals, *imports})):
+                            or _mentions_any(node, {*literals, *imports, *module_defs})):
                         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
                     continue
                 raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
