@@ -486,6 +486,17 @@ def test_producer_without_observations_path_is_byte_identical_to_before(tmp_path
     golden_doc = json.loads(golden)
     produced_doc.pop("observation_digest", None)
     golden_doc.pop("observation_digest", None)
+    # ``provider_binary_identity_digest`` covers the producing interpreter's
+    # own bytes, and ``source_config_digest`` covers the whole config
+    # including it — both inherit the same machine noise as the paths above.
+    # Drop the interpreter digest on both sides and recompute the config
+    # digest over the normalized config so byte-identity of every other
+    # field still decides the assertion.
+    for document in (produced_doc, golden_doc):
+        document["producer"]["source_config"].pop("provider_binary_identity_digest", None)
+        document["producer"]["source_config_digest"] = hashlib.sha256(
+            factory._canonical_bytes(document["producer"]["source_config"])
+        ).hexdigest()
     assert produced_doc == golden_doc
     assert (
         hashlib.sha256(quota._canonical_bytes(produced_doc)).hexdigest()

@@ -313,6 +313,10 @@ def _owner_preview_answer():
 
 def test_fabric_route_preview_merges_the_shared_law_composition(tmp_path,monkeypatch):
     bridge=_capacity_bridge()
+    # The owner-file guard is host state, not the composition under test: pin a
+    # synthetic owner so the preview is hermetic on clean CI runners.
+    owner=tmp_path/'fabric_task.py';owner.write_text('',encoding='utf-8')
+    monkeypatch.setattr(bridge,'FABRIC',owner)
     monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[dict(pool='canonical-pool')]))
     def run(*args,**kwargs):
         assert kwargs.get('timeout')==15
@@ -334,6 +338,8 @@ def test_fabric_route_preview_merges_the_shared_law_composition(tmp_path,monkeyp
 
 def test_fabric_route_preview_frontier_is_downgraded_by_the_shared_law(tmp_path,monkeypatch):
     bridge=_capacity_bridge()
+    owner=tmp_path/'fabric_task.py';owner.write_text('',encoding='utf-8')
+    monkeypatch.setattr(bridge,'FABRIC',owner)
     monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[]))
     monkeypatch.setattr(bridge.subprocess,'run',lambda *a,**k:SimpleNamespace(
         returncode=0,stdout=json.dumps(_owner_preview_answer()).encode(),stderr=b''))
@@ -352,6 +358,17 @@ def test_fabric_route_preview_refuses_without_the_shared_law(tmp_path,monkeypatc
     with pytest.raises(ValueError) as caught:
         bridge.preview(dict(task_class='execute',complexity='C1_ROUTINE_BOUNDED'))
     assert str(caught.value)=='ROUTE_PREVIEW_SOURCE_UNAVAILABLE'
+
+
+def test_fabric_route_preview_refuses_when_the_owner_file_is_absent(tmp_path,monkeypatch):
+    bridge=_capacity_bridge()
+    # The production guard itself stays: with no owner file on this host the
+    # preview refuses before any subprocess is spawned.
+    monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[dict(pool='canonical-pool')]))
+    monkeypatch.setattr(bridge,'FABRIC',tmp_path/'absent-fabric_task.py')
+    with pytest.raises(ValueError) as caught:
+        bridge.preview(dict(task_class='execute',complexity='C1_ROUTINE_BOUNDED'))
+    assert str(caught.value)=='FABRIC_OWNER_UNAVAILABLE'
 
 
 def test_capacity_preview_validator_accepts_repointed_and_legacy_shapes(tmp_path):

@@ -50,12 +50,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '16d5759d83027a65edc6e98a683ce3c0e26a0a6c6d2ebd84bed8f33574caa9d0',
-                                    'ast_sha256': 'c7c7e2f7305e392fb45919e09cac26297f0a83776de64f4428579bce422608ae',
+                                    'source_sha256': '21754f04ff0d5571ace5be199e23e20c9b91c2ca5ddc493c6821109cf4546646',
+                                    'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
                                     'sites': ((('body',
                                                 3,
                                                 'body',
-                                                58,
+                                                59,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -73,7 +73,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                58,
+                                                59,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -95,7 +95,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                58,
+                                                59,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -153,3 +153,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
+
+# 2026-11-09 MMOS composition pin move: the integration branch (capacity
+# fabric frame branch + WO-13 selected_child_admit action, composed via
+# commits merged under feat/mmos-v1-integration) extends the ingress method
+# before the catalog branch. The three reviewed Fabric response operands,
+# their reasons and their complete AST shape below the catalog block are
+# unchanged; only the enclosing whole-source and ingress-method digests and
+# the mapped statement index (body 58 -> 59) move. No new literal site is
+# qualified.

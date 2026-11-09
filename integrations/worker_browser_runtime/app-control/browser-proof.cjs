@@ -93,10 +93,26 @@ async function main() {
     await page.getByText('glm:fixture-allowance', { exact: true }).waitFor();
     const setDisplay = async (theme, locale) => {
       const before = await inspect();
-      await act(before.locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
+      const disclosure = before.locale === 'zh-CN' ? '显示设置' : 'Display settings';
+      // Below the drawer breakpoint the display controls render inside the
+      // navigation drawer, which defaults closed at mobile widths. Open it
+      // through the always-rendered navigation toggle (its accessible name is
+      // static in both states) so the disclosure is enumerable at every
+      // variant width, then restore the closed drawer before the variant's
+      // layout checks so mobile and desktop variants assert the same state.
+      const navigationToggle = before.locale === 'zh-CN' ? '打开导航' : 'Open navigation';
+      const drawerOpened = !before.controls.some(row => row.name === disclosure);
+      if (drawerOpened) await act(navigationToggle, 'activate');
+      await act(disclosure, 'activate');
       await act(before.locale === 'zh-CN' ? '主题' : 'Theme', 'select', { value: theme });
       await act(before.locale === 'zh-CN' ? '语言' : 'Language', 'select', { value: locale });
       await act(locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
+      if (drawerOpened) {
+        // The language select above may have just changed the toggle's live
+        // accessible name; re-read the current locale's spelling to close.
+        const mid = await inspect();
+        await act(mid.locale === 'zh-CN' ? '打开导航' : 'Open navigation', 'activate');
+      }
       const after = await inspect();
       assert.equal(after.theme, theme); assert.equal(after.locale, locale);
     };
