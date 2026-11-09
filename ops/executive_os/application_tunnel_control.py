@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import shlex
@@ -118,6 +119,11 @@ class Paths:
     server_keyfile: Path = Path("/etc/chisel/server.key")
     server_unit: str = "mm-chisel-server.service"
     python: str = "/usr/bin/python3"
+    home_launcher: Path = Path("/usr/local/sbin/mm-chisel-home.sh")
+    home_unit_file: Path = Path("/etc/systemd/system/mm-chisel-home.service")
+    home_credential: Path = Path("/etc/chisel/mm-home.env")
+    home_binary: Path = Path("/usr/local/bin/chisel")
+    home_user: str = "longr"
 
     @classmethod
     def fixture(cls, root):
@@ -136,6 +142,11 @@ class Paths:
             server_keyfile=root / "etc" / "chisel" / "server.key",
             server_unit="mm-chisel-server.service",
             python=sys.executable,
+            home_launcher=root / "usr/local/sbin/mm-chisel-home.sh",
+            home_unit_file=root / "etc/systemd/system/mm-chisel-home.service",
+            home_credential=root / "etc/chisel/mm-home.env",
+            home_binary=root / "usr/local/bin/chisel",
+            home_user=pwd.getpwuid(os.geteuid()).pw_name,
         )
 
 
@@ -316,7 +327,7 @@ def _qualification(raw):
     require(type(record) is dict and set(record) == {
         "schema", "server_fingerprint", "client_binary", "server_binary", "semantics",
         "evidence", "custody"}, "qualification schema refused")
-    require(record["schema"] in (QUALIFICATION_SCHEMA, ROLE_QUALIFICATION_SCHEMA), "qualification schema refused")
+    require(record["schema"] in (QUALIFICATION_SCHEMA, ROLE_QUALIFICATION_SCHEMA, HOME_QUALIFICATION_SCHEMA), "qualification schema refused")
     require(record["custody"] == "root-owned source attestation; not a remote signature",
             "qualification custody refused")
     require(type(record["server_fingerprint"]) is str
@@ -339,8 +350,13 @@ def _qualification(raw):
     semantic_keys = {"authfile_rename_reload", "new_tunnel_acl_refresh"}
     if role_aliases:
         semantic_keys.add("simultaneous_closed_role_remotes")
+    if record["schema"] == HOME_QUALIFICATION_SCHEMA:
+        semantic_keys.update(("normal_remote_destination_acl", "simultaneous_home_forwards"))
     require(type(semantics) is dict and set(semantics) == semantic_keys,
             "qualification semantics refused")
+    if record["schema"] == HOME_QUALIFICATION_SCHEMA:
+        require(all(value is True for value in semantics.values()),
+                "unsupported home forwarding semantics refused")
     require(semantics["authfile_rename_reload"] is True
             and semantics["new_tunnel_acl_refresh"] is True
             and (not role_aliases or semantics["simultaneous_closed_role_remotes"] is True),
@@ -733,6 +749,56 @@ class System:
             main_pid = 0
         return {"active": values.get("ActiveState") == "active", "main_pid": main_pid,
                 "argv": _parse_systemd_argv(values.get("ExecStart", ""))}
+
+
+
+    def home_unit_identity(self, paths):
+        completed = subprocess.run(["/bin/systemctl", "show", HOME_UNIT,
+            "--property=ActiveState,MainPID,ExecStart,FragmentPath,DropInPaths,User,"
+            "InvocationID,NeedDaemonReload,ControlGroup,Restart,RestartUSec,NoNewPrivileges"],
+            capture_output=True, text=True, timeout=30)
+        require(completed.returncode == 0, "home unit observation unavailable")
+        values = dict(line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
+        require(values.get("MainPID", "").isdigit(), "home unit PID observation refused")
+        return {"active": values.get("ActiveState") == "active", "main_pid": int(values["MainPID"]),
+                "argv": _parse_systemd_argv(values.get("ExecStart", "")),
+                "fragment": values.get("FragmentPath"), "dropins": values.get("DropInPaths"),
+                "user": values.get("User"), "invocation": values.get("InvocationID"),
+                "need_daemon_reload": values.get("NeedDaemonReload"),
+                "cgroup": values.get("ControlGroup"), "restart": values.get("Restart"),
+                "restart_usec": values.get("RestartUSec"),
+                "no_new_privileges": values.get("NoNewPrivileges")}
+
+    def home_process_credential(self, pid):
+        require(sys.platform.startswith("linux") and type(pid) is int and pid > 0,
+                "home process observation unavailable")
+        proc = Path("/proc") / str(pid)
+        uid = proc.stat().st_uid
+        with (proc / "environ").open("rb") as handle:
+            raw = handle.read(1024 * 1024 + 1)
+        require(len(raw) <= 1024 * 1024, "home process environment exceeds bound")
+        values = [part[5:] for part in raw.split(b"\0") if part.startswith(b"AUTH=")]
+        require(len(values) == 1, "home process credential observation refused")
+        return {"uid": uid, "credential_sha256": digest(values[0])}
+
+    def home_active_streams(self, pid):
+        completed = subprocess.run(["/usr/bin/ss", "-H", "-t", "-n", "-p"],
+                                   capture_output=True, text=True, timeout=30)
+        require(completed.returncode == 0, "home consumer stream observation unavailable")
+        for line in completed.stdout.splitlines():
+            if str(pid) not in re.findall(r"pid=(\d+)", line):
+                continue
+            fields = line.split()
+            require(len(fields) >= 5, "home stream observation malformed")
+            # The one incumbent TLS transport is not a consumer stream.
+            # Any owned SSH-target or local-forward connection refuses restart.
+            if fields[4] not in ("146.190.142.17:443", "[::ffff:146.190.142.17]:443"):
+                return True
+        return False
+
+    def restart_home(self):
+        # In particular: no daemon-reload, alternate unit or automatic retry.
+        return _bounded(["/bin/systemctl", "restart", HOME_UNIT], timeout=60)
 
 
 def _observed_version(output):
@@ -1970,6 +2036,596 @@ def _write_service_receipt(journal, name, receipt):
 # ------------------------------------------------------------------------ CLI
 
 
+
+# ------------------------------------------------- existing Linux home client
+#
+# This is another closed phase of the SAME transport owner. There is no new
+# client, service, credential, endpoint selector, installer or retry mechanism.
+HOME_SCHEMA = "mastermind.application_tunnel_home.v1"
+HOME_BUNDLE_SCHEMA = "mastermind.application_tunnel_home_bundle.v1"
+HOME_QUALIFICATION_SCHEMA = "mastermind.application_tunnel_qualification.v3"
+HOME_UNIT = "mm-chisel-home.service"
+HOME_SSH_REMOTE = "R:127.0.0.1:2222:127.0.0.1:22"
+HOME_DESTINATIONS = ("127.0.0.2:50142", "127.0.0.3:50142")
+HOME_REMOTES = tuple(value + ":" + value for value in HOME_DESTINATIONS)
+HOME_REGEXES = (r"^127\.0\.0\.2:50142$", r"^127\.0\.0\.3:50142$")
+HOME_LAUNCHER = (
+    '#!/bin/bash\nset -euo pipefail\nset -a\nsource /etc/chisel/mm-home.env\n'
+    'set +a\nexport AUTH="$CHISEL_AUTH"\n\n'
+    'exec /usr/local/bin/chisel client \\\n'
+    '  --fingerprint "$CHISEL_FP" \\\n'
+    '  --keepalive 20s \\\n'
+    '  https://146-190-142-17.sslip.io \\\n'
+    '  R:127.0.0.1:2222:127.0.0.1:22\n'
+).encode()
+HOME_CANDIDATE = HOME_LAUNCHER.rstrip(b"\n") + (
+    " \\\n  " + " \\\n  ".join(HOME_REMOTES) + "\n").encode()
+HOME_UNIT_BYTES = (
+    "[Unit]\nDescription=Mastermind persistent travel fallback reverse tunnel\n"
+    "After=network-online.target\nWants=network-online.target\n\n"
+    "[Service]\nType=simple\nUser=longr\n"
+    "ExecStart=/usr/local/sbin/mm-chisel-home.sh\nRestart=always\nRestartSec=3\n"
+    "NoNewPrivileges=true\n\n[Install]\nWantedBy=multi-user.target\n"
+).encode()
+
+
+def _home_id():
+    return "app-home-" + digest(canonical({
+        "predecessor": operation_identity(True), "unit": HOME_UNIT,
+        "server": SERVER, "ssh": HOME_SSH_REMOTE, "remotes": HOME_REMOTES}))[:32]
+
+
+def _home_area(paths):
+    return paths.server_operation_root / "home-client"
+
+
+def _home_owner(paths):
+    """Resolve the existing unit account by name; never assume its numeric IDs."""
+    try:
+        account = pwd.getpwnam(paths.home_user)
+    except KeyError:
+        raise ValueError("original home account unavailable") from None
+    require(account.pw_name == paths.home_user, "original home account differs")
+    return {"name": account.pw_name, "uid": account.pw_uid, "gid": account.pw_gid}
+
+
+def _home_credential(paths):
+    """Read the original user's exact private file, never source shell text.
+
+    Keep this separate from the root-private reader. No secret bytes are
+    persisted or returned; the server resolves the existing authfile key locally.
+    """
+    owner = _home_owner(paths)
+    path = paths.home_credential
+    assets._sealed_path(path.parent, directory=True)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                and (before.st_uid, before.st_gid) == (owner["uid"], owner["gid"])
+                and stat.S_IMODE(before.st_mode) == 0o600 and 0 < before.st_size < 4096,
+                "original home credential custody refused")
+        assets._no_acl(path, before, descriptor=fd)
+        raw = os.read(fd, 4097)
+        require(len(raw) == before.st_size
+                and _file_identity(before) == _file_identity(os.fstat(fd))
+                == _file_identity(path.lstat()), "home credential changed during observation")
+        values = {}
+        for line in raw.decode("utf-8").splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            try:
+                parts = shlex.split(line, posix=True, comments=False)
+            except ValueError:
+                raise ValueError("home credential syntax refused") from None
+            require(len(parts) == 1, "home credential syntax refused")
+            key, separator, value = parts[0].partition("=")
+            require(separator and key in ("CHISEL_AUTH", "CHISEL_FP") and key not in values,
+                    "home credential keys refused")
+            values[key] = value
+        require(set(values) == {"CHISEL_AUTH", "CHISEL_FP"}, "home credential keys refused")
+        require(re.fullmatch(r"[A-Za-z0-9._-]{1,80}:[A-Za-z0-9_-]{16,128}",
+                             values["CHISEL_AUTH"]) is not None,
+                "home credential format refused")
+        require(re.fullmatch(r"[A-Za-z0-9+/]{43}=", values["CHISEL_FP"]) is not None,
+                "home fingerprint format refused")
+        return {"identity": _file_identity(before), "sha256": digest(raw), "owner": owner,
+                "credential_sha256": digest(values["CHISEL_AUTH"].encode()),
+                "server_fingerprint": values["CHISEL_FP"]}
+    except UnicodeError:
+        raise ValueError("home credential syntax refused") from None
+    finally:
+        os.close(fd)
+
+
+def _home_binary(paths, system, qualification):
+    observed = system.binary_identity(paths.home_binary)
+    expected = qualification["client_binary"]
+    require(observed == {"sha256": expected["sha256"], "output": expected["build"]}
+            and _observed_version(observed["output"]) == expected["version"],
+            "home binary differs from qualification")
+
+
+def _home_argv(paths, fingerprint, candidate):
+    return [str(paths.home_binary), "client", "--fingerprint", fingerprint,
+            "--keepalive", "20s", SERVER, HOME_SSH_REMOTE,
+            *(HOME_REMOTES if candidate else ())]
+
+
+def _home_observe(paths, system, qualification, credential, *, candidate):
+    unit_file = _capture_preimage(paths.home_unit_file)
+    require(unit_file["state"] == "PRESENT" and unit_file["mode"] == 0o644
+            and assets._read(paths.home_unit_file, MAX_BYTES) == HOME_UNIT_BYTES,
+            "original home unit differs")
+    _home_binary(paths, system, qualification)
+    unit = system.home_unit_identity(paths)
+    require(unit["active"] and unit["main_pid"] > 0
+            and unit["argv"] == [str(paths.home_launcher)]
+            and unit["fragment"] == str(paths.home_unit_file) and not unit["dropins"]
+            and unit["user"] == "longr"
+            and unit["cgroup"] == "/system.slice/" + HOME_UNIT
+            and unit["restart"] == "always" and unit["restart_usec"] == "3s"
+            and unit["no_new_privileges"] == "yes", "original home unit identity refused")
+    pid = unit["main_pid"]
+    require(system.process_matches(pid, _home_argv(paths, credential["server_fingerprint"], candidate)),
+            "original home process arguments differ")
+    live = system.process_image_identity(pid)
+    require(live["sha256"] == qualification["client_binary"]["sha256"],
+            "home running executable differs")
+    process_credential = system.home_process_credential(pid)
+    require(process_credential == {"uid": credential["owner"]["uid"],
+                                  "credential_sha256": credential["credential_sha256"]},
+            "home running credential differs")
+    require(system.home_unit_identity(paths) == unit
+            and system.process_image_identity(pid) == live
+            and _home_credential(paths) == credential,
+            "home identity changed during observation")
+    return {"unit": unit, "unit_file": unit_file, "process": live}
+
+
+def _home_predecessor(receipt, qualification):
+    require(type(receipt) is dict and receipt.get("schema") == RECEIPT_SCHEMA
+            and receipt.get("operation_id") == operation_identity(True)
+            and receipt.get("state") == "GRANT_FILE_APPLIED"
+            and receipt.get("grant_file_applied") is True
+            and receipt.get("custody") == SERVER_CUSTODY,
+            "original role grant receipt required")
+    require(receipt.get("server_binary_sha256") == qualification["server_binary"]["sha256"]
+            and receipt.get("server_binary_version") == qualification["server_binary"]["version"],
+            "original role server binary differs")
+    for field in ("bundle_digest", "authfile_sha256", "identity_sha256", "qualification_digest"):
+        require(type(receipt.get(field)) is str
+                and re.fullmatch(r"[0-9a-f]{64}", receipt[field]), "role receipt commitment refused")
+    require(type(receipt.get("authfile_identity")) is dict
+            and receipt["authfile_identity"].get("sha256") == receipt["authfile_sha256"]
+            and type(receipt.get("server_process")) is dict, "role server custody refused")
+    return receipt
+
+
+def _home_bundle(document):
+    return {"schema": HOME_BUNDLE_SCHEMA, "purpose": PURPOSE, "operation_id": _home_id(),
+            "source": document["source"], "release": document["release"],
+            "qualification": document["qualification"],
+            "credential_sha256": document["credential"]["credential_sha256"],
+            "client_intent_digest": digest(canonical(document)),
+            "predecessor": document["predecessor"], "custody": CUSTODY}
+
+
+def stage_home(*, source_repo, source_sha, release_root, release_commit_sha,
+               release_tree_sha, qualification_path, predecessor_server_receipt,
+               paths=None, system=None):
+    _root()
+    paths, system = paths or Paths(), system or System()
+    qualification = _qualification(_read_root_private(Path(qualification_path), MAX_BYTES))
+    require(qualification["schema"] == HOME_QUALIFICATION_SCHEMA,
+            "home forwarding qualification required")
+    tree = install_source_policy.validate_acceptance_source(
+        source_repo=Path(source_repo), expected_sha=source_sha)
+    seal, entries = _release_entries(Path(release_root), release_commit_sha,
+                                    release_tree_sha, Path(source_repo))
+    require(source_sha == release_commit_sha and tree == release_tree_sha,
+            "home release differs from protected source")
+    predecessor = _home_predecessor(
+        decode(_read_root_private(Path(predecessor_server_receipt), MAX_BYTES)), qualification)
+    credential = _home_credential(paths)
+    require(credential["server_fingerprint"] == qualification["server_fingerprint"],
+            "home server fingerprint differs")
+    with _PurposeLock(paths, create=True, server=True) as lock:
+        directory = _home_area(paths)
+        if not os.path.lexists(directory):
+            _make_private_directory(directory)
+        with publication.private(directory) as area:
+            if "intent.json" in area.names():
+                old = decode(area.read("intent.json"))
+                require(old.get("schema") == HOME_SCHEMA and old.get("operation_id") == _home_id()
+                        and old.get("source") == {"sha": source_sha, "tree": tree}
+                        and old.get("qualification") == qualification
+                        and old.get("credential") == credential
+                        and old.get("predecessor") == predecessor
+                        and old.get("release") == {
+                            "root": str(release_root), "commit_sha": release_commit_sha,
+                            "tree_sha": release_tree_sha, "manifest_digest": digest(canonical(seal)),
+                            "entries": entries},
+                        "original home staging differs")
+                payloads = {"launcher-before.sh": HOME_LAUNCHER, "launcher-after.sh": HOME_CANDIDATE,
+                            "server-bundle.json": canonical(_home_bundle(old))}
+                if not set(payloads) <= area.names():
+                    require(_capture_preimage(paths.home_launcher) == old["launcher_preimage"]
+                            and _home_observe(paths, system, qualification, credential, candidate=False)
+                                == old["observed"],
+                            "incomplete home stage requires original custody")
+                    for name, raw in payloads.items():
+                        lock.check()
+                        _write_once(area, name, raw)
+                return _home_projection(_load_home(area, paths), "STAGED")
+            require(not area.names(), "incomplete original home staging refused")
+            before = _capture_preimage(paths.home_launcher)
+            require(before["state"] == "PRESENT" and before["mode"] == 0o755
+                    and assets._read(paths.home_launcher, MAX_BYTES) == HOME_LAUNCHER,
+                    "original home launcher differs")
+            observed = _home_observe(paths, system, qualification, credential, candidate=False)
+            require(not system.listeners(RELAY_PORT), "home application port is already held")
+            document = {"schema": HOME_SCHEMA, "purpose": PURPOSE, "operation_id": _home_id(),
+                        "source": {"sha": source_sha, "tree": tree},
+                        "release": {"root": str(release_root), "commit_sha": release_commit_sha,
+                                    "tree_sha": release_tree_sha, "manifest_digest": digest(canonical(seal)),
+                                    "entries": entries},
+                        "qualification": qualification, "credential": credential,
+                        "predecessor": predecessor, "launcher_preimage": before,
+                        "observed": observed, "custody": CUSTODY}
+            lock.check()
+            # Intent precedes all staging and the sole eventual target write.
+            area.write("intent.json", canonical(document))
+            _write_once(area, "launcher-before.sh", HOME_LAUNCHER)
+            _write_once(area, "launcher-after.sh", HOME_CANDIDATE)
+            _write_once(area, "server-bundle.json", canonical(_home_bundle(document)))
+            return _home_projection(document, "STAGED")
+
+
+def _load_home(area, paths):
+    document = decode(area.read("intent.json"))
+    require(type(document) is dict and set(document) == {
+        "schema", "purpose", "operation_id", "source", "release", "qualification",
+        "credential", "predecessor", "launcher_preimage", "observed", "custody"}
+        and document["schema"] == HOME_SCHEMA and document["purpose"] == PURPOSE
+        and document["operation_id"] == _home_id() and document["custody"] == CUSTODY,
+        "home intent refused")
+    require(area.names() <= {"intent.json", "launcher-before.sh", "launcher-after.sh",
+                            "server-bundle.json", "client-intent.json", "client-receipt.json", "grant-receipt.json",
+                            "restart-intent.json", "restart-result.json"},
+            "unexpected home operation entry")
+    qualification = _qualification(canonical(document["qualification"]))
+    require(qualification["schema"] == HOME_QUALIFICATION_SCHEMA, "home qualification refused")
+    _home_predecessor(document["predecessor"], qualification)
+    release = document["release"]
+    seal = _release_seal(Path(release["root"]), release["commit_sha"], release["tree_sha"])
+    require(digest(canonical(seal)) == release["manifest_digest"]
+            and document["source"] == {"sha": release["commit_sha"], "tree": release["tree_sha"]},
+            "home release binding differs")
+    require(area.read("launcher-before.sh") == HOME_LAUNCHER
+            and area.read("launcher-after.sh") == HOME_CANDIDATE
+            and area.read("server-bundle.json") == canonical(_home_bundle(document)),
+            "home staged payload differs")
+    require(_home_credential(paths) == document["credential"], "original home credential changed")
+    return document
+
+
+def _home_projection(document, state, **extra):
+    return {"schema": RECEIPT_SCHEMA, "operation_id": _home_id(), "state": state,
+            "client_intent_digest": digest(canonical(document)),
+            "bundle_digest": digest(canonical(_home_bundle(document))),
+            "credential_sha256": document["credential"]["credential_sha256"],
+            "source": document["source"], "unit": HOME_UNIT,
+            "tunnel_proven": False, "application_proven": False,
+            "provider_effects_settled": False, "custody": CUSTODY, **extra}
+
+
+def _home_merge_authfile(raw, identity):
+    entries = _authfile_entries(raw)
+    matches = [key for key in entries if digest(key.encode()) == identity]
+    require(len(matches) == 1, "original home identity is not unique in the authfile")
+    key = matches[0]
+    require(key.partition(":")[0] != AUDIENCE, "application identity cannot become the home identity")
+    require(any(re.search(pattern, "R:127.0.0.1:2222") for pattern in entries[key]),
+            "original home SSH grant is absent")
+    require(not any(re.search(pattern, remote) for patterns in entries.values()
+                    for pattern in patterns for remote in HOME_DESTINATIONS),
+            "a normal application destination is already granted")
+    merged = {entry: list(patterns) for entry, patterns in entries.items()}
+    merged[key].extend(HOME_REGEXES)
+    return entries, merged
+
+
+def _home_server_bundle(bundle_path, expected_digest):
+    raw = _read_root_private(Path(bundle_path), MAX_BYTES)
+    require(digest(raw) == expected_digest, "home server bundle digest differs")
+    bundle = decode(raw)
+    require(type(bundle) is dict and set(bundle) == {
+        "schema", "purpose", "operation_id", "source", "release", "qualification",
+        "credential_sha256", "client_intent_digest", "predecessor", "custody"}
+        and bundle["schema"] == HOME_BUNDLE_SCHEMA and bundle["purpose"] == PURPOSE
+        and bundle["operation_id"] == _home_id() and bundle["custody"] == CUSTODY,
+        "home server bundle refused")
+    for field in ("credential_sha256", "client_intent_digest"):
+        require(type(bundle[field]) is str and re.fullmatch(r"[0-9a-f]{64}", bundle[field]),
+                "home bundle commitment refused")
+    qualification = _qualification(canonical(bundle["qualification"]))
+    require(qualification["schema"] == HOME_QUALIFICATION_SCHEMA, "home server qualification refused")
+    _home_predecessor(bundle["predecessor"], qualification)
+    source, release = bundle["source"], bundle["release"]
+    require(type(source) is dict and set(source) == {"sha", "tree"}
+            and all(type(v) is str and re.fullmatch(r"[0-9a-f]{40}", v) for v in source.values()),
+            "home server source refused")
+    require(type(release) is dict and set(release) == {
+        "root", "commit_sha", "tree_sha", "manifest_digest", "entries"}
+        and release["commit_sha"] == source["sha"] and release["tree_sha"] == source["tree"]
+        and type(release["manifest_digest"]) is str
+        and re.fullmatch(r"[0-9a-f]{64}", release["manifest_digest"])
+        and type(release["entries"]) is dict
+        and set(release["entries"]) == set(IMPORT_CLOSURE) | {TEMPLATE_PATH}
+        and all(type(v) is str and re.fullmatch(r"[0-9a-f]{64}", v)
+                for v in release["entries"].values()), "home server release refused")
+    return raw, bundle, qualification
+
+
+def _home_retained_role(bundle, paths):
+    """Verify the VPS-retained original reverse successor without modifying it."""
+    expected = bundle["predecessor"]
+    with publication.private(paths.server_operation_root / "operation-hermes-v2") as area:
+        require(area.names() == {"server-intent.json", "bundle.json", "preimage.json",
+                                 "candidate.json", "server-receipt.json"},
+                "original role server operation incomplete")
+        raw, previous, qualification = _server_bundle(
+            area.path / "bundle.json", expected["bundle_digest"], paths)
+        require(previous["schema"] == ROLE_BUNDLE_SCHEMA,
+                "home requires original role aliases")
+        _server_role_predecessor(previous, paths)
+        intent = decode(area.read("server-intent.json"))
+        receipt = decode(area.read("server-receipt.json"))
+        preimage, candidate = area.read("preimage.json"), area.read("candidate.json")
+        _, merged, changed = _merge_authfile(preimage, previous["auth"], role_aliases=True)
+        require(changed and canonical(merged) == candidate
+                and digest(preimage) == intent["preimage"]["sha256"]
+                and digest(candidate) == intent["candidate_sha256"]
+                and intent["bundle_digest"] == digest(raw)
+                and intent["operation_id"] == operation_identity(True)
+                and receipt == expected
+                and receipt == _server_receipt(intent, previous, qualification,
+                                               receipt["authfile_identity"]),
+                "original role server custody changed")
+        require(previous["qualification"]["server_fingerprint"] ==
+                bundle["qualification"]["server_fingerprint"],
+                "home server fingerprint differs from original role grant")
+        return candidate
+
+
+def _home_server_receipt(bundle, intent, after):
+    return {"schema": RECEIPT_SCHEMA, "operation_id": _home_id(),
+            "state": "GRANT_FILE_APPLIED", "bundle_digest": intent["bundle_digest"],
+            "client_intent_digest": bundle["client_intent_digest"],
+            "identity_sha256": bundle["credential_sha256"], "source": bundle["source"],
+            "authfile_identity": after, "authfile_sha256": intent["candidate_sha256"],
+            "server_process": intent["server_process"],
+            "qualification_digest": digest(canonical(bundle["qualification"])),
+            "grant_file_applied": True, "server_reload_proven": False,
+            "tunnel_proven": False, "application_proven": False,
+            "provider_effects_settled": False, "custody": SERVER_CUSTODY}
+
+
+def home_server(*, bundle_path, expected_digest, apply=False, paths=None, system=None):
+    _root()
+    require(type(apply) is bool, "home action refused")
+    paths, system = paths or Paths(), system or System()
+    with _PurposeLock(paths, create=False, server=True) as lock:
+        raw, bundle, qualification = _home_server_bundle(bundle_path, expected_digest)
+        predecessor_bytes = _home_retained_role(bundle, paths)
+        unit = _server_observation(paths, system, qualification)
+        require(unit["live_image"] == bundle["predecessor"]["server_process"],
+                "original role server process changed")
+        before = _capture_preimage(paths.server_authfile)
+        current = _read_root_private(paths.server_authfile, MAX_BYTES)
+        require(before == _capture_preimage(paths.server_authfile),
+                "home server target changed during observation")
+        listeners = system.listeners(RELAY_PORT)
+        require({row["address"] for row in listeners} ==
+                {remote.removeprefix("R:") for remote in _remotes(True)[0]}
+                and len(listeners) == 3
+                and all(row["pid"] == unit["main_pid"] for row in listeners),
+                "original role listeners are not held by the original server")
+        directory = paths.server_operation_root / "operation-hermes-home"
+        if not os.path.lexists(directory):
+            require(apply, "original home server operation has not been staged")
+            _make_private_directory(directory)
+        with publication.private(directory) as area:
+            require(area.names() <= {"intent.json", "bundle.json", "preimage.json",
+                                     "candidate.json", "receipt.json"},
+                    "unexpected home server entry")
+            _, merged = _home_merge_authfile(predecessor_bytes, bundle["credential_sha256"])
+            candidate = canonical(merged)
+            if "intent.json" not in area.names():
+                require(apply and not area.names()
+                        and before == bundle["predecessor"]["authfile_identity"]
+                        and current == predecessor_bytes,
+                        "original home server preimage differs")
+                intent = {"schema": HOME_SCHEMA, "operation_id": _home_id(),
+                          "bundle_digest": expected_digest, "preimage": before,
+                          "candidate_sha256": digest(candidate),
+                          "server_process": unit["live_image"]}
+                lock.check()
+                area.write("intent.json", canonical(intent))
+            intent = decode(area.read("intent.json"))
+            require(intent == {"schema": HOME_SCHEMA, "operation_id": _home_id(),
+                "bundle_digest": expected_digest,
+                "preimage": bundle["predecessor"]["authfile_identity"],
+                "candidate_sha256": digest(candidate), "server_process": unit["live_image"]},
+                "home server intent differs")
+            staged = {"bundle.json": raw, "preimage.json": predecessor_bytes, "candidate.json": candidate}
+            for name, payload in staged.items():
+                if name not in area.names():
+                    require(apply and before == intent["preimage"],
+                            "incomplete home server staging requires original preimage")
+                    _write_once(area, name, payload)
+                require(area.read(name) == payload, "home server staging differs")
+            committed = current == candidate
+            require(committed or before == intent["preimage"], "home server target conflicts")
+            if "receipt.json" in area.names():
+                receipt = decode(area.read("receipt.json"))
+                require(committed and receipt == _home_server_receipt(bundle, intent, before),
+                        "home settled authfile identity changed")
+                return receipt
+            if not committed:
+                if not apply:
+                    return {"schema": RECEIPT_SCHEMA, "operation_id": _home_id(),
+                            "state": "NOT_APPLIED", "grant_file_applied": False}
+                require(_server_observation(paths, system, qualification)["live_image"] ==
+                        intent["server_process"], "home server changed before publication")
+                require(_read_root_private(Path(bundle_path), MAX_BYTES) == raw,
+                        "home carried bundle changed")
+                area.check()
+                lock.check()
+                _install(paths.server_authfile, candidate, intent["preimage"]["mode"],
+                         replace=True, expect=intent["preimage"])
+            after = _capture_preimage(paths.server_authfile)
+            require(_read_root_private(paths.server_authfile, MAX_BYTES) == candidate
+                    and (after["mode"], after["uid"], after["gid"]) ==
+                        tuple(intent["preimage"][key] for key in ("mode", "uid", "gid")),
+                    "home authfile readback differs")
+            receipt = _home_server_receipt(bundle, intent, after)
+            lock.check()
+            _write_once(area, "receipt.json", canonical(receipt))
+            return receipt
+
+
+def _home_grant(path, document):
+    receipt = decode(_read_root_private(Path(path), MAX_BYTES))
+    bundle = _home_bundle(document)
+    require(type(receipt) is dict and receipt.get("schema") == RECEIPT_SCHEMA
+            and receipt.get("operation_id") == _home_id()
+            and receipt.get("state") == "GRANT_FILE_APPLIED"
+            and receipt.get("grant_file_applied") is True
+            and receipt.get("bundle_digest") == digest(canonical(bundle))
+            and receipt.get("client_intent_digest") == digest(canonical(document))
+            and receipt.get("identity_sha256") == bundle["credential_sha256"]
+            and receipt.get("source") == document["source"]
+            and receipt.get("qualification_digest") == digest(canonical(document["qualification"]))
+            and receipt.get("custody") == SERVER_CUSTODY, "home server grant differs")
+    return receipt
+
+
+def _home_client_intent(document):
+    return {"schema": HOME_SCHEMA, "operation_id": _home_id(),
+            "client_intent_digest": digest(canonical(document)),
+            "preimage": document["launcher_preimage"], "candidate_sha256": digest(HOME_CANDIDATE)}
+
+
+def _home_candidate_custody(metadata, document):
+    original = document["launcher_preimage"]
+    require(metadata["state"] == "PRESENT" and metadata["mode"] == 0o755
+            and metadata["sha256"] == digest(HOME_CANDIDATE)
+            and (metadata["uid"], metadata["gid"]) == (original["uid"], original["gid"])
+            and metadata["identity"][5] == 1, "home candidate executable custody differs")
+
+
+def home_client(*, server_receipt=None, apply=False, restart=False, paths=None, system=None):
+    """Publish once, transition once, then observe. Never retry a service command."""
+    _root()
+    require(type(apply) is bool and type(restart) is bool and not (apply and restart),
+            "home action refused")
+    paths, system = paths or Paths(), system or System()
+    with _PurposeLock(paths, server=True) as lock:
+        with publication.private(_home_area(paths)) as area:
+            document = _load_home(area, paths)
+            if server_receipt is not None:
+                grant = _home_grant(server_receipt, document)
+                _write_once(area, "grant-receipt.json", canonical(grant))
+            require("grant-receipt.json" in area.names(), "home server grant required")
+            _home_grant(area.path / "grant-receipt.json", document)
+            before = _capture_preimage(paths.home_launcher)
+            current = assets._read(paths.home_launcher, MAX_BYTES)
+            committed = current == HOME_CANDIDATE
+            if "client-intent.json" in area.names():
+                require(decode(area.read("client-intent.json")) == _home_client_intent(document),
+                        "original home client publication intent differs")
+            if committed:
+                require("client-intent.json" in area.names(),
+                        "candidate without original client publication intent cannot be adopted")
+                _home_candidate_custody(before, document)
+            require(committed or before == document["launcher_preimage"],
+                    "original home launcher changed")
+            if "client-receipt.json" in area.names():
+                receipt = decode(area.read("client-receipt.json"))
+                require(committed and receipt == {"identity": before,
+                    "client_intent_digest": digest(canonical(document))},
+                    "settled home launcher identity changed")
+            elif committed:
+                # The durable original intent and candidate prove a committed
+                # missing receipt. Reconcile records it, never republishes it.
+                lock.check()
+                _write_once(area, "client-receipt.json", canonical({
+                    "identity": before, "client_intent_digest": digest(canonical(document))}))
+            elif apply:
+                observed = _home_observe(paths, system, document["qualification"],
+                                         document["credential"], candidate=False)
+                require(observed == document["observed"], "original home process or unit changed")
+                require(not system.listeners(RELAY_PORT), "home application port appeared")
+                area.check()
+                lock.check()
+                _write_once(area, "client-intent.json", canonical(_home_client_intent(document)))
+                _install(paths.home_launcher, HOME_CANDIDATE, 0o755, replace=True, expect=before)
+                before = _capture_preimage(paths.home_launcher)
+                require(assets._read(paths.home_launcher, MAX_BYTES) == HOME_CANDIDATE,
+                        "home launcher readback differs")
+                _home_candidate_custody(before, document)
+                _write_once(area, "client-receipt.json", canonical({
+                    "identity": before, "client_intent_digest": digest(canonical(document))}))
+                committed = True
+            if not committed:
+                require(not restart, "home launcher has not been applied")
+                return _home_projection(document, "NOT_APPLIED")
+            if "restart-intent.json" in area.names():
+                intent = decode(area.read("restart-intent.json"))
+                require(intent == {"schema": HOME_SCHEMA, "operation_id": _home_id(),
+                                   "observed": document["observed"],
+                                   "client_intent_digest": digest(canonical(document))},
+                        "original home restart intent differs")
+                # No branch below can call systemctl after this durable intent.
+                try:
+                    observed = _home_observe(paths, system, document["qualification"],
+                                             document["credential"], candidate=True)
+                    listeners = system.listeners(RELAY_PORT)
+                    started = (observed["process"] != document["observed"]["process"]
+                        and observed["unit_file"] == document["observed"]["unit_file"]
+                        and len(listeners) == 2
+                        and {row["address"] for row in listeners} == set(HOME_DESTINATIONS)
+                        and all(row["pid"] == observed["unit"]["main_pid"] for row in listeners))
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    started = False
+                return _home_projection(document, "STARTED" if started else "RESTART_UNRESOLVED",
+                                        restart_replayed=False)
+            if not restart:
+                return _home_projection(document, "FILE_APPLIED")
+            observed = _home_observe(paths, system, document["qualification"],
+                                     document["credential"], candidate=False)
+            require(observed == document["observed"], "original home process or unit changed")
+            require(not system.home_active_streams(observed["unit"]["main_pid"]),
+                    "original home client has active consumer streams")
+            require(not system.listeners(RELAY_PORT), "home application listener appeared")
+            lock.check()
+            area.write("restart-intent.json", canonical({
+                "schema": HOME_SCHEMA, "operation_id": _home_id(),
+                "observed": document["observed"], "client_intent_digest": digest(canonical(document))}))
+            try:
+                outcome = system.restart_home()
+                result = {"returncode": outcome["returncode"], "observed_return": True}
+            except (OSError, subprocess.SubprocessError):
+                result = {"returncode": None, "observed_return": False}
+            # Even an explicit failure must be reconciled on this same intent.
+            _write_once(area, "restart-result.json", canonical(result))
+            return _home_projection(document, "RESTART_RECONCILE_REQUIRED",
+                                    restart_replayed=False, command_result=result)
+
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2000,13 +2656,36 @@ def build_parser():
     start_parser.add_argument("--role-aliases", action="store_true")
     stop_parser = sub.add_parser("stop-client")
     stop_parser.add_argument("--role-aliases", action="store_true")
+
+    home_stage = sub.add_parser("stage-home")
+    home_stage.add_argument("--source-repo", type=Path, required=True)
+    home_stage.add_argument("--source-sha", required=True)
+    home_stage.add_argument("--release-root", type=Path, required=True)
+    home_stage.add_argument("--release-commit-sha", required=True)
+    home_stage.add_argument("--release-tree-sha", required=True)
+    home_stage.add_argument("--qualification", dest="qualification_path", type=Path, required=True)
+    home_stage.add_argument("--predecessor-server-receipt", type=Path, required=True)
+    for command in ("apply-home-server", "reconcile-home-server"):
+        item = sub.add_parser(command)
+        item.add_argument("--bundle", dest="bundle_path", type=Path, required=True)
+        item.add_argument("--expected-digest", required=True)
+    for command in ("apply-home-client", "reconcile-home-client", "restart-home-client"):
+        item = sub.add_parser(command)
+        item.add_argument("--server-receipt", type=Path, required=command == "apply-home-client")
     return parser
 
 
 def main(argv=None, *, paths=None, system=None):
     args = vars(build_parser().parse_args(argv))
     command = args.pop("command")
-    if command == "stage":
+    if command == "stage-home":
+        result = stage_home(**args, paths=paths, system=system)
+    elif command in ("apply-home-server", "reconcile-home-server"):
+        result = home_server(**args, apply=command == "apply-home-server", paths=paths, system=system)
+    elif command in ("apply-home-client", "reconcile-home-client", "restart-home-client"):
+        result = home_client(**args, apply=command == "apply-home-client",
+                             restart=command == "restart-home-client", paths=paths, system=system)
+    elif command == "stage":
         result = stage(**args, paths=paths, system=system)
     elif command == "apply-server":
         result = apply_server(**args, paths=paths, system=system)
