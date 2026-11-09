@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the fifteen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the sixteen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -29,6 +29,7 @@ Direct entry points for the fifteen files amended in this successor. Each file r
 | [BioCatalyst](https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0) | Clarified that dialog dismissal preserves the parent research/comparison draft. |
 | [MedTech](https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0) | Distinguished narrower guidance from a source conflict or an earlier launch. |
 | [Watchlist save recovery](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) | Added EN390 and ZH320 browser-retention failure states; checking storage preserves the original operation and never resends a save. |
+| [Shared Shell company search](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) | Added a proposed phone selection/return journey with exact listing identity and enabled Analysis access when descriptive metadata is unavailable. |
 
 ## Verified mobile meaning corrections
 
@@ -981,9 +982,66 @@ This closes a missing design state. No account endpoint was called, no save was 
 The bounded read-only audit of file `01M6Y31C449F02KGRNPGK94Q8D` found its Reference discovery, local refinement, applied/no-match states, unavailable reads and return behavior already coherent. Its illustrative Atlas8.4%, theme5.8% and2.6-percentage-point difference match the retained comparison scale. It remains distinct from both T47 and the current F01 exact-company picker. No reference promotion, replacement search service or mutation was made in that file.
 
 
+
+## Shared Shell — exact company selection and browser return on phone
+
+The [Shared Shell Completion and Integration page](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) had SS05's desktop search specimen at `1VT-0`, plus separate phone Directory and account/recovery states. The bounded audit found no phone counterpart for the incumbent **company-only picker → exact-listing preview → explicit Open Analysis → browser Back** path. The separate Shared Market search file covers illustrative theme/company/workspace discovery, not this exact owner journey.
+
+This is an additive proposed composition. It does not rewrite SS05, promote the shared-shell candidate, or claim an implemented phone capture.
+
+### Exact source and current disposition
+
+Root read Terminal [#1276](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1276) metadata at `d02a49631724a6ef48ce507914396921d218ad03`: open, Draft, unarmed and unmerged, with its scoped F01 release hold retained. Root also read Macro [#10645](https://github.com/mastermindx-market-intelligence/macro/pull/10645) at `dce261d07ebc993e8a9579cca2200e445b6636d4`. Operative candidate.4, proposed/unadopted candidate.5, original atlas EFFECT_UNKNOWN and Readme DOCUMENT_CHANGED remain binding. Migrated `UZ-0` / `VP-0`, original held targets and the later `p-3-0` Today proposal were not touched.
+
+Root inspected these files at the immutable Terminal head:
+
+| Source | Blob | Observed behavior |
+| --- | --- | --- |
+| [ShellSearch.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d02a49631724a6ef48ce507914396921d218ad03/terminal/components/chrome/shared-shell/ShellSearch.tsx) | `442b1b0a1d85b68f758f611fdc54c913e8b1cd8a` | Commits the canonical symbol/query, annotates the existing origin history entry, and reopens only from a valid marker whose href matches the actual URL. Cancelling clears that marker. |
+| [SearchModal.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d02a49631724a6ef48ce507914396921d218ad03/terminal/components/SearchModal.tsx) | `33ea3fb723bd9034dfc652a9bc07c8ecf893e67f` | Selecting an eligible company previews it; Open Analysis commits it. Query edits clear the preview. The existing phone path uses MobileSheet; the preview is rendered only for a still-visible result. |
+| [CompanyListingIdentity.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d02a49631724a6ef48ce507914396921d218ad03/terminal/components/CompanyListingIdentity.tsx) | `0cf806e8debbbc5f1929f5ea77d521c21462f103` | Preserves the exact listing and supplied name. Unavailable venue or trading currency does not disable Open Analysis. Late metadata for another listing cannot relabel the current one. |
+| [companySearchContext.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d02a49631724a6ef48ce507914396921d218ad03/terminal/lib/companySearchContext.ts) | `2166bbbccb4d85667acc218ece36b75133c17b14` | Validates full canonical symbol and query; owns the existing Analysis href and history key. Trading currency uses exact-ticker quote_currency, never statement currency or an inferred exchange mapping. |
+
+### Two native phone moments, one retained identity
+
+New gallery `3OH-0`, **SS17–18 · PROPOSED · Exact company search and browser return · Phone**, contains two390×844 frames and an adjacent build binding.
+
+| Frame | Scenario | Exact values and key nodes |
+| --- | --- | --- |
+| `3JH-0` / SS17 | Selected listing; descriptive metadata unavailable | Query `3MV-0` **NVIDIA**; selected symbol `3N1-0` **NVDA**; preview `3N5-0` **NVDA · NVIDIA**; `3N7-0` **Venue unavailable**; `3N8-0` **Trading currency unavailable**; `3N9-0` **Selected from “NVIDIA”**; enabled Open Analysis `3NA-0` / `3NB-0`. |
+| `3NF-0` / SS18 | Returned through browser Back, with valid origin marker and the same listing still eligible | Query `3O1-0`, selected symbol `3NW-0`, preview `3NQ-0`, unavailable fields `3NP-0` / `3NO-0`, selected-query line `3NM-0`, enabled Open Analysis `3NK-0` / `3NL-0`. All corresponding values are identical. |
+| `3OR-0` | Separate Build binding | Existing source, exact generated example destination, history validity, query/cancel/late-metadata rules, qualification and unchanged holds. |
+
+The existing SS05 NVIDIA/NVDA example is reused; its NASDAQ/USD data is not silently copied into the new unavailable-metadata case. A selected result remains visually distinct from the preview's deliberate Open action. The44px search input and Close target and48px Open target fit the390px phone composition. No new Tools tab, tool-search retry, account action or global-search service is inferred from this company-only source.
+
+The builder reference shows the incumbent helper's example result, `/analysis?symbol=NVDA&company_query=NVIDIA`. It does not introduce a new return route or persistence store. The return scenario is expressly conditional: invalid/mismatched history cannot reopen search, query edits clear the preview, cancellation clears the marker, and a no-longer-eligible result is not promised. Arbitrary filters, result ordering, scroll and focus restoration are not fabricated.
+
+### Visual and preservation proof
+
+Root inspected both complete phone captures and the complete900×1546 gallery. The two phone captures are **byte-identical**, and all **17 corresponding text elements match**, establishing static before/return identity parity. This is deliberate design parity; it is not an executed browser Back test.
+
+The gallery sits at x2030/y−2658. Its native screenshot ends at y−1112, leaving254px above the next existing row at y−858. Offscreen native tree reads report unknown computed gallery height; the rendered dimensions come from the actual native JPEG, while native node information establishes the canvas position and child identities.
+
+Exact readback of the untouched source boards preserved **118 text leaves**:50 on SS05 `1VT-0`,13 on the phone template `2FM-0`, and55 on the integration map `2WG-0`. All8 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only `3OH-0`, `3JH-0` and `3NF-0`.
+
+- `paper-f01-company-phone-and-guide-copies-20261109-c4-sd`
+- `paper-f01-company-phone-navigation-20261109-c4-sd`
+- `paper-f01-company-phone-content-20261109-c4-sd`
+- `paper-f01-company-return-phone-copy-20261109-c4-sd`
+- `paper-f01-company-gallery-content-20261109-c4-sd`
+- `paper-f01-company-gallery-place-phones-20261109-c4-sd`
+- `paper-f01-company-gallery-names-20261109-c4-sd`
+- `paper-f01-company-finish-20261109-c4-sd`
+
+Browser navigation, eligibility changes, request counts, metadata races, keyboard/input, focus and release acceptance remain obligations of the incumbent implementation. This successor changes no application code or release disposition.
+
+### Prepared Research and Reading — preserve coherent references
+
+The bounded read-only audit of file `01M6Y2Z642VN20X8WDSWV07M0M` found its Reference comparison → evidence → return journey internally consistent: Atlas8.4% versus theme5.8% remains a2.6-percentage-point difference, with five-session period,25Sep date, fictional fixture, basket limitations and preserved return context. Its synthetic NVDA setup keeps listing identity, intraday horizon, inspection and watchlist choice distinct. The existing PARTIAL/reference status was preserved; no exact current implementation-owner binding was established in that bounded lookup, and no new state or owner was invented.
+
 ## Active continuation
 
-The successor covers fifteen design files, including the populated Stage phone and browser-retention save recovery. Preserve accepted work and existing holds. The next supported phase is a proposed F01 phone company-search companion: exact listing, partial metadata with Open Analysis still available, and browser-Back restoration under the incumbent history owner. Held F01 candidate/readme effects and the later Today proposal remain untouched.
+The successor covers sixteen design files. The populated Stage phone, browser-retention watchlist recovery and proposed exact-company phone return companion are verified and saved. Preserve accepted work, live writers and existing holds. Bounded read-only audits are checking remaining Expectation Surface and Risk Radar journeys for a concrete source-supported gap beyond prior accepted work; continue only with a justified amendment.
 
 
 ## Acceptance boundary
