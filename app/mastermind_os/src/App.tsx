@@ -1,3 +1,4 @@
+import {NativePrimaryAccountControl} from "./NativePrimaryAccountControl";
 import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
@@ -3664,8 +3665,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const partialNativeAuth = native && authState
     ? nativePartialAuthPresentation(authState, locale) : null;
   // Presentation reuses the incumbent explicit auth action and its guards.
-  const authenticationControl = authState ? (
-                <button
+  const authenticationButtonRef = useRef<HTMLButtonElement>(null);
+  const existingAuthenticationControl = authState ? (
+                <button ref={authenticationButtonRef}
                   disabled={authState.status === "unconfigured"}
                   onClick={() => {
                     const auth = window.MastermindMissionHost?.auth;
@@ -3707,6 +3709,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                       : copy.signIn}
                 </button>
   ) : null;
+  const authenticationControl = authState && native && !authState.acquisition && !authState.content ? (
+    <NativePrimaryAccountControl host={window.MastermindMissionHost} state={authState} locale={locale}
+      pendingControl={existingAuthenticationControl} pendingControlRef={authenticationButtonRef}
+      beforeSignIn={() => nativeGoalRef.current.onAuthChange(false)} />
+  ) : existingAuthenticationControl;
   const todayNeedsAuthentication = !!authState && !authState.acquisition &&
     ["signed_out", "error", "signing_in", "unconfigured"].includes(authState.status);
   const todayAuthenticationCue = todayNeedsAuthentication ? <section className="card" aria-label={locale === "zh-CN" ? "工作区登录" : "Workspace sign-in"}>

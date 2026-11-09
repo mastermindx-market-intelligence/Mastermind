@@ -18,6 +18,8 @@ export interface ArchiveProjectsViewProps {
   mode: "projects" | "archived";
   status: "unread" | "loading" | "ready" | "unavailable";
   projects: readonly ArchiveProjectCard[];
+  /** Separate current catalogue outcome. Archive permission is not catalogue authority. */
+  currentProjectsState?: "pending" | "ready" | "unavailable";
   archived: readonly ArchivedProject[];
   coverage: { checked: number; supplied: number; companyTotal: null } | null;
   inspectedWorkRef: string | null;
@@ -35,6 +37,9 @@ export interface ArchiveProjectsViewProps {
 // projection. No row, count or company total is invented in this view.
 const COPY_ZH: Record<string, string> = {
   "Projects": "项目",
+  "Reading projects…": "正在读取项目…",
+  "Projects are unavailable right now. The current project list could not be confirmed.": "项目暂不可用；当前项目列表尚未确认。",
+  "No projects were supplied by the current read.": "当前读取未提供项目。",
   "Archived": "已归档",
   "Find a project": "查找项目",
   "No supplied projects match this search.": "没有已提供的项目匹配此搜索。",
@@ -175,7 +180,7 @@ function Inspector({ found, workRef, t, onBack, headingRef }: {
 }
 
 function ArchiveProjectsScoped({
-  locale, mode, status, projects, archived, coverage, inspectedWorkRef,
+  locale, mode, status, projects, currentProjectsState, archived, coverage, inspectedWorkRef,
   canRead, onRead, onChangeMode, onInspectArchive, onOpenProject, newProjectControl,
 }: ArchiveProjectsViewProps) {
   const zh = locale === "zh-CN";
@@ -219,7 +224,11 @@ function ArchiveProjectsScoped({
   const inspected = inspectedWorkRef === null
     ? null
     : archived.find(row => row.work_ref === inspectedWorkRef) ?? null;
-  const statusLine = !canRead
+  const projectsReady = currentProjectsState === undefined ? canRead : currentProjectsState === "ready";
+  const statusLine = mode === "projects" && currentProjectsState !== undefined
+    ? currentProjectsState === "pending" ? t("Reading projects…")
+      : currentProjectsState === "unavailable" ? t("Projects are unavailable right now. The current project list could not be confirmed.") : null
+    : !canRead
     ? t("Open archive records in an authorized current project context.")
     : status === "unread" ? t("Archive evidence has not been read yet.")
     : status === "loading" ? t("Reading archive evidence…")
@@ -241,16 +250,17 @@ function ArchiveProjectsScoped({
           </button>
         </div>
       </header>}
-    {mode === "projects" && <p className="archive-note">
+    {mode === "projects" && (currentProjectsState === undefined || projectsReady) && <p className="archive-note">
       {t("Archive status comes only from checked source records. It does not indicate whether work is running.")}
     </p>}
     {statusLine && <p className="archive-status" role="status">{statusLine}</p>}
     {mode === "projects" ? <>
-      {canRead && <div className="archive-search"><label htmlFor={projectSearchId}>{t("Find a project")}</label>
+      {projectsReady && <div className="archive-search"><label htmlFor={projectSearchId}>{t("Find a project")}</label>
         <input id={projectSearchId} type="search" value={projectQuery} placeholder={t("Find a project")} onChange={event => setProjectQuery(event.target.value)} /></div>}
-      {!canRead ? null
+      {!projectsReady ? null
         : projects.length === 0
-          ? <p className="archive-empty">{t("No project records are shown in this view.")}</p>
+          ? <p className="archive-empty">{t(currentProjectsState === "ready"
+            ? "No projects were supplied by the current read." : "No project records are shown in this view.")}</p>
           : visibleProjects.length === 0 ? <p className="archive-empty">{t("No supplied projects match this search.")}</p>
           : <ul className="archive-list">
             {visibleProjects.map(card =>

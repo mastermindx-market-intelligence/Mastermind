@@ -32,7 +32,7 @@ it.each(['en','zh-CN'] as const)('distinguishes actual closed native expiry, unf
  ] as const){
   await f.publish({status,reason,acquisition:false,content:false});
   expect(screen.getByRole('alert').textContent).toBe(locale==='en'?en:zh);
-  expect(screen.getByRole('button',{name:locale==='en'?'Sign in':'登录'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:locale==='en'?'Sign in to account':'登录账户'})).toBeTruthy();
   expect(f.view.container.textContent).not.toContain(locale==='en'?'Continue in your browser, then return here.':'在浏览器中继续，完成后返回此处。');
   expect(f.view.container.textContent).not.toContain('Work authorization was not granted');
   expect(f.client.getState()).toEqual({status,reason,acquisition:false,content:false});
@@ -48,6 +48,6 @@ it('keeps the original active-flow control and does not expose browser-continuat
  const f=await mount('en');await f.publish({status:'signing_in',reason:null,acquisition:false,content:false});
  expect(screen.getByRole('button',{name:'Cancel sign in'})).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
  await f.publish({status:'signed_out',reason:null,acquisition:false,content:false});
- expect(screen.getByRole('button',{name:'Sign in'})).toBeTruthy();expect(f.view.container.textContent).not.toContain('Continue in your browser, then return here.');
+ expect(screen.getByRole('button',{name:'Sign in to account'})).toBeTruthy();expect(f.view.container.textContent).not.toContain('Continue in your browser, then return here.');
  expect(f.invoke.mock.calls.some(([c])=>['sign_in','sign_out','continue_authorization'].includes(c))).toBe(false);
 });

@@ -280,3 +280,18 @@ it("uses a visual reason preview while preserving the full exact reason in the i
   expect(document.querySelector(".archive-facts dd:last-child")?.textContent).toBe(reason);
   expect(document.querySelector(".archive-reason-preview")).toBeNull();
 });
+
+it.each(["en","zh-CN"] as const)("distinguishes current catalogue pending/unavailable from qualified empty independently of archive permission: %s",locale=>{
+ const messages={pending:locale==="en"?"Reading projects…":"正在读取项目…",unavailable:locale==="en"?"Projects are unavailable right now. The current project list could not be confirmed.":"项目暂不可用；当前项目列表尚未确认。",ready:locale==="en"?"No projects were supplied by the current read.":"当前读取未提供项目。"};
+ for(const state of ["pending","unavailable","ready"] as const){
+  const read=vi.fn();const v=render(<ArchiveProjectsView {...props({locale,currentProjectsState:state,projects:[],canRead:false,onRead:read})}/>);
+  expect(screen.getByText(messages[state])).toBeTruthy();
+  if(state!=="ready")expect(screen.queryByText(messages.ready)).toBeNull();
+  expect(document.body.textContent).not.toMatch(/0 projects|公司.*0/);expect(read).not.toHaveBeenCalled();v.unmount();
+ }
+});
+it("shows a qualified current row without granting an archive read",()=>{
+ const read=vi.fn(),open=vi.fn();render(<ArchiveProjectsView {...props({currentProjectsState:"ready",canRead:false,onRead:read,onOpenProject:open})}/>);
+ expect(screen.getByText("Live program")).toBeTruthy();expect((screen.getByRole("button",{name:"Refresh archived projects"}) as HTMLButtonElement).disabled).toBe(true);
+ fireEvent.click(screen.getByRole("button",{name:"Open project Live program"}));expect(open).toHaveBeenCalledWith("WS:LIVE-1");expect(read).not.toHaveBeenCalled();
+});
