@@ -1310,6 +1310,46 @@ class A4ReauditN1ClassifierTests(unittest.TestCase):
                 self.assertIsNone(parse(value))
 
 
+class ReCheckR1LivePortNoRowTests(unittest.IsolatedAsyncioTestCase):
+    """Re-audit #3 R1 through the REAL T3McpToolPort (re-check M1): a
+    pre-durability recovery (store has NO row for the run) under another
+    OAuth client makes ZERO mutating calls and is refused typed; under the
+    original client it adopts the ORIGINAL thread by a read (no replay)."""
+
+    async def _launched_under_a(self):
+        server = DonorMcpServer()
+        adapter_a, _ = _donor_adapter(server, state_store=InMemoryT3AdapterStateStore())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter_a.start(spec)
+        self.assertEqual(server.mints(), 1)
+        return server, spec, ref, _recovery_binding(spec, ref)
+
+    async def test_other_oauth_client_is_refused_with_zero_mutating_calls(self) -> None:
+        server, spec, ref, binding = await self._launched_under_a()
+        before = len(_mutating_calls(server))
+        other, _ = _donor_adapter(server, _SID_B, state_store=InMemoryT3AdapterStateStore())
+        with self.assertRaises(_t3m.T3NamespaceAttestationError) as ctx:
+            await other.reattach(spec, binding)
+        self.assertEqual(ctx.exception.reason, "PRINCIPAL_MISMATCH")
+        self.assertEqual(len(_mutating_calls(server)), before)  # nothing sent
+        self.assertEqual([c[0] for c in server.calls].count(_SID_B), 0)
+        self.assertEqual(server.mints(), 1)
+
+    async def test_original_client_adopts_by_read_without_a_replay(self) -> None:
+        server, spec, ref, binding = await self._launched_under_a()
+        before = len(_mutating_calls(server))
+        again, _ = _donor_adapter(server, state_store=InMemoryT3AdapterStateStore())
+        adopted = await again.reattach(spec, binding)
+        self.assertEqual(adopted.provider_session_id, ref.provider_session_id)
+        self.assertEqual(adopted, ref)
+        self.assertEqual(len(_mutating_calls(server)), before)  # READ, not replay
+        self.assertEqual(server.mints(), 1)
+        # Durable: the adopted receipt is persisted; a second reattach is free.
+        self.assertIsNotNone(again.launch_receipt(spec.run_id))
+        self.assertEqual(await again.reattach(spec, binding), ref)
+        self.assertEqual(len(_mutating_calls(server)), before)
+
+
 class A4ReauditLivePortTests(unittest.IsolatedAsyncioTestCase):
     async def test_n1_is_error_after_commit_keeps_intent_and_replay_adopts_original(self) -> None:
         """Reviewer's double-launch: a post-commit isError must stay UNKNOWN."""

@@ -71,3 +71,19 @@ typed refusals; 3 regression tests incl. a principal-qualified fake upstream); R
 `environmentId` at construction and before send); R5 r2 receipt bytes pinned; R3 fixed earlier. R2/R6 recorded, not fixed.
 Live claim attaches to adapter `128e5e8be` + live-run harness; HEAD bytes are test-proven only. A short distinct re-check of
 the R1/R4 delta is requested before the row is called reviewed.
+
+## Distinct re-check of the R1/R4/R5 delta (`d2c9429e5`) — Opus READ_ONLY, 2026-11-10
+
+Verdict **ACCEPT_WITH_MINORS**: R1/R4/R5 FIXED_CONFIRMED; invariants 1/2/9 on the no-row path PROVEN_BY_PROBE (24/24 probe
+checks with the real `T3ExecutionAdapter` + `SQLiteT3AdapterStateStore` + `T3McpToolPort.from_access_token` over a shared
+upstream fake; 12 concurrent recoveries on separate empty stores → 1 upstream thread; Python derivation byte-equal to node
+`JSON.stringify` on 4 tricky vectors). `environmentId` confirmed the only forwarding knob in the donor. Residuals (not
+introduced by R1): a caller-forged `provider_session_id` or a port attested as A over a transport authenticated as B can
+still cause one replay-then-refusal — the existing store/claim locality gap and composition precondition (M2).
+Minors applied by the integrator in the same session: **M1** regression test through the REAL `T3McpToolPort` with two
+OAuth sessions (`ReCheckR1LivePortNoRowTests`); **M2** composition precondition recorded in the port docstring (build only
+with `from_access_token` over the same token the transport sends); **N1** no-row recovery under the proven principal now
+adopts the original thread by a READ (`_adopt_original_by_read`, zero mutating calls) when the port offers
+`read_launch_thread`, replay only as fallback; **N2** prover exceptions wrapped as `PRINCIPAL_UNPROVABLE`; protocol
+docstring lists the optional `expected_launch_thread_id`. Not covered: donor deleted-thread replay semantics; no live run of
+HEAD bytes (live claim attaches to adapter `128e5e8be`).

@@ -1809,7 +1809,10 @@ class T3NativeClientPort(Protocol):
 
     ``read_result(thread_id, run_id)`` (OPTIONAL): the dedicated terminal
     read ``collect_result`` uses; without it the adapter head-reads with an
-    empty cursor.  ``read_launch_thread(thread_id)`` (OPTIONAL, read-only):
+    empty cursor.  ``expected_launch_thread_id(client_request_id)`` (OPTIONAL):
+    the thread id THIS port's attested principal would own for a key — the
+    upstream derivation; without it a pre-durability (no-store-row) recovery
+    is refused as unprovable.  ``read_launch_thread(thread_id)`` (OPTIONAL, read-only):
     the deterministic-id lookup :meth:`T3ExecutionAdapter.adopt_stranded_launch`
     uses (re-audit N6); never a launch or replay.  Transport contract: raise :class:`T3UnknownOutcomeError`
     for every failure that may have happened after the request was sent.
@@ -2665,7 +2668,16 @@ class T3ExecutionAdapter:
                 "thread; nothing was sent (re-audit R1)",
                 reason="PRINCIPAL_UNPROVABLE",
             )
-        expected_thread = str(prover(key) or "")
+        try:
+            expected_thread = str(prover(key) or "")
+        except Exception as exc:  # a prover that cannot answer proves nothing
+            raise T3NamespaceAttestationError(
+                "refused: the port could not derive the thread id its principal "
+                f"({principal!r}) would own for the original key ({exc}); a "
+                "pre-durability replay cannot be proven to return the ORIGINAL "
+                "thread; nothing was sent (re-audit R1)",
+                reason="PRINCIPAL_UNPROVABLE",
+            ) from exc
         if expected_thread != original.provider_session_id:
             raise T3NamespaceAttestationError(
                 "refused: the current authenticated principal "
@@ -2676,8 +2688,77 @@ class T3ExecutionAdapter:
                 "(nothing was sent)",
                 reason="PRINCIPAL_MISMATCH",
             )
+        reader = getattr(self._port, "read_launch_thread", None)
+        if callable(reader):
+            # Hardening (re-check N1): the proof above already identifies the
+            # ORIGINAL thread under this principal, so adopt it by a READ —
+            # zero mutating calls — instead of asking upstream to replay.
+            return await self._adopt_original_by_read(
+                spec, original, key, reader, t3_request_namespace(principal)
+            )
         envelope = self._reconstruct_envelope(spec, key)
         return await self._replay_and_adopt(spec, envelope, original, None)
+
+    async def _adopt_original_by_read(
+        self,
+        spec: WorkerLaunchSpec,
+        original: WorkerProcessRef,
+        key: str,
+        reader: Any,
+        request_namespace: str,
+    ) -> WorkerProcessRef:
+        """Adopt the ORIGINAL thread (already proven to be this principal's by
+        the deterministic derivation) through the port's read-only seam."""
+        thread_id = str(original.provider_session_id)
+        try:
+            found = await reader(thread_id)
+        except T3PortRefusalError as exc:
+            raise T3LaunchEffectUnknownError(
+                f"the original thread {thread_id!r} could not be read "
+                f"({exc.code or exc}); absence proves nothing — nothing was launched",
+                client_request_id=key,
+            ) from exc
+        except T3UnknownOutcomeError as exc:
+            raise T3LaunchEffectUnknownError(
+                f"read of the original thread {thread_id!r} had an unknown outcome; "
+                "nothing was launched",
+                client_request_id=key,
+            ) from exc
+        except Exception as exc:
+            raise T3ExecutionAdapterError(
+                f"read of the original thread {thread_id!r} failed: {exc}"
+            ) from exc
+        if (
+            not isinstance(found, T3ThreadLaunchReceipt)
+            or found.thread_id != thread_id
+            or not found.run_id
+        ):
+            raise T3LaunchEffectUnknownError(
+                f"the read did not identify the original thread {thread_id!r} "
+                "and its run; nothing was launched",
+                client_request_id=key,
+            )
+        receipt = dataclasses.replace(
+            found, created_at="", request_namespace=request_namespace,
+            client_request_id=key,
+        )
+        ref = self._neutral_process_ref(spec, receipt, key)
+        if ref != original:
+            raise T3ExecutionAdapterError(
+                "the adopted execution does not reproduce the recovery binding's "
+                "original identity; refusing to adopt a replacement"
+            )
+        try:
+            self._state.put_launch_receipt(
+                spec.run_id, receipt=receipt, original_ref=ref, spec=spec,
+            )
+        except Exception as exc:
+            raise T3LaunchEffectUnknownError(
+                f"original thread {thread_id!r} was adopted by read but its receipt "
+                f"could not be persisted: {exc}",
+                client_request_id=key,
+            ) from exc
+        return ref
 
     async def adopt_stranded_launch(
         self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
@@ -3370,6 +3451,10 @@ class T3McpToolPort:
       client is not authenticated as; receipt echo fields are set ONLY when
       the upstream ``threadId`` proves ``(namespace, key)``
       (:func:`t3_expected_launch_thread_id`), never copied from the request;
+      COMPOSITION PRECONDITION (re-check M2): build this port ONLY with
+      :meth:`from_access_token` over the SAME token the transport sends —
+      the attested namespace and the transport's session must be one
+      identity, or the no-row-replay proof is about the wrong principal;
       ``created_at`` is never a local clock (replays reproduce the ref);
     * transport failures are classified (audit #4, re-audit N1): only
       pre-send failures and the explicit donor-derived pre-dispatch
