@@ -6,7 +6,7 @@ This is the successor to merged [PR #2302](https://github.com/mastermindx-market
 
 Fresh native Paper inventory contains 82 resources. The migration directory says 42 smaller editable files hold 940 original artboards, with original URLs retained as navigation and draft/reference/archive status unchanged. This session independently read the dedicated destination identities; it does not recertify the migration's full fidelity or promote reference designs to build acceptance. Original navigation, recovery copies, archives and previous effect/hold boundaries remain untouched.
 
-Paper carrier: Mastermind Paper. Observed catalog: paper-desktop 0.5.18, hash `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb`; tool-scoped bounded writes accepted. Schema-held create_artboard/update_styles/token tools were not used. Root is the only canvas writer. Bounded native children supplied read-only design judgment.
+Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter for new actions after the documented read-only transport failure. Observed catalog: paper-desktop 0.5.18, hash `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb`; tool-scoped bounded writes accepted. Schema-held create_artboard/update_styles/token tools were not used. Root is the only canvas writer. Bounded native children supplied read-only design judgment.
 
 ## Verified mobile meaning corrections
 
@@ -297,9 +297,108 @@ This is a bounded continuation of the root-created copies, not a takeover of the
 
 Durable predecessor for this decision: [verified Forex and prior-phase record at8bab3126](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8bab3126fa8dd48998ce68163cc8dc48e3c7d9cd/research/paper_migrated_journeys_2026-11-08/AUDIT_AND_DELIVERY.md). Native target: [Breadth file/page](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0).
 
+## Verified Breadth selected-session continuation — 2026-11-09
+
+The bounded target decision above was completed in the current [Breadth file/page](https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0). Original Summary `XZ-0`, its improved chart `10M-0`, Summary body `1QZ-0`, and the original desktop/mobile overview fixtures were preserved. Previously observed extremes/drivers effects were not replayed.
+
+### Constituents and Receipts now have distinct, complete purposes
+
+| Destination | Native board and key nodes | Verified result |
+| --- | --- | --- |
+| Constituents | `17W-0`, body `2GJ-0`, header `2O1-0`, members `2O5-0`, coverage `2OO-0`, returns `2OT-0` | The preserved selected Constituents tab now leads to advancing examples GE/JPM/CAT and declining examples XOM/PFE/KO. All six names came from the existing fixture. The panel explicitly says individual contributions and source IDs are not supplied. It retains 2,172 priced and 99.2% identity-resolved context, with full membership dependent on a verified selected-session source. Back to Summary and View receipts are 44px actions. |
+| Receipts | `1HC-0`, new body `2OZ-0`, tabs `2P0-0`, coverage `2PC-0`, bindings `2PS-0`, method `2Q6-0`, returns `2Q9-0` | The old compressed Summary content was replaced with receipt-specific coverage and bindings: 2,172 priced, 99.2% identity resolved, 96.7% seasoned, zero unmatched split seams; roster/daily bars/split observations BOUND and aggregate artifact EOD. These remain explicitly illustrative fixture states. The panel says source links are unavailable and provides Back to Summary and Constituents actions. |
+| Shared selected-session context | Constituents left root `2QF-0`, plot `2QY-0`; Receipts left root `2S5-0`, plot `2SO-0` | Reused the existing improved Summary chart in both owned copies, preserving the Sep 24 fixture, selected values 108.7/106.2, 1,327/741 advance/decline, 121/52 new highs/lows and start=100 normalization. Native JSX was converted into equivalent static HTML/SVG; source `10M-0` was not changed. |
+| Meaning and labels | `2QK-0` and `2SA-0`; surrounding context labels `1FD-0`/`1OT-0`, `1FF-0`/`1OV-0` | Removed the undefined 71/100 score from the two owned copies. Descriptive “Broadening · illustrative” remains. The copies now say SESSION EVIDENCE and ILLUSTRATIVE FIXTURE, with selection-based explanatory copy. No numeric return, forecast, temporal lead or predictive authority was introduced. |
+
+The Constituents and Receipts headers, selected date and Close controls were retained. The source Summary still belongs to the preserved reference; this phase does not claim to have corrected every occurrence elsewhere. Sep 24 selected-session fixtures are not silently replaced by the Sep 29 overview fixture.
+
+### Accessible interaction states and source contract
+
+Two new native 1440×960 boards sit to the right of the inspector copies with 80px horizontal gaps:
+
+| Board | Position and key nodes | Purpose |
+| --- | --- | --- |
+| `2TV-0` — 04A · R1 BUILD · Accessible selected-session evidence | x1795, y−684; body `2ZE-0`; failed-read specimen `2ZP-0`; chart-data specimen `30N-0`; selection contract `31C-0` | Two native 390px specimens plus the common selection, keyboard, clock and reader-binding requirements. |
+| `32X-0` — 04B · R1 BUILD · Source outcomes, routes & acceptance | x3315, y−684; body `36A-0`; outcomes matrix `31U-0`; route/proof reference `32N-0` | Five distinct owner-reported source outcomes, named existing destinations and the implementation acceptance boundary. |
+
+The failed-read specimen keeps Sep 24 selected, labels original source time, membership vintage and receipt coverage unavailable, and offers Close and Return to Summary. It is specifically a failed evidence read, not confirmed absence, a denied read, or a valid empty result. No retry action is invented before an exact-session reader and retry contract are established.
+
+The chart-data specimen exposes the existing selected row: Sep 24, 2026, A/D index108.7 and NYSE Composite index106.2. Both displayed series are explicitly normalized to start100. A visible-focus Inspect Sep 24 session action is48px; Back to chart is44px. Builder notes require Enter/Space to match chart click/tap and require every available plotted session in the implemented table. This single-row specimen does not imply additional historical rows or implemented keyboard behavior.
+
+The selection contract carries session/calendar, universe/cohort revision, chart period, price basis and supplied source/version/knowledge cutoff through the existing page state. It requires explicit user selection for a different date/version, restores the original trigger on Close and preserves the selected date on Return to Summary. Selected session, original source time, known time and display time remain distinct. It introduces no selection store, history service, poller, watch or retry layer.
+
+The outcome matrix distinguishes:
+- evidence read failed;
+- owner-confirmed exact-session evidence not retained;
+- current access does not permit disclosure;
+- an owner-reported correction or newer version;
+- a successful read with genuinely empty permitted content.
+
+Those are conditional presentation requirements for the incumbent reader, not claims that the inspected projection implements these responses. Restricted fields remain governed by the existing access owner; no new blanket licensing gate is created.
+
+### Exact source grounding
+
+Root re-read the following files at Macro #10212 head `4e072e56654bca4af9dc80af003a4a8578828cb5`:
+
+| Source | Blob | Relevant finding |
+| --- | --- | --- |
+| [Paper design brief](https://github.com/mastermindx-market-intelligence/macro/blob/4e072e56654bca4af9dc80af003a4a8578828cb5/research/breadth_intelligence/PAPER_DESIGN_BRIEF.md) | `74af63d6421561306f06beb0a3ebc6620abac5e0` | No unexplained composite score, no hover-only data, visible focus and keyboard table equivalence; named chart bases and source/display clocks; static design proof remains separate from runtime acceptance. |
+| [Master plan](https://github.com/mastermindx-market-intelligence/macro/blob/4e072e56654bca4af9dc80af003a4a8578828cb5/research/breadth_intelligence/MASTER_PLAN.md) | `bfcd3ffb23ea7975261dec8ecc645ce73842e236` | Distinguishes source time, known time, membership revisions and evidence modes. Original observed history requires retained first-observation evidence. Reuse incumbent producers and read owners; no duplicate store or pipeline. |
+| [Projection implementation](https://github.com/mastermindx-market-intelligence/macro/blob/4e072e56654bca4af9dc80af003a4a8578828cb5/engine/breadth_intelligence_projection.py) | `a327c256b461496f5128d5210c65b2a552405433` | Stateless display-only projection over one caller-supplied source-clock snapshot. It preserves null/unmeasured reasons but does not implement this selected-session receipt reader, retained history, keyboard interaction or evidence retry. Caller metadata validation does not independently prove observation custody. |
+
+The fresh PR read was open, not merged, not draft, with merge-on-green and merge-blocked labels. Its body reported release of its bounded source-only hold; that does not resolve the separate Paper, integration, historical/PIT, scientific or browser acceptance boundaries. This phase does not alter that PR or its holds.
+
+### Visual proof, repair and effect reconciliation
+
+Root inspected the complete native Constituents and Receipts boards at1440×960, both400×680 evidence panels, the390px failure specimen, and both complete final1440×960 builder boards. Final tree readback shows the interaction body is1440×907 within its960px frame, and the reader-contract body is1440×922 within its960px frame. All sections and footer references are visible without clipping.
+
+Two concrete issues were corrected during native QA:
+
+1. An initially empty flex container was represented by Paper as Rectangle `2ZK-0`. Attempting insert-children returned EFFECT_UNKNOWN with “Rectangle cannot have children.” Exact node readback showed childCount0 and no children; exact parent readback showed only the original header and empty Rectangle. The error receipt is preserved historically. These reads established no specimen effect at the target before a new, materially different same-carrier replace operation created Frame `2ZM-0` with the specimen. No blind retry or carrier swap occurred.
+2. The first combined builder body was1664px tall inside the inherited960px artboard. The oversized body was not accepted. A second owned native duplicate was made, its copied body was replaced with a compact header, and the existing source-outcome matrix and route/proof nodes were moved into it. Both final bodies fit their frames. Schema-held update_styles/create_artboard were not used.
+
+Explicit finish released only `17W-0`, `1HC-0`, `2TV-0` and `32X-0`. All33 successful phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct. The one failed Rectangle insertion is reconciled above and is not counted as an applied design change.
+
+Operation receipts:
+
+- `paper-breadth-constituents-header-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-advancing-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-declining-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-coverage-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-return-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-body-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-header-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-coverage-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-bindings-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-method-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-return-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-chart-context-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-constituents-chart-plot-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-chart-context-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-receipts-chart-plot-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-copy-context-labels-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-view-names-continuation-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-copy-undefined-score-removal-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-contract-board-copy-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-contract-board-header-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-unavailable-specimen-20261109-c4-sd` — EFFECT_UNKNOWN → exact-target readback confirmed no effect before the distinct replacement.
+- `paper-breadth-evidence-row-frame-repair-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-chart-data-keyboard-specimen-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-selection-source-contract-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-recovery-state-matrix-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-route-proof-reference-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-chart-data-user-copy-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-contract-names-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-reader-contract-board-copy-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-reader-contract-board-header-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-contract-split-to-fit-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-contract-route-map-update-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-contract-board-split-names-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+- `paper-breadth-evidence-continuation-finish-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
+
 ## Active continuation
 
-Portfolio mobile, Bonds source recovery, Government Revenue320px returns, Forex review/account gallery and current My watches desktop/mobile integration are verified. Continue exact-target Breadth reconciliation and the bounded completion of its root-created unfinished constituents/receipts views only where current effects/custody permit. Preserve the improved Summary, external header/tab changes, source limits and original fixtures. No Breadth completion is yet claimed.
+Portfolio mobile, Bonds source recovery, Government Revenue320px returns, Forex review/account gallery and current My watches desktop/mobile integration, and the bounded Breadth selected-session continuation are verified as static designs. Preserve their accepted work. Save/read back this phase, prepare the single owned successor report PR, then continue a fresh, disjoint Paper audit where current source and writer custody permit. Exact-session runtime readers, authenticated account behavior, keyboard/focus operation and production acceptance are not discharged by these screenshots.
 
 ## Acceptance boundary
 
