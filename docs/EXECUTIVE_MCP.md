@@ -421,6 +421,106 @@ file placed under a production tree is refused as well.
   mechanism (**Secure MCP Tunnel**). **Do not expose the gateway to the public
   Internet as a workaround**, and do not add TCP/HTTP to
   `ExecutiveControlService`.
+- **Amendment (Chairman decision, incident #1656, 2026-10-21).** The Chairman
+  decided to publish an authenticated public MCP entrypoint on
+  `https://mcp.mastermind-x.com/mcp`, superseding the blanket prohibition above for
+  that one endpoint. It is not a workaround for the tunnel: the owner-rendered
+  Caddy block (`ops/executive_os/os_public_edge.caddy.template`) exposes exactly
+  GET `/.well-known/oauth-protected-resource/mcp` and POST `/mcp`, the gateway
+  remains the only authenticator (Caddy performs none), Caddy caps request bodies
+  at 64000 bytes (below the gateway's own 65536-byte ceiling), and every other
+  path on the host still aborts. `ExecutiveControlService` still gains no
+  TCP/HTTP.
+  **Installing the Caddy routes is not neutral.** Without the gateway key below
+  the gateway's token verifier accepts a token minted for any configured resource
+  (the OS audience and every tunnel audience) at `/mcp`, and the primary
+  challenge/metadata still name a tunnel URL. So the moment the routes are live,
+  an Internet client holding a token for any of those audiences could reach
+  `/mcp`, and a compliant client could not discover this host. The gateway
+  therefore carries an opt-in **sealed installed-config key,
+  `public_mcp_resource`**, and the routes must not be installed until the
+  installed gateway runs with it.
+  - **Value and profile.** The only accepted value is exactly
+    `https://mcp.mastermind-x.com/mcp`, and only on the plain `web_ceo_v3`
+    profile; it is refused together with `coo` or `principal_ruling_target`,
+    with any other profile, or when the value duplicates a primary or additional
+    (OS/tunnel) resource. `gateway_refresh_preflight` runs the same validation, so
+    a bad value is refused before any service-control effect.
+  - **What it does.** `/mcp` accepts that single audience only: the primary
+    connector, the OS Executive and every tunnel audience are refused there with
+    a 401 whose challenge carries
+    `resource_metadata="https://mcp.mastermind-x.com/.well-known/oauth-protected-resource/mcp"`
+    and names no other resource, and
+    `GET /.well-known/oauth-protected-resource/mcp` returns metadata for
+    `https://mcp.mastermind-x.com/mcp` alone. The public policy is derived from the
+    primary pair, differs from it only by resource and metadata URL, and reuses its
+    policy ids and audit sinks (no new audit directory). The reconcile route is not
+    mounted in this mode.
+  - **Confinement.** The OS Executive transport authenticates with its own
+    exact-resource pair, so a public-audience token is refused on
+    `/os/executive/*` (the OS resource may not be set to the public resource). The
+    Workspace and content apps are built with fixed-resource policies of their own,
+    and the OS static app serves anonymous public assets and accepts no bearer at
+    all; none of them receives the public Executive pair. Only the
+    `web_ceo_v3` builder opts in; every other builder, including the COO
+    compositions, refuses a configured public policy.
+  - **Exclusive per process.** Public mode replaces the multi-audience `/mcp`
+    behaviour for that gateway process; it is not additive. Keeping the OpenAI
+    tunnel entrypoint reachable at the same time needs a second gateway instance
+    with its own sealed config. With the key absent nothing changes.
+  - **Still outside the source.** (c) a distinct, separately registered Auth0 API
+    audience for `https://mcp.mastermind-x.com/mcp` (a human step in the tenant),
+    and the sealed M2 installed-config change that adds the key, are prerequisites
+    for the VPS apply. Neither is performed by a source change.
+  - **Owned component update (`plan-mcp-component` / `apply-mcp-component` /
+    `reconcile-mcp-component`).** Changing the sealed gateway config and plist
+    (a new release sha, optionally `--set-public-mcp-resource`) is performed by
+    `ops/executive_os/mcp_component_update.py`, dispatched only by the
+    `service-control.sh` of the TARGET release under root. It replaces the
+    historical 2026-09-27 `mcp-component-*` receipts, whose code was not in the
+    repository. `plan` is read-only and prints a digest; `apply` requires that
+    digest (`--plan-sha256`) and refuses on any drift. Each effect (stage, stop,
+    replace, start) is persisted as a transaction marker before it is dispatched,
+    stop and start are never replayed, and recovery is observation-driven through
+    `reconcile`. A launchd `disabled` override on the gateway label is honored
+    as an operator kill switch only where it can be told apart from the tool's
+    own `disable`: `apply` refuses (`GATEWAY_DISABLED`) and a gateway disabled
+    between staging and the stop discards the staged images with no effect. After
+    the tool's own stop the flag is its own, so an operator `disable` made before
+    the `start` (or before the compensating `enable` completes) is undone by the
+    `start`/`enable` the tool already owes. Once the compensating `enable` has
+    completed and is recorded, the tool never enables again: a label found
+    disabled then is EFFECT_UNKNOWN `GATEWAY_DISABLED_AFTER_RECOVERY` and needs
+    the operator to `enable` it (and `bootstrap` it if it was also booted out),
+    then `reconcile`; the tool cannot close a transaction while leaving the label
+    disabled. A candidate is verified only when the readback
+    join, the loopback probes **and** a launchd process-identity proof pass, and
+    the proof brackets the probes: the running gateway must have the after-image
+    argv, program, working directory and service user and keep one stable pid
+    for three consecutive polls before the probes; after the probes the same pid
+    must be observed running with that identity on every poll of a hold window
+    that outlasts launchd's 10 s `ThrottleInterval`, the probes are repeated, and
+    a final observation must match again. A new release that dies, is respawned
+    or changes identity within that window, and a before-image process, are
+    EFFECT_UNKNOWN `PROCESS_IDENTITY_NOT_PROVEN:<reasons>`, never a COMPLETE
+    receipt. The proof does **not** tie the listener pid to the port (a foreign
+    process holding the port while the new release stays alive but unbound is not
+    detected) and does not cover a failure later than the hold window. There is
+    **no automatic rollback after replacement**: a
+    failed candidate is restored by a human-approved copy of the preserved
+    before-images (`mcp-update-<plan12>.config.before` and `.plist.before` in
+    `installation-receipts/`) followed by `launchctl enable` and `bootstrap`;
+    the tool has no restore verb. A recorded start dispatch that leaves the
+    label absent is reported as EFFECT_UNKNOWN `START_NOT_PROVEN` and needs the
+    same human `launchctl enable` + `bootstrap`; it is never retried. An
+    ineffective stop (the old gateway is still serving) is closed as
+    `ABORTED_UNCHANGED` after one compensating `enable` and prior-release probes;
+    the preserved and staged images are removed and `reconcile` can re-enter that
+    cleanup if the root process dies part-way. Receipt names carry the
+    transaction start stamp, so re-applying the same plan after an abort writes
+    a distinct receipt. The tool exists only inside releases built after it
+    merges, and running it against the installed gateway is a separate
+    Chairman-approved effect.
 - EXEC-MCP-A does not modify `allowed_peer_uids` or the production
   service-principal topology. A dedicated least-privilege principal for the
   tunnel-facing process is a **separate reviewed architecture decision** for the

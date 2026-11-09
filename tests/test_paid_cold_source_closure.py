@@ -76,8 +76,8 @@ def test_private_wrapper_actual_broker_host_filter_and_ledger_data(staged,tmp_pa
     (policy/'accounts.yaml').write_text('providers:\n  glm:\n    enabled: true\n    accounts:\n      - name: ready\n        per_account_cap: 2\n')
     (policy/'pools.yaml').write_text('routing:\n  cost_usd_per_mtok_estimates:\n    glm: 0.25\n')
     validator=(staged/'glm_keys.py').read_bytes();(owner/'glm_keys.py').write_bytes(validator)
-    (owner/'hosts.json').write_text(json.dumps({'h':dict(roles=['lanes'],allowed_modes=['glm'],qualification_only_modes=[],ssh_alias='route')}))
-    (owner/'state/hosts/h.json').write_text(json.dumps(dict(host='h',reachable=True,ts=1000,glm_local_account_readiness=dict(schema='mastermind.glm_local_account_readiness.v1',host='h',transport_alias='route',mode='glm',config_scope='launcher_glm_config.v1',status='known',validator_sha256=hashlib.sha256(validator).hexdigest(),observed_at=1000,accounts={'ready':True}))))
+    (owner/'hosts.json').write_text(json.dumps({'ubuntu0':dict(roles=['lanes'],allowed_modes=['glm'],qualification_only_modes=[],ssh_alias='mmx-ubuntu0')}))
+    (owner/'state/hosts/ubuntu0.json').write_text(json.dumps(dict(host='ubuntu0',reachable=True,ts=1000,glm_local_account_readiness=dict(schema='mastermind.glm_local_account_readiness.v1',host='ubuntu0',transport_alias='mmx-ubuntu0',mode='glm',config_scope='launcher_glm_config.v1',status='known',validator_sha256=hashlib.sha256(validator).hexdigest(),observed_at=1000,accounts={'ready':True}))))
     code='''
 import socket
 socket.create_connection=lambda *a,**k:(_ for _ in ()).throw(AssertionError('network forbidden'))
@@ -89,11 +89,41 @@ b=state.configure('lease_broker')
 import quota_remote
 quota_remote.read_provider=lambda *a,**k:(_ for _ in ()).throw(AssertionError('refresh forbidden'))
 br=b.Broker(db_path=str(state.OWNER/'broker/test.sqlite'),lock_path=str(state.OWNER/'broker/test.lock'),accounts_path=os.environ['POOL_ACCOUNTS_YAML'],now_fn=lambda:1000,check_pid=False,external_gates=False,this_host='fixture',status_json=os.environ['POOL_STATUS_JSON'],hosts_path=str(state.OWNER/'hosts.json'))
-r,_,_=br._try_acquire('inert-root','glm','ready','remote-glm','h',os.getpid(),60,None,model='glm-5.3-flash')
+# Explicit Root-publication/installed-context premise only. This cold test
+# checks real source closure/filter/broker/ledger; the separate real four-file
+# constructor and pre-import graph tests qualify that external owner boundary.
+from contextlib import contextmanager
+import hashlib,json
+import paid_host_readiness as readiness
+registry=state.OWNER/'hosts.json';validator=state.OWNER/'glm_keys.py'
+binding=dict(schema_version=readiness.CONTEXT_SCHEMA,host='ubuntu0',
+ transport_alias='mmx-ubuntu0',worker_id='glm-paid-01',account='ready',model='glm-5.3-flash',
+ boot_id='12345678-1234-1234-1234-123456789abc',source_config_sha256='a'*64,
+ release_manifest_sha256='b'*64,registry_sha256=hashlib.sha256(registry.read_bytes()).hexdigest(),
+ initializer_commitment_sha256='c'*64,validator_sha256=hashlib.sha256(validator.read_bytes()).hexdigest(),
+ readiness_source_sha256=hashlib.sha256((stage/'paid_host_readiness.py').read_bytes()).hexdigest())
+def current_source():
+ if (hashlib.sha256(registry.read_bytes()).hexdigest()!=binding['registry_sha256']
+     or hashlib.sha256(validator.read_bytes()).hexdigest()!=binding['validator_sha256']):readiness._refuse()
+context=readiness.InstalledReadinessContext(readiness._SEAL,binding=binding,
+ commitment={'account':{'uid':1000,'gid':1000}},sources={},root=stage,checks=[current_source])
+@contextmanager
+def installed():
+ context.check();yield context;context.check()
+readiness.open_installed_context=installed
+r,_,_=br._try_acquire('inert-root','glm','ready','remote-glm','ubuntu0',os.getpid(),60,None,model='glm-5.3-flash')
+assert not r.ok and r.reason=='host_account_unavailable'
+observation=dict(schema=readiness.SCHEMA,host='ubuntu0',transport_alias='mmx-ubuntu0',
+ mode='glm',config_scope=readiness.SCOPE,validator_sha256=binding['validator_sha256'],
+ observed_at=1000,status='known',accounts={'ready':True},context=binding,
+ config_identity=[1,2,0o100600,1000,1000,1,57,100,100])
+(state.OWNER/'state/hosts/ubuntu0.json').write_bytes(readiness.canonical(dict(host='ubuntu0',
+ ts=1000,reachable=True,boot_id=binding['boot_id'],glm_local_account_readiness=observation)))
+r,_,_=br._try_acquire('inert-root','glm','ready','remote-glm','ubuntu0',os.getpid(),60,None,model='glm-5.3-flash')
 assert r.ok,r.reason
 # Exact existing telemetry predicate, no caller filter stub or capacity fallback.
 (state.OWNER/'glm_keys.py').write_bytes(b'changed')
-try:br._try_acquire('another','glm','ready','remote-glm','h',os.getpid(),60,None,model='glm-5.3-flash')
+try:br._try_acquire('another','glm','ready','remote-glm','ubuntu0',os.getpid(),60,None,model='glm-5.3-flash')
 except ValueError:pass
 else:raise AssertionError('changed original validator accepted')
 ledger=state.configure('pool_ledger')
@@ -112,13 +142,13 @@ def test_default_remote_support_uses_only_verified_physical_owner(staged,tmp_pat
         for name in ('support_bundle','paid_model_owner'):sys.modules.pop(name,None)
         import support_bundle as support
         import paid_model_owner as owner
-        assert owner._PAID_SUPPORT_FILES==support.PAID_MODEL_SOURCE_FILES
+        assert owner._PAID_SUPPORT_FILES==support.PAID_INITIALIZED_SOURCE_FILES
         assert owner._SUPPORT_EXT_LINKS==support._EXT_SYMLINKS
         lanes=(tmp_path/'lanes').resolve();stable=lanes/'ext';stable.mkdir(parents=True)
         (lanes/'support-releases').mkdir();(stable/'active').mkdir();(stable/'lanes').mkdir()
         sources=tmp_path/'sources';sources.mkdir()
         manifest={}
-        for name in support.PAID_MODEL_SOURCE_FILES:
+        for name in support.PAID_INITIALIZED_SOURCE_FILES:
             raw=(b'fixture: policy\n' if name=='pools.yaml' else (staged/name).read_bytes());(sources/name).write_bytes(raw);manifest[name]=hashlib.sha256(raw).hexdigest()
         # Only policy publication qualification is fixture DATA; alias/file
         # validation and the actual support publisher/remote helper are real.

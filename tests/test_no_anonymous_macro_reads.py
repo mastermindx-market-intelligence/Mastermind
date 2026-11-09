@@ -36,6 +36,8 @@ the whole point is that this shape is structural, not textual.
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from pathlib import Path
 
 import yaml
@@ -103,7 +105,125 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "This constant is not a clone, fetch, or anonymous read; mismatches "
         "must fail closed."
     ),
+    ("app/mastermind_os/src/fixtures/project-journey-source-issued-388205.json",
+     "https://github.com/mastermindx-market-intelligence/macro"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged signed source-issued CREATE/PLAN "
+        "fixture: four proposal URL DATA values ending /pull/401 or /pull/402; "
+        "JSON only, consumed by inert NativeClient tests, no clone/fetch/read."
+    ),
+    ("app/mastermind_os/src/fixtures/project-plan-proposal-source-issued-4fa354.json",
+     "https://github.com/mastermindx-market-intelligence/macro"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- whole22 source-issued S24 fixture: four "
+        "original proposal URL DATA values /pull/401 and /pull/402, retained in "
+        "public responses/Events, never a clone/fetch/read. Exact frozen fixture "
+        "and closed proposal-url locations are checked below."
+    ),
+    ("app/mastermind_os/src/fixtures/plan-adoption-installed-journey.json",
+     "https://github.com/mastermindx-market-intelligence/macro"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged signed installed ADOPT fixture: "
+        "two original proposal URL DATA values /pull/401 and /pull/402; JSON only, "
+        "consumed by inert App tests, no anonymous acquisition."
+    ),
+    ("app/mastermind_os/src/fixtures/knowledge-memory-source.json",
+     "https://github.com/mastermindx-market-intelligence/macro"): (
+        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged source-issued Memory fixture "
+        "contains one proposal URL DATA value /pull/403, never an acquisition; "
+        "the actual App uses its qualified source operation, not this URL for reads."
+    ),
 }
+
+# PR #2055: fixed pull-request URL DATA and closed URL validators, not remote
+# acquisition. Each exception binds one entire reviewed source line in one file.
+# A fetch/clone/raw-content call added even in the same file is still rejected.
+_INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
+    # Immutable public fixture provenance DATA, not source acquisition. Exact
+    # path + entire line only; every fetch/clone/other URL still reaches the fence.
+    'tests/fixtures/memory_native_v3_9fb08/PROVENANCE.json': frozenset((
+        '"original_held_pr": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",',
+    )),
+    'tests/fixtures/memory_native_v3_9fb08/SOURCE_MANIFEST.json': frozenset((
+        '"carrier": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",',
+    )),
+    # Exact published compiler provenance, asserted as local archive metadata.
+    # Neither line performs a request; other acquisition text stays guarded.
+    'tests/fixtures/discovery-correction-source.json': frozenset((
+        '"pull_request": "https://github.com/mastermindx-market-intelligence/macro/pull/10831",',
+    )),
+    'tests/discovery_correction_test_support.py': frozenset((
+        "assert fixture['pull_request']=='https://github.com/mastermindx-market-intelligence/macro/pull/10831'",
+    )),
+    # Actual temporary-Git correction owner fixture; this is an inert PR URL
+    # returned by the declared fixture API, never a remote acquisition command.
+    'app/mastermind_os/src/fixtures/discovery-correction-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-signed-canonical-journey.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-first-use-signed-journey.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'app/mastermind_os/src/fixtures/knowledge-write-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation-contract-cases.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation.test.ts': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/" +',
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/12/files",',
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/13",',
+    )),
+    'app/mastermind_os/src/knowledge/library/project-source-operation.ts': frozenset((
+        "'https://github.com/mastermindx-market-intelligence/macro/pull/';",
+    )),
+    'app/mastermind_os/src/planning/plan-adoption-status.ts': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/";',
+    )),
+    'app/mastermind_os/src/planning/plan-adoption-status.test.ts': frozenset((
+        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417",',
+        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/418",',
+        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417/",',
+    )),
+    'app/mastermind_os/src/fixtures/project-draft-files-source-issued.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'app/mastermind_os/src/fixtures/native-wire/source-file-6cb8.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
+    )),
+    'common/workspace_source_operation_contract.py': frozenset((
+        '_PR_URL_PREFIX = "https://github.com/mastermindx-market-intelligence/macro/pull/"',
+    )),
+    'tests/test_installed_source_git_identity.py': frozenset((
+        "item={'number':12,'html_url':'https://github.com/mastermindx-market-intelligence/macro/pull/12',",
+    )),
+    'tests/test_knowledge_publisher_events.py': frozenset((
+        'PR = {"number": 11, "url": "https://github.com/mastermindx-market-intelligence/macro/pull/11",',
+    )),
+    'tests/test_workspace_source_operation_contract.py': frozenset((
+        '"https://github.com/mastermindx-market-intelligence/macro/pull/"',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/07"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/7/files"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/8"))',
+        'url="https://github.com/mastermindx-market-intelligence/macro/pull/8",',
+    )),
+    'tests/test_workspace_source_operations.py': frozenset((
+        'PR = {"number": 7, "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7",',
+    )),
+}
+
+def _is_inert_pr_link_data(relative: str, shape: str, line: str) -> bool:
+    return (shape == "bare_clone_url"
+            and "/macro/pull/" in line
+            and line.strip() in _INERT_PR_LINK_DATA_LINES.get(relative, ()))
 
 _ALLOWED_EXTS = {".py", ".sh", ".js", ".ts", ".yml", ".yaml", ".json", ".toml"}
 # Top-level directories excluded from the walk per the commission's scope, plus
@@ -128,6 +248,11 @@ def _is_excluded(path: Path) -> bool:
     if "worktrees" in parts:          # other sessions' nested checkouts, not our content
         return True
     if parts and parts[0] in _EXCLUDED_TOP_DIRS:
+        return True
+    # Vite's canonical, gitignored output duplicates the source literals above.
+    # This is a source-origin guard, not production-bundle acceptance. Keep
+    # adjacent/custom dist-like paths and every authored source path in scope.
+    if parts[:3] == ("app", "mastermind_os", "dist"):
         return True
     if path.suffix.lower() == ".md":
         return True
@@ -174,6 +299,10 @@ def violations() -> dict[str, list[tuple[str, str]]]:
                 matched = m.group(0)
                 if (rel, matched) in _ALLOWLIST:
                     continue
+                end = text.find("\n", m.end())
+                line = text[text.rfind("\n", 0, m.start()) + 1:end if end != -1 else len(text)]
+                if _is_inert_pr_link_data(rel, shape, line):
+                    continue
                 found.setdefault(rel, []).append((shape, matched))
     return found
 
@@ -205,10 +334,10 @@ def test_allowlist_entry_is_visible_and_still_matches():
     The fourth is an opt-in Studio publisher's fixed remote identity, not a
     clone/fetch. Each exception remains keyed by exact file and matched text so none silently
     covers drift in another file."""
-    assert len(_ALLOWLIST) == 4, (
-        f"expected exactly four allowlist entries (production _REMOTE, its direct "
-        f"test constant, the workspace-origin fixture, and Studio publisher "
-        f"remote identity), found "
+    assert len(_ALLOWLIST) == 8, (
+        f"expected exactly eight allowlist entries (production _REMOTE, its direct "
+        f"test constant, the workspace-origin fixture, Studio publisher, and four inert "
+        f"source-issued proposal fixtures), found "
         f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():
         path = _ROOT / rel
@@ -483,3 +612,73 @@ def test_ci_yml_macro_checkout_step_is_authenticated():
         f"expected the || github.token fallback form exactly, got {token!r} -- a "
         f"bare secrets.MACRO_CI_READ_TOKEN with no fallback breaks CI immediately "
         f"while the secret does not exist")
+
+
+def test_inert_pr_link_lines_are_exact_live_data_not_file_exemptions():
+    for relative, expected in _INERT_PR_LINK_DATA_LINES.items():
+        actual = {line.strip() for line in (_ROOT / relative).read_text().splitlines()}
+        assert expected and expected <= actual
+        for line in expected:
+            assert _BANNED_PATTERNS["bare_clone_url"].search(line)
+            assert _is_inert_pr_link_data(relative, "bare_clone_url", line)
+            assert not _is_inert_pr_link_data(relative + ".foreign", "bare_clone_url", line)
+            assert not _is_inert_pr_link_data(relative, "bare_clone_url", line + " # drift")
+
+
+def test_same_pr_data_path_still_refuses_anonymous_fetch_and_raw_content():
+    acquisition = (
+        "fetch('https://github.com/mastermindx-market-intelligence/macro')",
+        "git clone https://github.com/mastermindx-market-intelligence/macro.git",
+        "fetch('https://raw.githubusercontent.com/mastermindx-market-intelligence/macro/main/secret.json')",
+        "fetch('https://api.github.com/repos/mastermindx-market-intelligence/macro/contents/README.md')",
+    )
+    for relative in _INERT_PR_LINK_DATA_LINES:
+        for line in acquisition:
+            hits = [shape for shape, pattern in _BANNED_PATTERNS.items() if pattern.search(line)]
+            assert hits
+            assert all(not _is_inert_pr_link_data(relative, shape, line) for shape in hits)
+
+
+@pytest.mark.parametrize("relative, excluded", [
+    ("app/mastermind_os/dist/assets/generated.js", True),
+    ("app/mastermind_os/src/project-source-operation.ts", False),
+    ("app/mastermind_os/src/dist/authored.ts", False),
+    ("app/mastermind_os/dist-custom/authored.js", False),
+    ("app/mastermind_os/.dist/authored.js", False),
+    ("app/other/dist/authored.js", False),
+    ("custom/app/mastermind_os/dist/authored.js", False),
+    ("dist/authored.js", False),
+])
+def test_only_canonical_vite_generated_output_is_outside_source_scan(relative, excluded):
+    assert _is_excluded(_ROOT / relative) is excluded
+
+
+def test_s24_proposal_urls_are_exact_frozen_public_data_not_acquisition():
+    rel = "app/mastermind_os/src/fixtures/project-plan-proposal-source-issued-4fa354.json"
+    raw = (_ROOT / rel).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == "7ddf2b019c7abd04a0f28d2b5f0849080d228ed0924efede56cf322cdcfab845"
+    fixture = json.loads(raw)
+    url = "https://github.com/mastermindx-market-intelligence/macro"
+    found = []
+
+    def visit(value, path=()):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, (*path, key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, (*path, index))
+        elif isinstance(value, str) and url in value:
+            found.append((path, value))
+
+    visit(fixture)
+    assert found == [
+        (("samples", 5, "response", "receipt", "proposal", "url"), url + "/pull/401"),
+        (("samples", 16, "response", "receipt", "proposal", "url"), url + "/pull/402"),
+        (("source_events", 8, "payload", "proposal", "url"), url + "/pull/401"),
+        (("source_events", 12, "payload", "proposal", "url"), url + "/pull/402"),
+    ]
+    assert (rel, url) in _ALLOWLIST
+    # The exact exception never masks a new executable/foreign-path acquisition.
+    assert ("unreviewed/" + rel, url) not in _ALLOWLIST
+    assert "bare_clone_url" in find_anonymous_macro_reads("git clone " + url)

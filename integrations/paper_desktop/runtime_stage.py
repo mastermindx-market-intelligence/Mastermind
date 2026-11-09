@@ -67,6 +67,44 @@ REVIEWED_GENERATIONS = {
     "v14": {
         "bridge.py": "d950c09a076c87f6c555b59ff59ac563bbcc3a1760eec1a0b7b261ee59fd8e29",
     },
+    "v15": {
+        "bridge.py": "2873a2b45900a982e0e6975f43a58973128568c6c186b17eab239bf188c58661",
+    },
+    "v16": {
+        "bridge.py": "0828e0623029d136440277919a4392f637bb98c73e826ab7d06d917e3221b029",
+    },
+    "v17": {
+        "bridge.py": "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
+    },
+    # Security-qualified v18: preserve all immutable earlier generation pins.
+    # The v17 candidate must not be selected after its reviewed contract bugs.
+    "v18": {
+        "bridge.py": "48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5",
+    },
+    # Post-edit verifier must also qualify its snapshot getter; no retry.
+    "v19": {
+        "bridge.py": "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
+    },
+    # v20 closes the implicit second-read TOCTOU review finding.
+    # v19 receipts remain immutable historical proof and are not selected.
+    "v20": {
+        "bridge.py": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+    },
+    # P00 candidate: requalify the requested call after the guard getter.
+    # Source review/release and same-owner activation remain separate gates.
+    "v21": {
+        "bridge.py": "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
+    },
+    # Readiness diagnostics retain the v21 getter-first, per-tool guards.
+    # This additive source pin is not runtime staging or activation authority.
+    "v22": {
+        "bridge.py": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+    },
+    # Protected update_styles descriptor compatibility; v22 remains immutable.
+    # Registration alone does not stage, select or activate a Paper runtime.
+    "v23": {
+        "bridge.py": "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523",
+    },
 }
 
 

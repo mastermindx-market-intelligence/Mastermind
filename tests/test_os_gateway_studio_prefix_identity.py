@@ -155,11 +155,23 @@ class PrefixGuardTests(unittest.TestCase):
         self.assertFalse(self.walk._traversal_only(('prefix','protected')))
         self.churn(self.protected)
         with self.assertRaises(reader.StudioObservationError):self.walk.recheck_all()
-    def test_other_seven_directory_fields_stay_exact(self):
+    def test_other_five_directory_fields_stay_exact(self):
         pre=self.prefix_stat
         for field in reader._DIRECTORY_CUSTODY_FIELDS:
             post=SimpleNamespace(**{k:getattr(pre,k)+(1 if k==field else 0) for k in reader._IDENTITY_FIELDS})
             with self.subTest(field=field),self.assertRaises(reader.StudioObservationError):reader._require_directory_custody(pre,post)
+    def test_namespace_change_during_registration_still_refuses_full_identity(self):
+        p=self.root/'new';fd=self.walk.adopt(os.open(p,reader._DIR_FLAGS));pre=os.fstat(fd)
+        self.queue.register=lambda changes:(p/'unrelated').write_bytes(b'OWNED')
+        with self.assertRaises(reader.StudioObservationError):
+            self.walk._prefix_guard.watch(('new',),fd,pre)
+        self.assertNotIn(('new',),self.walk._prefix_guard._held)
+    def test_strict_role_promotion_keeps_original_namespace_baseline(self):
+        old=self.walk._records[('prefix',)][0]
+        (self.prefix/'unrelated-directory').mkdir(mode=0o700)
+        self.walk._strict_directories.add(('prefix',))
+        with self.assertRaises(reader.StudioObservationError):self.walk.recheck_all()
+        self.assertEqual(self.walk._records[('prefix',)][0],old)
     def test_acl_uses_fresh_actual_full_identity_after_prefix_churn(self):
         self.churn(self.prefix);seen=[]
         def acl(name,*,descriptor,expected_identity):
@@ -189,8 +201,23 @@ class NativePrefixTests(unittest.TestCase):
         self.guard.close();os.close(self.fd);self.temp.cleanup()
     def test_actual_sibling_write_is_not_hazard(self):
         p=self.path/'unrelated';p.write_bytes(b'OWNED');p.unlink();self.guard.check()
+    def test_actual_sibling_file_entry_is_not_custody(self):
+        before=os.fstat(self.fd)
+        (self.path/'unrelated-file').write_bytes(b'OWNED')
+        after=os.fstat(self.fd)
+        self.assertNotEqual((before.st_nlink,before.st_size),(after.st_nlink,after.st_size))
+        self.guard.check()
+    def test_actual_sibling_directory_entry_is_not_custody(self):
+        before=os.fstat(self.fd)
+        (self.path/'unrelated-directory').mkdir(mode=0o700)
+        after=os.fstat(self.fd)
+        self.assertNotEqual((before.st_nlink,before.st_size),(after.st_nlink,after.st_size))
+        self.guard.check()
     def test_actual_rename_restore_is_hazard(self):
         moved=self.root/'moved';self.path.rename(moved);moved.rename(self.path)
+        with self.assertRaises(reader.StudioObservationError):self.guard.check()
+    def test_actual_directory_delete_is_hazard(self):
+        self.path.rmdir()
         with self.assertRaises(reader.StudioObservationError):self.guard.check()
     def test_actual_same_mode_chmod_is_hazard(self):
         self.path.chmod(0o700)
@@ -238,6 +265,12 @@ class NativeObservationTests(acl_fixture.HomeAclReaderTestCase):
     def test_native_closed_tool_traversal_fd_still_observes_benign_write(self):
         result=self.observe_native(lambda:self.churn(self.fx.tools/'backend'))
         self.assertTrue(result.backend_sha256)
+    def test_native_closed_tool_prefix_allows_unrelated_file_entry(self):
+        result=self.observe_native(lambda:(self.fx.tools/'backend'/'unrelated-file').write_bytes(b'INERT'))
+        self.assertTrue(result.backend_sha256)
+    def test_native_home_prefix_allows_unrelated_directory_entry(self):
+        result=self.observe_native(lambda:(self.fx.home/'unrelated-directory').mkdir(mode=0o700))
+        self.assertTrue(result.manifest_bytes)
     def test_native_closed_tool_traversal_fd_still_rejects_rename_restore(self):
         path=self.fx.tools/'backend';moved=self.fx.tools/'moved-backend'
         def rename():path.rename(moved);moved.rename(path)
@@ -248,13 +281,28 @@ class NativeObservationTests(acl_fixture.HomeAclReaderTestCase):
         subprocess.run(['/bin/chmod','+a','everyone deny delete',str(path)],check=True,capture_output=True)
         result=self.observe_native(lambda:self.churn(path))
         self.assertTrue(result.plist_bytes)
-    def test_native_non_timestamp_prefix_change_stays_strict(self):
+    def test_native_prefix_custody_change_stays_strict(self):
         def change():
             before=self.fx.home.stat()
-            (self.fx.home/'persistent-owned-entry').write_bytes(b'INERT')
+            self.fx.home.chmod(0o750 if before.st_mode&0o777 != 0o750 else 0o700)
             after=self.fx.home.stat()
             self.assertTrue(any(getattr(before,k)!=getattr(after,k)
                                 for k in reader._DIRECTORY_CUSTODY_FIELDS))
+        with self.assertRaises(reader.StudioObservationError):self.observe_native(change)
+    def test_native_launchagents_unrelated_file_entry_stays_strict(self):
+        with self.assertRaises(reader.StudioObservationError):
+            self.observe_native(lambda:(self.fx.home/'Library'/'LaunchAgents'/'unrelated-file').write_bytes(b'INERT'))
+    def test_native_publication_unrelated_directory_entry_stays_strict(self):
+        with self.assertRaises(reader.StudioObservationError):
+            self.observe_native(lambda:(self.fx.base/'unrelated-directory').mkdir(mode=0o700))
+    def test_native_dependency_unrelated_directory_entry_stays_strict(self):
+        with self.assertRaises(reader.StudioObservationError):
+            self.observe_native(lambda:(self.fx.node_modules/'unrelated-directory').mkdir(mode=0o700))
+    def test_native_late_even_permitted_acl_change_still_refuses(self):
+        import subprocess
+        def change():
+            subprocess.run(['/bin/chmod','+a','everyone deny delete',str(self.fx.home)],
+                           check=True,capture_output=True)
         with self.assertRaises(reader.StudioObservationError):self.observe_native(change)
     def test_native_launchagents_namespace_stays_strict(self):
         with self.assertRaises(reader.StudioObservationError):

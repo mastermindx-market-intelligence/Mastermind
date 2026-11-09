@@ -5,7 +5,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { createFabricFacade } from '../fabric-backend.mjs';
 const names = ['fabric_capabilities', 'fabric_request', 'fabric_status', 'fabric_wait',
-  'fabric_result', 'fabric_accept', 'fabric_controller_output'];
+  'fabric_result', 'fabric_accept', 'fabric_controller_output',
+  // Optional synthetic catalog only; no real result or provider access.
+  ...(process.env.FIXTURE_PAGED === 'true' ? ['fabric_result_page'] : [])];
 let effects = 0;
 let resultCalls = 0;
 const finished = value => {
@@ -33,7 +35,8 @@ const facade = createFabricFacade({ async callTool(request) {
 } });
 const server = new Server({ name: 'disposable-fabric-fixture', version: '0.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools:
-  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : [])]
+  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : []),
+    ...(process.env.FIXTURE_ORIGINAL_COLLISION === 'true' ? ['fabric_collect_original'] : [])]
     .map(name => ({ name, inputSchema: { type: 'object' } })) }));
 server.setRequestHandler(CallToolRequestSchema, async request => {
   const name = request.params.name;

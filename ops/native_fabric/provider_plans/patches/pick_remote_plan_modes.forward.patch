@@ -1,0 +1,13 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -2122,6 +2122,10 @@
+         excluded |= {name for name, entry in registry.items()
+                      if not isinstance(entry, dict) or entry.get("platform") not in required_platforms}
+     for pool, adapters in _HOST_POOL_MODES.items():
++        # Local plan candidates have their own AUTO/physical/consent owner.
++        # They are not modes of the incumbent remote placement RoutePlan.
++        if pool in {"byteplus", "experiential"}:
++            continue
+         # Chairman placement instruction: Grok workers run only on the four
+         # Ubuntu hosts. This restricts selection; all ordinary host gates remain.
+         pool_excluded = excluded | (set(registry) - {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}

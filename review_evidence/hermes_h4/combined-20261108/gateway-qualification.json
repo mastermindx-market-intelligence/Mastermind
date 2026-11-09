@@ -1,0 +1,72 @@
+{
+  "candidate": "workspace-sha256:b4cc80d15269ad084f37f4c998b380b62978cea5a0887435cdb1ef471f56ab12",
+  "command": [
+    "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+    "-I",
+    "-B",
+    "-c",
+    "import sys,runpy;sys.path.append('/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages');runpy.run_path('/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/adapter/integrations/hermes_application_fabric/qualification/qualify_gateway.py',run_name='__main__')",
+    "--adapter-root",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/adapter",
+    "--owner-root",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/owner",
+    "--hermes-root",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/hermes-clean",
+    "--hermes-fixture",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/hermes-combined",
+    "--candidate",
+    "workspace-sha256:b4cc80d15269ad084f37f4c998b380b62978cea5a0887435cdb1ef471f56ab12",
+    "--manifest",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/source-manifest.json"
+  ],
+  "installed": false,
+  "live_acceptance": false,
+  "log": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/gateway-qualification.log",
+  "log_sha256": "5cb800d49e24bc779ca4a2fa2e0c565847707351e1aa699444664ec0128b2995",
+  "manifest_sha256": "ff4c023d6de325329f04e485b19ff839a8f399f927f73a8152527acbc20f1bc5",
+  "native_fixture_unchanged_after": true,
+  "native_head": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "observed_at": "2026-11-08T01:52:34.057762+00:00",
+  "owner_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+  "python": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+  "records": [
+    {
+      "candidate": "workspace-sha256:b4cc80d15269ad084f37f4c998b380b62978cea5a0887435cdb1ef471f56ab12",
+      "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "jsonschema": "4.26.0",
+      "live_provider_acceptance": false,
+      "mode": "pinned-native-host-patch-loopback-fixture",
+      "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+      "owner_source_verified": true,
+      "owner_verification_scope": "client_and_factory_bytes",
+      "python": "3.14.9",
+      "pyyaml": "6.0.3"
+    },
+    {
+      "blocked_external_connections": 0,
+      "errors": 0,
+      "failures": 0,
+      "live_provider_acceptance": false,
+      "sdk_constructions": [],
+      "skips": 0,
+      "tests_run": 115
+    }
+  ],
+  "returncode": 0,
+  "schema": "mastermind.hermes_h4_combined_gateway_qualification.v1",
+  "seconds": 21.02,
+  "security_fixture_commit": "9a4a24041ec8a121c3cb9e03e5e4c1185774999e",
+  "source_commit": "e830c1c85675ab9bfe977fefae0bde6e710363a5",
+  "source_unchanged_after": true,
+  "tracked_and_untracked_overlay": {
+    "agent/agent_init_fallback.py": "d711241adccb370b64a70e440b16175aa33e3f5bb9425ff2d377efe73ef14668",
+    "agent/chat_completion_helpers.py": "dc6a16b6e34f7397f7b42e7fdc6ba9d542d8f488b43ee91a58b903e1f341ac8c",
+    "tests/test_fallback_family_first.py": "5d93dac235f2b9ce7f6e7759f3955d6b4ec4f77beb9e62652d58e37c2109e456",
+    "tests/tui_gateway/test_kanban_resume_guard.py": "e25a4ea47ade78982a4fb0a9c0f4e962a83170b4bfea838538b3c6bbf8c799cc",
+    "tests/tui_gateway/test_omit_messages_resume_bounded_ack.py": "210e8a1088066c30961b3db454ad724303e3aa00c3552b0bb67000093e63859d",
+    "tests/tui_gateway/test_protocol.py": "4aa138c12cc41be298059be8e8a9b77471dce9f443c5108c464c8d8096106e03",
+    "tests/tui_gateway/test_tui_gateway_server.py": "77f67dd2c7b0fba928fcecd00daa1366822849ffa67a3acb75a4fb494c2ff535",
+    "tui_gateway/methods_session.py": "69b00256bd55956c53fb6ab86ab3af9be0fc637cc4f52b34a66143d86247e0a9"
+  },
+  "yaml_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages"
+}

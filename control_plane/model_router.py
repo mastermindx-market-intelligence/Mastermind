@@ -641,12 +641,17 @@ class ModelRouter:
         capability_policy_path: str | Path | None = None,
     ) -> "ModelRouter":
         source = Path(path or DEFAULT_POLICY_PATH).expanduser().resolve(strict=True)
+        # Keep the incumbent policy validator, but never compose a torn or
+        # ambiguous live configuration read. There is no last-good fallback:
+        # a missing/changed configuration must not revive removed eligibility.
+        from control_plane.model_router_configuration import (
+            ConfigurationError, read_configuration_source,
+        )
         try:
-            raw = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RoutingPolicyError(
-                f"routing policy is unreadable: {type(exc).__name__}"
-            ) from exc
+            observed_source = read_configuration_source(source)
+            raw = observed_source.document
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
         if not isinstance(raw, dict):
             raise RoutingPolicyError("routing policy root must be an object")
         if raw.get("schema_version") != ROUTER_SCHEMA_VERSION:
@@ -792,7 +797,11 @@ class ModelRouter:
                     required_capabilities=capabilities,
                 )
             routes[task_kind] = normalized
-        return cls(
+        try:
+            observed_source.require_current()
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
+        router = cls(
             policy_version=policy_version,
             providers=providers,
             model_aliases=model_aliases,
@@ -800,6 +809,18 @@ class ModelRouter:
             capability_registry=capability_registry,
             source_path=source,
         )
+        router._configuration_source_sha256 = observed_source.source_sha256
+        return router
+
+    def configuration_snapshot(self) -> dict[str, Any]:
+        """Describe this exact loaded policy, not current live pool capacity.
+
+        Revision includes the capability owner digest. Existing Jobs/Attempts
+        retain their original bindings; observing a revision grants no reload,
+        account rotation, admission or new execution authority.
+        """
+        from control_plane.model_router_configuration import describe_configuration
+        return describe_configuration(self)
 
     def resolve_model_alias(self, model_alias: str) -> ModelAlias:
         alias = _bounded_id(model_alias, field="model_alias")
@@ -1030,6 +1051,97 @@ class ModelRouter:
             excluded_worker_ids=request.excluded_worker_ids,
             reason_codes=tuple(reasons),
         )
+
+    def explain_route(
+        self,
+        request: WorkRequest,
+        *,
+        considered_aliases: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Explain source eligibility, never observed price or live placement.
+
+        Reuse the authoritative pure route decision. An alias, model name or
+        admission cost class is not measured economics, qualification, current
+        capacity, a worker selection, or authority to execute. Unknown requested
+        aliases are reported rather than enrolled or silently discarded.
+        """
+        if (
+            not isinstance(considered_aliases, Sequence)
+            or isinstance(considered_aliases, (str, bytes))
+            or len(considered_aliases) > 32
+        ):
+            raise RoutingPolicyError("considered_aliases must be a sequence of at most 32 aliases")
+        considered: set[str] = set()
+        for alias in considered_aliases:
+            if not isinstance(alias, str):
+                raise RoutingPolicyError("considered alias must be a bounded identifier")
+            considered.add(_bounded_id(alias, field="considered_alias"))
+
+        decision = self.route(request)
+        positions = {
+            alias: (index, tier.tier_id)
+            for index, tier in enumerate(decision.suitability_tiers)
+            for alias in tier.model_aliases
+        }
+        required = set(decision.required_capabilities)
+        rows: list[dict[str, Any]] = []
+        for alias in sorted(set(self.model_aliases) | considered):
+            profile = self.model_aliases.get(alias)
+            position = positions.get(alias)
+            missing = sorted(required - set(profile.capabilities)) if profile else None
+            if profile is None:
+                disposition = "NOT_CONFIGURED"
+            elif decision.mode is RouteMode.FRONTIER_LEAD:
+                disposition = (
+                    "FRONTIER_JUDGMENT_ROUTE" if position is not None
+                    else "PRINCIPAL_JUDGMENT_REQUIRED"
+                )
+            elif not profile.worker_eligible:
+                disposition = "NOT_WORKER_ELIGIBLE"
+            elif missing:
+                disposition = "MISSING_REQUIRED_CAPABILITIES"
+            elif position is None:
+                disposition = "NOT_IN_TASK_ROUTE"
+            elif position[0] == 0:
+                disposition = "FIRST_LAWFUL_TIER"
+            else:
+                disposition = "LATER_SUITABILITY_TIER"
+            rows.append({
+                "model_alias": alias,
+                "configured": profile is not None,
+                "source_disposition": disposition,
+                "source_tier": position[1] if position else None,
+                "provider_alias": profile.provider_alias if profile else None,
+                "model": profile.model if profile else None,
+                "effort": profile.effort if profile else None,
+                "execution_profile_id": profile.execution_profile_id if profile else None,
+                "source_worker_eligible": profile.worker_eligible if profile else None,
+                "admission_cost_class": profile.cost_class if profile else None,
+                "missing_capabilities": missing,
+                "measured_cost": None,
+            })
+        return {
+            "schema": "mastermind.model_route_explanation/v1",
+            "authority": "NONE_SOURCE_PREVIEW_ONLY",
+            "source_policy_version": self.policy_version,
+            "decision": decision.to_dict(),
+            "aliases": rows,
+            "providers": [
+                {
+                    "provider_alias": alias,
+                    "enabled_in_source": provider.enabled,
+                    "autonomous_allowed_in_source": provider.autonomous_allowed,
+                    "live_readiness": "NOT_OBSERVED",
+                }
+                for alias, provider in sorted(self.providers.items())
+            ],
+            "runtime_observation": "NOT_PERFORMED",
+            "economic_comparison": "NOT_PERFORMED",
+            "selected_worker": None,
+            "live_admission": False,
+            "claim_time_revalidation_required": True,
+        }
+
 
 
 def route_work(

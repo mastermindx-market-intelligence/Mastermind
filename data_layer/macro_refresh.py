@@ -244,6 +244,36 @@ _ANCHOR_DEFS: tuple[_AnchorDef, ...] = (
 # Convenience tuple kept for callers that only need the paths (e.g. quick existence checks).
 _ANCHORS: tuple[str, ...] = tuple(a.rel for a in _ANCHOR_DEFS)
 
+
+def _read_news_build_date(d: dict) -> str | None:
+    # site/news/by_ticker.json → "asof" (the Macro build date the file was written on)
+    return d.get("asof") or d.get("as_of")
+
+
+def _read_news_source_date(d: dict) -> str | None:
+    # site/news/by_ticker.json → "source_asof" (when the news fetch behind the file ran; older
+    # than "asof" when the producer retained a previous build's feed). None when not stamped.
+    return d.get("source_asof")
+
+
+def _read_intelligence_date(d: dict) -> str | None:
+    # site/intelligence/by_ticker.json → "as_of" (engine.intelligence), else its generated_utc
+    return d.get("as_of") or d.get("asof") or d.get("generated_utc")
+
+
+# REPORT-ONLY anchors (news estate D2, 2026-10-31): the context-only news / intelligence
+# snapshots the bot and the news lens read.  They are surfaced in anchors_report() (so the runlog
+# shows how old the vendored news is), but they never enter asof()'s MIN, the freeze decision or
+# data_gaps — a stale context-only feed must not freeze or date the trading engine.
+_REPORT_ONLY_ANCHOR_DEFS: tuple[_AnchorDef, ...] = (
+    _AnchorDef(rel="site/news/by_ticker.json", reader=_read_news_build_date,
+               label="news_by_ticker"),
+    _AnchorDef(rel="site/news/by_ticker.json", reader=_read_news_source_date,
+               label="news_by_ticker_source"),
+    _AnchorDef(rel="site/intelligence/by_ticker.json", reader=_read_intelligence_date,
+               label="intelligence_by_ticker"),
+)
+
 # site/stockdata/ is untracked in the macro repo (R2 migration, 2026-07-01) so the git leg can
 # never produce it — only the R2 leg does.  We always check for it and report it in data_gaps so
 # an R2-sync failure surfaces loudly on every build.
@@ -478,7 +508,7 @@ def anchors_report() -> dict[str, str | None]:
     is stale or missing, rather than seeing only the minimum.
     """
     report: dict[str, str | None] = {}
-    for anchor in _ANCHOR_DEFS:
+    for anchor in _ANCHOR_DEFS + _REPORT_ONLY_ANCHOR_DEFS:
         p = _SRC / anchor.rel
         resolved: str | None = None
         try:

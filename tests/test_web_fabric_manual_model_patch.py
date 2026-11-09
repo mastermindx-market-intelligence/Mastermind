@@ -4,6 +4,7 @@ The older source-only historical patch in this PR is retained as provenance,
 not as a release recipe or current executable. No provider process is started.
 """
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import pytest
@@ -17,5 +18,11 @@ def test_web_fabric_manual_routing_integrated():
     run = subprocess.run(["node", "--test", "fabric-backend.test.mjs"], cwd=SOURCE,
                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=75)
     assert run.returncode == 0, run.stdout[-14000:]
-    # Node 20+ may emit either TAP ASCII or Unicode test summary prefixes.
-    assert ("pass 46" in run.stdout and "fail 0" in run.stdout), run.stdout[-2500:]
+    # Node 20+ may emit either TAP ASCII or Unicode summary prefixes.
+    # New Fabric tests may increase the total, but cannot remove the baseline
+    # contract or pass while any discovered Node case fails.
+    counts = {name: int(value) for name, value in re.findall(
+        r"(?m)^(?:#|\u2139)\s+(tests|pass|fail)\s+(\d+)\s*$", run.stdout
+    )}
+    assert counts.get("tests", 0) >= 46, run.stdout[-2500:]
+    assert counts.get("pass") == counts["tests"] and counts.get("fail") == 0, run.stdout[-2500:]

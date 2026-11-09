@@ -5,6 +5,7 @@ The controller owns the shared provider lease; remote_sub_exec owns the host.
 """
 from __future__ import annotations
 import json
+import hashlib
 import math
 import os
 import sys
@@ -89,7 +90,7 @@ def scope(key, mode, model, here, env, *, timing=None):
     # Diagnostic values never participate in admission or lease settlement.
     if timing is not None:
         timing["remote_scope_checked_at"] = now
-    if not 0 < deadline-issued <= 7200 or not -30 <= now-issued <= 30 or now >= deadline:
+    if not 0 < deadline-issued <= 14400 or not -30 <= now-issued <= 30 or now >= deadline:
         raise ValueError("native_remote_lease_window_invalid")
     return value
 
@@ -319,6 +320,315 @@ def preflight(mode, model, cwd, env):
             model,
             projection.url,
         )
+
+
+# APPLICATION purpose: closed transport validation and typed result. The worker
+# contracts above stay unchanged. Data validation is NOT authentication: only
+# the source-bound trusted owner may pin the profile.
+APPLICATION_SCHEMA = "mastermind.application.native-invocation.v1"
+APPLICATION_PROFILE_SCHEMA = "mastermind.application.native-profile.v1"
+APPLICATION_RESULT_SCHEMA = "mastermind.application.native-result.v1"
+APPLICATION_PREPARE_SCHEMA = "mastermind.application.native-prepare.v1"
+APPLICATION_PURPOSE = "APPLICATION"
+APPLICATION_RESULT_KIND = "native_cli_v1"
+APPLICATION_OWNER_MODULE = "application_native_owner.py"
+APPLICATION_TEXT_BYTES = 65536
+APPLICATION_OUTPUT_BYTES = 8 * 1024 * 1024
+APPLICATION_IDENTITY = ("principal_id", "caller_host", "workload", "turn_id",
+    "request_id", "dispatch_id", "lease_id", "pool", "account", "model", "host")
+APPLICATION_DIGEST = ("recipe_digest", "logical_payload_digest", "invocation_digest",
+    "source_generation", "support_digest", "profile_digest", "compiler_digest",
+    "policy_digest")
+APPLICATION_ENVELOPE = frozenset(("schema", "purpose") + APPLICATION_IDENTITY
+    + APPLICATION_DIGEST + ("issued_at", "expires_at", "remaining_seconds",
+    "user_text", "system_text", "max_output_bytes"))
+APPLICATION_RESULT_FIELDS = frozenset(("schema", "kind", "purpose", "status",
+    "started", "returncode") + APPLICATION_IDENTITY + APPLICATION_DIGEST
+    + ("process", "capture", "cleanup", "cleanup_proven", "output_complete",
+       "usage", "provider_settled"))
+APPLICATION_PROFILE_FIELDS = frozenset(("schema", "argv", "cwd", "env",
+    "system_text", "profile_digest", "compiler_digest", "policy_digest",
+    "max_output_bytes"))
+APPLICATION_STATUSES = frozenset(("completed", "failed", "incomplete",
+    "effect_unknown", "not_started"))
+_APPLICATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+_APPLICATION_SHA = re.compile(r"[0-9a-f]{64}\Z")
+_APPLICATION_ENV = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
+# The frozen invocation commitment never binds credential bytes.
+_APPLICATION_SECRET = re.compile(
+    r"API_KEY|_TOKEN|_SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY|SESSION")
+
+
+def application_payload_digest(user_text, system_text):
+    """Digest the exact logical payload: one user text, optional system text."""
+    body = json.dumps({"system_text": system_text, "user_text": user_text},
+                      sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def application_scope(envelope):
+    """Validate the closed APPLICATION invocation data contract.
+
+    Data validation, never authentication. An incompatible alphabet, an
+    unknown field or a changed payload is refused, not reformatted."""
+    if type(envelope) is not dict or set(envelope) != APPLICATION_ENVELOPE:
+        raise ValueError("application_envelope_shape_refused")
+    if (envelope["schema"] != APPLICATION_SCHEMA
+            or envelope["purpose"] != APPLICATION_PURPOSE):
+        raise ValueError("application_envelope_purpose_refused")
+    for name in APPLICATION_IDENTITY:
+        value = envelope[name]
+        if type(value) is not str or not _APPLICATION_ID.fullmatch(value):
+            raise ValueError("application_envelope_identity_refused")
+    for name in APPLICATION_DIGEST:
+        value = envelope[name]
+        if type(value) is not str or not _APPLICATION_SHA.fullmatch(value):
+            raise ValueError("application_envelope_digest_refused")
+    user_text, system_text = envelope["user_text"], envelope["system_text"]
+    if type(user_text) is not str or type(system_text) is not str:
+        raise ValueError("application_envelope_text_refused")
+    if (len(user_text.encode("utf-8")) > APPLICATION_TEXT_BYTES
+            or len(system_text.encode("utf-8")) > APPLICATION_TEXT_BYTES):
+        raise ValueError("application_envelope_text_refused")
+    if application_payload_digest(user_text, system_text) != envelope["logical_payload_digest"]:
+        raise ValueError("application_payload_digest_mismatch")
+    for name in ("issued_at", "expires_at"):
+        if type(envelope[name]) is not int or not 0 < envelope[name] < 2 ** 31:
+            raise ValueError("application_envelope_time_refused")
+    if envelope["expires_at"] <= envelope["issued_at"]:
+        raise ValueError("application_envelope_time_refused")
+    remaining = envelope["remaining_seconds"]
+    if type(remaining) is not int or not 1 <= remaining <= 14400:
+        raise ValueError("application_envelope_budget_refused")
+    output_bytes = envelope["max_output_bytes"]
+    if type(output_bytes) is not int or not 1024 <= output_bytes <= APPLICATION_OUTPUT_BYTES:
+        raise ValueError("application_envelope_capture_refused")
+    return dict(envelope)
+
+
+def application_profile(profile, envelope):
+    """Validate the pinned trusted profile and bind it to the envelope. The
+    public application request never supplies argv, env, executable or cwd."""
+    if type(profile) is not dict or set(profile) - APPLICATION_PROFILE_FIELDS:
+        raise ValueError("application_profile_shape_refused")
+    if profile.get("schema") != APPLICATION_PROFILE_SCHEMA:
+        raise ValueError("application_profile_schema_refused")
+    argv = profile.get("argv")
+    if (type(argv) is not list or not 1 <= len(argv) <= 64
+            or any(type(item) is not str or not item or "\0" in item for item in argv)
+            or len(json.dumps(argv).encode("utf-8")) > 32768):
+        raise ValueError("application_profile_argv_refused")
+    cwd = profile.get("cwd")
+    if (type(cwd) is not str or not cwd.startswith("/") or "\0" in cwd
+            or len(cwd) > 4096):
+        raise ValueError("application_profile_cwd_refused")
+    env = profile.get("env", {})
+    if type(env) is not dict or len(env) > 64:
+        raise ValueError("application_profile_env_refused")
+    for name, value in env.items():
+        if (type(name) is not str or not _APPLICATION_ENV.fullmatch(name)
+                or type(value) is not str or "\0" in value or len(value) > 4096
+                or _APPLICATION_SECRET.search(name)):
+            raise ValueError("application_profile_env_refused")
+    if profile.get("system_text", "") != envelope["system_text"]:
+        raise ValueError("application_profile_system_text_refused")
+    for name in ("profile_digest", "compiler_digest", "policy_digest"):
+        if profile.get(name) != envelope[name]:
+            raise ValueError("application_profile_digest_refused")
+    output_bytes = profile.get("max_output_bytes", envelope["max_output_bytes"])
+    if type(output_bytes) is not int or not 1024 <= output_bytes <= APPLICATION_OUTPUT_BYTES:
+        raise ValueError("application_profile_capture_refused")
+    return dict(profile)
+
+
+def application_invocation_digest(envelope, argv, cwd):
+    """Secret-free commitment over the exact frozen invocation: the exact input
+    bytes, argv semantics, selected profile and source identities."""
+    body = {name: envelope[name] for name in APPLICATION_ENVELOPE
+            if name != "invocation_digest"}
+    body["argv_sha256"] = hashlib.sha256(json.dumps(
+        argv, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True).encode("utf-8")).hexdigest()
+    body["cwd_sha256"] = hashlib.sha256(cwd.encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=True).encode("utf-8")).hexdigest()
+
+
+def application_carrier_key(envelope):
+    """The original dispatch is the single carrier key, never a caller alias."""
+    value = envelope.get("dispatch_id")
+    if type(value) is not str or not _APPLICATION_ID.fullmatch(value):
+        raise ValueError("application_carrier_key_refused")
+    return value
+
+
+_APPLICATION_PROCESS_FIELDS = frozenset((
+    "pid", "pgid", "label", "receipt_schema", "receipt_returncode", "receipt_timed_out"))
+_APPLICATION_CAPTURE_FIELDS = frozenset((
+    "stdout_bytes", "stderr_bytes", "stdout_truncated", "stderr_truncated",
+    "stdout_complete", "stderr_complete", "stdout_sha256"))
+_APPLICATION_CLEANUP_FIELDS = frozenset((
+    "status", "reason", "sigterm_sent", "sigkill_sent", "identity_verified",
+    "census_proven", "residual_count", "error_code", "stdout_capture_complete",
+    "stderr_capture_complete", "stdin_delivery_complete", "stdout_capture_error",
+    "stderr_capture_error", "stdin_delivery_error"))
+_APPLICATION_CLEANUP_GROUP = frozenset((
+    "session_id", "sigterm_member_count", "sigkill_member_count"))
+_APPLICATION_CLEANUP_OPTIONAL = frozenset(("leader_kill_sent", "leader_exit_observed"))
+
+
+def _application_cleanup_valid(value, process):
+    if not value:
+        return True
+    if (type(value) is not dict
+            or not _APPLICATION_CLEANUP_FIELDS <= set(value)
+            or set(value) - _APPLICATION_CLEANUP_FIELDS
+            - _APPLICATION_CLEANUP_GROUP - _APPLICATION_CLEANUP_OPTIONAL):
+        return False
+    if type(value["status"]) is not str or value["status"] not in {
+            "not_needed", "terminated", "identity_mismatch_direct_only",
+            "process_census_unproven", "residual_processes", "output_capture_unproven"}:
+        return False
+    for name in ("sigterm_sent", "sigkill_sent", "identity_verified", "census_proven",
+                 "leader_kill_sent", "leader_exit_observed", "stdout_capture_complete",
+                 "stderr_capture_complete", "stdin_delivery_complete"):
+        if name in value and type(value[name]) is not bool:
+            return False
+    group = set(value) & _APPLICATION_CLEANUP_GROUP
+    if group:
+        if group != _APPLICATION_CLEANUP_GROUP:
+            return False
+        for name in group:
+            if type(value[name]) is not int or not 0 <= value[name] < 2 ** 31:
+                return False
+        if value["session_id"] <= 0 or (process and value["session_id"] != process["pgid"]):
+            return False
+    elif value["sigterm_sent"] or value["sigkill_sent"]:
+        return False
+    residual = value["residual_count"]
+    if residual is not None and (type(residual) is not int or not 0 <= residual < 2 ** 31):
+        return False
+    if type(value["reason"]) is not str or len(value["reason"]) > 128:
+        return False
+    for name in ("error_code", "stdout_capture_error", "stderr_capture_error", "stdin_delivery_error"):
+        error = value[name]
+        if error is not None and (type(error) is not str or len(error) > 128):
+            return False
+    if value["census_proven"] and value["identity_verified"]:
+        for stream in ("stdout_capture", "stderr_capture", "stdin_delivery"):
+            if value[stream + "_complete"] is not True or value[stream + "_error"] is not None:
+                return False
+    return True
+
+
+def application_result(envelope, *, status, started, returncode, process=None,
+                       capture=None, cleanup=None):
+    """Process evidence only: model completion and provider settlement stay unknown."""
+    from lane_runtime import cleanup_receipt_is_proven
+    if (status not in APPLICATION_STATUSES or type(started) is not bool
+            or type(returncode) is not int):
+        raise ValueError("application_result_status_refused")
+    capture, cleanup = dict(capture or {}), dict(cleanup or {})
+    value = {"schema": APPLICATION_RESULT_SCHEMA, "kind": APPLICATION_RESULT_KIND,
+             "purpose": APPLICATION_PURPOSE, "status": status,
+             "started": started, "returncode": returncode,
+             "process": dict(process or {}), "capture": capture, "cleanup": cleanup,
+             "cleanup_proven": cleanup_receipt_is_proven(cleanup),
+             "output_complete": bool(capture) and capture.get("stdout_complete") is True
+             and capture.get("stderr_complete") is True,
+             "usage": None, "provider_settled": None}
+    for name in APPLICATION_IDENTITY + APPLICATION_DIGEST:
+        value[name] = envelope[name]
+    return value
+
+
+def application_result_valid(value, envelope):
+    """Validate exact identity and the closed, internally consistent carrier result."""
+    from lane_runtime import cleanup_receipt_is_proven
+    if type(value) is not dict or set(value) != APPLICATION_RESULT_FIELDS:
+        return False
+    if (value.get("schema") != APPLICATION_RESULT_SCHEMA
+            or value.get("kind") != APPLICATION_RESULT_KIND
+            or value.get("purpose") != APPLICATION_PURPOSE
+            or type(value.get("status")) is not str
+            or value.get("status") not in APPLICATION_STATUSES):
+        return False
+    if not all(value.get(name) == envelope[name]
+               for name in APPLICATION_IDENTITY + APPLICATION_DIGEST):
+        return False
+    if (type(value["started"]) is not bool or type(value["returncode"]) is not int
+            or not -255 <= value["returncode"] <= 255
+            or type(value["cleanup_proven"]) is not bool
+            or type(value["output_complete"]) is not bool
+            or value["usage"] is not None or value["provider_settled"] is not None):
+        return False
+    process, capture, cleanup = value["process"], value["capture"], value["cleanup"]
+    if any(type(item) is not dict for item in (process, capture, cleanup)):
+        return False
+    if process:
+        if set(process) != _APPLICATION_PROCESS_FIELDS:
+            return False
+        if (type(process["pid"]) is not int or not 0 < process["pid"] < 2 ** 31
+                or type(process["pgid"]) is not int or process["pgid"] != process["pid"]
+                or process["label"] != application_carrier_key(envelope)
+                or process["receipt_schema"] != "mastermind.local_owned_process_receipt.v1"
+                or type(process["receipt_returncode"]) is not int
+                or process["receipt_returncode"] != value["returncode"]
+                or type(process["receipt_timed_out"]) is not bool):
+            return False
+    if capture:
+        if set(capture) != _APPLICATION_CAPTURE_FIELDS:
+            return False
+        for name in ("stdout_bytes", "stderr_bytes"):
+            if type(capture[name]) is not int or not 0 <= capture[name] < 2 ** 53:
+                return False
+        for stream in ("stdout", "stderr"):
+            if (type(capture[stream + "_truncated"]) is not bool
+                    or type(capture[stream + "_complete"]) is not bool
+                    or capture[stream + "_complete"] == capture[stream + "_truncated"]):
+                return False
+        if any(capture[s + "_complete"] and capture[s + "_bytes"] > envelope["max_output_bytes"]
+               for s in ("stdout", "stderr")):
+            return False
+        digest = capture["stdout_sha256"]
+        if digest is not None and (type(digest) is not str or not _APPLICATION_SHA.fullmatch(digest)):
+            return False
+        if capture["stdout_complete"] and digest is None:
+            return False
+    if not _application_cleanup_valid(cleanup, process):
+        return False
+    proven = cleanup_receipt_is_proven(cleanup)
+    complete = bool(capture) and capture["stdout_complete"] and capture["stderr_complete"]
+    if value["cleanup_proven"] != proven or value["output_complete"] != complete:
+        return False
+    status = value["status"]
+    if status == "not_started":
+        return (not value["started"] and value["returncode"] in (75, 78)
+                and not process and not capture and not cleanup
+                and not proven and not complete)
+    if not value["started"]:
+        return False
+    if status == "effect_unknown":
+        return not proven
+    if not process or not capture or not cleanup or not proven:
+        return False
+    if status == "incomplete":
+        return not complete
+    if not complete:
+        return False
+    if status == "completed":
+        return value["returncode"] == 0 and process["receipt_timed_out"] is False
+    return status == "failed" and value["returncode"] != 0
+
+
+def application_carrier_returncode(value, envelope):
+    """A held original remains held on every read; process rc0 is insufficient."""
+    if not application_result_valid(value, envelope):
+        raise ValueError("application_result_invalid")
+    if value["status"] in ("effect_unknown", "incomplete"):
+        return 76
+    return value["returncode"]
 
 
 if __name__ == "__main__":

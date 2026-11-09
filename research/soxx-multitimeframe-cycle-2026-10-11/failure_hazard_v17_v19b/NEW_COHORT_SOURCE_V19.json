@@ -1,0 +1,174 @@
+{
+  "NVDA": [
+    {
+      "tf": "15m",
+      "rows": 8114,
+      "start": "2025-07-15",
+      "end": "2026-10-09",
+      "distinct_days": 313,
+      "source_counts": {
+        "stored_5m": 7672,
+        "stored_1h": 0,
+        "live_tail": 442,
+        "unattributed": 0
+      },
+      "source_store_sha": "9d47a2530812816db69af99582096fce7d3bd323db99e19128421509db142fe6",
+      "response_sha256": "95fe09312e86d6641afe94b30051cd33fd9d905b6ea0f1c4da6f41808c265619",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "30m",
+      "error": "URLError"
+    }
+  ],
+  "AVGO": [
+    {
+      "tf": "15m",
+      "error": "URLError"
+    }
+  ],
+  "MU": [
+    {
+      "tf": "15m",
+      "rows": 8283,
+      "start": "2025-07-03",
+      "end": "2026-10-09",
+      "distinct_days": 320,
+      "source_counts": {
+        "stored_5m": 7841,
+        "stored_1h": 0,
+        "live_tail": 442,
+        "unattributed": 0
+      },
+      "source_store_sha": "ec25a93b020b14f63c9f725393f85d6310f1c8381a4bf035fa9ddb8d640bc4e0",
+      "response_sha256": "db95708ee259684aa462d9f09d5e83e0f2535550277405702e707a89854cc642",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "30m",
+      "rows": 4142,
+      "start": "2025-07-03",
+      "end": "2026-10-09",
+      "distinct_days": 320,
+      "source_counts": {
+        "stored_5m": 3921,
+        "stored_1h": 0,
+        "live_tail": 221,
+        "unattributed": 0
+      },
+      "source_store_sha": "ec25a93b020b14f63c9f725393f85d6310f1c8381a4bf035fa9ddb8d640bc4e0",
+      "response_sha256": "6e85e1facf3be06bc659e3d16527d4425d760797c80a3634d3878bceca89c656",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "5m",
+      "rows": 20000,
+      "start": "2025-10-01",
+      "end": "2026-10-09",
+      "distinct_days": 258,
+      "source_counts": {
+        "stored_5m": 19532,
+        "stored_1h": 0,
+        "live_tail": 468,
+        "unattributed": 0
+      },
+      "source_store_sha": "ec25a93b020b14f63c9f725393f85d6310f1c8381a4bf035fa9ddb8d640bc4e0",
+      "response_sha256": "1ff0903520dbad6c92c1dfd01f7000a31e19d8515445810d647407c3ed49b51f",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    }
+  ],
+  "INTC": [
+    {
+      "tf": "15m",
+      "rows": 8140,
+      "start": "2025-07-14",
+      "end": "2026-10-09",
+      "distinct_days": 314,
+      "source_counts": {
+        "stored_5m": 7698,
+        "stored_1h": 0,
+        "live_tail": 442,
+        "unattributed": 0
+      },
+      "source_store_sha": "48068114c7ff9a7382365d66ad8e21c6a44d68d9963a949dd5c750206f80e137",
+      "response_sha256": "d8af2d150b47617d0ce68a7d77688bc44e7384687469b6ef0fa85b85554705a3",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "30m",
+      "rows": 4070,
+      "start": "2025-07-14",
+      "end": "2026-10-09",
+      "distinct_days": 314,
+      "source_counts": {
+        "stored_5m": 3849,
+        "stored_1h": 0,
+        "live_tail": 221,
+        "unattributed": 0
+      },
+      "source_store_sha": "48068114c7ff9a7382365d66ad8e21c6a44d68d9963a949dd5c750206f80e137",
+      "response_sha256": "5adbccefe330c92b753e38787f5df4313d84e1245ddab7cd31342623b03c231e",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "5m",
+      "rows": 20000,
+      "start": "2025-10-01",
+      "end": "2026-10-09",
+      "distinct_days": 258,
+      "source_counts": {
+        "stored_5m": 19532,
+        "stored_1h": 0,
+        "live_tail": 468,
+        "unattributed": 0
+      },
+      "source_store_sha": "48068114c7ff9a7382365d66ad8e21c6a44d68d9963a949dd5c750206f80e137",
+      "response_sha256": "c1e2fdc528f0ab84a88c04eaa92f423a8f4f48fb0c9e8e5d7abf11588db3eb4c",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    }
+  ],
+  "AMAT": [
+    {
+      "tf": "15m",
+      "error": "URLError"
+    }
+  ],
+  "LRCX": [
+    {
+      "tf": "15m",
+      "rows": 8856,
+      "start": "2025-06-02",
+      "end": "2026-10-09",
+      "distinct_days": 342,
+      "source_counts": {
+        "stored_5m": 8414,
+        "stored_1h": 0,
+        "live_tail": 442,
+        "unattributed": 0
+      },
+      "source_store_sha": "d136eeb2e861718fd1eacaa8dd7c3c88eadb6b755b6d687c0b76d5fe7f744fc0",
+      "response_sha256": "449121b343ca56e35d8a09a4f2e44cc459b7e7f17b7348f5554bc5faee1bc5cd",
+      "session": "regular",
+      "timestamp_basis": "ET_display_not_true_UTC",
+      "price_adjustment": "unverified"
+    },
+    {
+      "tf": "30m",
+      "error": "URLError"
+    }
+  ]
+}

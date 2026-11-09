@@ -132,5 +132,43 @@ class NativeManualPreviewTest(unittest.TestCase):
         with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_POOL_MODE_MISMATCH"):
             task._enforce_manual_route({"POOL":"grok","MODEL":"synthetic"},"grok",None)
 
+    def test_request_auto_tokens_normalized_before_any_persistence(self):
+        # The intercepted original-root resolution happens BEFORE state dirs,
+        # retained packets, leases or worker dispatch. Verify the actual request
+        # call frame rather than pretending that preview covers request.
+        class PreEffectStop(Exception):
+            pass
+
+        cases=(
+            ("minimax", "auto", "AUTO", "minimax", None, None),
+            ("AUTO", "auto", "auto", None, None, None),
+            ("minimax", "MiniMax-M3", None, "minimax", "MiniMax-M3", None),
+        )
+        for provider, model, preference, want_pool, want_model, want_prefer in cases:
+            captured=[]
+            def inspect_original_request(root, env):
+                caller=sys._getframe(1)
+                self.assertEqual(caller.f_code.co_name, "request")
+                values=caller.f_locals
+                captured.append((values["pool"],values["requested_model"],values["prefer"]))
+                raise PreEffectStop("intercepted_before_native_storage")
+
+            with self.subTest(pool=provider, model=model):
+                with patch.object(task,"resolve_request_root",new=inspect_original_request):
+                    with self.assertRaises(PreEffectStop):
+                        task.request("manual-auto-f1-fixture", "review",
+                                     packet=ROOT/"no-production-packet", cwd="~", stdin_bytes=None,
+                                     pool=provider, requested_model=model,
+                                     prefer=preference)
+                self.assertEqual(captured,[(want_pool,want_model,want_prefer)])
+
+    def test_request_rejects_malformed_selector_before_root_or_storage(self):
+        with patch.object(task,"resolve_request_root") as resolver:
+            with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_SELECTOR_INVALID"):
+                task.request("manual-invalid-f1-fixture","review",
+                             packet=ROOT/"no-production-packet", cwd="~", stdin_bytes=None,
+                             pool="minimax", requested_model="MiniMax-M3;evil")
+            resolver.assert_not_called()
+
 if __name__=="__main__":
     unittest.main()

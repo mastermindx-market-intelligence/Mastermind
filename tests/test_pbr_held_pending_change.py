@@ -456,3 +456,41 @@ def test_without_a_queue_every_held_row_keeps_its_current_rendering(tmp_path, tr
     ])
     assert results["MU"]["result"] is None
     assert results["XOM"]["result"] is None
+
+
+# Actual renderPositions output composition; not DOM mounting or browser proof.
+HELD_POSITION_OUTPUT_HARNESS = r'''
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync(process.argv[1],'utf8');
+function fn(name){const start=html.indexOf('function '+name+'(');assert(start>=0,name);const line=html.slice(start).split('\n')[0];if(line.endsWith('}'))return line;const end=html.indexOf('\n}',start);assert(end>start,name);return html.slice(start,end+2);}
+function variable(name){const start=html.indexOf('\nvar '+name+' =')+1;assert(start>0,name);const line=html.slice(start).split('\n')[0];if(line.endsWith(';'))return line;const end=html.indexOf('\n};',start);assert(end>start,name);return html.slice(start,end+3);}
+let source=[variable('I18N'),variable('esc'),variable('pct'),variable('fmtDate'),variable('_parseLocalDate'),variable('fmtDateShort'),...['t','securityName','helpIcon','pnlCell','_ccySymOf','_ccySym','_heldPendingChange','_accountStateInvalid','renderPositions'].map(fn)].join('\n');
+if(process.env.DISCARD_QC==='1'){assert(source.includes('if (qc) {'));source=source.replace('if (qc) {','if (false && qc) {');}
+let lang='en';const sink={innerHTML:''};
+// Explicit string-output sink only: no browser, DOM implementation, handlers, layout or mounts.
+const ctx=vm.createContext({document:{documentElement:{getAttribute:()=>lang}},E:(id)=>{assert.equal(id,'positions');return sink;},_expandedIdx:null,_portfolios:[],_portfolio:'autonomous',_perf:null,_liveMarks:null});
+vm.runInContext(source,ctx,{filename:'exact-selected-index-functions.js'});
+const position={ticker:'MU',sleeve:'brain',verdict:'hold',weight:.03,cost_basis:1000,current_price:900,unrealized_pnl:-3000,unrealized_pct:-10,held_days:4,opened_at:'2026-10-19',thesis_full:{summary:'Retained thesis',bull:['Demand'],bear:['Risk']}};
+function render(trades,pending=false){ctx._book={currency:'USD',positions:[{...position,pending}],decisions:[]};ctx._trades=trades;const before=JSON.stringify([ctx._book,ctx._trades]);vm.runInContext('renderPositions()',ctx);assert.equal(JSON.stringify([ctx._book,ctx._trades]),before);const m=sink.innerHTML.match(/<tr class="pos-row"[^>]*>([\s\S]*?)<\/tr>/);assert(m);const cells=[...m[1].matchAll(/<td(?:\s[^>]*)?>([\s\S]*?)<\/td>/g)].map(m=>m[1]);assert.equal(cells.length,11);return {markup:sink.innerHTML,row:m[0],cells};}
+const results=[];
+for(lang of ['en','zh']){
+ const baseline=render({pending_target:{status:'none',rows:[]}});
+ for(const [action,kind,label] of [['exit','exit',lang==='en'?'EXIT QUEUED':'已排队卖出'],['trim','trim',lang==='en'?'TRIM QUEUED':'已排队减仓'],['add','add',lang==='en'?'ADD QUEUED':'已排队加仓'],['comparison_unavailable','unclassified',lang==='en'?'CHANGE QUEUED':'已排队调整'],['unpriceable','unclassified',lang==='en'?'CHANGE QUEUED':'已排队调整']]){
+ const out=render({pending_target:{status:'queued',fill_after:'2026-10-23T09:30:00-04:00',rows:[{ticker:'MU',action,status:'queued'}]}});
+ assert(out.cells[7].includes(label),lang+action);assert(out.cells[7].includes('2026-10-23'));assert(out.row.includes('data-queued-change="'+kind+'"'));assert.deepEqual(out.cells.filter((_,i)=>i!==7),baseline.cells.filter((_,i)=>i!==7));assert(out.markup.includes('Retained thesis'));results.push(lang+':'+action);
+ }
+ for(const status of ['none','invalid','unavailable']){assert.deepEqual(render({pending_target:{status,rows:[{ticker:'MU',action:'exit'}]}}).cells,baseline.cells);results.push(lang+':'+status);}
+ for(const action of ['hold','blocked','buy','filtered','unknown_action']){assert.deepEqual(render({pending_target:{status:'queued',rows:[{ticker:'MU',action}]}}).cells,baseline.cells);results.push(lang+':'+action);}
+ const noDate=render({pending_target:{status:'queued',rows:[{ticker:'MU',action:'exit'}]}});assert(noDate.cells[7].includes(lang==='en'?'awaiting settlement':'等待结算'));results.push(lang+':awaiting');
+ const pendingBase=render({pending_target:{status:'none',rows:[]}},true);assert.deepEqual(render({pending_target:{status:'queued',rows:[{ticker:'MU',action:'exit'}]}},true).cells,pendingBase.cells);results.push(lang+':pending');
+ assert.deepEqual(render({pending_target:{status:'queued',rows:[{ticker:'XOM',action:'exit'}]}}).cells,baseline.cells);results.push(lang+':foreign');
+}
+console.log(JSON.stringify({passed:results.length,cases:results,scope:'actual function markup composition; explicit sink, not DOM/browser',source_mutated:process.env.DISCARD_QC==='1'}));
+'''
+
+@requires_node
+def test_held_pending_change_reaches_actual_positions_markup():
+    completed = subprocess.run([shutil.which("node"), "-e", HELD_POSITION_OUTPUT_HARNESS, str(HTML_PATH)], capture_output=True, text=True, timeout=30, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["passed"] == 32

@@ -33,9 +33,10 @@ def coo_settings(settings):
                          lambda *_: {}, lambda *_: {})
 
 
-def build(settings, *, coo=False, enabled=True, supply=True, change=lambda kw: None):
+def build(settings, *, coo=False, enabled=True, supply=True, socket_path=None, change=lambda kw: None):
     peer, audit = leaf.Peer(), leaf.Audit()
-    bridge = InstalledSessionBridgeClient("/no-live-session-test.sock", client=peer)
+    bridge = InstalledSessionBridgeClient(
+        settings.ceo_ingress_socket_path if socket_path is None else socket_path, client=peer)
     kwargs = dict(audit_sink=audit, mdm_reader=launch.FixedMdm(),
                   session_target_projector=bridge.targets, session_reply_handler=bridge.send,
                   session_summon_handler=bridge.summon,
@@ -86,6 +87,12 @@ def test_legacy_default_viewer_and_launch_have_no_session_routes(settings, coo, 
 def test_default_off_refuses_supplied_session_owner(settings, coo):
     with pytest.raises(ValueError):
         build(settings, coo=coo, enabled=False)
+
+
+@pytest.mark.parametrize("coo", [False, True])
+def test_foreground_composition_refuses_a_different_ingress_owner(settings, coo):
+    with pytest.raises(ValueError, match="foreground admission requires this installed ingress owner"):
+        build(settings, coo=coo, socket_path="/different-ingress-fixture-not-listening.sock")
 
 
 @pytest.mark.parametrize("coo", [False, True])

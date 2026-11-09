@@ -103,7 +103,7 @@ def test_missing_partial_frames_fail_closed(backend,tmp_path,monkeypatch,suffix)
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT 00'),
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT '+SECRET),
     framed().replace('PHYSICAL_BEGIN','READINESS_BEGIN'),
-    framed(readiness=1),
+    framed(physical=1),
     framed()+PREFIX+SECRET+'\n'])
 def test_malformed_duplicate_inconsistent_frames_fail_closed(backend,tmp_path,monkeypatch,frame):
     value=write(backend,tmp_path,monkeypatch,physical()+frame,0)
@@ -132,7 +132,7 @@ def test_failure_diagnostic_never_copies_arbitrary_output(backend,tmp_path,monke
 
 
 @pytest.mark.parametrize('physical_status,readiness_status',[(0,0),(0,1),(1,0),(1,78)])
-def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physical_status,readiness_status):
+def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,physical_status,readiness_status):
     source=(SOURCE/'host_pull.sh').read_text()
     start=source.index('    probe="printf')
     end=source.index('\n    OUT=$(run_probe',start)
@@ -145,7 +145,7 @@ def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physica
                              capture_output=True,text=True,check=True).stdout
     result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',generated],env=env,
                           capture_output=True,text=True)
-    assert result.returncode==readiness_status
+    assert result.returncode==physical_status
     assert 'optional_fixture=true' in result.stdout
     assert PREFIX+f'PHYSICAL_EXIT {physical_status}' in result.stdout
     assert PREFIX+f'READINESS_EXIT {readiness_status}' in result.stdout
@@ -318,18 +318,23 @@ def test_hook_held_namespace_rename_refuses(backend,tmp_path,monkeypatch):
 
 def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_path):
     text=(SOURCE/'host_pull.sh').read_text()
+    # Include fixed wrapper assignment with caller; capture argv and stdin
+    # using inert local functions. Never make an actual SSH request.
+    assignment=text[text.index('HOST_PULL_REMOTE_STDIN_EXEC='):text.index('run_probe() {')]
     function=text[text.index('run_probe() {'):text.index('if [ -n "$PHYSICAL_HOST" ]; then')]
-    # Bash functions stand in for transport executables; no SSH/perl is run.
-    stub='perl(){ printf "ARG:%s\\n" "$@"; }; sh(){ return 98; };\n'
+    stub='perl(){ printf "ARG:%s\n" "$@"; printf "STDIN:"; /bin/cat; }; sh(){ return 98; };\n'
     for flag in ('','fixed-hook-inspection','fixed-physical-diagnostic'):
-        script=stub+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
+        script=stub+assignment+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
         result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
                               env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
         assert result.returncode==0
         assert 'ARG:BatchMode=yes' in result.stdout and 'ARG:ConnectTimeout=8' in result.stdout
         assert ('ARG:StrictHostKeyChecking=yes' in result.stdout)==bool(flag)
         assert ('ARG:UpdateHostKeys=no' in result.stdout)==bool(flag)
-        assert result.stdout.endswith('ARG:mmx-ubuntu0\nARG:INERT\n')
+        assert 'ARG:INERT\n' not in result.stdout
+        assert result.stdout.endswith('STDIN:INERT\n')
+        wrapper=result.stdout.split('ARG:mmx-ubuntu0\nARG:',1)[1].split('\nSTDIN:',1)[0]
+        assert 0<len(wrapper)<4096 and 'mktemp' in wrapper and 'exit 143' in wrapper
 
 
 def physical_frame(output=None, digest='a'*64):
@@ -515,3 +520,34 @@ def test_actual_selected_occupancy_cli_reads_disposable_existing_lane(backend,tm
     assert 'active_lanes_status=known\n' in output and 'active_lanes=0\n' in output
     after={p.relative_to(root):(p.stat().st_ino,p.read_bytes()) for p in root.rglob('*') if p.is_file()}
     assert before==after
+
+def test_physical_failure_with_optional_success_remains_unreachable(
+    backend, tmp_path, monkeypatch
+):
+    value=write(backend,tmp_path,monkeypatch,framed(physical=1)+physical(),1)
+    assert value['reachable'] is False and value['error']=='probe_exit_1'
+    assert 'load1' not in value
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_NONZERO','exit_status':1}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_ZERO','exit_status':0}
+
+
+def test_optional_readiness_failure_is_not_physical_failure_or_accepted_account(
+    backend, tmp_path, monkeypatch
+):
+    # A forged known account in optional stdout must not survive optional rc=1.
+    forged={'schema':'mastermind.glm_local_account_readiness.v1',
+            'host':'fixture-host','transport_alias':'fixture-alias','mode':'glm',
+            'config_scope':'launcher_glm_config.v1',
+            'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
+            'status':'known','accounts':{'fixture-account':True}}
+    value=write(backend,tmp_path,monkeypatch,
+                framed(readiness=1)+physical()+
+                'glm_local_account_readiness='+json.dumps(forged)+'\n',0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
+
+

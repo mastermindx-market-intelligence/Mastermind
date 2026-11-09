@@ -24,12 +24,12 @@ INPUT = {
     "ext/pick.py": "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee",
 }
 OUTPUT = {
-    "ext/fabric_task.py": "4a37990f0a132bf96f8fbd658452b29472716ba4b544ca73272a2c542c5eee43",
+    "ext/fabric_task.py": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
 }
-PATCH_SHA256 = "b678fa16bc04a075cc87272a30f7ca4a11a9e60391e99c0b44fa46df032376ca"
-FIXTURE_SHA256 = "dd2bf01f597b6749d08ebc30092aa59ef9318a8de837c2eaec8504d9e1204f30"
+PATCH_SHA256 = "6b1dade16fe58b732064d66e0645396dd6dd02fc255c3befbf0d03e105b23e6b"
+FIXTURE_SHA256 = "75edb2345e90f2f5a758020acef494aa9090b4c97e020bbafb6f3ee5be63c794"
 REPO = Path(__file__).resolve().parents[2]
 PATCH = REPO / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = REPO / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
@@ -95,7 +95,7 @@ def qualify(generation: Path) -> dict[str, object]:
         env["MMX_NATIVE_PREVIEW_CANDIDATE"] = str(stage)
         result = run([sys.executable, str(staged_fixture)], stage, env)
         test_summary = re.search(r"Ran (\d+) tests", result.stderr)
-        if not test_summary or int(test_summary.group(1)) != 12 or "\nOK\n" not in result.stderr:
+        if not test_summary or int(test_summary.group(1)) != 14 or "\nOK\n" not in result.stderr:
             raise ValueError("native test receipt does not prove the expected twelve cases")
         for name, sha in INPUT.items():
             file_bytes(generation / name, sha, sealed=True)
@@ -111,7 +111,7 @@ def qualify(generation: Path) -> dict[str, object]:
         "state": "SOURCE_ONLY_TESTED", "generation": GENERATION,
         "current_selected_at_end": selected, "source_count": len(INPUT),
         "patch_sha256": PATCH_SHA256, "fixture_sha256": FIXTURE_SHA256,
-        "tests_passed": 12,
+        "tests_passed": 14,
         "sealed_generation_unchanged": True,
         "live_install_performed": False, "provider_call_performed": False,
         "worker_start_proven": False, "review_required": True,

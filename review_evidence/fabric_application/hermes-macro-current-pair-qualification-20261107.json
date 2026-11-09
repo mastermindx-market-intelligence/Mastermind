@@ -1,0 +1,230 @@
+{
+  "changed_source_sha256": {
+    ".github/workflows/ci.yml": "c0a8c4d8022a6240673e9fafa70dc5400f900122a07d11f42a3d8c0e44e40dbe",
+    ".github/workflows/hermes-application-inference.yml": "15b5556d26d3e9ef2318b4427ee9b71bf5187ae7f6a5beeea56dbb0960a26d1d",
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+    "integrations/hermes_application_fabric/qualification/qualify_gateway.py": "2256fbd014b7d4e7892d7293a9e6c1e6cb880bfdfc2024ef75e6980e2b571efe",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "7de5c5b04a89d47f908fa45b8c8242dbe2a8cdfedd9ce4b8904b897817935a71",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "4d4dce80d8b7cb64917c11d0a41595b1efe2dc8c7ab7251a4583831a23492edf",
+    "tests/executive_fabric_release_identity_review.py": "ef7436855e52a9d464b9a0bdbb8c218df30bcc9edc720380e000bd0b0061262a"
+  },
+  "decision": [
+    "Advance all current Macro fixture pins together; preserve historical evidence pins.",
+    "The existing closed CI module inventory now requires 185 audit/history and 106 native composition cases, all with zero failures/errors/skips.",
+    "The actual native implementation and qualified107/109/112 cohort are unchanged by this pin-only source update.",
+    "Do not substitute the isolated C4 publisher-only WORKER cohort for the composed APPLICATION publisher; current whole-parent closure already rejects mixed historical task/runtime members.",
+    "Use normal CI supersession for this substantive new pair; do not cancel other writers or duplicate original effects."
+  ],
+  "limits": {
+    "explicit_denials_and_unknown_effects_preserved": true,
+    "hermes_core_patch_installed": false,
+    "installed_runtime_mutated": false,
+    "live_provider_acceptance": false,
+    "original_mastermind_live_writer_preserved": true,
+    "uptime_acceptance": false
+  },
+  "macro": {
+    "head": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c",
+    "hosted_owner": {
+      "conclusion": "success",
+      "errors": 0,
+      "event_merge": "a708a641ab1e050440722de632dcd03c9f259ee8",
+      "failures": 0,
+      "job": 128422784896,
+      "mastermind_fixture": "41e86c7aa89905f9b4592d57fbf32c2d7c0f1458",
+      "not_current_6991_pair": true,
+      "run": 42379114987,
+      "skipped": 0,
+      "tests": 126
+    },
+    "local_current_pair": {
+      "errors": 0,
+      "failures": 0,
+      "mastermind_native": "6991fdea6b4dca152726629aa220a1b5d3fead63",
+      "skipped": 0,
+      "tests": 547
+    },
+    "merged_to_main": false,
+    "original_pr": 10740,
+    "parents": [
+      "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+      "1575d8ccb7c618f52efdcfdc638f5cbbf217d334"
+    ],
+    "qualification_receipt": {
+      "path": "docs/reports/metabolism-publication-history-integration-20261107.json",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c"
+    },
+    "ready_readback": true,
+    "release_armed": false,
+    "source_comment": {
+      "comment_id": 6707954668,
+      "pull_request": 10740,
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    "source_update": {
+      "branch_and_pr_readback": true,
+      "expected_old_head": "1575d8ccb7c618f52efdcfdc638f5cbbf217d334",
+      "force": false
+    },
+    "tree": "bf943b0430eac2c6c6fc3e0fa83bdfecb6fddffa"
+  },
+  "mastermind_parent": "6991fdea6b4dca152726629aa220a1b5d3fead63",
+  "observed_at_utc": "2026-11-07T14:10:57.598189+00:00",
+  "parent_hosted_proof": {
+    "enrollment": {
+      "conclusion": "success",
+      "job": 128418499610,
+      "run": 42377672983
+    },
+    "event_merge": "53bf3bb4e9b16e2d217000436bec41c403828e86",
+    "hermes_inference": {
+      "all_eight_jobs_success": true,
+      "gateway": {
+        "blocked_external_connections": 0,
+        "errors": 0,
+        "failures": 0,
+        "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+        "job": 128418498999,
+        "live_provider_acceptance": false,
+        "sdk_constructions": [],
+        "skips": 0,
+        "tests": 100
+      },
+      "native_owner": {
+        "errors": 0,
+        "external_connections": 0,
+        "failures": 0,
+        "job": 128418498935,
+        "live_provider_acceptance": false,
+        "skips": 0,
+        "tests": 12
+      },
+      "primary_host": {
+        "conclusion": "success",
+        "job": 128418499048,
+        "tests": 137
+      },
+      "run": 42377672785
+    },
+    "macro_fixture": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+    "main_ci": {
+      "completed_steps": [
+        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+        "Verify native application admission and dispatch custody",
+        "Verify closed application transport in isolated root fixtures",
+        "Verify exact scoped Fabric model and Metabolism composition",
+        "Verify actual Brain Fabric and production inference composition"
+      ],
+      "completed_steps_conclusion": "success",
+      "full_suite_success_claim": false,
+      "run": 42377672876,
+      "shard_zero_job": 128419314162,
+      "status": "in_progress_at_observation"
+    },
+    "os": {
+      "conclusion": "success",
+      "jobs": [
+        128418499722,
+        128418500008
+      ],
+      "run": 42377672974
+    },
+    "pinned_loader": {
+      "cases_per_python": 11,
+      "conclusion": "success",
+      "jobs": [
+        128418499037,
+        128418499207
+      ],
+      "python_versions": [
+        "3.13",
+        "3.12"
+      ],
+      "run": 42377672847
+    },
+    "source_and_event_tree": "8de6a159cdf93770bde4d59612678f1261cd9bab",
+    "source_head": "6991fdea6b4dca152726629aa220a1b5d3fead63"
+  },
+  "pin_qualification": {
+    "command": [
+      "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-c",
+      "/dev/null",
+      "--rootdir",
+      "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+      "--basetemp",
+      "/private/tmp/mmx-c226-pair-pin-proof-l4ib6byw/pytest",
+      "--junitxml",
+      "/private/tmp/mmx-c226-pair-pin-proof-l4ib6byw/tests.xml",
+      "tests/test_executive_fabric_release_identity_review.py",
+      "-k",
+      "qualify_application_owner"
+    ],
+    "junit_sha256": "758dfb4bea224bbfd1cc7b045825c17bd950ec7e78db2949b9fa6fe4652ca508",
+    "log": "/private/tmp/mmx-c226-pair-pin-proof-l4ib6byw/tests.log",
+    "log_sha256": "942426b95c302a12fc22e274fb4ec4c2b383f33144375fb60e9d9f253d5d791b",
+    "macro_ref": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c",
+    "rc": 0,
+    "required_metabolism_modules": {
+      "tests.test_metabolism_audit": 185,
+      "tests.test_metabolism_fabric_composition": 106
+    },
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 2
+    },
+    "workflow_syntax": true
+  },
+  "pin_update": {
+    ".github/workflows/ci.yml": {
+      "sha256": "c0a8c4d8022a6240673e9fafa70dc5400f900122a07d11f42a3d8c0e44e40dbe",
+      "updated_refs": 1
+    },
+    ".github/workflows/hermes-application-inference.yml": {
+      "sha256": "15b5556d26d3e9ef2318b4427ee9b71bf5187ae7f6a5beeea56dbb0960a26d1d",
+      "updated_refs": 4
+    },
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": {
+      "sha256": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+      "updated_refs": 1
+    },
+    "integrations/hermes_application_fabric/qualification/qualify_gateway.py": {
+      "sha256": "2256fbd014b7d4e7892d7293a9e6c1e6cb880bfdfc2024ef75e6980e2b571efe",
+      "updated_refs": 1
+    },
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": {
+      "sha256": "7de5c5b04a89d47f908fa45b8c8242dbe2a8cdfedd9ce4b8904b897817935a71",
+      "updated_refs": 1
+    },
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": {
+      "sha256": "4d4dce80d8b7cb64917c11d0a41595b1efe2dc8c7ab7251a4583831a23492edf",
+      "updated_refs": 1
+    },
+    "tests/executive_fabric_release_identity_review.py": {
+      "qualified_source_sha256": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+      "sha256": "ef7436855e52a9d464b9a0bdbb8c218df30bcc9edc720380e000bd0b0061262a",
+      "token": [
+        346,
+        37,
+        40,
+        "int",
+        "409"
+      ]
+    }
+  },
+  "provenance_representation": {
+    "original_sha256": "9f63b8e5b536801d44b1953306795f5c83bfe8f43c0c8b9992862d0fbc41bfb1",
+    "reason": "Represent evidence references as repository/commit/path and issue-comment metadata; keep executable/config read-transport guard unchanged. Historical observations and verdicts unchanged."
+  },
+  "purpose": "Qualify the reconciled original Macro source through the existing Mastermind/Hermes pair.",
+  "schema": 1,
+  "source_reference_representation": "Two inert GitHub citations use explicit repository/revision/path or PR/comment pointers. Source identities and observation facts are unchanged; no transport or guard exemption is added."
+}

@@ -1,0 +1,21 @@
+diff --git a/ext/fabric_task.py b/ext/fabric_task.py
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -760,10 +760,17 @@
+     request_deadline_ns: int | None = None,
+     not_before: str | None = None,
+     strict_manual_pin: bool = False,
+ ) -> int:
+     rid = validate_run_id(run_id)
++    # Normalize the same public AUTO sentinels used by the read-only preview
++    # before constructing a durable request packet or selecting a provider.
++    pool = _manual_token(pool)
++    requested_model = _manual_token(requested_model)
++    prefer = _manual_token(prefer)
++    if strict_manual_pin and pool is None:
++        raise FabricTaskError("MANUAL_POOL_REQUIRED")
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     if max_turns is not None:
+         max_turns = validate_request_max_turns(max_turns)
+     env = os.environ.copy()
