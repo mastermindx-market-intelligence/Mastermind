@@ -18607,19 +18607,50 @@ def _recheck_placement_lineage(connection, job_row, spec, authority) -> None:
 
 
 def _placement_binding_for_attempt(connection, attempt_id: str) -> dict[str, Any] | None:
+    """The Attempt's CURRENT ExecutionBinding: the one issued at claim, or the
+    latest re-issue by ``adopt_attempt`` (which rotates the fence on the same
+    Attempt — REVIEW_2314 M-1)."""
     rows = connection.execute(
-        "SELECT payload_json FROM events WHERE attempt_id=? AND event_type='JOB_CLAIMED' "
-        "AND aggregate_type='job'",
+        "SELECT event_type,payload_json FROM events WHERE attempt_id=? AND ("
+        "(event_type='JOB_CLAIMED' AND aggregate_type='job') OR "
+        "(event_type='ATTEMPT_ADOPTED' AND aggregate_type='attempt')) ORDER BY event_id",
         (attempt_id,),
     ).fetchall()
-    bindings = [
-        payload["execution_binding"]
-        for payload in (json.loads(row[0]) for row in rows)
+    issued = [
+        (row[0], payload["execution_binding"])
+        for row, payload in ((row, json.loads(row[1])) for row in rows)
         if isinstance(payload, dict) and "execution_binding" in payload
     ]
-    if len(bindings) > 1:
+    claimed = [binding for kind, binding in issued if kind == "JOB_CLAIMED"]
+    if len(claimed) > 1:
         raise PersistenceError("Attempt carries more than one ExecutionBinding")
-    return bindings[0] if bindings else None
+    if issued and not claimed:
+        raise PersistenceError("re-issued ExecutionBinding has no claim-time binding")
+    return issued[-1][1] if issued else None
+
+
+def _reissue_placement_binding(
+    connection, row: sqlite3.Row, *, fence_counter: int, lease_expires_at_ms: int
+) -> dict[str, Any] | None:
+    """Adoption rotated the fence: re-issue the binding in the SAME transaction."""
+    from control_plane.child_execution_contracts import ExecutionBinding
+    from control_plane.executive_placement_authority import reissue_execution_binding
+    placed = connection.execute(
+        "SELECT json_type(constraints_json,'$.child_placement') FROM jobs WHERE job_id=?",
+        (row["job_id"],),
+    ).fetchone()
+    if placed is None or placed[0] is None:
+        return None  # legacy (non-placement) Job: adoption unchanged
+    raw = _placement_binding_for_attempt(connection, str(row["attempt_id"]))
+    if raw is None:
+        raise StateConflict("adoption refused: placement Job Attempt has no ExecutionBinding")
+    binding = ExecutionBinding.from_dict(raw)
+    if (binding.attempt_ref != str(row["attempt_id"])
+            or binding.fence_counter != int(row["fence_generation"])):
+        raise PersistenceError("placement ExecutionBinding and Attempt fence diverged")
+    return reissue_execution_binding(
+        binding, fence_counter=fence_counter, lease_expires_at_ms=lease_expires_at_ms
+    ).to_dict()
 
 
 def _require_placement_settlement_fence(
@@ -20100,6 +20131,9 @@ class AttemptRegistry:
             )
             if updated_attempt.rowcount != 1:
                 raise StateConflict(f"attempt {attempt_id} lost the adoption race")
+            reissued = _reissue_placement_binding(
+                connection, row, fence_counter=next_fence, lease_expires_at_ms=expiry
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -20116,6 +20150,7 @@ class AttemptRegistry:
                     "previous_lease_owner": str(row["lease_owner"]),
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": reissued} if reissued is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )
@@ -21499,6 +21534,14 @@ class AttemptRegistry:
                         attempt_id,
                     ),
                 )
+                if cancel_was_requested:
+                    # Custody is released here and the Job is terminal, so no
+                    # later verb can settle (REVIEW_2314 M-2). The LOST branch
+                    # keeps custody; requeue_job settles both.
+                    ResourceBroker(self.store)._settle_placement_in_transaction(
+                        connection, attempt_id=attempt_id, timestamp=timestamp,
+                        reason="LEASE_EXPIRED",
+                    )
                 self.store.append_event(
                     connection,
                     aggregate_type="job",
@@ -25495,6 +25538,13 @@ class ResourceBroker:
         the exact demands against same-transaction counters. The claim is the
         effect authority for its Attempt, so the commitment is BEGUN in the same
         transaction; settlement later moves it to SETTLED exactly once.
+
+        Forensic divergence (REVIEW_2314 m-4): this path does not call
+        ``mint_capacity_capture``/``evaluate_begin``. Inside one BEGIN IMMEDIATE
+        transaction that recheck would be tautological, but placement
+        commitments therefore carry no capacity-capture receipt; the JOB_CLAIMED
+        ``placement_commitment`` payload (observations digest, registry
+        revision) is their admission evidence.
         """
         from . import executive_physical_resources as physical
 
@@ -25587,6 +25637,14 @@ class ResourceBroker:
         Idempotent: no commitment (legacy claim) or an already-terminal one is
         a no-op. Called wherever the Worker quota custody of that Attempt is
         released, inside the same transaction.
+
+        Trust basis (REVIEW_2314 m-2): ``terminal_effect_state: TERMINAL`` is
+        asserted without the incumbent settle's ``process_terminal`` /
+        ``descendants_terminal`` proofs. It rides the same-transaction Worker
+        quota release, whose verb (complete/fail/cancel/release/requeue/expiry)
+        is the Executive's effect authority for the Attempt; the settlement
+        ``reason`` names that verb. Weaker forensics than other physical
+        commitments until the reviewed-schema placement request kind lands.
         """
         from .executive_placement_authority import PLACEMENT_OWNER
 
