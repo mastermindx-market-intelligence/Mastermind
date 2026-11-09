@@ -1,6 +1,7 @@
 """PR smoke selects bounded source-proximate modules; merge queue owns full tests."""
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 from pathlib import Path
 
@@ -8,7 +9,8 @@ import pytest
 
 from scripts.ci_pr_smoke import (
     SmokeUnqualified, check_changed_python, select_modules,
-    _IDENTITY_PIN_REGISTRIES, _MAX_SELECTED_MODULES, _reviewed_registries,
+    _IDENTITY_PIN_REGISTRIES, _MAX_SELECTED_MODULES, _registry_keys,
+    _reviewed_registries,
 )
 
 _FABRIC_REGISTRY, FABRIC_TESTS = _IDENTITY_PIN_REGISTRIES[0]
@@ -606,3 +608,38 @@ def test_main_passes_identity_modules_to_the_test_runner(tmp_path, monkeypatch):
                                       "--base", "base", "--head", "head"])
     assert ci_pr_smoke.main() == 0
     assert list(argv) == ["tests/test_ci_pytest_policy.py", *FABRIC_TESTS]
+
+
+def test_live_identity_registries_extract_to_their_runtime_reviewed_files():
+    """Every wired registry must stay extractable by the trusted-base parser.
+
+    The selector reads registries only from the trusted base, so a registry
+    edit is never parsed against its own new bytes. Without this guard a
+    registry rewritten into a refused shape would merge cleanly and then
+    fail every later smoke candidate closed. The extracted keys must equal
+    the module's runtime REVIEWED_FILES, so the static reading cannot drift
+    from what the owning pin tests actually enforce.
+    """
+    root = Path(__file__).resolve().parents[1]
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True, stdout=subprocess.PIPE,
+    ).stdout.decode("ascii").strip()
+    for path, _tests in _IDENTITY_PIN_REGISTRIES:
+        extracted = _registry_keys(
+            root, head, path, (root / path).read_bytes(), frozenset())
+        spec = importlib.util.spec_from_file_location(
+            "_live_registry_" + Path(path).stem, root / path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert extracted == set(module.REVIEWED_FILES), path
+        assert extracted, path
+
+
+@pytest.mark.parametrize("registry", [path for path, _ in _IDENTITY_PIN_REGISTRIES])
+def test_registry_edit_selects_its_owners_and_the_live_registry_guard(registry):
+    root = Path(__file__).resolve().parents[1]
+    owners = dict(_IDENTITY_PIN_REGISTRIES)[registry]
+    picked = select_modules(root, [registry], identity_registries=())
+    assert set(owners) <= set(picked)
+    assert "tests/test_ci_pr_smoke.py" in picked

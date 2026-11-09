@@ -50,6 +50,12 @@ _IDENTITY_PIN_REGISTRIES = (
     )),
 )
 _MAX_REGISTRY_BYTES = 256_000
+# A registry edit is read from the trusted base, never from the candidate,
+# so the candidate's new registry bytes would otherwise merge without ever
+# meeting the extractor, and every later smoke candidate would then refuse
+# SMOKE_REVIEWED_REGISTRY_MALFORMED. Editing a wired registry therefore also
+# selects its owning tests and this live-registry extractability guard.
+_REGISTRY_GUARD_TEST = "tests/test_ci_pr_smoke.py"
 
 # Top-level statements that either are control flow or mutate in place; a
 # registry module must not contain them at all. ``match`` executes at import
@@ -428,6 +434,9 @@ def select_modules(
     for sources, tests in identity_registries:
         if sources.intersection(changed):
             required += tests
+    for path, tests in _IDENTITY_PIN_REGISTRIES:
+        if path in changed:
+            required += (*tests, _REGISTRY_GUARD_TEST)
     for path in required:
         file = root / path
         try:
