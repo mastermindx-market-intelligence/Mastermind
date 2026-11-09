@@ -5156,3 +5156,397 @@ def test_r9_unarmed_watchdog_in_process_restores_the_handler(
     assert 0.9 <= elapsed < 4.0, elapsed
     assert signal.getitimer(signal.ITIMER_REAL)[0] == 0
     assert signal.getsignal(signal.SIGALRM) is before
+
+
+# --- r10: the lexer reading (REVIEW5 N1 MAJOR) -------------------------------
+#
+# Every r6–r9 reader found construct extents with a quote-UNAWARE bracket
+# matcher/regex, so a quoted, escaped or commented bracket inside a
+# construct hid the glued word: ``$(: "("; printf p)ool run grok …`` ran
+# ``pool`` in sealed zsh and bash while the armed guard ALLOWED it bound and
+# unbound (no binding check). r10 adds a quote-aware scanner reading (here-
+# documents, comments, ``case`` in a substitution, bash/zsh ``${…}`` extent
+# disagreements; see the guard's block comment).
+#
+# (id, template, shells that RUN it (ground truth), origin)
+# ``{a}`` = the arguments (launch arguments / a ground-truth marker tag).
+
+_R10_N1_ESCAPES = [
+    ("quote-glued", '$(: "("; printf p)"ool" {a}', "zsh bash", "REVIEW5"),
+    ("dq-paren", '$(: "("; printf p)ool {a}', "zsh bash", "REVIEW5"),
+    ("sq-close-paren", "$(: ')'; printf p)ool {a}", "zsh bash", "REVIEW5"),
+    ("escaped-paren", "$(: \\(; printf p)ool {a}", "zsh bash", "REVIEW5"),
+    ("brace-dq-close", '${x:-p${y#"}"}}ool {a}', "zsh bash", "REVIEW5"),
+    ("comment-paren", "$(printf p # (\n)ool {a}", "zsh bash", "REVIEW5"),
+    ("nested-in-echo", 'echo $($(: "("; printf p)ool {a})', "zsh bash", "REVIEW5"),
+    ("nested-in-bash-c", "bash -c '$(: \"(\"; printf p)ool {a}'", "zsh bash", "REVIEW5"),
+    ("sub-sh", '$(: "("; printf s)ub.sh {a}', "zsh bash", "REVIEW5"),
+    ("slot-py", '$(: "("; printf sl)ot.py {a}', "zsh bash", "REVIEW5"),
+    ("sq-open-paren", "$(: '('; printf p)ool {a}", "zsh bash", "C9 (11th: the sq twin)"),
+    # siblings found by Director C9 (an ``_r6_lex``-only reading misses them):
+    ("case-in-cmdsub", "$(case x in x) printf p;; esac)ool {a}", "zsh", "C9"),
+    ("heredoc-in-cmdsub", "$(cat <<E >/dev/null\n)\nE\nprintf p)ool {a}", "zsh", "C9"),
+    ("heredoc-then-line", 'cat <<E >/dev/null\n$(\nE\n$(: "("; printf p)ool {a}', "bash", "C9"),
+    ("brace-first-close", "x=p; ${x:-{}ool {a}", "bash", "C9"),
+]
+
+_R10_LAUNCH_ARGS = {"slot-py": "glm a /tmp glm-5.3"}
+
+
+def _r10_escape_command(row: tuple, args: str | None = None) -> str:
+    return row[1].replace("{a}", args or _R10_LAUNCH_ARGS.get(row[0], "run grok a /tmp grok-4"))
+
+
+def test_r10_escape_table_covers_every_reviewer_shape() -> None:
+    reviewer = {
+        '$(: "("; printf p)"ool"', '$(: "("; printf p)ool', "$(: ')'; printf p)ool",
+        "$(: \\(; printf p)ool", '${x:-p${y#"}"}}ool', "$(printf p # (\n)ool",
+        'echo $($(: "("; printf p)ool', "bash -c '$(: \"(\"; printf p)ool",
+        '$(: "("; printf s)ub.sh', '$(: "("; printf sl)ot.py',
+    }
+    words = {row[1].split(" {a}")[0] for row in _R10_N1_ESCAPES}
+    assert reviewer <= words
+    assert sum(row[3] != "C9" for row in _R10_N1_ESCAPES) == 11
+
+
+@pytest.mark.parametrize("row", _R10_N1_ESCAPES, ids=[row[0] for row in _R10_N1_ESCAPES])
+def test_r10_bracket_matcher_escapes_are_judged_and_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    command = _r10_escape_command(row)
+    assert guard.r6_names_wrapper(command), command
+    assert guard._r10_lexed_reading(command), command
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), (bound_reason, nobind_reason)
+    assert "R6_" in bound_reason and "R6_" in nobind_reason, (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+    assert "guard budget exceeded" not in bound_reason + nobind_reason
+
+
+def test_r10_reviewer_row_through_the_real_hook_command_line(tmp_path: Path) -> None:
+    """REVIEW5 N1 exact reproduction: armed, NO binding, ``python3 "<guard>"``.
+    r9 ALLOWED it (0.05–0.07 s) while the plain launch is denied 'missing
+    binding'."""
+    elapsed, code, out = _r8_hook_cli(
+        tmp_path, '$(: "("; printf p)"ool" run grok a /tmp grok-4', bound=False, owner=False
+    )
+    assert code == 0 and out, out
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "R6_COMMAND_SUBSTITUTION" in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, elapsed
+
+
+def test_r10_sealed_shells_run_each_escape(tmp_path: Path) -> None:
+    """Ground truth for _R10_N1_ESCAPES: SEALED zsh (``env -i``, ``zsh -f``)
+    and bash (``env -i``, ``--norc --noprofile``), PATH = FAKE wrappers that
+    only touch a marker + /usr/bin:/bin (the real wrappers are unreachable):
+    every shape EXECUTES a wrapper in each shell its row names."""
+    import shutil
+    import subprocess
+
+    zsh = shutil.which("zsh")
+    bash = "/bin/bash" if Path("/bin/bash").exists() else shutil.which("bash")
+    if zsh is None or bash is None:
+        pytest.skip("no zsh/bash")
+    bin_dir, ran, home = tmp_path / "bin", tmp_path / "ran", tmp_path / "home"
+    for directory in (bin_dir, ran, home):
+        directory.mkdir()
+    for name in ("pool", "sub.sh", "slot.py"):
+        fake = bin_dir / name
+        fake.write_text(f'#!/bin/sh\ntouch "{ran}/{name}-$1"\n', encoding="utf-8")
+        fake.chmod(0o755)
+    sealed_env = ["/usr/bin/env", "-i", f"PATH={bin_dir}:/usr/bin:/bin", f"HOME={home}"]
+    argvs = {"zsh": [zsh, "-f", "-c"], "bash": [bash, "--norc", "--noprofile", "-c"]}
+    checked = 0
+    for row in _R10_N1_ESCAPES:
+        for shell_name in row[2].split():
+            tag = "r10" + shell_name + row[0].replace("-", "")
+            command = _r10_escape_command(row, tag)
+            subprocess.run(
+                sealed_env + argvs[shell_name] + [command],
+                cwd=home, capture_output=True, text=True, timeout=20, check=False,
+            )
+            markers = [p.name for p in ran.iterdir() if p.name.endswith("-" + tag)]
+            assert markers, (row[0], shell_name, command)
+            assert guard.r6_names_wrapper(command), command
+            checked += 1
+    assert checked == 2 * 11 + 4  # 11 reviewer/twin rows in both shells + 4 siblings
+
+
+#: Honest commands with quoted, escaped or commented brackets inside
+#: constructs, here-documents with apostrophes (the ``git commit``/``gh pr
+#: create`` idiom), arithmetic and comments: OUT of scope (the reviewer's
+#: two named forms first).
+_R10_HONEST_OUT = [
+    'x=$(grep "(" f)',
+    'echo "a (b" $(date)',
+    "git commit -m \"$(cat <<'EOF'\nFix the lexer so it doesn't fail (r10).\n\n"
+    "Co-Authored-By: X <x@example.com>\nEOF\n)\"",
+    "git commit -m \"$(cat <<'EOF'\nFix `_r6_lex` so it doesn't (r10)\nEOF\n)\"",
+    "gh pr create --title t --body \"$(cat <<'EOF'\n## Summary\n- it's done (see #1)\nEOF\n)\"",
+    "cat > /tmp/x.py <<'EOF'\nprint('hi $x (')\nEOF",
+    'echo "$(date +%s) (started)"',
+    "awk '{print $1 \")\"}' f",
+    'sed -n "s/(\\(.*\\))/\\1/p" f',
+    'for f in $(ls *.py); do echo "$f (done)"; done',
+    "echo $(( (1 + 2) * 3 ))",
+    'echo "${HOME}" # (comment',
+    "printf '%s (%s)\\n' \"$a\" \"$b\"",
+    "result=$(python3 -c \"print('(')\")",
+    'echo `date` "(x)"',
+    "echo $(( 1 << 2 ))",
+    "cat <<E\n$HOME (home)\nE\necho done",
+    "echo ${CONFIG:-{}}",
+    "grep -n '${{ matrix.index }}' .github/workflows/ci.yml",
+    "sed -i '' 's/${{ github.token }}/x/' ci.yml",
+]
+
+
+@pytest.mark.parametrize("command", _R10_HONEST_OUT)
+def test_r10_honest_bracket_and_heredoc_forms_stay_out_of_scope(command: str) -> None:
+    assert not guard._r10_lexed_reading(command), command
+    assert not guard.r6_names_wrapper(command), command
+
+
+def test_r10_r6_lex_fails_on_the_commit_idiom_the_r10_reader_does_not() -> None:
+    """Why r10 does not reuse ``_r6_lex``'s failure as its fail-closed rule:
+    ``_r6_lex`` cannot read a here-document inside ``$(…)``, so an apostrophe
+    in a commit message fails it; "failure + ``$`` → in scope" would refuse
+    every such armed ``git commit``."""
+    command = _R10_HONEST_OUT[2]
+    assert guard._r6_lex(command)[1]  # the existing lexer fails …
+    assert not guard._r10_lexed_reading(command)  # … the r10 reader reads it
+
+
+@pytest.mark.parametrize("command", [
+    "grep -n '$(' docs/runbook.md",
+    'rg -n "\\$\\(" src',
+    "git commit -m \"$(cat <<'EOF'\nr10: don't (see $(x))\nEOF\n)\"",
+])
+def test_r10_honest_forms_keep_their_armed_verdict(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+
+
+@pytest.mark.parametrize("command, code", [
+    # an unterminated ``$(`` in deferred (quoted) text: fail closed (rule kept)
+    ("sed -i '' 's/$(/x/' f", "R6_NOT_A_PLAIN_LAUNCH"),
+    # ``'`` inside ``"${…}"``: a quote to bash 3.2, literal to zsh — fail closed
+    ("echo \"${y:-it's}\"", "R6_TOKENIZE_FAILED"),
+    # bare braces inside ``${…}`` whose bash end (first ``}``) and zsh end
+    # (counted) differ by more than ``}``: fail closed
+    ("echo ${x:-{a}b}", "R6_EXPANSION"),
+])
+def test_r10_known_over_refusals_are_pinned(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    code: str,
+) -> None:
+    """PINS KNOWN LIMITS (C9 ledger), not desired properties: these honest-
+    looking commands are newly IN SCOPE and refused in ARMED sessions only."""
+    assert guard._r10_lexed_reading(command)
+    (bound, bound_reason, _), (nobind, nobind_reason, _) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny")
+    assert code in bound_reason and code in nobind_reason, (bound_reason, nobind_reason)
+
+
+def test_r10_construct_depth_boundary_is_unchanged() -> None:
+    def chain(k: int) -> str:
+        return "echo " + "$(echo " * k + "hi" + ")" * k
+
+    for k in range(1, 10):
+        assert not guard._r10_lexed_reading(chain(k)), k
+    for k in (10, 11, 16, 400):
+        assert guard._r10_lexed_reading(chain(k)), k
+
+
+def test_r10_reading_is_never_narrower_than_r9(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Union property: ``r6_names_wrapper`` only gained a reading, so every
+    command in scope with the r10 reading switched off (= r9) is still in
+    scope with it (6 000 random quote/bracket/construct texts + the r9
+    escape table), and the r10 reading newly covers the N1 rows."""
+    import random
+
+    rng = random.Random(20261111)
+    pieces = ['"("', "')'", "\\(", "$(: x)", "$(printf p)", "${x:-p}", '"', "'", "p", "ool",
+              "o", "ol", "s", "ub.sh", "#", "\n", " ", ";", "`", "$", "{", "}", "(", ")",
+              "$'", "<<E\n", "\nE\n"]
+    commands = ["".join(rng.choice(pieces) for _ in range(rng.randint(1, 9))) for _ in range(6000)]
+    commands += [_r9_escape_command(row) for row in _R9_SCOPE_ESCAPES]
+    commands += [_r10_escape_command(row) for row in _R10_N1_ESCAPES]
+    with_r10 = [guard.r6_names_wrapper(command) for command in commands]
+    monkeypatch.setattr(guard, "_r10_lexed_reading", lambda _raw: False)
+    without_r10 = [guard.r6_names_wrapper(command) for command in commands]
+    narrowed = [c for c, a, b in zip(commands, with_r10, without_r10) if b and not a]
+    assert narrowed == []
+    assert sum(with_r10) > sum(without_r10)
+    assert not any(without_r10[-len(_R10_N1_ESCAPES):])  # r9 missed every N1 row
+    assert all(with_r10[-len(_R10_N1_ESCAPES):])
+
+
+# --- r10: budget rows for the lexer reading (real hook command line) --------
+
+_R10_BUDGET_ROWS = [
+    # (id, prefix, unit, suffix, bound, owner channel, verdict fragment)
+    ("r10-dq-paren-glue-dash-path", '$(: "("; printf p)ool run grok a /tmp grok-4 ', "-a/", "", False, False, "R6_COMMAND_SUBSTITUTION"),
+    ("r10-sq-close-glue-dq-run", "$(: ')'; printf p)ool run grok a /tmp grok-4 ", '"a"', "", False, False, "R6_COMMAND_SUBSTITUTION"),
+    ("r10-brace-dq-glue-sq-run", '${x:-p${y#"}"}}ool run grok a /tmp grok-4 ', "'a'", "", False, False, "R6_EXPANSION"),
+    ("r10-comment-paren-glue-run", "$(printf p # (\n)ool run grok a /tmp grok-4 ", "a ", "", False, False, "R6_TOKENIZE_FAILED"),
+    ("r10-bash-c-paren-glue-body", "bash -c '$(: \"(\"; printf p)ool run grok a /tmp grok-4 ", '"a" ', "'", False, False, "R6_"),
+    ("r10-case-cmdsub-run", "", "echo $(case x in x) a;; esac) ", "", False, False, "R6_"),
+    ("r10-heredoc-unclosed-run", '$(: "("; printf p)ool run grok a /tmp grok-4\n', "<<A\n", "", False, False, "R6_HEREDOC"),
+    ("r10-param-nested-default-run", "", "${x:-${y}}", "", False, False, "R6_EXPANSION"),
+    ("r10-param-default-p-run", "", "${x:-p}", "", False, False, "R6_EXPANSION"),
+    ("r10-quoted-heredoc-unclosed-cmdsub-run", "", "cat <<'E'\nit's $(x\nE\n", "", False, False, "R6_HEREDOC"),
+    ("r10-param-sq-default-run-no-wrapper", "echo ", "${x:-'a'}", "", False, False, "allow"),
+    ("r10-assign-cmdsub-run-no-wrapper", "", "x=$(a) ", "", False, False, "allow"),
+    ("r10-quoted-paren-cmdsub-run-no-wrapper", "", '$(: "(") ', "", False, False, "allow"),
+    ("r10-deferred-sq-cmdsub-run-no-wrapper", "", "'$(a)' ", "", False, False, "allow"),
+    ("r10-closed-heredoc-run-no-wrapper", "", "cat <<E\n$x (\nE\n", "", False, False, "allow"),
+    ("r10-quoted-heredoc-prose-run-no-wrapper", "", "cat <<'E'\nit's (x) $y\nE\n", "", False, False, "allow"),
+    ("r10-backtick-run-no-wrapper", "", "`a` ", "", False, False, "allow"),
+    ("r10-escaped-dq-cmdsub-run-no-wrapper", "", '"\\$(a)" ', "", False, False, "allow"),
+    ("r10-unclosed-sq-tail-no-wrapper", "echo $x '", "a(", "", False, False, "allow"),
+    ("r10-bound-launch-quoted-paren-args", "pool run glm a /tmp glm-5.3 ", '"(" ', "", True, True, "allow"),
+]
+
+
+@pytest.mark.parametrize("row", _R10_BUDGET_ROWS, ids=[row[0] for row in _R10_BUDGET_ROWS])
+def test_r10_budget_rows_finish_through_the_real_hook_command_line(
+    tmp_path: Path, row: tuple
+) -> None:
+    row_id, prefix, unit, suffix, bound, owner, fragment = row
+    prefix += " " * ((_R8_CAP - len(prefix) - len(suffix)) % len(unit))  # whole units
+    command = _r8_filled(prefix, unit, _R8_CAP, suffix)
+    assert len(command) == _R8_CAP
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=bound, owner=owner)
+    assert code == 0
+    if fragment == "allow":
+        assert out == "", out[:300]
+    else:
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", out[:300]
+        assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
+        assert "guard budget exceeded" not in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, (row_id, elapsed)
+
+
+# --- r10: the unarmed watchdog decision (REVIEW5 N2 MODERATE) ----------------
+#
+# Unarmed, the quadratic heredoc stripper runs BEFORE the legacy identity
+# check: ``pool run grok a /tmp grok-4⏎`` + N × ``<<A⏎`` with no POOL_* env
+# was DENIED by r8 ("missing POOL_ORCHESTRATOR_ID", 7.3–9.5 s) and got NO
+# DECISION from r9 at 7 s (fail open on every CLI). r10: the watchdog firing
+# DENIES when the raw text names a wrapper (recorded before the stripper).
+
+_R10_N2_TEXT = "pool run grok a /tmp grok-4\n" + "<<A\n" * 24_000
+
+
+def _r10_unarmed_hook(tmp_path: Path, command: str, budget: str | None = None):
+    env = {"MASTERMIND_GUARD_BUDGET_S": budget} if budget else {}
+    env.update({name: "" for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS")})
+    return _r9_hook(tmp_path, _payload(tmp_path, command), armed=False, extra_env=env)
+
+
+def test_r10_unarmed_heredoc_launch_denies_at_the_watchdog_default_budget(tmp_path: Path) -> None:
+    """REVIEW5 N2 exact shape, default 7 s budget, real hook command line:
+    DENY (r8-equivalent: the missing identity is named), inside the 10 s kill."""
+    elapsed, code, out = _r10_unarmed_hook(tmp_path, _R10_N2_TEXT)
+    assert code == 0 and out, out
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "guard budget exceeded" in reason and "fail closed" in reason
+    assert "POOL_ORCHESTRATOR_ID" in reason and "POOL_PARENT_RUN_ID" in reason
+    assert elapsed < 8.5, elapsed
+
+
+@pytest.mark.parametrize("count", [21_000, 22_500, 24_000])
+def test_r10_unarmed_heredoc_launch_denies_at_a_lowered_budget(tmp_path: Path, count: int) -> None:
+    command = "pool run grok a /tmp grok-4\n" + "<<A\n" * count
+    elapsed, code, out = _r10_unarmed_hook(tmp_path, command, "1.5")
+    assert code == 0 and out, out
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "guard budget exceeded" in reason and "POOL_ORCHESTRATOR_ID" in reason
+    assert elapsed < 4.0, elapsed
+
+
+@pytest.mark.parametrize("command", [
+    "pool run grok a /tmp grok-4\n" + "<<A\n" * 24_000,  # the literal launch
+    '$(: "("; printf p)ool run grok a /tmp grok-4\n' + "<<A\n" * 24_000,  # N1 + N2
+    "sub.sh glm-memory a\n" + "<<A\n" * 24_000,
+])
+def test_r10_unarmed_watchdog_denies_every_wrapper_naming_text(tmp_path: Path, command: str) -> None:
+    elapsed, code, out = _r10_unarmed_hook(tmp_path, command, "1.5")
+    assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert elapsed < 4.0, elapsed
+
+
+def test_r10_unarmed_adversarial_ci_text_is_still_no_decision(tmp_path: Path) -> None:
+    """The reviewer's unarmed ``gh`` CI-wait text: no wrapper named → r9's
+    no decision is kept (availability)."""
+    elapsed, code, out = _r10_unarmed_hook(tmp_path, _R9_F4_TEXT)
+    assert (code, out) == (0, "")
+    assert elapsed < 8.5, elapsed
+    elapsed, code, out = _r10_unarmed_hook(tmp_path, "gh run view 1\n" + "<<A\n" * 24_000, "1.5")
+    assert (code, out) == (0, "")
+    assert elapsed < 4.0, elapsed
+
+
+def test_r10_unarmed_scope_state_drives_the_watchdog_decision(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In process, budget 1 s: a still-running scope reading ("pending") is a
+    DENY; a slow step after a no-wrapper reading is no decision; a slow
+    non-Bash tool (state "unset") is no decision."""
+    import time
+
+    monkeypatch.setenv(guard.R8_WATCHDOG_ENV, "1")
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT", raising=False)
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+
+    def slow(*_args, **_kwargs):
+        time.sleep(30)
+
+    real_reading = guard.r6_names_wrapper
+    monkeypatch.setattr(guard, "r6_names_wrapper", slow)
+    with pytest.raises(SystemExit):
+        _r8_run_main(monkeypatch, _payload(shared_placement, "echo $(date)"))
+    assert "guard budget exceeded" in _emitted(capsys)["permissionDecisionReason"]
+    monkeypatch.setattr(guard, "r6_names_wrapper", real_reading)
+    monkeypatch.setattr(guard, "strip_heredocs", slow)
+    _r8_run_main(monkeypatch, _payload(shared_placement, "echo $(date)"))
+    assert capsys.readouterr().out == ""
+    with pytest.raises(SystemExit):
+        _r8_run_main(monkeypatch, _payload(shared_placement, "pool run grok a /tmp grok-4"))
+    assert "POOL_ORCHESTRATOR_ID" in _emitted(capsys)["permissionDecisionReason"]
+    monkeypatch.setattr(guard, "guard_native_child", slow)
+    started = time.monotonic()
+    _r8_run_main(monkeypatch, {
+        "cwd": str(shared_placement), "session_id": "s", "tool_name": "Agent",
+        "tool_input": {"model": "opus", "prompt": "x"},
+    })
+    assert capsys.readouterr().out == "" and time.monotonic() - started < 4.0
