@@ -66,8 +66,8 @@ def main(argv=None):
         os.environ.pop(name, None)
     os.environ.update(values)
     import uvicorn
-    uvicorn.run("ops.native_fabric.unified_router.gateway:app", host="127.0.0.1",
-                port=args.port, workers=1, access_log=False)
+    uvicorn.run("ops.native_fabric.unified_router.gateway:create_app", factory=True,
+                host="127.0.0.1", port=args.port, workers=1, access_log=False)
 
 
 if __name__ == "__main__":
