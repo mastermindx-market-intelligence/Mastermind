@@ -1,0 +1,35 @@
+/* Code surface (TD04). Deep-link only; no embedded editor or terminal. */
+
+.mm-code h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.3; }
+.mm-code > .muted { margin: 0 0 20px; font-size: 14px; }
+.mm-eyebrow { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--noir-champagne); }
+
+.mm-code-unavailable { display: flex; flex-direction: column; gap: 12px; max-width: 520px; padding: 24px; }
+.mm-code-unavailable > p { margin: 0; }
+.mm-code-evidence summary { color: var(--noir-text-secondary); font-size: 13px; cursor: pointer; }
+.mm-code-evidence p { margin: 8px 0 0; }
+.mm-code-evidence code { color: var(--noir-text-secondary); }
+
+.mm-code-threads { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.mm-code-thread { display: flex; flex-direction: column; gap: 12px; background: var(--noir-panel); border: 1px solid var(--noir-selected); border-radius: 14px; padding: 20px 24px; }
+.mm-code-thread-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mm-code-thread-head h2 { margin: 0; font-size: 20px; font-weight: 500; flex: 1 1 auto; }
+.mm-code-thread dl { display: grid; gap: 8px; margin: 0; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.mm-code-thread dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.mm-code-thread dt { color: var(--noir-text-tertiary); font-size: 13px; flex-shrink: 0; }
+.mm-code-thread dd { margin: 0; color: var(--noir-text-primary); font-size: 14px; text-align: right; overflow-wrap: anywhere; }
+.mm-code-thread dd a { color: var(--noir-steel); }
+.mm-code-open { align-self: flex-start; background: var(--noir-champagne); color: #17140f; border-radius: 9px; padding: 11px 16px; font-size: 14px; font-weight: 500; text-decoration: none; }
+
+.mm-chip { display: inline-flex; align-items: center; border: 1px solid var(--noir-selected); border-radius: 6px; background: var(--noir-raised); color: var(--noir-text-secondary); font-size: 12px; line-height: 18px; padding: 3px 9px; }
+.mm-chip-state[data-state="running"] { color: var(--noir-sage); }
+.mm-chip-state[data-state="queued"] { color: var(--noir-text-secondary); }
+.mm-chip-state[data-state="unknown"] { color: var(--noir-champagne); }
+.mm-chip-state[data-state="declined"] { color: var(--noir-rose); }
+.mm-chip-state[data-state="terminal"] { color: var(--noir-steel); }
+
+.mm-code-security { margin-top: 20px; font-size: 12px; }
+
+@media (max-width: 800px) {
+  .mm-code-thread dl { grid-template-columns: 1fr; }
+}
