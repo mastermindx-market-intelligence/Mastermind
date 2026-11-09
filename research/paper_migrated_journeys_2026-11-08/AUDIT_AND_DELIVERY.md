@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the 18 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the 19 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -32,6 +32,7 @@ Direct entry points for the 18 files amended in this successor. Each file retain
 | [Shared Shell company search](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) | Added a proposed phone selection/return journey with exact listing identity and enabled Analysis access when descriptive metadata is unavailable. |
 | [Expectation Surface](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | Added proposed EN/ZH finder-loading and unavailable states that preserve the query and chart, with a source-bound retry and no-match contract. |
 | [Intelligence Hub](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | Updated the entry map for later current/reference work, added exact Build and Archive destinations, and distinguished provisional research-list returns. |
+| [Bonds decision workspace](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0) | Aligned the retained market read across desktop, phone and tablet duration review; preserved all scenario calculations, inputs and inspector controls. |
 
 ## Verified mobile meaning corrections
 
@@ -1139,9 +1140,53 @@ A separate read-only Crypto audit found that later saved-case amendment `3IP-0` 
 
 The canonical Product Design System audit likewise found current F02 authority, unavailable/access distinctions, uncertain-write protection, conditional focus restoration and44px house hit targets already covered. Its later build companion remains a task tree, not an execution queue or permission grant. Historical G15 and `9SE-0`/`9SM-0` uncertainties remain intact. No token or system-contract mutation was made.
 
+## Bonds decision workspace — preserve the current read during duration review
+
+[File/page](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0). This is the dedicated Bonds Decision Workspace, separate from the previously amended Bonds/cross-asset study file.
+
+### The contradiction and its native authority
+
+Current entry `Z3-0` identifies the R10 desktop `2H1-0`, phone `GJ-0` and tablet `JP-0` as the active curve journey. Their corrected headline says **Real yields rose. Credit spreads widened.** Both Policy / real-rate tightening and Growth / cut repricing are **UNCONFIRMED**.
+
+The R12 contract on [Build page `p-2-0`](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-2-0), `3FC-0` / `3NL-0`, explicitly binds the illustrative five-session inputs: 3M/2Y−2bp, nominal10Y+18bp, real10Y+12bp, and high-yield spread+6bp. It says these explanation grades remain unconfirmed until actual rules are defined and verified.
+
+The existing duration reviews—desktop `2Z9-0`, phone `2QG-0`, tablet `2UW-0`—still retained the old stronger headline, a rising-front-end explanation, SUPPORTED policy tightening and CONTRADICTED growth/cut repricing. The desktop screenshot showed the old hero behind an inspector that explicitly promises the current rate read will remain visible and only the scenario-dependent result is under review.
+
+Root read the exact native origin, review and R12 trees and content, then confirmed the incumbent template identity: [templates/bonds.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/bonds.html.j2), blob `8bb464cbbc8e9381a66735cc67ceb44429ef6108`. The correction follows the already specified native R10/R12 fixture; it is not a newly inferred market conclusion or a claim that the template implements that design.
+
+### Sixteen exact alignments
+
+| Review | Current-origin content copied | Corrected existing nodes / new grade nodes |
+| --- | --- | --- |
+| Desktop `2Z9-0` | `2JU-0` headline; `2JV-0` dated comparison; `2P4-0` policy explanation; `2P9-0` growth explanation; both current unconfirmed grades. | `322-0`, `323-0`, `37C-0`, `37H-0`; grade `37B-0` replaced by `3P1-0`, `37G-0` by `3P3-0`. |
+| Phone `2QG-0` | `HA-0`, `HB-0`, `J3-0`, and current grades `J2-0`/`J6-0`. | `2R7-0`, `2R8-0`, `2T0-0`; grade `2SZ-0` replaced by `3P5-0`, `2T3-0` by `3P7-0`. |
+| Tablet `2UW-0` | `KG-0`, `KH-0`, `M9-0`, and current grades `M8-0`/`MC-0`. | `2VN-0`, `2VO-0`, `2XG-0`; grade `2XF-0` replaced by `3P9-0`, `2XJ-0` by `3PB-0`. |
+
+Ten existing text elements were updated directly, preserving the headline line break. Six qualification leaves were replaced with the current origins' neutral muted styling and typography, removing the obsolete green/red support/contradiction meanings. Desktop grade width remains124px. Phone/tablet grades size naturally to75px; native node bounds confirm all six fit inside their existing parent rows. The earlier61px phone SUPPORTED width was measured content, not an applied fixed-width style; no unnecessary parent resizing was introduced.
+
+### Verification and preserved behavior
+
+All **16 corrected elements match their respective current origins exactly**. The three reviews preserve346 unaffected text leaves: desktop180, phone84, tablet82. The unchanged origin boards and R12 contract preserve another366 leaves:162+62+62+80. There are no unintended text changes among those **712 preserved leaves**.
+
+Root inspected the final full desktop review and the phone/tablet hero captures. The corrected desktop headline remains legible behind the intended scrim. Phone/tablet foreground overlays continue to cover their backing layers as before; the underlying hero captures and measured grade geometry verify the retained layout. Lower backing-row captures outside the clipped review viewport were not treated as visual proof.
+
+Most directly, all three foreground inspector captures are **byte-for-byte identical before and after**:
+
+| Inspector | Native node | Capture size |
+| --- | --- | --- |
+| Desktop | `38P-0` | 590×1000 |
+| Phone | `2TM-0` | 390×1006 |
+| Tablet | `2Y3-0` | 768×790 |
+
+The +50bp shock,5.0/14.8-year modified durations,$10,000 examples,−$250/−$740 results,−300 to+300bp entry bounds, missing-convexity/cash-flow disclosures, accuracy qualifications, return/edit controls and independent evidence remain unchanged. Invalid-input state `39U-0`, R12 coverage `3C6-0`, read-input evidence `3I2-0` and contract `3FC-0` were not modified.
+
+All eight phase operations returned APPLIED_RESPONSE_OBSERVED: context-copy, desktop-policy, desktop-growth, phone-policy, phone-growth, tablet-policy, tablet-growth and context-finish under prefix `paper-bonds-duration-` and suffix `-20261109-c4-sd`. Explicit finish released only `2Z9-0`, `2QG-0` and `2UW-0`.
+
+This proves static state-family consistency. It does not establish executed origin → review → return behavior, a live market interpretation, scenario-calculation implementation, or deployment acceptance.
+
 ## Active continuation
 
-The successor covers18 design files. The Hub map now exposes current/reference destinations without promoting provisional states. The next supported corrections are the Bonds duration-review backing interpretation and the shared tool-search example count; preserve their existing inspectors, query, destinations, source bindings and release status.
+The successor covers19 design files. Bonds duration-review context now matches the current R10 origins, with its foreground inspectors preserved exactly. Continue with the confirmed shared tool-search fixture-completeness correction, then reassess remaining safe gaps without duplicating later current work.
 
 ## Acceptance boundary
 
