@@ -31,6 +31,24 @@ stacked on feat/mmos-v1-shared-contracts):
       this id before that selection.  The proven-live receipt path remains:
       a real-turn receipt through the selected incumbent runtime.
 
+Rev 5 T3 lane addition (PROVEN_LIVE for the adapter's own path; MMOS Rev 5
+D3, stacked on feat/mmos-rev5-t3-lane over feat/mmos-v1-integration):
+    - t3-native: exact class T3ExecutionAdapter exists in the source tree and
+      implements the WorkerExecutionAdapter floor plus reattach (replay-only,
+      same clientRequestId + namespace).  A REAL native execution + result
+      return through the adapter has been observed and recorded:
+      integrations/t3/live_proof/t3_live_proof_receipt.json (recorded
+      2026-11-09T04:23:23Z; environment m2studio / T3 Code 0.1.7 at
+      127.0.0.1:3773; one t3_thread_launch with binding-derived
+      clientRequestId 7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b,
+      incremental-cursor reads STARTING->SUCCEEDED, collect_result returned
+      the native result "T3-PROOF-OK"; intent persisted before the native
+      call and result ledgered before the CollectionReceipt, both asserted
+      live).  This is NOT a master merge and NOT runtime activation: the
+      adapter stays UNSELECTED — wiring the real MCP port into the selected
+      runtime's transport composition is a deployment act, and no routing
+      policy may bind a live worker through this id before that selection.
+
 Receipt path for a PROVEN_LIVE entry: attach the real-turn receipt ruling R5
 requires and move the corresponding catalog rows off SPEC_ONLY in the same
 change. There is no such receipt for claude-compatible-subscription, and no
@@ -80,7 +98,7 @@ from control_plane.worker_execution_contract import (
 # a name here unless this docstring records the receipt path or
 # source-implementation status that authorizes it.
 MASTER_IMPLEMENTED_ADAPTER_IDS = frozenset(
-    {"codex-cli", "canonical-paid-fabric", "hermes-native"}
+    {"codex-cli", "canonical-paid-fabric", "hermes-native", "t3-native"}
 )
 
 

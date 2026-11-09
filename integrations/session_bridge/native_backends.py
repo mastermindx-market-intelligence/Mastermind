@@ -158,14 +158,27 @@ class CanonicalTargetReader:
         fabric_reader: Callable[[], Any],
         codex_reader: Callable[[], Any],
         claude_reader: Callable[[], Any],
+        t3_reader: Callable[[], Any] | None = None,
     ) -> None:
         self._readers = {
             "fabric_attempt": fabric_reader,
             "codex": codex_reader,
             "claude": claude_reader,
+            # The kind is known, but its owner is optional. Without a composed
+            # projection the exact answer is "no addressable target", not an
+            # unsupported-kind refusal (same contract as claude).
+            "t3": t3_reader if t3_reader is not None else (lambda: []),
         }
         if any(not callable(reader) for reader in self._readers.values()):
             raise TypeError("all target readers must be callable")
+        # The omitted-kind inventory is the incumbent closed projection. A kind
+        # whose owner is not composed stays addressable (an exact read is empty)
+        # without inserting an empty group into that legacy inventory shape.
+        self._inventory = (
+            ("fabric_attempt", "codex", "claude", "t3")
+            if t3_reader is not None
+            else ("fabric_attempt", "codex", "claude")
+        )
 
     def __call__(self, kind: str | None) -> Any:
         if kind is not None:
@@ -174,7 +187,7 @@ class CanonicalTargetReader:
                 raise BridgeError("invalid_input", "unsupported target kind")
             return reader()
         values: dict[str, Any] = {}
-        remaining = iter(self._readers.items())
+        remaining = iter((name, self._readers[name]) for name in self._inventory)
         for name, reader in remaining:
             value = reader()
             if inspect.isawaitable(value):
