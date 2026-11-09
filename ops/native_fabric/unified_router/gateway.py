@@ -11,6 +11,8 @@ possible upstream effect; exhausted pools surface as typed refusals.
 """
 from __future__ import annotations
 
+import asyncio
+import functools
 import hmac
 import ipaddress
 import json
@@ -34,16 +36,21 @@ from ops.native_fabric.unified_router.routes import (
     RouteState,
     WIRE_ANTHROPIC,
     WIRE_OPENAI,
+    WIRE_RESPONSES,
     config_file_route_key,
     credential_pool_key,
     env_file_value,
     select_route,
 )
+from ops.native_fabric.unified_router import codex_oauth
 from ops.native_fabric.unified_router.wire import (
     OpenAIStreamTranslator,
+    ResponsesStreamTranslator,
     WireTranslationError,
     anthropic_to_openai,
+    anthropic_to_responses,
     openai_to_anthropic,
+    responses_to_anthropic,
 )
 
 ALLOWED = {("POST", "v1/messages"), ("POST", "v1/messages/count_tokens"),
@@ -64,6 +71,29 @@ def _public_reason(exc: Exception, fallback: str) -> str:
         return text
     _log.warning("unified router withheld exception detail: %s", type(exc).__name__)
     return fallback
+
+
+class _SyncHttpClient:
+    """Short-lived synchronous client for OAuth refresh endpoints.
+
+    Token refreshes are blocking file+HTTP transactions under the incumbent
+    auth.json lock; they run in a worker thread (see ``_run_in_executor``)
+    instead of blocking the router's event loop.
+    """
+
+    def __init__(self, timeout_s: float = 20.0):
+        self._client = httpx.Client(timeout=timeout_s, follow_redirects=False)
+
+    def post(self, *args, **kwargs):
+        return self._client.post(*args, **kwargs)
+
+    def close(self) -> None:
+        self._client.close()
+
+
+async def _run_in_executor(fn, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -110,6 +140,9 @@ def _routes_from_document(document: dict) -> tuple[Route, ...]:
             config_path=entry.get("config_path", ""),
             key_pointer=entry.get("key_pointer", ""),
             base_url_pointer=entry.get("base_url_pointer", ""),
+            token_url=entry.get("token_url", ""),
+            client_id=entry.get("client_id", ""),
+            originator=entry.get("originator", ""),
             upstream_model=tuple((slug, wire) for slug, wire
                                  in entry.get("upstream_model", {}).items()),
             auth_header=entry.get("auth_header", ""),
@@ -143,6 +176,8 @@ class RouterState:
     served: int = 0
     refused: int = 0
     per_route: dict[str, dict[str, int]] = field(default_factory=dict)
+    oauth_cursor: dict[str, int] = field(default_factory=dict)
+    oauth_bench: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def count(self, route_id: str, outcome: str) -> None:
         bucket = self.per_route.setdefault(route_id, {"served": 0, "refused": 0})
@@ -237,8 +272,14 @@ def create_app(cfg: Settings | None = None, *,
 
     def authorized(request: Request) -> bool:
         scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
-        return (scheme.lower() == "bearer"
-                and hmac.compare_digest(candidate, app.state.settings.proxy_token))
+        if scheme.lower() == "bearer" and hmac.compare_digest(
+                candidate, app.state.settings.proxy_token):
+            return True
+        # The Anthropic Messages wire's native credential header; accepted
+        # alongside Bearer exactly like the incumbent anthropic gateway.
+        api_key = request.headers.get("x-api-key", "")
+        return bool(api_key) and hmac.compare_digest(
+            api_key, app.state.settings.proxy_token)
 
     @app.get("/healthz")
     async def healthz(request: Request) -> Response:
@@ -346,9 +387,25 @@ def create_app(cfg: Settings | None = None, *,
         counting = request.url.path.endswith("/count_tokens")
         if counting and route.wire != WIRE_ANTHROPIC:
             return JSONResponse({"error": {
-                "message": "count_tokens is not available on OpenAI-wire routes",
+                "message": "count_tokens is not available on non-Anthropic-wire routes",
                 "type": "fabric_route_error", "route": route.route_id}},
                 status_code=HTTPStatus.NOT_IMPLEMENTED)
+        forwarded = dict(payload, model=route.wire_model(resolved))
+        wants_stream = payload.get("stream") is True
+        if route.wire == WIRE_RESPONSES:
+            # OAuth routes authorize per account inside the forwarder.
+            try:
+                return await _forward_responses(app, route, forwarded, wants_stream)
+            except _ResponsesRouteRefused as exc:
+                state.routes.record_failure(route.route_id, exc.reason,
+                                            now=time.monotonic(),
+                                            cooldown_s=cfg.route_cooldown_s)
+                state.refused += 1
+                state.count(route.route_id, "refused")
+                return JSONResponse({"error": {
+                    "message": f"fabric route unavailable: {exc}",
+                    "type": "fabric_route_error"}},
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE)
         try:
             authorization = _route_authorization(route, cfg)
         except (OSError, ValueError) as exc:
@@ -365,8 +422,6 @@ def create_app(cfg: Settings | None = None, *,
                 "code": "credential_unavailable"}},
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE)
 
-        forwarded = dict(payload, model=route.wire_model(resolved))
-        wants_stream = payload.get("stream") is True
         try:
             if counting:
                 return await _forward_anthropic_count(app, route, authorization,
@@ -517,6 +572,176 @@ def create_app(cfg: Settings | None = None, *,
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"cache-control": "no-store"})
+
+    class _ResponsesRouteRefused(RuntimeError):
+        """Admission-time refusal; no upstream effect has occurred."""
+
+        def __init__(self, reason: str):
+            super().__init__(reason)
+            self.reason = reason
+
+    def _oauth_headers(account) -> dict[str, str]:
+        headers = {"authorization": f"Bearer {account.access_token}",
+                   "content-type": "application/json",
+                   "accept-encoding": "identity",
+                   "originator": "hermes-agent",
+                   "user-agent": "HermesAgent/fabric-router"}
+        headers.update(codex_oauth.account_id_header(account.access_token))
+        return headers
+
+    def _oauth_accounts(route: Route):
+        accounts = codex_oauth.read_accounts(cfg.auth_store, route.pool)
+        now = time.time()
+        state: RouterState = app.state.router_state
+        eligible = [a for a in accounts
+                    if not a.exhausted
+                    and state.oauth_bench.get((route.route_id, a.id), 0.0) <= now]
+        return accounts, eligible
+
+    async def _refresh_once(route: Route, account):
+        upstream: httpx.AsyncClient = app.state.upstream
+        return await _run_in_executor(
+            codex_oauth.refresh_account, cfg.auth_store, route.pool, account,
+            token_url=route.token_url, client_id=route.client_id,
+            client=_SyncHttpClient(upstream))
+
+    async def _forward_responses(app_, route: Route, payload: dict,
+                                 wants_stream: bool) -> Response:
+        state: RouterState = app.state.router_state
+        cfg_: Settings = app.state.settings
+        upstream: httpx.AsyncClient = app.state.upstream
+        try:
+            responses_request = anthropic_to_responses(payload)
+        except WireTranslationError as exc:
+            return JSONResponse({"error": {"message": str(exc),
+                                           "type": "invalid_request_error"}},
+                                status_code=400)
+        accounts, eligible = _oauth_accounts(route)
+        if not eligible:
+            raise _ResponsesRouteRefused(
+                f"all {len(accounts)} accounts of pool {route.pool!r} are "
+                "exhausted or benched")
+        cursor = state.oauth_cursor.get(route.route_id, 0)
+        tried: set[str] = set()
+        order = []
+        for offset in range(len(eligible)):
+            account = eligible[(cursor + offset) % len(eligible)]
+            if account.id not in tried:
+                tried.add(account.id)
+                order.append(account)
+        body_bytes = json.dumps(responses_request).encode()
+        base = _route_base_url(route).rstrip("/")
+        last_refusal: _ResponsesRouteRefused | None = None
+        for index, account in enumerate(order):
+            state.oauth_cursor[route.route_id] = (
+                cursor + index + 1) % max(len(eligible), 1)
+            selected = account
+            response = None
+            for attempt in range(2):
+                request = upstream.build_request(
+                    "POST", f"{base}/responses",
+                    headers=_oauth_headers(selected),
+                    content=body_bytes)
+                response = await upstream.send(request, stream=True)
+                if response.status_code in (401, 403) and attempt == 0:
+                    # One refresh for this row, then one retry; a failed
+                    # refresh benches the row for this request only.
+                    await response.aclose()
+                    try:
+                        selected = await _refresh_once(route, selected)
+                    except (codex_oauth.OAuthPoolError, OSError, ValueError):
+                        break
+                    continue
+                break
+            if response is None:
+                continue
+            status = response.status_code
+            if status == 429:
+                retry_after = response.headers.get("retry-after", "")
+                reset_at = float(retry_after) + time.time() \
+                    if retry_after.replace(".", "", 1).isdigit() else 0.0
+                try:
+                    data = json.loads(await response.aread())
+                except ValueError:
+                    data = {}
+                await response.aclose()
+                detail = ""
+                error = (data.get("error") or {}) if isinstance(data, dict) else {}
+                detail = str(error.get("message") or "usage limit")[:200]
+                if reset_at <= 0.0:
+                    reset_at = time.time() + 3600.0
+                state.oauth_bench[(route.route_id, account.id)] = reset_at
+                if time.time() < reset_at:
+                    await _run_in_executor(
+                        codex_oauth.bench_row, cfg_.auth_store, route.pool,
+                        account.id, reset_at=reset_at,
+                        reason=f"http_429 {detail}")
+                last_refusal = _ResponsesRouteRefused(
+                    f"account {account.label!r} refused 429 ({detail})")
+                continue
+            if status >= 500:
+                await response.aclose()
+                last_refusal = _ResponsesRouteRefused(
+                    f"account {account.label!r} upstream {status}")
+                continue
+            if status >= 400:
+                data = await response.aread()
+                await response.aclose()
+                state.routes.record_success(route.route_id)
+                state.served += 1
+                state.count(route.route_id, "served")
+                return Response(content=data, status_code=status,
+                                media_type="application/json")
+            state.routes.record_success(route.route_id)
+            state.served += 1
+            state.count(route.route_id, "served")
+            if not wants_stream:
+                data = await response.aread()
+                await response.aclose()
+                try:
+                    translated = responses_to_anthropic(
+                        json.loads(data), model=payload["model"])
+                except (ValueError, WireTranslationError) as exc:
+                    return JSONResponse({"error": {
+                        "message": f"translation failed: {exc}",
+                        "type": "fabric_route_error"}},
+                        status_code=502)
+                return JSONResponse(translated)
+            translator = ResponsesStreamTranslator(model=payload["model"])
+
+            async def stream():
+                first = True
+                buffer = b""
+                try:
+                    async for part in response.aiter_bytes():
+                        buffer += part
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            text = line.decode("utf-8", "replace").strip()
+                            if not text.startswith("data:"):
+                                continue
+                            data = text[5:].strip()
+                            if data == "[DONE]":
+                                for event in translator.finish():
+                                    yield _sse(*event)
+                                return
+                            try:
+                                chunk = json.loads(data)
+                            except ValueError:
+                                continue
+                            if first:
+                                yield _sse(*translator.message_start())
+                                first = False
+                            for event in translator.feed(chunk):
+                                yield _sse(*event)
+                    for event in translator.finish():
+                        yield _sse(*event)
+                finally:
+                    await response.aclose()
+
+            return StreamingResponse(stream(), media_type="text/event-stream",
+                                     headers={"cache-control": "no-store"})
+        raise last_refusal or _ResponsesRouteRefused("no eligible account remained")
 
     def _sse(event: str, data: str) -> bytes:
         return f"event: {event}\ndata: {data}\n\n".encode()

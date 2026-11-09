@@ -21,6 +21,7 @@ DEFAULT_AUTH_STORE = Path.home() / ".hermes" / "auth.json"
 # Wire the request speaks on the left; what the route accepts on the right.
 WIRE_ANTHROPIC = "anthropic"
 WIRE_OPENAI = "openai"
+WIRE_RESPONSES = "responses"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,9 @@ class Route:
     config_path: str = ""          # incumbent key config for kind="config_file"
     key_pointer: str = ""          # dotted pointer to the key inside that config
     base_url_pointer: str = ""     # optional dotted pointer to the base URL
+    token_url: str = ""            # OAuth refresh endpoint for kind="oauth_pool"
+    client_id: str = ""            # OAuth client id for kind="oauth_pool"
+    originator: str = ""           # identity header mirrored from the incumbent client
     upstream_model: tuple[tuple[str, str], ...] = ()  # public slug -> wire id
     auth_header: str = ""          # upstream header for the raw credential (default Bearer authorization)
     session_header: str = ""       # upstream header carrying a stable per-affinity session id

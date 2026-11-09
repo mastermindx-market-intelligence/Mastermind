@@ -242,3 +242,247 @@ class OpenAIStreamTranslator:
             "usage": {"output_tokens": self._usage.get("completion_tokens", 0)}}))
         out.append(self._events("message_stop", {"type": "message_stop"}))
         return out
+
+
+# ── OpenAI Responses wire (ChatGPT codex backend) ─────────────────────────────
+
+def anthropic_to_responses(body: dict) -> dict:
+    """Anthropic Messages request -> OpenAI Responses request (closed)."""
+    _require(isinstance(body, dict), "FABRIC_TRANSLATE_BODY")
+    input_items: list[dict] = []
+    system = body.get("system")
+    instructions: str | None = None
+    if isinstance(system, str) and system:
+        instructions = system
+    elif isinstance(system, list):
+        text = "\n".join(block.get("text", "") for block in system
+                         if isinstance(block, dict) and block.get("type") == "text")
+        if text:
+            instructions = text
+    for message in body.get("messages", []):
+        _require(isinstance(message, dict), "FABRIC_TRANSLATE_MESSAGE")
+        role = message.get("role")
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else (
+            [{"type": "text", "text": content}] if isinstance(content, str) else [])
+        if role == "user":
+            parts: list[dict] = []
+            for block in blocks:
+                kind = block.get("type")
+                if kind == "text":
+                    parts.append({"type": "input_text",
+                                  "text": block.get("text", "")})
+                elif kind == "image":
+                    source = block.get("source") or {}
+                    if source.get("type") == "base64":
+                        parts.append({"type": "input_image",
+                                      "image_url":
+                                          f"data:{source.get('media_type','image/png')}"
+                                          f";base64,{source.get('data','')}"})
+                elif kind == "tool_result":
+                    inner = block.get("content")
+                    if isinstance(inner, list):
+                        text = "\n".join(p.get("text", "") for p in inner
+                                         if isinstance(p, dict)
+                                         and p.get("type") == "text")
+                    else:
+                        text = inner if isinstance(inner, str) else json.dumps(inner)
+                    input_items.append({"type": "function_call_output",
+                                        "call_id": block.get("tool_use_id", ""),
+                                        "output": text})
+                else:
+                    raise WireTranslationError("FABRIC_TRANSLATE_BLOCK")
+            if parts:
+                input_items.append({"role": "user", "content": parts})
+        elif role == "assistant":
+            parts = []
+            calls = []
+            for block in blocks:
+                kind = block.get("type")
+                if kind == "text":
+                    parts.append({"type": "output_text",
+                                  "text": block.get("text", "")})
+                elif kind == "tool_use":
+                    calls.append({"type": "function_call",
+                                  "call_id": block.get("id", ""),
+                                  "name": block.get("name", ""),
+                                  "arguments": json.dumps(
+                                      block.get("input") or {},
+                                      separators=(",", ":"))})
+                elif kind == "thinking":
+                    continue
+                else:
+                    raise WireTranslationError("FABRIC_TRANSLATE_BLOCK")
+            if parts:
+                input_items.append({"role": "assistant", "content": parts})
+            input_items.extend(calls)
+        else:
+            raise WireTranslationError("FABRIC_TRANSLATE_ROLE")
+    request: dict = {"model": body.get("model"), "input": input_items,
+                     "max_output_tokens": body.get("max_tokens"),
+                     "store": False}
+    if instructions is not None:
+        request["instructions"] = instructions
+    if body.get("stream") is True:
+        request["stream"] = True
+    for source, target in (("temperature", "temperature"), ("top_p", "top_p")):
+        if isinstance(body.get(source), (int, float)):
+            request[target] = body[source]
+    tools = body.get("tools")
+    if isinstance(tools, list) and tools:
+        request["tools"] = [{"type": "function", "name": tool.get("name", ""),
+                             "description": tool.get("description", "") or None,
+                             "parameters": tool.get("input_schema")
+                             or {"type": "object"}}
+                            for tool in tools if isinstance(tool, dict)]
+        choice = body.get("tool_choice")
+        if isinstance(choice, dict):
+            if choice.get("type") == "any":
+                request["tool_choice"] = "required"
+            elif choice.get("type") == "tool":
+                request["tool_choice"] = {"type": "function",
+                                          "name": choice.get("name", "")}
+            else:
+                request["tool_choice"] = "auto"
+    return request
+
+
+def responses_to_anthropic(payload: dict, *, model: str) -> dict:
+    """OpenAI Responses response -> Anthropic Messages response (closed)."""
+    _require(isinstance(payload, dict) and isinstance(payload.get("output"), list),
+             "FABRIC_TRANSLATE_RESPONSE")
+    content: list[dict] = []
+    finish = "end_turn"
+    for item in payload["output"]:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        if kind == "message":
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "output_text":
+                    text = part.get("text")
+                    if isinstance(text, str) and text:
+                        content.append({"type": "text", "text": text})
+        elif kind == "function_call":
+            try:
+                arguments = json.loads(item.get("arguments") or "{}")
+            except ValueError:
+                raise WireTranslationError(
+                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            content.append({"type": "tool_use", "id": item.get("call_id", ""),
+                            "name": item.get("name", ""), "input": arguments})
+            finish = "tool_use"
+        elif kind == "reasoning":
+            continue
+        else:
+            continue
+    if not content:
+        content.append({"type": "text", "text": ""})
+    status = payload.get("status")
+    if status == "incomplete" and finish != "tool_use":
+        finish = "max_tokens"
+    usage = payload.get("usage") or {}
+    return {"id": payload.get("id") or "msg_fabric", "type": "message",
+            "role": "assistant", "model": model, "content": content,
+            "stop_reason": finish, "stop_sequence": None,
+            "usage": {"input_tokens": usage.get("input_tokens", 0),
+                      "output_tokens": usage.get("output_tokens", 0)}}
+
+
+class ResponsesStreamTranslator:
+    """Incremental Responses events -> Anthropic Messages SSE events."""
+
+    def __init__(self, *, model: str):
+        self.model = model
+        self._text_open = False
+        self._calls: dict[str, dict] = {}
+        self._order: list[str] = []
+        self._finish: str | None = None
+        self._usage: dict = {}
+        self._block_index = 0
+
+    def _events(self, event: str, data: dict) -> tuple[str, str]:
+        return event, json.dumps(data, separators=(",", ":"))
+
+    def message_start(self) -> tuple[str, str]:
+        return self._events("message_start", {"type": "message_start", "message": {
+            "id": "msg_fabric", "type": "message", "role": "assistant",
+            "model": self.model, "content": [], "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0}}})
+
+    def feed(self, event: dict) -> list[tuple[str, str]]:
+        _require(isinstance(event, dict), "FABRIC_TRANSLATE_CHUNK")
+        out: list[tuple[str, str]] = []
+        kind = event.get("type")
+        if kind == "response.output_text.delta":
+            piece = event.get("delta")
+            if isinstance(piece, str) and piece:
+                if not self._text_open:
+                    out.append(self._events("content_block_start", {
+                        "type": "content_block_start", "index": self._block_index,
+                        "content_block": {"type": "text", "text": ""}}))
+                    self._text_open = True
+                out.append(self._events("content_block_delta", {
+                    "type": "content_block_delta", "index": self._block_index,
+                    "delta": {"type": "text_delta", "text": piece}}))
+        elif kind == "response.output_item.added":
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                call_id = str(item.get("call_id") or item.get("id")
+                              or f"toolu_{len(self._calls)}")
+                self._calls[call_id] = {"id": call_id, "name": item.get("name", ""),
+                                        "arguments": ""}
+                self._order.append(call_id)
+        elif kind == "response.function_call_arguments.delta":
+            call_id = str(event.get("call_id") or "")
+            tool = self._calls.get(call_id)
+            if tool is not None and isinstance(event.get("delta"), str):
+                tool["arguments"] += event["delta"]
+        usage = event.get("usage")
+        if isinstance(usage, dict):
+            self._usage = usage
+        if kind == "response.completed":
+            response = event.get("response") or {}
+            if response.get("status") == "incomplete":
+                self._finish = "max_tokens"
+            elif self._calls:
+                self._finish = "tool_use"
+            else:
+                self._finish = "end_turn"
+            self._usage = response.get("usage") or self._usage
+        return out
+
+    def finish(self) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        if self._text_open:
+            out.append(self._events("content_block_stop", {
+                "type": "content_block_stop", "index": self._block_index}))
+            self._text_open = False
+            self._block_index += 1
+        for call_id in self._order:
+            tool = self._calls[call_id]
+            try:
+                arguments = json.loads(tool["arguments"] or "{}")
+            except ValueError:
+                raise WireTranslationError(
+                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            out.append(self._events("content_block_start", {
+                "type": "content_block_start", "index": self._block_index,
+                "content_block": {"type": "tool_use", "id": tool["id"],
+                                  "name": tool["name"], "input": {}}}))
+            out.append(self._events("content_block_delta", {
+                "type": "content_block_delta", "index": self._block_index,
+                "delta": {"type": "input_json_delta",
+                          "partial_json": json.dumps(arguments,
+                                                      separators=(",", ":"))}}))
+            out.append(self._events("content_block_stop", {
+                "type": "content_block_stop", "index": self._block_index}))
+            self._block_index += 1
+        stop_reason = self._finish or ("tool_use" if self._order else "end_turn")
+        out.append(self._events("message_delta", {
+            "type": "message_delta", "delta": {"stop_reason": stop_reason,
+                                               "stop_sequence": None},
+            "usage": {"output_tokens": self._usage.get("output_tokens", 0)}}))
+        out.append(self._events("message_stop", {"type": "message_stop"}))
+        return out
