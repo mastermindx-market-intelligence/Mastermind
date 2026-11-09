@@ -3264,3 +3264,24 @@ def test_r6_dead_interpreter_lists_are_gone() -> None:
     for name in ("_INTERPRETER_HEAD_RE", "_ALWAYS_INLINE_HEAD_RE",
                  "_deny_structurally_unobservable", "_SHELL_FEED_RE"):
         assert not hasattr(guard, name), name
+
+
+def test_binding_gate_admits_v1_1_native_binding_and_refuses_other_labels():
+    """The claim seam issues ExecutionBinding.v1.1 for t3-native routes (same
+    v1 required fields plus the sparse native-runtime extension). The gate's
+    restated shape law admits both labels and refuses anything else, so a
+    lawful t3-native launch reaches the binding/identity checks instead of
+    dying at the schema label (Director C2 E2E finding)."""
+    from ops.executive_os import provider_orchestrator_guard as guard
+    base = {
+        "root_run_ref": "runs/root-1", "immediate_parent_run_ref": "runs/root-1",
+        "logical_child_key": "child-1", "request_digest": "a" * 64,
+        "fence_counter": 3, "assignment_generation": 1,
+    }
+    assert guard._binding_problems({**base, "schema": "ExecutionBinding.v1"}, "env") == ""
+    assert guard._binding_problems({**base, "schema": "ExecutionBinding.v1.1",
+        "runtime_kind": "t3-native", "operation_key": "b" * 64,
+        "caller_namespace": ""}, "env") == ""
+    for label in ("ExecutionBinding.v2", "ExecutionBinding.v1.2", "", "ExecutionBinding"):
+        problem = guard._binding_problems({**base, "schema": label}, "env")
+        assert problem.startswith("env: schema must be ExecutionBinding.v1"), (label, problem)

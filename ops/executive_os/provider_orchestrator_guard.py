@@ -152,6 +152,12 @@ BINDING_ENV = "POOL_EXECUTION_BINDING"
 PLACEMENT_RECEIPT_ENV = "MASTERMIND_PLACEMENT_RECEIPT"
 PLACEMENT_RECEIPT_SCHEMA = "mastermind.placement_receipt/v1"
 EXECUTION_BINDING_SCHEMA = "ExecutionBinding.v1"
+#: Broker-issued binding generations the guard admits. v1.1 is the sparse
+#: native-runtime extension (runtime_kind / operation_key / caller_namespace /
+#: lease join) issued by claim_job for t3-native routes; its v1 fields and
+#: the fence/identity law below are unchanged, so the gate validates the
+#: same required shape for both labels. Anything else is refused.
+EXECUTION_BINDING_SCHEMAS = (EXECUTION_BINDING_SCHEMA, "ExecutionBinding.v1.1")
 #: Fields that make the presented binding BE the owner's current fenced
 #: assignment: the (root, immediate parent, logical child) identity triple,
 #: the admitted request digest, and the fenced attempt.
@@ -1409,8 +1415,8 @@ def _binding_problems(binding: object, owner: str) -> str:
     module, so it re-states the binding's structural law locally."""
     if not isinstance(binding, dict):
         return f"{owner}: binding is not a JSON object"
-    if str(binding.get("schema") or "") != EXECUTION_BINDING_SCHEMA:
-        return f"{owner}: schema must be {EXECUTION_BINDING_SCHEMA}"
+    if str(binding.get("schema") or "") not in EXECUTION_BINDING_SCHEMAS:
+        return f"{owner}: schema must be {EXECUTION_BINDING_SCHEMA} or {EXECUTION_BINDING_SCHEMAS[1]}"
     for name in ("root_run_ref", "immediate_parent_run_ref", "logical_child_key"):
         if not str(binding.get(name) or "").strip():
             return f"{owner}: {name} is required"
