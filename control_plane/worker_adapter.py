@@ -102,6 +102,20 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         adapter_id="hermes-native", implemented=True,
         implementation="control_plane.hermes_worker_adapter.HermesWorkerAdapter",
     ),
+    # Rev 5 D3 (T3 lane): closed t3-native seam.  T3ExecutionAdapter drives
+    # the native T3 thread seams (launch with a binding-derived clientRequestId,
+    # incremental-cursor reads, exact-run interrupt, replay-only recovery)
+    # through an injected T3NativeClientPort; the adapter never speaks
+    # HTTP/MCP, holds no credentials, and spawns no processes.  BUILT_NOT_
+    # PROVEN: no real native execution + result return through the selected
+    # runtime has been observed yet, so the descriptor is implemented=False —
+    # registration selects nothing and a routing policy cannot bind a live
+    # worker through this id.  Donor: T3 Code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
+    # (seams adapted, never rebuilt); delegate_task lineage is never forged.
+    "t3-native": AdapterDescriptor(
+        adapter_id="t3-native", implemented=False,
+        implementation="control_plane.t3_execution_adapter.T3ExecutionAdapter",
+    ),
     # WO-18 (MMOS V1, OQ-11/OQ-7): the scoped V1 DeepSeek route's adapter
     # identity — the incumbent DeepSeek lane is OpenCodeWorkerAdapter
     # (control_plane/opencode_worker.py, OQ-11 ruling).  Registered so the
