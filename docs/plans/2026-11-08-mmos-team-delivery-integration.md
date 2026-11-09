@@ -495,7 +495,7 @@ Final page readback: p-O-0 has 13 product boards; p-R-0 has 17 product boards; p
 
 **Hermes and company continuity.** A teammate is a persistent profile/session identity. Its conversation and project survive a coding delegation. The roster derives from authenticated membership; the example count of twelve must never become a product limit, filter or live-read fallback.
 
-**Teamlink.** The composer declares recipient, visibility and intent. Informational room messages do not silently become actionable assignments. Busy T3 send queues the next turn; interrupt/stop is a separate supported action. Delivery, acknowledgement, execution and return have different evidence and states. Uncertain delivery retains the original operation and offers status reconciliation; reconnect does not resend or launch another attempt. Context is reference-based and expiry-aware, with the original project/conversation carried through the return path.
+**Teamlink.** The composer declares recipient, visibility and intent. Informational room messages do not silently become actionable assignments. The explicitly selected Next turn action queues a continuation; steering, restart and stop remain distinct capability-gated actions (see the current send-mode correction in Section 17). Delivery, acknowledgement, execution and return have different evidence and states. Uncertain delivery retains the original operation and offers status reconciliation; reconnect does not resend or launch another attempt. Context is reference-based and expiry-aware, with the original project/conversation carried through the return path.
 
 At the observed census, T3 MCP challenged with OAuth and exposed read/operate scope; an authenticated Hermes-to-T3 roundtrip had not been executed. Result return was pull-based through existing T3 reads/wait behavior, without proven push delivery into Hermes. The designed return experience must be implemented through supported existing owners and qualified with a real original-parent receipt. It is not a claim that a new push adapter already exists. Cross-host routes stay unavailable until their actual registration/auth/capability proof exists.
 
@@ -559,3 +559,44 @@ Settings need a visible concrete scope, not a universal global form. Preserve T3
 **Research roles:** principal retains all Paper/source mutation. Three bounded native reasoning advisors inspect T3 backend, Hermes ownership and T3 settings taxonomy. WHY NOT FABLE: source/architecture critique and design judgment only; no implementation labor or new runtime assignment. Findings are advisory evidence, not GitHub approval.
 
 **Next safe phase:** complete the donor feature/settings map, author the Code and unified Settings pages, verify each meaningful design group, persist the exact native frame map here, and continue through final coverage audit.
+
+
+## 17. Full donor study and first native workspace milestone — active continuation
+
+This section supersedes older census assumptions where named below. It is a saved/read-back milestone within Section 16, **not** completion of the expanded design commission. Principal remains the sole canvas/source writer; the three bounded reasoning advisors completed their source studies. No runtime work was launched.
+
+### Answer-changing source findings
+
+1. **Full embedding:** [T3 architecture](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/overview.md) assigns shared connection/domain state to packages/client-runtime and execution to the environment server. Reuse the authenticated typed RPC/subscription boundary for the full workspace; retain MCP for outside-agent operations. [Environment authentication](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/environment-auth.md) explicitly refuses mcp-client sessions on other HTTP/WebSocket paths. This is a donor composition design, not a claim that a public stable SDK or installed integration exists.
+2. **Send modes:** [ThreadManagementService](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/orchestration-v2/ThreadManagementService.ts), sendToThread, implements auto, queue, steer and restart. Auto can steer an active steerable run; explicit queue targets the next turn. Fresh-context input does not join the active turn. The UI exposes the intended action and renders actual started/queued/steered/restarted delivery. This replaces any universal “busy T3 sends always queue” interpretation of Section 15.
+3. **Completion:** provider turn end, checkpoint/diff finalization, thread settlement and Mastermind objective acceptance remain different milestones. T3's existing receipt/event/projection and effect owners remain authoritative; viewer reconnect does not resubmit writes.
+4. **Settings:** [scope resolver](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/settingsScope.ts) preserves stale/unavailable selections and never broadens them to All. All environments is an explicit set of connected, loaded targets. [project resolution](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/shared/src/projectSettings.ts) applies project overrides, then only designated t3.json-backed settings when the effective value is null; it is not a universal three-level inheritance ladder.
+5. **Reset correction:** [useSettingsRestore](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/SettingsPanels.tsx) mixes client and server settings despite the donor's device-default wording. Mastermind separates Reset this device, Reset selected environment settings and Remove project override, with target/impact review and per-target outcomes.
+6. **Capture:** [SnapShots](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/user/snap-shot.md) means native screen/window capture into the composer. It is separate from hidden-ref code checkpoints and provider conversation rollback.
+7. **Portable history:** [portable handoffs](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/user/portable-handoffs.md) and current ContextHandoffService select full messages within a token budget and retain references to omitted history. Older compact activity summaries are not a universal 240-character handoff format. Context transfer does not clone tool state, credentials, reasoning or execution authority.
+8. **Persistent teammate:** [Hermes profiles](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/user-guide/profiles.md), [Bot Mode](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/user-guide/bot-mode.md) and [settings scope](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/store/settings-scope.ts) keep profile-owned configuration/memory/skills/sessions/routines and pin the displayed profile in API requests. Persistent Bot Chat, ordinary Hermes sessions, Hermes ACP coding sessions and T3 threads are distinct objects with links.
+9. **Placement and model routing:** T3's device-local environment preferences (Prefer/Normal/Less often/Manual only) do not create another company placement or Capacity Fabric model/account router. App helper consumers—titles, source-control writing, review guides, voice cleanup—retain separate supported model selections.
+
+### Native frames already authored and visually inspected
+
+| Frame | Native ID | Page | Visible workflow |
+|---|---|---|---|
+| CW01 · Code · Work inbox | 19K7-0 | p-U-0 | Work inbox, pinned/Needs you/Working/Settled, exact origin and selected-work inspector |
+| CW02 · Code · Embedded workbench | 19VK-0 | p-U-0 | Embedded thread inbox, conversation, next-turn composer, docked terminal and browser |
+| CW03 · Code · New thread and workspace | 1A6U-0 | p-U-0 | New/root/existing worktree, base branch, permission, runtime/model and original return destination |
+| CW04 · Code · Files and changes | 1AGU-0 | p-U-0 | Files, turn/branch/commit changes, contextual comments, prompt context and checkpoint entry |
+| CW05 · Code · Pull request inbox | 1ASS-0 | p-U-0 | Company PR inbox, filters, selected summary, checks/review and original thread |
+| CW06 · Code · Pull request review | 1B49-0 | p-U-0 | PR code review, pending comments, viewed files, linked PRs and repository merge requirements |
+| US01 · Settings · One searchable system | 1BFO-0 | p-V-0 | Unified settings taxonomy, control search and retained context |
+| US02 · Settings · Projects and sessions | 1BR6-0 | p-V-0 | Project/environment/checkout scope, inherited/overridden session and workspace defaults |
+| US03 · Settings · Runtimes and models | 1C3W-0 | p-V-0 | Environment-owned coding runtime, DSH ACP command, model catalog, Fabric route and app helpers |
+
+Code page: [17 · Code workspace · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0). Settings page: [18 · Unified settings · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0). New states/build pages p-W-0 and p-X-0 are reserved for this owned expansion and remain to be authored.
+
+### Transport reconciliation
+
+Operation mmos-t3-full-design-20261109-c4-cw06-clone lost its connection response. No automatic replay or cross-carrier Paper write occurred. Three successful full enumerations of the original p-U-0 page on the original Mastermind Paper carrier showed exactly the five acknowledged IDs (19K7-0, 19VK-0, 1A6U-0, 1AGU-0, 1ASS-0), with no unacknowledged clone. After connection recovery and explicit target-state reconciliation, the missing frame was created on that same carrier as 1B49-0 and visually checked. Read-only transport diagnosis changed no service, config, runtime, credentials or application state.
+
+### Remaining authorized design frontier
+
+Complete all eight tool surfaces and queue/steer/restart, native-session adoption, portable context/history and checkpoint states; complete all 22 T3 settings families plus Hermes teammate/capability/routine scope; add tablet/mobile views, operational/unsupported/partial-save states and source-to-frame build maps. Verify every resulting native board, reconcile the old directory/build links, save/read back final coverage, then release only owned working indicators. Continue in the same healthy turn.
