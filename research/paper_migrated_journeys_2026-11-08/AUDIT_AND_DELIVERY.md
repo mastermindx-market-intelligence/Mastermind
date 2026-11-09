@@ -180,9 +180,83 @@ All3 phase operations returned APPLIED_RESPONSE_OBSERVED:
 - `paper-government-320-confirmed-return-zh-20261108-c4`
 - `paper-government-320-returns-finish-20261108-c4`
 
+## Forex local preparation and current account saving — verified review/gallery phase
+
+File [Forex Guided Intelligence — Source Revisions](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0). This phase corrects preparation semantics, provides source-bound account states, and preserves the separately labeled future watch lifecycle.
+
+### Changes and native verification
+
+- Seven review variants `64Y-0`, `66F-0`, `67Z-0`, `69K-0`, `6B7-0`, `6D1-0`, `6EI-0` no longer say a condition is already saved before the user keeps it. Their notice states that it is not saved to the account and monitoring is inactive. Six actions say “Keep prepared in this tab”; the structural case says “Keep case in this tab”, remaining a future/manual case specification.
+- The first390px screenshot caught overflow in the old fixed-width action. All seven owned action rows were replaced with responsive Back/Keep controls,44px minimum height and wrapping-safe text. Native390px and expanded desktop verification showed the complete labels without clipping. New action-row roots are `B17-0`, `B1D-0`, `B1J-0`, `B1P-0`, `B1V-0`, `B21-0`, `B27-0`.
+- Prepared-result panel `87R-0` now says “Prepared in this tab · Not saved to your account”. Its former arbitrary saved “Revision1” is replaced by “Account save / Not created”. The unrelated valuation paragraph was replaced with the useful next step: review in My watches and explicitly save to the account. Its existing rail was not added or restyled by this phase.
+- Execution review `6B7-0` now shows UTC4H calendar, unavailable closing prices, inactive monitoring and no created account save. The collapsed/expanded exact-rule editors `9RG-0` and `9SF-0` retain the sample condition/expiry while identifying an unavailable feed, unavailable monitoring and the requirement for a future UTC expiry when actually saving. Unsupported activation/re-evaluation/pause assertions were removed from these current preparation paths.
+- About-reference panel `8DK-0` states that prepared drafts stay in this tab and reloading clears them. Its separate illustrative/reference and runtime qualification remains.
+- A native duplicated artboard `AZ5-0`, “R26 · Current account saving ·390px states and source contract”, is placed at x6588/y10229,1440×1837,80px to the right of the existing builder index. Body `B11-0` contains six390px cards: local draft `B2E-0`, pending save `B2T-0`, unconfirmed result `B38-0`, account-confirmed inactive revision example `B3K-0`, revision conflict `B3X-0`, and account change `B4A-0`. The illustrative USD/JPY rule uses the existing145.60 threshold with two completed consecutive4H closes and a clearly labeled example expiry16Nov2026,16:00UTC. It is no market observation or account record.
+- Contract `B4J-0` binds scope, confirmation, uncertain save, exact edit/delete, account boundary, return and inventory semantics. The implementation index `AV5-0` links `AZ5-0` through `B5C-0`, before supporting/future references. Current My watches routing now ends in inactive saving. The old exact design-count badge was replaced by a descriptive reference label, avoiding a stale total after extension. Future-owner watch lifecycle `AWW-0`/`AWX-0`/`AWY-0` and the design/runtime boundary at `AX0-0` remain explicit.
+
+Root inspected the full1837px gallery, updated index,390px review, expanded execution review, prepared result, About-reference panel, and collapsed/expanded exact-rule editor screenshots. All new gallery text/actions fit; no accent rails were added. The index is1440×1188; its next column begins80px beyond its right edge. Explicit finish released only the13 completed review/reference/artboard targets. Main-screen `4Z4-0` and `97H-0` have the initial local-wording correction but their foreground Pause/Resume and account-section integration remain a separate active phase below.
+
+### Current source, accepted scope and limits
+
+Root read the following exact files at Macro `aec7f387badcdf69c9a947fafbc73b4c68470c7d`:
+
+| Source | Blob |
+|---|---|
+| [`templates/forex_r26.js`](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/forex_r26.js) | `eec643c7bb3ce9727d156939d33a0f1a20443ede` |
+| [`templates/forex_watch_client.js`](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/forex_watch_client.js) | `89fd276a93949e7e03fb30196eb251aca517f173` |
+| [`templates/forex_r26_workspace.html.j2`](https://github.com/mastermindx-market-intelligence/macro/blob/aec7f387badcdf69c9a947fafbc73b4c68470c7d/templates/forex_r26_workspace.html.j2) | `f4674707662fe8f6ca087a41490ce6a8ba39d6f8` |
+
+The current client accepts supported pairs with literal `price_close`,4H/`fx-utc-4h/v1`,null feed, a valid comparison/positive threshold,1–10 consecutive closes and a valid future UTC expiry for writes. New local preparation has null condition ID/revision, saved:false, active:false and only enters the in-memory prepared array. Keeping it closes the editor, navigates to `#forex/my_watches` and focuses its tab.
+
+Account saving uses the existing owner and exact ID/user/expected revision; accepted records must be validated, rule-matching and inactive. The matching local draft is removed only after confirmation/reconciliation. Saved revision1 is valid only as an explicitly account-confirmed example. Inventory loading, unavailable, confirmed empty, saved inactive and pending operation remain distinct.
+
+Check status reconciles the original condition/request. An absent row or failed reconciliation read does not settle an uncertain SAVE. Inventory refresh is not mutation reconciliation. Delete has its own existing exact-ID semantics: a successful absence read can confirm deletion. A revision conflict requires Reload saved version for that exact record, with Save changes held until reloaded/reviewed. Actual account changes/sign-out invalidate prior-epoch replies and clear the former account’s local editor/drafts/pending UI; same-user sign-in confirmation does not. The pending map and local drafts make no reload/restart durability guarantee.
+
+Event, exposure and structural-condition lifecycles, activation, finalized monitoring and notification delivery remain future capability/owner/proof work. No account service request, login, write, deletion, market data fetch, backend change, browser/runtime test or deployment was performed in this phase.
+
+### Transport recovery and effect reconciliation
+
+After16 observed Forex mutations through Mastermind Paper, the NEXT action’s get_basic_info preflight timed out before any edit call was issued. Exact-node read, Paper inspection and Executive session-target discovery also timed out. This was a transport failure, not a permission denial or unknown mutation. Studio Direct liveness and its existing Paper adapter were independently healthy. Its catalog had the same `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb` hash and accepted tool-scoped write schema. Exact-file read verified the same Forex identity/write readiness, and exact row `B3J-0` showed the two previously confirmed cards and no account-change card. No prior mutation was replayed or re-homed. New subsequent actions used the existing Studio Direct adapter with fresh exact-file guards and their own operation IDs. No host placement, app focus transition, service restart, account change or new transport was created.
+
+All33 phase operations returned APPLIED_RESPONSE_OBSERVED (16 Mastermind Paper;17 Studio Direct):
+
+- `paper-forex-tab-account-copy-20261108-c4`
+- `paper-forex-current-account-board-copy-20261108-c4`
+- `paper-forex-current-account-board-header-20261108-c4`
+- `paper-forex-review-actions-6ei-0-20261108-c4`
+- `paper-forex-review-actions-64y-0-20261108-c4`
+- `paper-forex-review-actions-66f-0-20261108-c4`
+- `paper-forex-review-actions-67z-0-20261108-c4`
+- `paper-forex-review-actions-69k-0-20261108-c4`
+- `paper-forex-review-actions-6b7-0-20261108-c4`
+- `paper-forex-review-actions-6d1-0-20261108-c4`
+- `paper-forex-prepared-result-context-20261108-c4`
+- `paper-forex-current-local-draft-state-20261108-c4`
+- `paper-forex-current-pending-state-20261108-c4`
+- `paper-forex-current-unconfirmed-state-20261108-c4`
+- `paper-forex-current-saved-state-20261108-c4`
+- `paper-forex-current-conflict-state-20261108-c4`
+- `paper-forex-current-account-change-state-20261108-c4-sd`
+- `paper-forex-current-account-contract-header-20261108-c4-sd`
+- `paper-forex-current-account-board-name-20261108-c4-sd`
+- `paper-forex-current-contract-scope-20261108-c4-sd`
+- `paper-forex-current-contract-confirmation-20261108-c4-sd`
+- `paper-forex-current-contract-uncertain-20261108-c4-sd`
+- `paper-forex-current-contract-edit-20261108-c4-sd`
+- `paper-forex-current-contract-account-20261108-c4-sd`
+- `paper-forex-current-contract-return-20261108-c4-sd`
+- `paper-forex-current-index-reference-20261108-c4-sd`
+- `paper-forex-current-index-order-20261108-c4-sd`
+- `paper-forex-current-index-scope-20261108-c4-sd`
+- `paper-forex-prepared-state-names-20261108-c4-sd`
+- `paper-forex-current-review-availability-20261108-c4-sd`
+- `paper-forex-exact-rule-current-scope-20261108-c4-sd`
+- `paper-forex-prepare-rule-current-scope-20261108-c4-sd`
+- `paper-forex-review-gallery-finish-20261108-c4-sd`
+
 ## Active continuation
 
-Portfolio mobile, Bonds source recovery, and Government Revenue320px return controls are now verified. Continue Forex R26 tab/account state clarity and reconciliation of the live Breadth overlap. These remaining phases are not claimed complete.
+Portfolio mobile, Bonds source recovery, Government Revenue320px return controls, and Forex review/current-account gallery are verified. Continue Forex main My watches desktop/mobile integration, then reconcile the protected Breadth overlap. The main screens still need current source controls and foreground local/account separation; no completion is claimed for those lanes.
 
 ## Acceptance boundary
 
