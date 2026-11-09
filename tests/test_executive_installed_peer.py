@@ -1368,6 +1368,21 @@ def test_complete_composition_binds_only_original_capture(composition, role):
 
 
 @pytest.mark.parametrize('role', ['control', 'gateway'])
+def test_projection_rejoins_use_only_this_qualification_observation(monkeypatch, composition, role):
+    value = composition(role)
+    calls = []
+    def projection(budget, previous=None):
+        calls.append((budget, previous))
+        return value.projection
+    monkeypatch.setattr(m, '_verify_control_projection', projection)
+    m.qualify_installed_peer(value.peer, role=role)
+    assert len(calls) == 3
+    assert calls[0][1] is None
+    assert all(previous is value.projection for _, previous in calls[1:])
+    assert all(budget is calls[0][0] for budget, _ in calls)
+
+
+@pytest.mark.parametrize('role', ['control', 'gateway'])
 @pytest.mark.parametrize('failure', ['pid', 'username', 'group', 'program', 'argv', 'cwd', 'dynamic_path', 'dynamic_status'])
 def test_composition_refuses_identity_mismatch(monkeypatch, composition, role, failure):
     value = composition(role)
@@ -1472,6 +1487,8 @@ class _FakeProcPidInfo:
         self.calls = []
         self.size = 56
         self.unique_id = 113769795
+        self.parent_unique_id = 113769700
+        self.parent_pidversion = 235172800
         self.pidversion = 235172879
         self.error = None
 
@@ -1481,6 +1498,8 @@ class _FakeProcPidInfo:
             raise self.error
         result = ctypes.cast(output, ctypes.POINTER(installed._ProcUniqueIdentifierInfo)).contents
         result.p_uniqueid = self.unique_id
+        result.p_puniqueid = self.parent_unique_id
+        result.p_orig_ppidversion = self.parent_pidversion
         result.p_idversion = self.pidversion
         return self.size
 
@@ -1523,7 +1542,11 @@ def test_process_instance_binds_exact_native_signature_and_clears_errno(process_
                               ctypes.c_void_p, ctypes.c_int]
     assert query.restype is ctypes.c_int
     assert (value.unique_id, value.pidversion) == (query.unique_id, query.pidversion)
-    assert list(value.__dataclass_fields__) == ["unique_id", "pidversion"]
+    assert value.parent_unique_id == query.parent_unique_id
+    assert value.parent_pidversion == query.parent_pidversion
+    assert list(value.__dataclass_fields__) == [
+        "unique_id", "pidversion", "parent_unique_id", "parent_pidversion"
+    ]
     with pytest.raises(AttributeError):
         value.unique_id = 1
     assert "_observe_process_instance" not in installed.__all__
@@ -2011,3 +2034,202 @@ def test_private_late_metadata_refusal_is_preserved_without_next_open(monkeypatc
     with pytest.raises(m.PeerIdentityError) as failure:
         m._open_trusted("/fixed", budget=budget)
     assert failure.value.code == expected
+
+
+# ---------------------------------------------------------------------------
+# I2 — the optional workspace Control Room socket (4-socket admission).
+#
+# The control plist may carry the optional WorkspaceControlRoom socket (added
+# by install.sh when the config carries the unix stanza). The installed
+# peer qualifier admits exactly {3-socket, 4-socket} control plists and
+# refuses every drift on the room entry.
+# ---------------------------------------------------------------------------
+
+import copy as _copy
+import plistlib as _plistlib
+
+
+def _qualified_control_with_room() -> dict:
+    profile = _copy.deepcopy(QUALIFIED_CONTROL_PLIST)
+    profile["Sockets"] = _copy.deepcopy(m._CONTROL_SOCKETS)
+    profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET
+    )
+    return profile
+
+
+def _drift_room(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME])
+    return profile
+
+
+def _drift_base_socket(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"]["CeoIngress"])
+    return profile
+
+
+def test_three_socket_control_plist_still_matches():
+    parsed = m._load_strict_plist(_plistlib.dumps(QUALIFIED_CONTROL_PLIST), code="PLIST_INVALID")
+    releases = []
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert releases == [QUALIFIED_CONTROL_PLIST["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+def test_four_socket_control_plist_matches_via_template_swap():
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    releases = []
+    # The guard at the top of _profile_matches swaps the 3-socket template
+    # for the 4-socket one when the room key is present; both templates
+    # admit the same document.
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, releases)
+    assert releases == [document["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+@pytest.mark.parametrize("mutator,description", [
+    (lambda e: e.__setitem__("SockPathMode", 0o660), "room SockPathMode 0o660"),
+    (lambda e: e.__setitem__("SockPathMode", True), "room SockPathMode True (bool)"),
+    (lambda e: e.__setitem__("SockPathGroup", 470), "room SockPathGroup 470"),
+    (lambda e: e.__setitem__("SockPathGroup", 457), "room SockPathGroup 457 (CeoIngress gid)"),
+    (lambda e: e.__setitem__("SockPathOwner", 470), "room SockPathOwner 470"),
+    (lambda e: e.__setitem__("SockPathName", "/var/run/mastermind-executive/control-room.sock"),
+     'room SockPathName "/var/run/mastermind-executive/control-room.sock"'),
+    (lambda e: e.__setitem__("SockFamily", "Unix"), 'room entry with extra key "SockFamily": "Unix"'),
+    (lambda e: e.pop("SockPassive"), "room entry missing SockPassive"),
+])
+def test_room_entry_drift_is_refused(mutator, description):
+    document = _drift_room(_qualified_control_with_room(), transform=mutator)
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False, description
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False, description
+
+
+def test_extra_socket_alongside_room_is_refused():
+    document = _qualified_control_with_room()
+    document["Sockets"]["Extra"] = {"SockPassive": True, "SockPathMode": 384,
+                                    "SockPathName": "/tmp/x", "SockPathOwner": 450,
+                                    "SockPathGroup": 450, "SockType": "stream"}
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_base_socket_drift_is_refused_when_room_is_present():
+    # CeoIngress SockPathMode drifted to 384 (== 0o600) while the room entry
+    # is present — the 4-socket admission must not loosen the base sockets.
+    document = _drift_base_socket(_qualified_control_with_room(),
+                                  transform=lambda e: e.__setitem__("SockPathMode", 384))
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_three_socket_with_stale_room_entry_is_refused():
+    # A 3-socket document with a stray room entry must not be admitted.
+    document = _qualified_control_with_room()
+    document["Sockets"].pop(m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+    # Re-add a stale room entry that drifts: SockPathGroup 470.
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET)
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME]["SockPathGroup"] = 470
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_template_cross_equality_phase1c_and_installed_peer():
+    from scripts import executive_os_phase1c as phase1c
+    from tests.executive_installed_control_fixture import unix_stanza
+
+    config = {"control_uid": 450, "workspace_control_room": unix_stanza(450)}
+    entry = phase1c.workspace_control_room_launchd_entry(config, control_gid=450)
+    assert entry == m._WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME == phase1c._WORKSPACE_CONTROL_ROOM_SOCKET_NAME
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathName"] == phase1c._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathOwner"] == m._ROLE_TOPOLOGIES["control"].service_uid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathGroup"] == m._ROLE_TOPOLOGIES["control"].config_gid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathMode"] == 0o600
+
+
+def test_release_observation_matcher_admits_four_socket_control_plist():
+    from control_plane import executive_release_observation as obs
+    control_spec = next(spec for spec in obs._SPECS if spec.role == "control")
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    found = []
+    assert obs._profile(control_spec) is m._EXPECTED_PLIST_PROFILES["control"]
+    assert m._profile_matches(obs._profile(control_spec), parsed, found) is True
+    assert found == [document["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+# --- Release walk entry bound (incident #1656) -------------------------------
+# The sealed release is a whole-repository archive, so its entry count tracks the
+# repository (about 9,800 on master when the bound was set) and must not be held to
+# the smaller bound that guards the Python runtime walk. All filesystem access is
+# faked; none of this qualifies a real host.
+
+def _fake_release(monkeypatch, count):
+    names = ["f%06d" % index for index in range(count)]
+    monkeypatch.setattr(m, "_directory_entries", lambda directory, budget: list(names))
+    monkeypatch.setattr(m, "_lstat", lambda path: info())
+    monkeypatch.setattr(m, "_read_trusted_bytes",
+                        lambda *a, **k: (b"x", info(size=1)))
+
+
+@pytest.mark.parametrize("count", [8193, 9045, 9773])
+def test_release_walk_admits_a_tree_past_the_runtime_walk_bound(monkeypatch, count):
+    assert count > m._MAX_WALK_ENTRIES
+    _fake_release(monkeypatch, count)
+    assert len(m._walk_release("/fixed/release", m._Budget(25))) == count
+
+
+def test_release_walk_bound_is_inclusive_and_fails_closed_one_past(monkeypatch):
+    _fake_release(monkeypatch, m._MAX_RELEASE_ENTRIES)
+    rows = m._walk_release("/fixed/release", m._Budget(25))
+    assert len(rows) == m._MAX_RELEASE_ENTRIES
+    _fake_release(monkeypatch, m._MAX_RELEASE_ENTRIES + 1)
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        m._walk_release("/fixed/release", m._Budget(25))
+    assert caught.value.code == "SERVICE_RELEASE_ENTRY_LIMIT"
+
+
+def test_release_walk_recheck_applies_the_same_bound(monkeypatch):
+    # _recheck_release walks again with hash_files=False; it must not disagree.
+    _fake_release(monkeypatch, m._MAX_WALK_ENTRIES + 1)
+    monkeypatch.setattr(m, "_open_trusted",
+                        lambda *a, **k: (7, info(size=1), info(size=1)))
+    monkeypatch.setattr(m, "_close", lambda handle: None)
+    rows = m._walk_release("/fixed/release", m._Budget(25), hash_files=False)
+    assert len(rows) == m._MAX_WALK_ENTRIES + 1
+    _fake_release(monkeypatch, m._MAX_RELEASE_ENTRIES + 1)
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        m._walk_release("/fixed/release", m._Budget(25), hash_files=False)
+    assert caught.value.code == "SERVICE_RELEASE_ENTRY_LIMIT"
+
+
+def test_release_bound_does_not_widen_the_python_runtime_walk(monkeypatch):
+    assert m._MAX_WALK_ENTRIES == 8192
+    assert m._MAX_RELEASE_ENTRIES > m._MAX_WALK_ENTRIES
+    directory = SimpleNamespace(
+        st_dev=1, st_ino=2, st_mode=stat.S_IFDIR | 0o755, st_uid=0, st_gid=0,
+        st_nlink=2, st_size=0, st_mtime_ns=1, st_ctime_ns=1)
+    monkeypatch.setattr(m, "_open_trusted",
+                        lambda *a, **k: (7, directory, directory))
+    monkeypatch.setattr(m, "_close", lambda handle: None)
+    monkeypatch.setattr(m, "_lstat", lambda path: directory)
+    listed = []
+
+    def entries(path, budget):
+        listed.append(path)
+        return ["n%05d" % index for index in range(m._MAX_WALK_ENTRIES + 1)]
+
+    monkeypatch.setattr(m, "_directory_entries", entries)
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        m._inventory_python_base(m._Budget(25))
+    assert caught.value.code == "SERVICE_RUNTIME_ENTRY_LIMIT"
+    # Refused on the first listing: a runtime walk bounded by the larger release
+    # bound would still refuse, but only after descending into the children.
+    assert len(listed) == 1

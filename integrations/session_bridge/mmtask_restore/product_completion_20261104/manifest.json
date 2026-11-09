@@ -1,0 +1,74 @@
+{
+  "kind": "immutable-source-successor-not-installer",
+  "commission": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1842#issuecomment-6622345759",
+  "preimages": {
+    "mmtask": {
+      "path": "../payload/mmtask",
+      "sha256": "711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a",
+      "mode": "0755"
+    },
+    "charterlib.py": {
+      "path": "../payload/charterlib.py",
+      "sha256": "a0d88124f19d3467b0e6b341138754bcc4162b7c0ad5d4366fe3f0813ed1c731",
+      "mode": "0755"
+    },
+    "SCHEMA.md": {
+      "path": "preimage/SCHEMA.md",
+      "sha256": "d6cd44d125ea226066fe88bb56c02335a1fc420ddc6aecf56ff044db770a5f25",
+      "mode": "0644"
+    }
+  },
+  "postimages": {
+    "mmtask": {
+      "sha256": "d3ba5c0d4b2d53ba122fbc905c4216fc8c2a48ffcb8d357c19a5a47ab3572649",
+      "bytes": 72981,
+      "mode": "0755"
+    },
+    "charterlib.py": {
+      "sha256": "aa3826bf5aa2d96608384560e0a3d3c24d8407527c31f9c12d14a8cd12fa9926",
+      "bytes": 13925,
+      "mode": "0755"
+    },
+    "SCHEMA.md": {
+      "sha256": "2b8b32ecfd01b804b9176d67230f181f6960e6089540910a6261b30b86a1ccfc",
+      "bytes": 8299,
+      "mode": "0644"
+    }
+  },
+  "patch": {
+    "path": "completion.patch",
+    "sha256": "9efed071674d253cebea07d3acffc421b291ef7528a0964630d78d0ca6dfac82",
+    "context_lines": 0
+  },
+  "tests": {
+    "test_completion_semantics.py": {
+      "path": "test_completion_semantics.py.source",
+      "sha256": "d40e3dbd0c8d66edb4b7ffc380e3718e354a6f6c5cea38604513b909de7a7ded",
+      "fixtures": "synthetic/disposable; .source prevents repository discovery"
+    },
+    "test_composite.py": {
+      "path": "test_composite.py.source",
+      "sha256": "855f89fed540c29f10d5675d7397052f8dda23ecccee55e154b5a673a8a957ad",
+      "fixtures": "synthetic/disposable; .source prevents repository discovery"
+    },
+    "test_wave_identity.py": {
+      "path": "test_wave_identity.py.source",
+      "sha256": "7aa59a4ac2a92284a549351d22929d368129240a30019547bddabdb99673ebee",
+      "fixtures": "synthetic/disposable; .source prevents repository discovery"
+    }
+  },
+  "evidence_scope": {
+    "completion_semantics": 16,
+    "composite": 14,
+    "collision": 12,
+    "affected_existing_import_export": 4,
+    "real_validator_compatibility": "Original35PASS; combined29PASS plus6 fixture-correctedPASS; final identity delta affected4PASS, not a new full-suite claim.",
+    "disposable_real_source": "4 actual workstreams,24 distinct waves; original seed retained/idempotent repeat; live Options charter unchanged.",
+    "installation": "Separate exact-target promotion; source package performs none."
+  },
+  "reconstruction": {
+    "result": "PASS",
+    "method": "exact preimages, disposable directory, patch --batch --fuzz=0 -p1, all3postimageSHA256match",
+    "installed_writes": false
+  }
+}

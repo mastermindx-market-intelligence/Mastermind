@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,6 +48,91 @@ def _marker(root: Path, name: str = "pack-" + "a" * 40 + ".promisor", data: byte
     marker = pack / name
     marker.write_bytes(data)
     return marker
+
+
+def test_large_git_batch_completes_without_bidirectional_pipe_deadlock(tmp_path: Path):
+    """A real 4096-object batch must finish even with small Darwin pipe buffers."""
+    root, head = _repo(tmp_path)
+    script = """
+import sys
+from pathlib import Path
+from ops.executive_os.admin_checkout import _run_git
+root, head = Path(sys.argv[1]), sys.argv[2]
+data = ((head + '\\n') * 4096).encode('ascii')
+out = _run_git(root, 'cat-file', '--buffer',
+               '--batch-check=%(objectname) %(objecttype)', input_bytes=data)
+assert out.splitlines() == [(head + ' commit').encode('ascii')] * 4096
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", script, str(root), head],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        # Only this isolated test's process group; no installer or host process.
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate(timeout=5)
+        pytest.fail("4096-object Git batch deadlocked beyond five seconds")
+    assert process.returncode == 0, (stdout, stderr)
+
+
+def test_git_input_timeout_reaps_child_and_closes_private_spool(tmp_path: Path, monkeypatch):
+    from ops.executive_os import admin_checkout
+
+    executable = tmp_path / "slow-git"
+    executable.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(5)\n")
+    executable.chmod(0o700)
+    monkeypatch.setattr(admin_checkout, "_GIT", str(executable))
+    monkeypatch.setattr(admin_checkout, "_GIT_TIMEOUT_SECONDS", 0.1)
+    original = admin_checkout.tempfile.TemporaryFile
+    handles = []
+
+    def temporary_file():
+        handle = original()
+        info = os.fstat(handle.fileno())
+        assert stat.S_IMODE(info.st_mode) == 0o600
+        assert info.st_nlink == 0
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(admin_checkout.tempfile, "TemporaryFile", temporary_file)
+    started = time.monotonic()
+    with pytest.raises(admin_checkout.AdminCheckoutError, match="Git observation failed"):
+        admin_checkout._run_git(tmp_path, "status", input_bytes=b"a" * 200_000)
+    assert time.monotonic() - started < 2
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("ticks", [(1.0, 1.0, 2.0), (1.0, 2.0, 2.0)])
+def test_git_input_staging_does_not_reset_shared_deadline(tmp_path: Path, monkeypatch, ticks):
+    from ops.executive_os import admin_checkout
+
+    clock = iter(ticks)
+    monkeypatch.setattr(admin_checkout, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+    def must_not_launch(*args, **kwargs):
+        pytest.fail("expired observation must not launch Git")
+
+    monkeypatch.setattr(admin_checkout.subprocess, "run", must_not_launch)
+    with pytest.raises(admin_checkout.AdminCheckoutError, match="exceeded its bound"):
+        admin_checkout._run_git(tmp_path, "status", input_bytes=b"object\n", deadline=1.5)
+
+
+def test_git_input_spool_failure_refuses_without_pipe_fallback(tmp_path: Path, monkeypatch):
+    from ops.executive_os import admin_checkout
+
+    def unavailable():
+        raise OSError("temporary storage unavailable")
+
+    def must_not_launch(*args, **kwargs):
+        pytest.fail("no fallback Git launch after spool failure")
+
+    monkeypatch.setattr(admin_checkout.tempfile, "TemporaryFile", unavailable)
+    monkeypatch.setattr(admin_checkout.subprocess, "run", must_not_launch)
+    with pytest.raises(admin_checkout.AdminCheckoutError, match="Git observation failed"):
+        admin_checkout._run_git(tmp_path, "status", input_bytes=b"object\n")
 
 
 def test_complete_checkout_normalizes_only_empty_safe_promisor_marker(tmp_path: Path):

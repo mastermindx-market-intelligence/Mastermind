@@ -1,0 +1,104 @@
+{
+  "repository": "deepseek-ai/deepseek-harness",
+  "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+  "files": [
+    {
+      "path": "packages/mcp/mcp-client/src/tools.ts",
+      "name": "tools.ts",
+      "folder": "mcp-pristine",
+      "bytes": 20892,
+      "git_blob": "9e7b5c0ab550dc2f2074126ca08c07b12f65dcce",
+      "sha256": "59203150bda479a990afcdaf60483a35a836887926892e1074e02d0294c01af9"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/connection.ts",
+      "name": "connection.ts",
+      "folder": "mcp-pristine",
+      "bytes": 18741,
+      "git_blob": "9a4ec9123aea0e416178b45da6e788bade46274f",
+      "sha256": "06dc1b3a1297b8b23f6ac5c44f3ba6740716c76db71c28cfb8f14d6c0340030e"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/transport.ts",
+      "name": "transport.ts",
+      "folder": "mcp-pristine",
+      "bytes": 1594,
+      "git_blob": "52030772febd9e55e9e6ffbe2e54a4ea3cec0aca",
+      "sha256": "6f3fca685af3d5654c476e95db24e1245dc1fa021a0bd7f477ce4ad997e1c8f6"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/server-context.ts",
+      "name": "server-context.ts",
+      "folder": "mcp-pristine",
+      "bytes": 1475,
+      "git_blob": "b0ba4ccd78883ac4730c3facc35b7e4b609c7fd6",
+      "sha256": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a"
+    },
+    {
+      "path": "packages/mcp/mcp-client/src/index.ts",
+      "name": "index.ts",
+      "folder": "mcp-pristine",
+      "bytes": 9464,
+      "git_blob": "3f89532b91d915cad20d65fa06ae52ace088958d",
+      "sha256": "f279bd88743ca73b0d9834915d1bb31e455e21c87f4990808cfd55b273db4d1c"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/mcp-client.spec.ts",
+      "name": "mcp-client.spec.ts",
+      "folder": "mcp-tests",
+      "bytes": 49828,
+      "git_blob": "4a330850b8c4c267c482da9a53b685492a9c5d07",
+      "sha256": "6bdf3c30d11997aa292bb8a9d44700a1183426b4822e9d2bbef638faae9a1362"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/tool-definition.spec.ts",
+      "name": "tool-definition.spec.ts",
+      "folder": "mcp-tests",
+      "bytes": 2738,
+      "git_blob": "3e99736401105c5400119787b619e4cd7e0e3314",
+      "sha256": "d655bcbd98e7c9cb2644ca70e51172c46fe515aa4d7ca90528a7b492bce51f80"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/protocol.spec.ts",
+      "name": "protocol.spec.ts",
+      "folder": "mcp-tests",
+      "bytes": 7253,
+      "git_blob": "6124752c08804b656e362ec9bea1fc0d02dca98d",
+      "sha256": "b7c327e7fef29581111314002d5fc183ef64d7a69cd52b54781c96e24ba46892"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/reconnect.spec.ts",
+      "name": "reconnect.spec.ts",
+      "folder": "mcp-tests",
+      "bytes": 27080,
+      "git_blob": "f41670178cd5b980f708d61b4d369be12bdf0e60",
+      "sha256": "4685d6a15e47168cc560db934cff2ce40e530e2cf9ecff37d6423542618ec13a"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/apply.spec.ts",
+      "name": "apply.spec.ts",
+      "folder": "mcp-tests",
+      "git_blob": "fff238923f178a9f33469fd8c57bdaa11f6e05e7",
+      "bytes": 17203,
+      "sha256": "b84714d412e566129258a466d617758e287986adacec345978240d0ae30c0129"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/server-context.spec.ts",
+      "name": "server-context.spec.ts",
+      "folder": "mcp-tests",
+      "git_blob": "8c3d2a7371480dc2ca915b85517ac4e09e556ee3",
+      "bytes": 2506,
+      "sha256": "aa0dae086d2d3a0cc548d4f14a51a135cfc0cb1817c9c92bde1a9bb5a120e648"
+    }
+  ],
+  "patch_file": "mcp-generation-admission.patch",
+  "patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+  "patched_source_sha256": {
+    "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
+    "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
+    "index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
+    "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
+  },
+  "proof_scope": "Real MCP SDK and existing donor connection/ToolRuntime; not installed worker, model, endpoint entitlement, instruction/resource or original-parent qualification.",
+  "patch_format": "unified-zero-context; exact source preimage and postimage hashes required"
+}

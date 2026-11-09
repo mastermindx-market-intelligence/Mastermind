@@ -19,6 +19,13 @@ import sys
 import time
 
 from control_plane.executive_peer_identity import PeerIdentityError
+# Compatibility aliases for the existing release-observation owner. The ABI
+# lives in a neutral module shared with OHF child-lineage qualification.
+from control_plane.executive_process_identity import (
+    _ProcUniqueIdentifierInfo,
+    _ProcessInstanceObservation,
+    _observe_process_instance,
+)
 
 __all__ = ["qualify_installed_peer"]
 
@@ -41,67 +48,6 @@ _CFTypeID = ctypes.c_ulong
 _Boolean = ctypes.c_ubyte
 _SecCSFlags = ctypes.c_uint32
 _CFTypeRef = ctypes.c_void_p
-
-
-class _ProcUniqueIdentifierInfo(ctypes.Structure):
-    """Darwin PROC_PIDUNIQIDENTIFIERINFO ABI, fixed at 56 bytes.
-
-    Apple XNU f6217f891ac0bb64f3d375211650a4c1ff8ca1ea,
-    bsd/sys/proc_info_private.h. Parent and executable fields are deliberately
-    excluded from the returned process-instance observation.
-    """
-
-    _fields_ = [
-        ("p_uuid", ctypes.c_ubyte * 16),
-        ("p_uniqueid", ctypes.c_uint64),
-        ("p_puniqueid", ctypes.c_uint64),
-        ("p_idversion", ctypes.c_int32),
-        ("p_orig_ppidversion", ctypes.c_int32),
-        ("p_reserve2", ctypes.c_uint64),
-        ("p_reserve3", ctypes.c_uint64),
-    ]
-
-
-@dataclass(frozen=True, slots=True)
-class _ProcessInstanceObservation:
-    """Kernel process/exec identity only; neither peer nor effect authority."""
-
-    unique_id: int
-    pidversion: int
-
-
-def _observe_process_instance(pid: int) -> _ProcessInstanceObservation:
-    """Read one internally supplied PID; production role wiring is separate.
-
-    This private primitive does not qualify a service or replace the existing
-    socket audit-token observer. Each call reads a fresh kernel result.
-    """
-    if type(pid) is not int or not 0 < pid <= (1 << 31) - 1:
-        raise PeerIdentityError("SERVICE_PROCESS_PID_INVALID")
-    if sys.platform != "darwin":
-        raise PeerIdentityError("PEER_PLATFORM_UNSUPPORTED")
-    try:
-        if ctypes.sizeof(_ProcUniqueIdentifierInfo) != 56 or ctypes.sizeof(ctypes.c_int) != 4:
-            raise PeerIdentityError("SERVICE_PROCESS_ABI_UNSUPPORTED")
-        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-        query = library.proc_pidinfo
-        query.argtypes = [
-            ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
-            ctypes.c_void_p, ctypes.c_int,
-        ]
-        query.restype = ctypes.c_int
-        observed = _ProcUniqueIdentifierInfo()
-        ctypes.set_errno(0)
-        size = query(pid, 17, 0, ctypes.byref(observed), 56)
-    except PeerIdentityError:
-        raise
-    except Exception:
-        raise PeerIdentityError("SERVICE_PROCESS_OBSERVATION_UNAVAILABLE") from None
-    if type(size) is not int or size != 56:
-        raise PeerIdentityError("SERVICE_PROCESS_OBSERVATION_SIZE_INVALID")
-    if observed.p_uniqueid <= 0 or observed.p_idversion <= 0:
-        raise PeerIdentityError("SERVICE_PROCESS_IDENTITY_INVALID")
-    return _ProcessInstanceObservation(observed.p_uniqueid, observed.p_idversion)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1121,6 +1067,17 @@ _MAX_READ_BYTES = 32 * 1024 * 1024
 _MAX_CLOSURE_BYTES = 256 * 1024 * 1024
 _MAX_DIRECTORY_ENTRIES = 4096
 _MAX_WALK_ENTRIES = 8192
+# The sealed release is the whole-repository ``git archive`` plus installer-added
+# assets (install.sh stage_sealed_release), so its entry count tracks the
+# repository: about 9,800 tree entries on master when this bound was set, already
+# past the 8,192 runtime-walk bound above. Bound the release walk on its own.
+# This deliberate ceiling matches the 16,384-entry limit enforced by
+# release_manifest.py's Linux _HeldReleaseSources consumer. General manifest
+# create/verify do not impose that count; staging alone does not prove it.
+# Author-reported warm-cache observations were ~0.13 ms/entry hashed and ~0.04
+# ms/entry for the drift recheck. They do not qualify a cold/root host or imply
+# a guaranteed deadline; the unchanged service budget still fails closed.
+_MAX_RELEASE_ENTRIES = 16384
 _MAX_NAME_BYTES = 255
 _SERVICE_BUDGET_SECONDS = 25.0
 
@@ -1373,6 +1330,24 @@ _EXPECTED_PLIST_PROFILES = {
         "UserName": "_mastermind_executive_mcp",
         "WorkingDirectory": _RELEASE_PLACEHOLDER,
     },
+}
+
+
+# The optional workspace Control Room socket (install.sh adds it only when the
+# Control config carries the unix stanza). Owner, group and mode derive from
+# the existing Control topology; mode is owner read/write only.
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+_WORKSPACE_CONTROL_ROOM_SOCKET = {
+    "SockPassive": True,
+    "SockPathGroup": _ROLE_TOPOLOGIES["control"].config_gid,
+    "SockPathMode": stat.S_IRUSR | stat.S_IWUSR,
+    "SockPathName": "/var/run/mastermind-executive/workspace-control-room.sock",
+    "SockPathOwner": _ROLE_TOPOLOGIES["control"].service_uid,
+    "SockType": "stream",
+}
+_CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM = {
+    **_EXPECTED_PLIST_PROFILES["control"],
+    "Sockets": {**_CONTROL_SOCKETS, _WORKSPACE_CONTROL_ROOM_SOCKET_NAME: _WORKSPACE_CONTROL_ROOM_SOCKET},
 }
 
 
@@ -1769,6 +1744,13 @@ _READ_ONLY_COMMANDS = (_CODESIGN_VERIFY_ARGV, _CODESIGN_METADATA_ARGV)
 
 def _profile_matches(template: object, value: object, releases: list) -> bool:
     """Closed structural match; only exact release-SHA substitution may vary."""
+    if (
+        template is _EXPECTED_PLIST_PROFILES["control"]
+        and type(value) is dict
+        and type(value.get("Sockets")) is dict
+        and _WORKSPACE_CONTROL_ROOM_SOCKET_NAME in value["Sockets"]
+    ):
+        template = _CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM
     if type(template) is str:
         if type(value) is not str or not value.isascii():
             return False
@@ -1885,12 +1867,19 @@ def _verify_role_plist(
 
 
 @dataclass(frozen=True, slots=True)
+class _AeadObservation:
+    details: tuple
+    identities: tuple
+
+
+@dataclass(frozen=True, slots=True)
 class _ConfigObservation:
     digest: str
     provenance_digest: str
     release: str
     identity: tuple
     ancestor_identities: tuple
+    control_aead: _AeadObservation | None = None
 
 
 def _require_document_text(document: dict, name: str, *, code: str) -> str:
@@ -1926,7 +1915,42 @@ def _require_release(document: dict, name: str, *, code: str) -> str:
     return value
 
 
-def _verify_control_projection(budget: _Budget) -> _ConfigObservation:
+def _control_aead_snapshot(release_path: str, budget: _Budget) -> tuple:
+    """Fresh descriptor/ACL inventory, including the lock and manifest bytes.
+
+    Reuse the existing sealed-tree walker; this observation is local to one
+    qualification and never persists or authorizes another connection.
+    """
+    from ops.executive_os import control_aead_profile as profile
+    lock_path = release_path + "/" + profile.LOCK_RELATIVE
+    lock_ancestors = _observe_ancestors(lock_path, budget)
+    lock, lock_info = _read_trusted_bytes(
+        lock_path, budget=budget, maximum=32768, expected_mode=0o644)
+    root = str(profile.profile_root(lock))
+    ancestors = _observe_ancestors(root, budget)
+    _, identities, _, _, _ = _walk_closure(root, budget, hash_files=False)
+    manifest, _ = _read_trusted_bytes(
+        root + "/" + profile.MANIFEST, budget=budget,
+        maximum=32 * 1024 * 1024, expected_mode=0o444)
+    return (release_path, root, hashlib.sha256(lock).hexdigest(),
+            _object_identity(lock_info), lock_ancestors, ancestors, identities,
+            hashlib.sha256(manifest).hexdigest())
+
+
+def _observe_control_aead(document, release_path, budget, previous=None):
+    from ops.executive_os.control_aead_profile import observe_if_enrolled
+    before = _control_aead_snapshot(release_path, budget)
+    if previous is not None:
+        if type(previous) is not _AeadObservation or previous.identities != before:
+            raise _refuse("SERVICE_CONTROL_AEAD_CLOSURE_CHANGED")
+        return previous
+    observed = observe_if_enrolled(document, release_path, check=budget.check)
+    _joined(_control_aead_snapshot(release_path, budget), before,
+            "SERVICE_CONTROL_AEAD_CLOSURE_CHANGED")
+    return _AeadObservation(tuple(sorted(observed.items())), before)
+
+
+def _verify_control_projection(budget: _Budget, previous=None) -> _ConfigObservation:
     """Read the fixed trusted Control config that carries the Python projection.
 
     The same snapshot is consumed for either role: this is provenance evidence
@@ -1950,9 +1974,22 @@ def _verify_control_projection(budget: _Budget) -> _ConfigObservation:
         "python_runtime_provenance_digest",
         code="SERVICE_PYTHON_PROVENANCE_MISSING",
     )
+    control_aead = None
+    event_config = document.get("reply_events")
+    if type(event_config) is dict and event_config.get("armed") is True:
+        try:
+            control_aead = _observe_control_aead(
+                document, _release_directory(release), budget,
+                previous.control_aead if previous is not None else None)
+        except PeerIdentityError:
+            raise
+        except Exception:
+            raise _refuse("SERVICE_CONTROL_AEAD_CLOSURE_REFUSED") from None
+        _deadline_fence(budget)
     return _ConfigObservation(
         digest=hashlib.sha256(raw).hexdigest(),
         provenance_digest=projection,
+        control_aead=control_aead,
         release=release,
         identity=_object_identity(identity),
         ancestor_identities=_joined(_observe_ancestors(_CONTROL_CONFIG_PATH, budget), ancestors, "SERVICE_ANCESTOR_CHANGED"),
@@ -2046,7 +2083,7 @@ def _walk_release(
             child_relative = name if not relative else relative + "/" + name
             if child_relative == _NETWORK_MANIFEST_NAME:
                 continue
-            if len(rows) >= _MAX_WALK_ENTRIES:
+            if len(rows) >= _MAX_RELEASE_ENTRIES:
                 raise _refuse("SERVICE_RELEASE_ENTRY_LIMIT")
             child = directory + "/" + name
             try:
@@ -2601,7 +2638,63 @@ def _joined(first, second, code: str):
     return second
 
 
-def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
+def _verify_studio_control_observation(budget: _Budget) -> _ConfigObservation:
+    """Read only the root's closed seal; never open private Control contents."""
+    from control_plane.executive_control_observation import (
+        CONTROL_PATH, OBSERVATION_PATH, TRANSACTION_PATH, MAX_BYTES,
+        object_identity, parse_observation, validate_identity,
+    )
+
+    def require_no_transaction():
+        budget.check()
+        try:
+            _lstat(TRANSACTION_PATH)
+        except FileNotFoundError:
+            return
+        except OSError:
+            raise _refuse('SERVICE_TRANSACTION_OBSERVATION_UNAVAILABLE') from None
+        raise _refuse('SERVICE_CONFIG_TRANSACTION_ACTIVE')
+
+    require_no_transaction()
+    ancestors = _observe_ancestors(CONTROL_PATH, budget)
+    try:
+        before = validate_identity(object_identity(_lstat(CONTROL_PATH)))
+    except (OSError, ValueError):
+        raise _refuse('SERVICE_CONFIG_METADATA_UNAVAILABLE') from None
+    raw, _ = _read_trusted_bytes(OBSERVATION_PATH, budget=budget,
+        maximum=MAX_BYTES, expected_mode=0o444, expected_gid=0)
+    try:
+        value = parse_observation(raw)
+        if tuple(value['control_identity']) != before:
+            raise ValueError()
+        after = validate_identity(object_identity(_lstat(CONTROL_PATH)))
+    except (OSError, ValueError):
+        raise _refuse('SERVICE_CONTROL_OBSERVATION_MISMATCH') from None
+    _joined(before, after, 'SERVICE_CONFIG_CHANGED')
+    _joined(_observe_ancestors(CONTROL_PATH, budget), ancestors, 'SERVICE_ANCESTOR_CHANGED')
+    require_no_transaction()
+    return _ConfigObservation(digest=value['control_sha256'],
+        provenance_digest=value['python_runtime_provenance_digest'],
+        release=value['source_release_sha'], identity=before,
+        ancestor_identities=ancestors)
+
+
+def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget, *, studio_control=False):
+    if studio_control and role != 'control':
+        raise _refuse('SERVICE_STUDIO_CONTROL_ONLY')
+
+    def read_config(release):
+        if not studio_control:
+            return _verify_role_config(topology, release, budget)
+        value = _verify_studio_control_observation(budget)
+        if value.release != release:
+            raise _refuse('SERVICE_CONFIG_RELEASE_MISMATCH')
+        return value
+
+    def read_projection(previous=None):
+        return (_verify_studio_control_observation(budget) if studio_control
+                else _verify_control_projection(budget, previous))
+
     budget.check()
     if peer.euid != topology.service_uid:
         raise _refuse("SERVICE_SERVICE_UID_MISMATCH")
@@ -2628,10 +2721,10 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
     if launchd.working_directory != release_path:
         raise _refuse("SERVICE_PLIST_WORKING_DIRECTORY_MISMATCH")
 
-    config = _verify_role_config(topology, plist.release, budget)
+    config = read_config(plist.release)
     _deadline_fence(budget)
     budget.check()
-    projection = _verify_control_projection(budget)
+    projection = read_projection()
     _deadline_fence(budget)
     budget.check()
     if topology.role == "control" and projection.release != plist.release:
@@ -2673,12 +2766,12 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
     )
     _deadline_fence(budget)
     _joined(
-        _verify_role_config(topology, plist.release, budget),
+        read_config(plist.release),
         config,
         "SERVICE_CONFIG_CHANGED",
     )
     _deadline_fence(budget)
-    _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(projection), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     budget.check()
     _recheck_release(release, budget)
@@ -2691,9 +2784,9 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
 
     _joined(_verify_role_plist(topology, budget, expected_release=plist.release), plist, "SERVICE_PLIST_CHANGED")
     _deadline_fence(budget)
-    _joined(_verify_role_config(topology, plist.release, budget), config, "SERVICE_CONFIG_CHANGED")
+    _joined(read_config(plist.release), config, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
-    _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(projection), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     _joined(_observe_real_boot_id(**_deadline_probe_kwargs(budget)), boot, "SERVICE_BOOT_ID_CHANGED")
     _deadline_fence(budget)
@@ -2752,7 +2845,20 @@ def _qualify_installed_peer_with_deadline(peer, *, role, deadline_monotonic_ns):
         peer, role=role, deadline_monotonic_ns=deadline_monotonic_ns)
 
 
-def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None):
+def _qualify_installed_control_for_studio(peer, *, deadline_monotonic_ns):
+    """Fixed Studio entry only; no wire-selectable observer or permission fallback.
+
+    The entry additionally qualifies its own installed receiver and consumes the
+    process-local peer context on this same live descriptor. This factory proves
+    the actual Control peer, not a native Broker operation or account grant.
+    """
+    if type(deadline_monotonic_ns) is not int or deadline_monotonic_ns <= 0:
+        raise _refuse(_DEADLINE_INVALID_CODE)
+    return _qualify_installed_peer_core(peer, role='control',
+        deadline_monotonic_ns=deadline_monotonic_ns, studio_control=True)
+
+
+def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None, studio_control=False):
     try:
         topology = _role_topology(role)
         budget = (_Budget(_SERVICE_BUDGET_SECONDS) if deadline_monotonic_ns is None
@@ -2762,7 +2868,8 @@ def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None):
         _deadline_fence(budget)
         if type(capture) is not _peer_identity._CaptureState:
             raise _refuse("PEER_CAPTURE_PROVENANCE_REQUIRED")
-        observation = _qualify(topology, peer, role, budget)
+        observation = (_qualify(topology, peer, role, budget, studio_control=True)
+                       if studio_control else _qualify(topology, peer, role, budget))
         budget.check()
         binding = _owner_binding(peer, observation)
         budget.check()

@@ -1,0 +1,570 @@
+{
+  "scope": "DISPOSABLE_SOURCE_ONLY_AUTH_PR_PROVIDER_SEAMS_INERT",
+  "initial_catalogue": {
+    "availability": "AVAILABLE",
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 1,
+          "listed": 1,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.20310ec6b14dfaeabf4e460f4d9e576909d6c353d01c1689e4a01d315ca42e21",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T15:14:41Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-DEMO.md",
+          "revision": "03216bc0024fc5f64a5851e750d9706917782d38",
+          "source_ref": "project-record.v1.c7d636398aa5008038f64a24e54a5d81372ef791bce1da03b5b354769e9c2efa",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:DEMO"
+    },
+    "source": {
+      "commit": "22a39a315bdbf9d5afbb1d8110e04cf0add4666f",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a"
+    }
+  },
+  "prepared_request": {
+    "schema": "mastermind.project_file_add_request.v1",
+    "request_id": "mmos-project-file-add-2222222222222222222222222222222222222222",
+    "work_ref": "WS:DEMO",
+    "source_commit": "22a39a315bdbf9d5afbb1d8110e04cf0add4666f",
+    "base_revision": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a",
+    "file": {
+      "display_name": "notes.md",
+      "media_type": "text/markdown",
+      "content_utf8": "# Demo project notes\n\nAuthored project file content for the fixture upload.\n"
+    }
+  },
+  "prepared_recipe": {
+    "schema": "mastermind.project_knowledge_recipe.v1",
+    "state": "DRAFT_ONLY",
+    "action": "project_file_add",
+    "work_ref": "WS:DEMO",
+    "request_id": "mmos-project-file-add-2222222222222222222222222222222222222222",
+    "request_fingerprint": "fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801",
+    "captured_commit": "22a39a315bdbf9d5afbb1d8110e04cf0add4666f",
+    "permission_binding_digest": "27398f5a006d9034843d007b7d7546aeee0edf6e6d9943e5dd2a16e1770a6c59",
+    "postimages": [
+      {
+        "path": "agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md",
+        "content_utf8": "# Demo project notes\n\nAuthored project file content for the fixture upload.\n",
+        "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73",
+        "expected_preimage_sha256": null
+      },
+      {
+        "path": "agentos/workstreams/WS-DEMO.md",
+        "content_utf8": "---\nschema: agentos.workstream.v1\nkey: DEMO\ntitle: Project knowledge capture\nobjective: Expose bounded project knowledge to the workspace.\nstatus: active\nprogram: mmos-core\nrepos:\n- macro\nowner: chairman\nclass: build\nblast_radius: reversible\nambiguity: specified\nwaves:\n- id: wave-1\n  title: Reader modules\n  status: done\nnext_action: Land the reader.\ndecisions:\n- DEC:EARLIER-CALL\nartifacts:\n- research/notes.md\n- agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md\nproject_files:\n- file_id: 4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5\n  artifact_ref: agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md\n  display_name: notes.md\n  media_type: text/markdown\n  content_sha256: 42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73\n  origin:\n    kind: PRINCIPAL_UPLOAD\n    actor_ref: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\n    request_sha256: fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801\n---\n\nKnowledge capture workstream body.\n",
+        "content_sha256": "49d985b6819711a54d4a4c4aed8dcf69af86b639629b1a8911dd52ad2079eb7f",
+        "expected_preimage_sha256": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a"
+      }
+    ]
+  },
+  "proposal_published": {
+    "schema": "mastermind.workspace_project_knowledge_publication.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-2222222222222222222222222222222222222222",
+      "work_ref": "WS:DEMO",
+      "source_commit": "22a39a315bdbf9d5afbb1d8110e04cf0add4666f",
+      "base_revision": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a",
+      "request_sha256": "b888a015816243febb6041d196fbe250e15343a403da4333fded9333d22ffc37",
+      "expected_preference_revision": null
+    },
+    "state": "PROPOSAL_PUBLISHED",
+    "recipe_fingerprint_sha256": "fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801",
+    "source": null,
+    "proposal": {
+      "number": 401,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",
+      "head_commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+      "head_branch": "mmos/knowledge-e6260d33dfb7bf8b24f2ce94fabae805cab2366f6a058a7e1e27e20decd21375"
+    },
+    "reason": null,
+    "retryable": false
+  },
+  "source_observed_status": {
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-2222222222222222222222222222222222222222",
+      "work_ref": "WS:DEMO"
+    },
+    "owner_context": {
+      "principal_scope": "02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e"
+    },
+    "disposition": "accepted",
+    "reason": null,
+    "request_sha256": "b888a015816243febb6041d196fbe250e15343a403da4333fded9333d22ffc37",
+    "recipe_fingerprint_sha256": "fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801",
+    "phase": "PUBLICATION",
+    "receipt": {
+      "kind": "SOURCE_OBSERVED",
+      "event_id": 3,
+      "recorded_at_ms": 1793805288000,
+      "receipt_sha256": "8005790bfe9518cb933638461c4cf440e6f988ea755e7569b6451f9e1a0b0c3e",
+      "sources": [
+        {
+          "repository": "macro",
+          "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+          "path": "agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md",
+          "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73"
+        },
+        {
+          "repository": "macro",
+          "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+          "path": "agentos/workstreams/WS-DEMO.md",
+          "content_sha256": "49d985b6819711a54d4a4c4aed8dcf69af86b639629b1a8911dd52ad2079eb7f"
+        }
+      ],
+      "proposal": null
+    },
+    "advance": null
+  },
+  "catalogue": {
+    "availability": "AVAILABLE",
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 2,
+          "listed": 2,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.b8b22e62c8ab77a69ef11501f3bc8ddb8ef0fa50d46588149232b8b126686ad1",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        },
+        {
+          "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73",
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": "workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e",
+            "kind": "PRINCIPAL_UPLOAD",
+            "request_sha256": "fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801"
+          },
+          "path": "agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md",
+          "repository": "macro",
+          "revision": "b9b09218c4ed44668e9a948ce9ca7f4bd8950a03",
+          "source_ref": "project-file.v1.60dc1a134979bff2fdcc24dc5b728db2054bcb2eb45eaef8f939c19a4aec95bc",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T15:14:43Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-DEMO.md",
+          "revision": "fe630d774fa9ca44cbad86ef3b3fdb5fafbdff77",
+          "source_ref": "project-record.v1.c3b27618eae6f161a02b15e3ecc04dab518c45619da40629dbc3f6b9c87f0c94",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:DEMO"
+    },
+    "source": {
+      "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "49d985b6819711a54d4a4c4aed8dcf69af86b639629b1a8911dd52ad2079eb7f"
+    }
+  },
+  "source": {
+    "availability": "AVAILABLE",
+    "document": {
+      "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73",
+      "content_utf8": "# Demo project notes\n\nAuthored project file content for the fixture upload.\n",
+      "media_type": "text/markdown",
+      "title": "notes.md"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_source.v1",
+    "selection": {
+      "source_ref": "project-file.v1.60dc1a134979bff2fdcc24dc5b728db2054bcb2eb45eaef8f939c19a4aec95bc",
+      "work_ref": "WS:DEMO"
+    },
+    "source": {
+      "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+      "committed_at": "2026-11-04T15:14:43Z",
+      "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73",
+      "path": "agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "b9b09218c4ed44668e9a948ce9ca7f4bd8950a03"
+    }
+  },
+  "memory": {
+    "availability": "EMPTY",
+    "memory": null,
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_preference.v1",
+    "selection": {
+      "work_ref": "WS:DEMO"
+    },
+    "source": null
+  },
+  "data_observation": {
+    "schema": "mastermind.canonical_project_data_observation.v1",
+    "repository": "mastermindx-market-intelligence/macro",
+    "default_ref": "main",
+    "executable_macro_commit": "22a39a315bdbf9d5afbb1d8110e04cf0add4666f",
+    "canonical_data_commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+    "canonical_commit_at": "2026-11-04T08:14:43-07:00",
+    "canonical_observed_at_ms": 1793805290487,
+    "publication_recorded_at_ms": 1793805288000,
+    "publication_time": null,
+    "source_operation": {
+      "selection": {
+        "action": "add_project_file",
+        "request_id": "mmos-project-file-add-2222222222222222222222222222222222222222",
+        "work_ref": "WS:DEMO"
+      },
+      "principal_scope": "02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e",
+      "request_sha256": "b888a015816243febb6041d196fbe250e15343a403da4333fded9333d22ffc37",
+      "recipe_fingerprint_sha256": "fc3c0417eece67ec3c9603d59ffe7c99f25cb22f9482b1d3f28f1e4f84658801",
+      "event_id": 3,
+      "receipt_sha256": "8005790bfe9518cb933638461c4cf440e6f988ea755e7569b6451f9e1a0b0c3e",
+      "recorded_at_ms": 1793805288000,
+      "sources": [
+        {
+          "repository": "macro",
+          "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+          "path": "agentos/project-files/WS-DEMO/4970e42e0a15d425644c887f140082269e25c65c625128b499894e8e9839efe5.md",
+          "content_sha256": "42ede3004dfb87246758bedded1a13bb381abfde5c4158ec2c2c6eb6af01cd73"
+        },
+        {
+          "repository": "macro",
+          "commit": "7727eae5d5b3c32d5269e783636df0161809e2c1",
+          "path": "agentos/workstreams/WS-DEMO.md",
+          "content_sha256": "49d985b6819711a54d4a4c4aed8dcf69af86b639629b1a8911dd52ad2079eb7f"
+        }
+      ]
+    },
+    "reader_closure_sha256": "bcd8fa028af276c2ae2a879acca892af04eb4a0d814ffc9444b0bf950c1d33e1",
+    "code_config_relation": "IDENTICAL_READER_CLOSURE",
+    "authority": "OBSERVATION_ONLY"
+  },
+  "memory_edit": {
+    "initial_memory": {
+      "availability": "EMPTY",
+      "memory": null,
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_preference.v1",
+      "selection": {
+        "work_ref": "WS:DEMO"
+      },
+      "source": null
+    },
+    "prepared_request": {
+      "schema": "mastermind.project_preference_set_request.v1",
+      "request_id": "mmos-project-preference-set-3333333333333333333333333333333333333333",
+      "work_ref": "WS:DEMO",
+      "source_commit": "597171ec63521ca07c5e469b892a4ce45948b9d7",
+      "base_revision": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a",
+      "expected_preference_revision": null,
+      "value": "Literal 中文 memory\nsecond line"
+    },
+    "prepared_recipe": {
+      "schema": "mastermind.project_knowledge_recipe.v1",
+      "state": "DRAFT_ONLY",
+      "action": "project_preference_set",
+      "work_ref": "WS:DEMO",
+      "request_id": "mmos-project-preference-set-3333333333333333333333333333333333333333",
+      "request_fingerprint": "21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58",
+      "captured_commit": "597171ec63521ca07c5e469b892a4ce45948b9d7",
+      "permission_binding_digest": "2619a362442bdacfda6628b91b9b0b092ec157fdac87baf7af9aed56647cede2",
+      "postimages": [
+        {
+          "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+          "content_utf8": "---\nschema: agentos.decision.v1\nkey: PROJECT-COMMUNICATION-PREFERENCE-DEMO\nquestion: How should this project communicate with its owner?\nanswer: 'Literal 中文 memory\n\n  second line'\nrationale: Explicit project-scoped communication preference supplied through the authorized project editor.\nalternatives:\n- option: Leave the preference unset\n  why_not: The authorized editor requested this value.\nevidence:\n- project-authoring-request:21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58\naffects:\n- WS:DEMO\nconfidence: high\nreversibility: easy\ndecided_by: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\ndecided_at: '2026-11-04'\nproject_preference:\n  schema: agentos.project_preference.v1\n  work_ref: WS:DEMO\n  kind: COMMUNICATION\n  value: 'Literal 中文 memory\n\n    second line'\n  origin:\n    kind: USER_EDIT\n    actor_ref: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\n    source_ref: null\n    source_revision: null\n  last_edit:\n    actor_ref: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\n    request_sha256: 21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58\n---\n",
+          "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1",
+          "expected_preimage_sha256": null
+        },
+        {
+          "path": "agentos/workstreams/WS-DEMO.md",
+          "content_utf8": "---\nschema: agentos.workstream.v1\nkey: DEMO\ntitle: Project knowledge capture\nobjective: Expose bounded project knowledge to the workspace.\nstatus: active\nprogram: mmos-core\nrepos:\n- macro\nowner: chairman\nclass: build\nblast_radius: reversible\nambiguity: specified\nwaves:\n- id: wave-1\n  title: Reader modules\n  status: done\nnext_action: Land the reader.\ndecisions:\n- DEC:EARLIER-CALL\n- DEC:PROJECT-COMMUNICATION-PREFERENCE-DEMO\nartifacts:\n- research/notes.md\n---\n\nKnowledge capture workstream body.\n",
+          "content_sha256": "ce561c5461b009bf02ac03d6a716b1e1d3f4f161e712bef81440f0842367aa75",
+          "expected_preimage_sha256": "9ffbaabfc6a1b6e40b58f7952978482a9c1e23df62eaee951b51aaa116f0d62a"
+        }
+      ]
+    },
+    "source_observed_status": {
+      "schema": "mastermind.workspace_source_operation_status.v1",
+      "selection": {
+        "action": "set_project_communication_preference",
+        "request_id": "mmos-project-preference-set-3333333333333333333333333333333333333333",
+        "work_ref": "WS:DEMO"
+      },
+      "owner_context": {
+        "principal_scope": "02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e"
+      },
+      "disposition": "accepted",
+      "reason": null,
+      "request_sha256": "adb47cda7e511814834825eecf84d991337ed86dd54068f08ff1c4fd47696c48",
+      "recipe_fingerprint_sha256": "21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58",
+      "phase": "PUBLICATION",
+      "receipt": {
+        "kind": "SOURCE_OBSERVED",
+        "event_id": 3,
+        "recorded_at_ms": 1793805381000,
+        "receipt_sha256": "137d2554c2b6c1738b0a6020aa349afbb2b46274b5fe755fab129769728492f9",
+        "sources": [
+          {
+            "repository": "macro",
+            "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+            "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+            "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1"
+          },
+          {
+            "repository": "macro",
+            "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+            "path": "agentos/workstreams/WS-DEMO.md",
+            "content_sha256": "ce561c5461b009bf02ac03d6a716b1e1d3f4f161e712bef81440f0842367aa75"
+          }
+        ],
+        "proposal": null
+      },
+      "advance": null
+    },
+    "catalogue": {
+      "availability": "AVAILABLE",
+      "project": {
+        "coverage": {
+          "files": {
+            "declared": 1,
+            "listed": 1,
+            "omitted": 0,
+            "state": "COMPLETE"
+          },
+          "records": {
+            "invalid": 0,
+            "matched": 2,
+            "omitted": 0,
+            "scanned": 3,
+            "state": "BOUNDED_SAMPLE"
+          }
+        },
+        "files": [
+          {
+            "content_sha256": null,
+            "display_name": "notes.md",
+            "media_type": "text/markdown",
+            "origin": {
+              "actor_ref": null,
+              "kind": "DECLARED_ARTIFACT",
+              "request_sha256": null
+            },
+            "path": "research/notes.md",
+            "repository": "macro",
+            "revision": null,
+            "source_ref": "project-file.v1.984b4851990d213193745d1dbd9625383576a540837cb2a3708afdd56acb97c7",
+            "state": "SOURCE_MISSING",
+            "viewer_relation": "UNKNOWN"
+          }
+        ],
+        "memory": {
+          "revision": "4b46da628949a71513a659dd4eed92fc78348ace",
+          "source_ref": "project-record.v1.72bb97b02be9c9484ba45a6f2e406f4c74de713c78a7f39fde60b41653ab28d6",
+          "state": "AVAILABLE"
+        },
+        "records": [
+          {
+            "authored_at": null,
+            "committed_at": "2026-11-04T15:16:19Z",
+            "kind": "WORKSTREAM",
+            "path": "agentos/workstreams/WS-DEMO.md",
+            "revision": "0d6df60dcbfd39fe496bba95802d66659ae40cb6",
+            "source_ref": "project-record.v1.a964ebf1a9db9178afe74d6730c112fc60f7370b22bb5ae2acfbb4c617134667",
+            "title": "Project knowledge capture"
+          },
+          {
+            "authored_at": "2026-11-04",
+            "committed_at": "2026-11-04T15:16:19Z",
+            "kind": "PROJECT_PREFERENCE",
+            "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+            "revision": "4b46da628949a71513a659dd4eed92fc78348ace",
+            "source_ref": "project-record.v1.72bb97b02be9c9484ba45a6f2e406f4c74de713c78a7f39fde60b41653ab28d6",
+            "title": "How should this project communicate with its owner?"
+          }
+        ],
+        "title": "Project knowledge capture"
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_knowledge.v1",
+      "selection": {
+        "work_ref": "WS:DEMO"
+      },
+      "source": {
+        "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+        "repository": "mastermindx-market-intelligence/macro",
+        "workstream_sha256": "ce561c5461b009bf02ac03d6a716b1e1d3f4f161e712bef81440f0842367aa75"
+      }
+    },
+    "memory": {
+      "availability": "AVAILABLE",
+      "memory": {
+        "last_edit": {
+          "actor_ref": "workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e",
+          "request_sha256": "21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58"
+        },
+        "origin": {
+          "actor_ref": "workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e",
+          "kind": "USER_EDIT",
+          "source_ref": null,
+          "source_revision": null
+        },
+        "value": "Literal 中文 memory\nsecond line"
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_preference.v1",
+      "selection": {
+        "work_ref": "WS:DEMO"
+      },
+      "source": {
+        "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+        "committed_at": "2026-11-04T15:16:19Z",
+        "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1",
+        "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "4b46da628949a71513a659dd4eed92fc78348ace"
+      }
+    },
+    "source": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1",
+        "content_utf8": "---\nschema: agentos.decision.v1\nkey: PROJECT-COMMUNICATION-PREFERENCE-DEMO\nquestion: How should this project communicate with its owner?\nanswer: 'Literal 中文 memory\n\n  second line'\nrationale: Explicit project-scoped communication preference supplied through the authorized project editor.\nalternatives:\n- option: Leave the preference unset\n  why_not: The authorized editor requested this value.\nevidence:\n- project-authoring-request:21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58\naffects:\n- WS:DEMO\nconfidence: high\nreversibility: easy\ndecided_by: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\ndecided_at: '2026-11-04'\nproject_preference:\n  schema: agentos.project_preference.v1\n  work_ref: WS:DEMO\n  kind: COMMUNICATION\n  value: 'Literal 中文 memory\n\n    second line'\n  origin:\n    kind: USER_EDIT\n    actor_ref: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\n    source_ref: null\n    source_revision: null\n  last_edit:\n    actor_ref: workspace:02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e\n    request_sha256: 21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58\n---\n",
+        "media_type": "text/markdown",
+        "title": "How should this project communicate with its owner?"
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-record.v1.72bb97b02be9c9484ba45a6f2e406f4c74de713c78a7f39fde60b41653ab28d6",
+        "work_ref": "WS:DEMO"
+      },
+      "source": {
+        "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+        "committed_at": "2026-11-04T15:16:19Z",
+        "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1",
+        "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "4b46da628949a71513a659dd4eed92fc78348ace"
+      }
+    },
+    "data_observation": {
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "repository": "mastermindx-market-intelligence/macro",
+      "default_ref": "main",
+      "executable_macro_commit": "597171ec63521ca07c5e469b892a4ce45948b9d7",
+      "canonical_data_commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+      "canonical_commit_at": "2026-11-04T08:16:19-07:00",
+      "canonical_observed_at_ms": 1793805402970,
+      "publication_recorded_at_ms": 1793805381000,
+      "publication_time": null,
+      "source_operation": {
+        "selection": {
+          "action": "set_project_communication_preference",
+          "request_id": "mmos-project-preference-set-3333333333333333333333333333333333333333",
+          "work_ref": "WS:DEMO"
+        },
+        "principal_scope": "02f00111adc7996f753e0baae419ca9b9c74c10672223a44c8e497575db3867e",
+        "request_sha256": "adb47cda7e511814834825eecf84d991337ed86dd54068f08ff1c4fd47696c48",
+        "recipe_fingerprint_sha256": "21819cc9fcfb7b96d6d51b580180a94fb12b8a5e11989a1c896661ca25862e58",
+        "event_id": 3,
+        "receipt_sha256": "137d2554c2b6c1738b0a6020aa349afbb2b46274b5fe755fab129769728492f9",
+        "recorded_at_ms": 1793805381000,
+        "sources": [
+          {
+            "repository": "macro",
+            "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+            "path": "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-DEMO.md",
+            "content_sha256": "ff658ce7d4701acd6af88452a895e936ae3d68bb57e173851c6d806a230108f1"
+          },
+          {
+            "repository": "macro",
+            "commit": "c1bc322329af23158f82baeb6aa3402bc458cc1c",
+            "path": "agentos/workstreams/WS-DEMO.md",
+            "content_sha256": "ce561c5461b009bf02ac03d6a716b1e1d3f4f161e712bef81440f0842367aa75"
+          }
+        ]
+      },
+      "reader_closure_sha256": "bcd8fa028af276c2ae2a879acca892af04eb4a0d814ffc9444b0bf950c1d33e1",
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "authority": "OBSERVATION_ONLY"
+    }
+  }
+}

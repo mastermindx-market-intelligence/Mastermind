@@ -103,3 +103,78 @@ def test_private_unix_sockets_remain_required(monkeypatch):
         instance._assert_no_public_listener()
 
     assert len(calls) == 2
+
+
+# The 6.4 parametrization: every TCP listener shape that the harness must refuse
+# even when only one of the two accounts reports it. The fix is an explicit
+# row with the canonical 10-token Darwin lsof layout, returned with rc 0 for
+# the affected account and the ordinary rc-1/empty shape for the other.
+LISTENER_NAMES = (
+    "*:8787",
+    "127.0.0.1:8787",
+    "127.0.0.1:1",
+    "127.0.0.1:65535",
+    "[::1]:8787",
+    "[::]:443",
+    "0.0.0.0:8787",
+    "*:1",
+    "*:65535",
+    "localhost:8787",
+)
+
+
+def _listener_row(account: str, name: str) -> bytes:
+    return (
+        f"Python 1327 {account} 5u IPv4 0x1 0t0 TCP {name} (LISTEN)\n"
+    ).encode("ascii")
+
+
+@pytest.mark.parametrize("account", [acceptance.CONTROL_USER, acceptance.WORKER_USER])
+@pytest.mark.parametrize("name", LISTENER_NAMES)
+def test_listener_scan_refuses_every_tcp_listener_shape(monkeypatch, account, name):
+    row = _listener_row(account, name)
+    if account == acceptance.CONTROL_USER:
+        outcomes = [_completed(0, stdout=HEADER + row), _completed(1)]
+        expected_calls = 1
+    else:
+        outcomes = [_completed(1), _completed(0, stdout=HEADER + row)]
+        expected_calls = 2
+    instance, calls = _bind(monkeypatch, outcomes)
+
+    with pytest.raises(acceptance.AcceptanceError, match="owns a TCP listener"):
+        instance._assert_no_public_listener()
+
+    assert len(calls) == expected_calls
+
+
+# The 6.5 partial / unparseable / non-empty observations the harness must fail
+# closed on rather than treating as "zero listeners".
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        _completed(0, stdout=HEADER),
+        _completed(0, stdout=HEADER + b"Python 1327 _mastermind_exec 5u IPv4 0x1 0t0 TCP *:4787 \n"),
+        _completed(0, stdout=HEADER + b"Python 1327 _mastermind_exec 5u IPv4 0x1 0t0 TCP *:4787 ESTABLISHED\n"),
+        _completed(0, stdout=b"COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n"),
+        _completed(0, stdout=b"garbled header\nPython 1327 _mastermind_exec 5u IPv4 0x1 0t0 TCP *:4787 (LISTEN)\n"),
+        _completed(1, stderr=b"lsof: permission denied\n"),
+        _completed(1, stdout=b"some leftover line\n"),
+        _completed(2),
+        _completed(0),
+    ],
+)
+def test_listener_scan_refuses_unknown_observation(monkeypatch, outcome):
+    instance, calls = _bind(monkeypatch, [outcome, outcome])
+
+    with pytest.raises(acceptance.AcceptanceError, match="did not produce a complete observation"):
+        instance._assert_no_public_listener()
+
+    assert len(calls) == 1
+
+
+def test_listener_scan_accepts_both_empty_zero_observations(monkeypatch):
+    instance, calls = _bind(monkeypatch, [_completed(1), _completed(1)])
+
+    instance._assert_no_public_listener()
+
+    assert len(calls) == 2

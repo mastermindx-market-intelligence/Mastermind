@@ -1,0 +1,28 @@
+{
+  "schema": "soxx.v16.confluence-versus-parent-alone_and_delay.frozen",
+  "commission_date": "2026-10-11",
+  "pre_specified_before_outcomes": true,
+  "scope": "Same existing private 15m RTH Terminal bars and predeclared four symbols SOXX SMH QQQ AMD; no new vendor endpoint/trades/publication rights",
+  "parent": "3h_medium: MACD(8,21,5), Stoch RSI(14), >=2 prior80bar histogram RMS opposite polarity plus recent Stoch K<=20, one bearish histogram lobe/episode, 26 observed RTH-hour expiration",
+  "conditions": {
+    "parent_only": "first completed 3H candle after arm on which 3H histogram remains negative and improves and 3H Stoch K rising and >=D. Entry at first subsequent observed 15m open",
+    "parent_and_30m_pivot": "latest closed parent turn state AND causal confirmed 30m price pivot, next observed 15m open",
+    "parent_and_15m_pivot": "latest closed parent turn state AND causal confirmed 15m price pivot, next observed 15m open",
+    "timed_delay_null": "Parent-only first-turn entry plus delay of 0,1,2,4,8 observed RTH hours before next 15m open, one entry per episode, skip if 26h expiry; no change in MACD/stoch thresholds"
+  },
+  "risk": "fixed original 1.5% stop from each corresponding actual synthetic next-open entry, 25% partial at 2%, fee5bp each side, initial stop never widened, 52 observed RTH hour timed exit and 15m OHLC low-first execution, next-open signal",
+  "primary_metric": "mean net per original parent extreme episode including no-trigger as cash, with missing exit unknown; no indicator turns on incomplete higher candles",
+  "secondary_metrics": [
+    "conditional entry return",
+    "same-episode parent's earlier turn vs confluence later return and lag",
+    "winner episodes skipped",
+    "median return",
+    "stops within 1h",
+    "calendar-week block bootstrap for paired effects",
+    "block shuffled lag null check"
+  ],
+  "analyses": "Do not select best delay to claim validation. Compare parent-only to 15/30 conjunction and stratified deterministic delays, pooled using per-symbol equal weighting and week-block dependence",
+  "publication": "GitHub research-only numbers/code; raw Terminal OHLCV private",
+  "NO_BOATS": true,
+  "NO_PIT": true
+}

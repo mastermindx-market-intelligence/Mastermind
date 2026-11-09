@@ -65,9 +65,10 @@ async def request(app, token, tool, arguments):
             headers={"authorization": "Bearer " + token}, json={"arguments": arguments})
 
 
-def test_static_surface_is_six_role_correct_tools():
+def test_static_surface_is_seven_role_correct_tools():
     assert COO_TOOL_NAMES == ("executive_mandate", "executive_state", "executive_inbox",
-                             "executive_fabric", "submit_principal_intent", "principal_intent_status")
+                             "executive_fabric", "submit_principal_intent", "principal_intent_status",
+                             "mmx_delegate")
     assert "submit_ceo_intent" not in COO_TOOL_NAMES
 
 
@@ -148,6 +149,27 @@ def test_credential_and_provider_errors_are_not_returned(rsa_key, tmp_path):
 def payload():
     return {"operation_key": "test-coo-request", "objective": "Read the assigned source.",
         "department": "executive", "priority": 1, "execution_profile": "research_only", "workstream": "WS:ONE"}
+
+
+def test_bounded_submit_requires_current_action_grant_before_ingress(rsa_key, tmp_path):
+    app, token, current, _ = setup(rsa_key, tmp_path)
+    current["authority"] = dataclasses.replace(
+        current["authority"],
+        principal_actions=("governed_orchestration",),
+    )
+    calls = []
+
+    async def send(path, frame):
+        calls.append((path, frame))
+        raise AssertionError("ungranted bounded intent reached Executive ingress")
+
+    app._client.send_frame = send
+    result = asyncio.run(
+        request(app, token, "submit_principal_intent", payload())
+    )
+    assert result.status_code == 403
+    assert result.json()["error"]["code"] == "authority_refused"
+    assert calls == []
 
 
 @pytest.mark.parametrize("outcome", ["lost", "raised", "wrong_receipt", "unknown_refusal", "not_sent"])

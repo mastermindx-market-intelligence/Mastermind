@@ -52,6 +52,59 @@ REVIEWED_GENERATIONS = {
     "v9": {
         "bridge.py": "a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725",
     },
+    "v10": {
+        "bridge.py": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+    },
+    "v11": {
+        "bridge.py": "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c",
+    },
+    "v12": {
+        "bridge.py": "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
+    },
+    "v13": {
+        "bridge.py": "1c1512a5e7891abcbe2929875937d1f9792b074932a5d7c9c2ca06c67f3be6d0",
+    },
+    "v14": {
+        "bridge.py": "d950c09a076c87f6c555b59ff59ac563bbcc3a1760eec1a0b7b261ee59fd8e29",
+    },
+    "v15": {
+        "bridge.py": "2873a2b45900a982e0e6975f43a58973128568c6c186b17eab239bf188c58661",
+    },
+    "v16": {
+        "bridge.py": "0828e0623029d136440277919a4392f637bb98c73e826ab7d06d917e3221b029",
+    },
+    "v17": {
+        "bridge.py": "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
+    },
+    # Security-qualified v18: preserve all immutable earlier generation pins.
+    # The v17 candidate must not be selected after its reviewed contract bugs.
+    "v18": {
+        "bridge.py": "48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5",
+    },
+    # Post-edit verifier must also qualify its snapshot getter; no retry.
+    "v19": {
+        "bridge.py": "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
+    },
+    # v20 closes the implicit second-read TOCTOU review finding.
+    # v19 receipts remain immutable historical proof and are not selected.
+    "v20": {
+        "bridge.py": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+    },
+    # P00 candidate: requalify the requested call after the guard getter.
+    # Source review/release and same-owner activation remain separate gates.
+    "v21": {
+        "bridge.py": "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
+    },
+    # Readiness diagnostics retain the v21 getter-first, per-tool guards.
+    # This additive source pin is not runtime staging or activation authority.
+    "v22": {
+        "bridge.py": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+    },
+    # Protected update_styles descriptor compatibility; v22 remains immutable.
+    # Registration alone does not stage, select or activate a Paper runtime.
+    "v23": {
+        "bridge.py": "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523",
+    },
 }
 
 

@@ -53,6 +53,7 @@ class RestartCompletionAdapter(FakeAdapter):
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(
                 self.spec.prompt.encode("utf-8")
             ).hexdigest(),

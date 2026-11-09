@@ -1,0 +1,80 @@
+{
+  "schema": "mastermind.mission_exit_audit_input/v1",
+  "mission": {
+    "requires": [
+      "accepted_worker_result",
+      "source_implementation",
+      "current_head_ci",
+      "independent_source_review"
+    ]
+  },
+  "worker": {
+    "scope": "implementation",
+    "state": "TERMINAL",
+    "exit_code": 0,
+    "accepted": false,
+    "acceptance_ref": null,
+    "result_ref": "fabric:prophet-a2-142-local-passes"
+  },
+  "source": {
+    "head": "ea8e38052b3e897577aa181cf9b4438faa23c766",
+    "implementation_applied": false,
+    "implementation_head": null,
+    "implementation_ref": null,
+    "implementation_scope_matched": false,
+    "ci_conclusion": "PENDING",
+    "ci_head": "ea8e38052b3e897577aa181cf9b4438faa23c766",
+    "ci_run_ref": null,
+    "review_verdict": "CHANGES_REQUESTED",
+    "review_head": "ea8e38052b3e897577aa181cf9b4438faa23c766",
+    "review_ref": "macro:pr-10289-review-request",
+    "author_id": "prophet-a2-author",
+    "reviewer_id": "macro-independent-reviewer"
+  },
+  "credential": {
+    "issuer_activation_verified": false,
+    "issuer_evidence_ref": null,
+    "owner_identified": false,
+    "owner_ref": null
+  },
+  "production": {
+    "job_attempt_accepted": false,
+    "job_attempt_ref": null,
+    "original_parent_consumed": false,
+    "parent_consumption_ref": null,
+    "installed_generation_qualified": false,
+    "generation_ref": null
+  },
+  "effect": {
+    "class": "NONE"
+  },
+  "lanes": {
+    "items": [
+      {
+        "id": "macro:pr-10289-hosted-exact-head-ci",
+        "state": "WAITING_EXTERNAL",
+        "blocker_ref": "github:run-ci-pending",
+        "blocker_owner_ref": "github:actions",
+        "blocker_observed": true
+      },
+      {
+        "id": "macro:pr-10289-independent-review",
+        "state": "WAITING_EXTERNAL",
+        "blocker_ref": "github:review-pending",
+        "blocker_owner_ref": "github:reviewer",
+        "blocker_observed": true
+      },
+      {
+        "id": "macro:guard-suite-145-tests-not-staged",
+        "state": "SAFE_WORK_REMAINING",
+        "next_action_ref": "macro:guard-145-test-step"
+      }
+    ],
+    "exit_claim": "CHECKPOINT_SUMMARY_STOP",
+    "wait_executor": {
+      "started": false,
+      "ref": null
+    },
+    "support_cycles_without_delta": 2
+  }
+}

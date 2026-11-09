@@ -548,6 +548,9 @@ class ExecutiveMcpGateway:
             data, grounding, degraded = self._ceo_intent_status(str(arguments["intent_id"]))
         else:  # pragma: no cover — tool_spec already refused an unknown name
             raise GatewayError("not_found", f"unknown tool {name!r}")
+        return self._read_envelope(name, generated_at, data, grounding, degraded)
+
+    def _read_envelope(self, name, generated_at, data, grounding, degraded):
         bound = bound_job_document if name == "executive_job" else bound_document
         bounded_data, receipts = bound(data, limit=self.config.max_response_bytes)
         return result_envelope(

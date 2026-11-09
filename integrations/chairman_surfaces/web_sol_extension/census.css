@@ -32,4 +32,16 @@ td { border-top: 1px solid #263240; font-size: 12px; overflow-wrap: anywhere; }
 footer { margin-top: 14px; color: #aebac8; font-size: 10px; line-height: 1.55; }
 footer p { margin: 6px 0; } footer strong { color: #d7e2ee; }
 .privacy { color: #8498ad; }
+a { color: #b8d9fa; }
+.browser-settings { margin: 0 auto; }
+.browser-settings section { margin-top: 24px; padding-top: 12px; border-top: 1px solid #2a3747; }
+.browser-settings h2 { font-size: 18px; margin: 8px 0; }
+.browser-settings h3 { font-size: 13px; }
+.browser-settings p { color: #aebac8; }
+.browser-settings button { margin: 4px 5px 4px 0; }
+.browser-settings .site-entry { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.browser-settings input { flex: 1; min-width: 190px; padding: 10px; border: 1px solid #41617d; border-radius: 7px; background: #11161e; color: #edf2f7; font: inherit; }
+.browser-settings input:focus-visible { outline: 2px solid #b8d9fa; outline-offset: 2px; }
+.browser-settings summary { cursor: pointer; color: #b8d9fa; }
+.browser-settings li { overflow-wrap: anywhere; }
 @media (max-width: 600px) { body { padding: 14px; } header { align-items: flex-start; } h1 { font-size: 22px; } .summary { grid-template-columns: repeat(2, 1fr); } th, td { padding: 8px 6px; } }

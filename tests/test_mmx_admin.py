@@ -481,3 +481,18 @@ def test_shared_status_client_refuses_uncorrelated_reconciliation(mutation):
         response["reconciliation"]["verify_ready_process_absent"] = 1
     with pytest.raises(RuntimeError):
         validate_status_response(response, expected_request_id="req-001")
+
+
+@pytest.mark.parametrize('action',['executive.services.start_paid','executive.services.stop_paid'])
+def test_paid_lifecycle_uses_existing_closed_request_and_explicit_identity(action):
+    argv=[action,'--request-id','req-paid-001','--expected-definition-sha256','a'*64]
+    request=build_request(argv)
+    assert request=={'schema':REQUEST_SCHEMA,'request_id':'req-paid-001','action':action,
+                     'args':{'expected_definition_sha256':'a'*64}}
+    assert build_request(argv)==request
+    for missing in ([action,'--expected-definition-sha256','a'*64],
+                    [action,'--request-id','req-paid-001'],
+                    [*argv,'--slot-id','codex-01']):
+        with pytest.raises((SystemExit,PrivilegedActionError)):build_request(missing)
+    with pytest.raises(SystemExit):
+        build_status_request(['status','--request-id','req-paid-001','--expected-definition-sha256','a'*64])

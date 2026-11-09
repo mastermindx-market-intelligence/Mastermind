@@ -8,6 +8,8 @@ reconciled before a native login file may be seeded onto a serialized stream.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
 from dataclasses import asdict
 import fcntl
@@ -16,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import time
@@ -79,6 +82,40 @@ def _managed_auth(raw: bytes) -> Mapping[str, Any]:
            for k in ("access_token", "refresh_token", "id_token", "account_id")):
         raise CodexAccountError("MANAGED_CHATGPT_AUTH_INCOMPLETE")
     return value
+
+
+def _local_user_claim_sha256(tokens: Mapping[str, Any]) -> str | None:
+    """Hash a bounded OpenAI ID-token user claim, never export token contents.
+
+    This is a local identity discriminator, NOT JWT signature verification,
+    seat entitlement, provider quota proof, or broker admission. Missing or
+    contradictory claims cannot qualify a Business quota comparison.
+    """
+    jwt = tokens.get("id_token")
+    if not isinstance(jwt, str) or len(jwt) > 131072:
+        return None
+    parts = jwt.split(".")
+    if len(parts) != 3 or not 1 <= len(parts[1]) <= 87382:
+        return None
+    try:
+        payload = base64.b64decode(
+            (parts[1] + "=" * (-len(parts[1]) % 4)).encode("ascii"),
+            altchars=b"-_", validate=True,
+        )
+        claims = json.loads(payload)
+    except (ValueError, UnicodeError, binascii.Error):
+        return None
+    if not isinstance(claims, Mapping):
+        return None
+    auth = claims.get("https://api.openai.com/auth")
+    if not isinstance(auth, Mapping):
+        return None
+    workspace = auth.get("chatgpt_account_id")
+    user = auth.get("chatgpt_user_id")
+    if (not isinstance(workspace, str) or workspace != tokens.get("account_id")
+            or not isinstance(user, str) or not 1 <= len(user) <= 256):
+        return None
+    return hashlib.sha256(user.encode()).hexdigest()
 
 
 def _home(path: Path, *, principal_home_admitted: bool = False) -> Path:
@@ -195,9 +232,13 @@ Existing credentials take precedence even when the seed is absent or stale.
     def auth_metadata(self) -> dict[str, Any]:
         self._check()
         value = _managed_auth(_private_file(self.home / "auth.json"))
-        return {"auth_mode": "chatgpt", "has_refresh_token": True,
-                "account_id_sha256": hashlib.sha256(
-                    value["tokens"]["account_id"].encode()).hexdigest()}
+        metadata = {"auth_mode": "chatgpt", "has_refresh_token": True,
+                    "account_id_sha256": hashlib.sha256(
+                        value["tokens"]["account_id"].encode()).hexdigest()}
+        user_hash = _local_user_claim_sha256(value["tokens"])
+        if user_hash is not None:
+            metadata["user_id_sha256"] = user_hash
+        return metadata
 
     def process_environment(self) -> dict[str, str]:
         self.auth_metadata()
@@ -233,14 +274,73 @@ def _window(value: Any, now: float) -> dict[str, Any] | None:
             "window_minutes": duration, "resets_at": reset}
 
 
+def reset_credit_inventory(limits: Mapping[str, Any], *, now: float) -> dict[str, Any]:
+    """Project native earned-reset facts; missing details are never zero balance.
+
+    Native availableCount is authoritative: the service may cap detail rows or
+    return null. Opaque IDs are retained for an admitted owner's explicit reset
+    proposal; provider titles/descriptions and all auth material are excluded.
+    This function cannot redeem, authorize, purchase or replenish a reset.
+    """
+    result: dict[str, Any] = {"state": "UNKNOWN", "available_count": None,
+        "details_complete": False, "credits": [], "source": "account/rateLimits/read",
+        "reset_execution_authorized": False}
+    raw = limits.get("rateLimitResetCredits")
+    if not isinstance(raw, Mapping):
+        return result
+    count = raw.get("availableCount")
+    if type(count) is not int or not 0 <= count <= 10000:
+        return result
+    result.update(state="COUNT_OBSERVED", available_count=count)
+    rows = raw.get("credits")
+    if rows is None:
+        return result
+    if not isinstance(rows, list) or len(rows) > 1000:
+        result["state"] = "DETAILS_INVALID"
+        return result
+    parsed, seen = [], set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            result["state"] = "DETAILS_INVALID"
+            return result
+        ident, expires = row.get("id"), row.get("expiresAt")
+        if (not isinstance(ident, str) or not ident.strip() or len(ident) > 256
+                or any(ord(c) < 32 or ord(c) == 127 for c in ident) or ident in seen
+                or row.get("status") != "available"
+                or row.get("resetType") != "codexRateLimits"
+                or (expires is not None and (type(expires) is not int or expires <= 0))):
+            result["state"] = "DETAILS_INVALID"
+            return result
+        seen.add(ident)
+        parsed.append({"credit_id": ident, "expires_at": expires,
+                       "expiry_state": "UNKNOWN" if expires is None else
+                           ("EXPIRED_OBSERVATION" if expires <= now else "FUTURE")})
+    result["credits"] = sorted(parsed, key=lambda c: (c["expires_at"] is None, c["expires_at"] or 0, c["credit_id"]))
+    consistent = count >= len(parsed) and not any(c["expiry_state"] == "EXPIRED_OBSERVATION" for c in parsed)
+    result["details_complete"] = consistent and len(parsed) == count
+    result["state"] = ("DETAILS_INCONSISTENT" if not consistent else
+                       "DETAILS_OBSERVED" if result["details_complete"] else "DETAILS_PARTIAL")
+    return result
+
+
 def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
                       now: float | None = None, limit_id: str = "codex") -> dict[str, Any]:
-    """Projection of provider evidence, not an admission or a quota reservation."""
+    """Project provider evidence without admission or quota reservation.
+
+    ``windows`` retains only validated measurements for existing consumers.
+    ``window_states`` preserves each native position independently: UNKNOWN
+    before identity/bucket observation, MISSING for an omitted key,
+    NOT_APPLICABLE only for explicit null, INVALID_OR_STALE for rejected data,
+    and OBSERVED for a validated window. EXHAUSTED may coexist with an unknown
+    sibling constraint; it is not completeness or permission to reset.
+    """
     now = time.time() if now is None else now
     result: dict[str, Any] = {"observed_at_unix": now, "auth_state": "UNKNOWN",
         "capacity_state": "UNKNOWN", "plan_type": None, "windows": {},
+        "window_states": {"primary": "UNKNOWN", "secondary": "UNKNOWN"},
         "source": ["account/read", "account/rateLimits/read"],
-        "account_identity_is_cached": True, "admission_granted": False}
+        "account_identity_is_cached": True, "admission_granted": False,
+        "limit_id": limit_id, "reset_credits": reset_credit_inventory({}, now=now)}
     identity = account.get("account")
     if identity is None and "account" in account:
         result["auth_state"] = "LOGIN_REQUIRED"
@@ -251,6 +351,7 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
         result["auth_state"] = "NATIVE_CHATGPT_AUTH_REQUIRED"
         return result
     result["auth_state"] = "MANAGED_CHATGPT_OBSERVED"
+    result["reset_credits"] = reset_credit_inventory(limits, now=now)
     plan = identity.get("planType")
     if isinstance(plan, str) and len(plan) <= 80:
         result["plan_type"] = plan
@@ -264,9 +365,20 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
     if not isinstance(selected, Mapping):
         return result
     for key in ("primary", "secondary"):
-        parsed = _window(selected.get(key), now)
-        if parsed is not None:
-            result["windows"][key] = parsed
+        # A depleted sibling does not make absent evidence complete. Keep the
+        # provider's explicit N/A distinct from missing or invalid measurements
+        # through the existing JSON probe output, even when capacity is exhausted.
+        if key not in selected:
+            result["window_states"][key] = "MISSING"
+        elif selected[key] is None:
+            result["window_states"][key] = "NOT_APPLICABLE"
+        else:
+            parsed = _window(selected[key], now)
+            if parsed is None:
+                result["window_states"][key] = "INVALID_OR_STALE"
+            else:
+                result["window_states"][key] = "OBSERVED"
+                result["windows"][key] = parsed
     if any(w["remaining_percent"] == 0 for w in result["windows"].values()):
         result["capacity_state"] = "EXHAUSTED"
     elif (result["windows"] and all(key in selected for key in ("primary", "secondary"))
@@ -291,9 +403,58 @@ def _failure_kind(error: Exception) -> str:
     return "NATIVE_READ_UNAVAILABLE"
 
 
+_VISIBLE_FRONTIER_MODELS = ("gpt-6-astra", "gpt-6.1-sol")
+_NATIVE_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+
+
+def native_model_visibility(raw: Any) -> dict[str, Any]:
+    """Sanitize one native model/list response; never infer quota or grant.
+
+    Unrecognized provider model IDs are discarded. An invalid, incomplete, or
+    duplicate catalog does not authorize any model and leaks no provider text.
+    """
+    result = {"state": "UNKNOWN", "supported_models": [],
+              "source": "model/list", "admission_granted": False}
+    if not isinstance(raw, Mapping) or raw.get("nextCursor") is not None:
+        return result
+    values = raw.get("data")
+    if not isinstance(values, list) or len(values) > 100:
+        return result
+    seen: set[str] = set()
+    qualified: set[str] = set()
+    for item in values:
+        if not isinstance(item, Mapping):
+            return result
+        ident = item.get("id")
+        if (type(ident) is not str or _NATIVE_MODEL_ID.fullmatch(ident) is None
+                or ident in seen
+                or any(field in item and type(item[field]) is not bool
+                       for field in ("isHidden", "hidden"))):
+            return result
+        seen.add(ident)
+        if ident in _VISIBLE_FRONTIER_MODELS and not (
+            item.get("isHidden") is True or item.get("hidden") is True
+        ):
+            qualified.add(ident)
+    result["state"] = "OBSERVED"
+    result["supported_models"] = [
+        model for model in _VISIBLE_FRONTIER_MODELS if model in qualified
+    ]
+    return result
+
+
 def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
-                         *, timeout: float = 20) -> dict[str, Any]:
-    """Two native reads in a contained app-server; no thread, turn or model call."""
+                         *, timeout: float = 20,
+                         previous_observation: Mapping[str, Any] | None = None,
+                         include_models: bool = False) -> dict[str, Any]:
+    """Two required native reads, optional bounded model/catalog read.
+
+    The optional native model list is obtained on the SAME locked App Server
+    session and never creates model usage, lease, credit, or dispatch authority.
+
+    The existing observation owner supplies its prior sanitized result. Nothing
+    is persisted here, and a comparison never grants quota or changes admission.
+    """
     from scripts.ohf.laboratory import AppServerClient
     # The explicit provider overrides prevent a saved profile selecting an API
     # route. File storage lets Codex persist its own refreshed managed session.
@@ -302,9 +463,15 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                             "home_identity": environment.auth_metadata()}
     stage = "construct"
     try:
+        native_env = environment.process_environment()
+        # The exact attended Homebrew Codex CLI on macOS needs its fixed
+        # executable directory for app-server initialize. Never inherit the
+        # parent PATH or widen the installed Executive pinned-binary path.
+        if Path(binary) == Path("/opt/homebrew/bin/codex"):
+            native_env["PATH"] = "/opt/homebrew/bin:" + native_env["PATH"]
         client = AppServerClient([str(binary), "app-server", "-c",
             'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
-            env=environment.process_environment(), cwd=environment.home,
+            env=native_env, cwd=environment.home,
             start_new_session=True)
         stage = "start"
         client.start()
@@ -317,10 +484,35 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
         stage = "account/read"
         account = client.request("account/read", {"refreshToken": False}, timeout=timeout)
         result["account"] = account_readiness(account, {})
-        stage = "account/rateLimits/read"
-        limits = client.request("account/rateLimits/read", {}, timeout=timeout)
-        result["account"] = account_readiness(account, limits)
-        result["state"] = "NATIVE_READS_COMPLETED"
+        auth_state = result["account"]["auth_state"]
+        if auth_state != "MANAGED_CHATGPT_OBSERVED":
+            # Keep explicit native sign-in evidence. A quota request cannot
+            # qualify a missing/non-managed account and can obscure that state.
+            result["state"] = (
+                "LOGIN_REQUIRED"
+                if auth_state in {"LOGIN_REQUIRED", "NATIVE_CHATGPT_AUTH_REQUIRED"}
+                else "NATIVE_READ_UNAVAILABLE"
+            )
+            result["failed_method"] = stage
+        else:
+            stage = "account/rateLimits/read"
+            limits = client.request("account/rateLimits/read", {}, timeout=timeout)
+            result["account"] = account_readiness(account, limits)
+            # Model metadata is advisory; quota-state reconciliation remains
+            # independently useful even if model/list is missing or unavailable.
+            # The selector must refuse UNKNOWN, never infer model eligibility.
+            if include_models:
+                result["model_visibility"] = native_model_visibility(None)
+                try:
+                    stage = "model/list"
+                    models = client.request("model/list",
+                                            {"limit": 100, "includeHidden": False},
+                                            timeout=timeout)
+                    result["model_visibility"] = native_model_visibility(models)
+                except Exception:
+                    # Provider errors can contain credentials: keep only UNKNOWN.
+                    result["model_visibility"] = native_model_visibility(None)
+            result["state"] = "NATIVE_READS_COMPLETED"
     except Exception as error:
         # Provider errors can echo tokens/headers. Never return arbitrary errors.
         result["state"] = _failure_kind(error)
@@ -340,4 +532,8 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
                                   "private_group_empty": False}
             if result["state"] == "NATIVE_READS_COMPLETED" and not result["stop"].get("private_group_empty"):
                 result["state"] = "NATIVE_CLEANUP_UNPROVEN"
+    # Observe only after the final cleanup disposition is known. An apparently
+    # successful read with uncertain process cleanup cannot become reset proof.
+    from control_plane.codex_quota_observation import compare_native_codex_quota
+    result["quota_change"] = compare_native_codex_quota(previous_observation, result)
     return result
