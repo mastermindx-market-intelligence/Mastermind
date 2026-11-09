@@ -13,13 +13,17 @@ by the CURRENT broker-issued ExecutionBinding.v1, validated against the
 owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
-The gate judges command SHAPE with an ADMIT rule (r6 — see
-``r6_refusal_codes``): a command that names a paid-launch wrapper is admitted
-only as ONE plain top-level launch (optionally behind a closed set of
-transparent prefixes), one faithful ``bash -c '<plain launch>'``, or a
-read-only inspector pipeline; every other shape naming a wrapper is refused
-with a typed ``R6_*`` code, read by a real tokenizer (a tokenizer failure
-refuses). POSIX line continuations are joined, never split.
+The gate judges command SHAPE with an ADMIT rule (r6/r7 — see ``r7_parse``
+and ``r6_refusal_codes``): a command that names a paid-launch wrapper is
+admitted only as ONE plain top-level launch (optionally behind a closed set
+of transparent prefixes, redirections only trailing), one faithful
+``bash -c '<plain launch>'``, or a pipeline of closed read forms; every other
+shape naming a wrapper is refused with a typed ``R6_*`` code, read by a real
+tokenizer (a tokenizer failure refuses). POSIX line continuations are joined,
+never split. r7: the binding gate's launch census and identity values come
+from that same parse (the lexer's argv and exact literal values), so every
+admitted unit whose command word is a wrapper reaches the binding gate; the
+text regexes remain only as a cross-check that must agree.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -27,7 +31,7 @@ shown through this provider hook; it does not claim to fence arbitrary processes
 """
 from __future__ import annotations
 
-import fnmatch
+import bisect
 import hashlib
 import json
 import os
@@ -114,14 +118,19 @@ _SLOT_POOL = (
     r"(?:grok|minimax|glm|glm-frontier|bailian|cursor|go|ocfree|"
     r"codex-native|claude-native)"
 )
+#: r7: no optional ``(?:[A-Za-z0-9_./-]+/)?`` path group in front of a wrapper
+#: name. The lookbehind already admits a name right after ``/``; the group
+#: only widened ``match.start()`` and made every scan QUADRATIC on long path
+#: words (a 20 KB ``/a/a/…`` word took >10 s — longer than the hook timeout,
+#: and a timed-out hook does not block the command).
 FABRIC_LAUNCH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:"
-    r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
-    r"|(?:[A-Za-z0-9_./-]+/)?sub\.sh\s+" + _SUB_LAUNCH_MODE + r"\b"
-    r"|(?:[A-Za-z0-9_./-]+/)?remote_sub\.sh\s+\S+\s+"
+    r"pool\s+(?:run|remote)\b"
+    r"|sub\.sh\s+" + _SUB_LAUNCH_MODE + r"\b"
+    r"|remote_sub\.sh\s+\S+\s+"
     + _REMOTE_LAUNCH_MODE
     + r"\b"
-    r"|(?:python(?:3(?:\.\d+)?)?\s+)?(?:[A-Za-z0-9_./-]+/)?slot\.py\s+"
+    r"|slot\.py\s+"
     + _SLOT_POOL
     + r"\b"
     r")",
@@ -206,7 +215,7 @@ _WRAPPER_SHAPES = {
     "slot.py": (0, _SLOT_POOLS),
 }
 _WRAPPER_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?<![A-Za-z0-9_.-])"
     r"(?P<wrapper>pool[ \t]+(?:run|remote)|remote_sub\.sh|sub\.sh|slot\.py)"
     r"(?![A-Za-z0-9_.-])",
     re.I,
@@ -237,18 +246,20 @@ _UNOBSERVABLE_ENV_RE = re.compile(
 #: when a wrapper token is present in the text (REVIEW_2329 r2 N-3). Computed
 #: commands without wrapper tokens are the documented arbitrary-process limit.
 _WRAPPER_NAME_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?<![A-Za-z0-9_.-])"
     r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
     re.I,
 )
 #: Loop bodies (for/while/until) execute their contents N times: one lexical
 #: launch inside one is N paid children under one binding's single attempt
 #: (REVIEW_2329 r2 N-2/C1).
-_LOOP_BODY_RE = re.compile(r"\bdo\b.*?\bdone\b", re.S)
+#: (Spans are found by a linear scan over these keywords, not a lazy
+#: ``do.*?done`` regex, which is quadratic on many unmatched ``do`` words.)
+_LOOP_KEYWORD_RE = re.compile(r"\b(?:done|do)\b")
 #: Batch executors that run their argument command once per input item
 #: (REVIEW_2329 r2 N-2/C2-C3, find -exec).
 _BATCH_EXECUTOR_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?<![A-Za-z0-9_.-])"
     r"(?:xargs|parallel|find)\b[^;&|\n]*",
     re.I,
 )
@@ -291,11 +302,53 @@ _BATCH_EXECUTOR_RE = re.compile(
 # or glob/brace pattern to a partial wrapper name (``${p}ol``, ``$s.sh``,
 # ``po?l``, ``{p,}ool``) counts as naming it. A word that is ENTIRELY computed
 # (``$W``, ``$(cmd)``, ``*``) names nothing and stays out of scope.
+#
+# --- r7: the parse drives the binding gate (REVIEW2 A1 findings 1-6) ---------
+#
+# r6 admitted by the parse but CENSUSED by text regexes that expect the mode
+# right after the wrapper (``pool run``), so ``pool </dev/null run grok``
+# passed r6 and then found no launch: the gate's early return skipped the
+# binding check entirely. r7 makes the parse the single source of truth:
+#
+#  * Grammar order is enforced, not just documented: LAUNCH is
+#    ``ASSIGN* PREFIX* HEAD ARG* REDIR*`` — a redirection before the command
+#    word or between arguments refuses (``R6_REDIRECTION``). The same order
+#    holds for NESTED and for every read form.
+#  * Every admitted unit whose command word is a wrapper (or python + slot.py,
+#    including the body of a NESTED form) becomes an ``_R7Launch`` carrying
+#    the lexer's argv and the EXACT literal value of every identity
+#    assignment that reaches it (prefix, ``env`` argument, nested outer and
+#    body). The gate never returns early for such a unit; it reads wrapper,
+#    mode and token from that argv and refuses unless the r4 text view finds
+#    exactly the same invocations (``validate_execution_binding``).
+#  * Command words other than the wrapper must be spelled exactly (lowercase)
+#    and be bare names or live directly in /bin or /usr/bin; any other path
+#    may name a staged binary (``R6_HEAD_SPELLING``). Wrapper words and the
+#    slot.py operand keep any path: what they run is the binding-checked
+#    launch (staged-file limit documented in the ledger).
+#  * Read forms are closed: the inspectors (``xxd`` dropped; ``tail``
+#    without follow; grep without ugrep's filter/pager/config/query options;
+#    ``file`` without compile) plus ``git commit -m|-F`` /
+#    ``git log|show|diff|status|grep|add`` with per-subcommand option
+#    allowlists, ``rg`` with an option allowlist (no --pre, -z, --hostname-bin)
+#    and ``sed -n N[,M]p``. A read form writes only to /dev/null or a
+#    duplicated descriptor.
+#
+# Shell model: the lexer models bash/POSIX word rules. The Bash tool on this
+# host runs ``zsh -c``; the known divergences that matter are refused rather
+# than modelled: zsh ``<N-M>`` numeric globs (bash reads a redirection), zsh
+# ``>!``/``>>!`` clobber operators (bash reads a target named ``!…``), zsh
+# ``=(…)`` process substitution and glob qualifiers (both need ``(``),
+# ``&!``/``&|`` (list operators). bash-only ``$"…"`` and zsh-only ``${:-x}``
+# are computed segments (refused) and are decoded for SCOPE so they cannot
+# hide a wrapper name.
 
 _R6_WRAPPER_BASENAMES = ("pool", "sub.sh", "remote_sub.sh", "slot.py")
-#: (stem, extension) per wrapper basename: a glob must spell at least two
-#: characters of the STEM before it counts as naming the wrapper (``*.sh``
-#: alone does not; ``su*.sh`` / ``po?l`` do).
+#: (stem, extension) per wrapper basename: a glob must spell at least one
+#: character of the STEM before it counts as naming the wrapper (``*.sh``
+#: alone does not; ``s*.sh`` / ``p*`` / ``po?l`` do — r7 lowered this from
+#: two). A glob in COMMAND-WORD position counts whenever it can match a
+#: wrapper basename at all (``* run …``, ``???? run …``).
 _R6_WRAPPER_STEMS = {
     "pool": ("pool", ""),
     "sub.sh": ("sub", ".sh"),
@@ -337,13 +390,188 @@ _R6_OTHER_SHELLS = frozenset({
     "tcsh", "csh", "pwsh",
 })
 #: Read-only inspectors admitted in the INSPECTOR form: none of them executes
-#: an argument. Narrower than ``_INSPECTORS``: ``rg`` (``--pre`` runs a
-#: command per file) and ``less``/``more`` (shell escapes, LESSOPEN) execute.
+#: an argument. Narrower than ``_INSPECTORS``: ``less``/``more`` (shell
+#: escapes, LESSOPEN) execute; r7 drops ``xxd`` (``xxd -r IN OUT`` writes
+#: OUT). ``rg`` is admitted only through its option allowlist (below).
 _R6_INSPECTORS = frozenset({
     "cat", "head", "tail", "grep", "egrep", "fgrep", "wc", "ls", "stat",
     "file", "diff", "cmp", "shasum", "sha1sum", "sha256sum", "md5",
-    "md5sum", "nl", "od", "xxd", "echo",
+    "md5sum", "nl", "od", "echo",
 })
+#: r7 closed read forms: the inspectors plus three (head, option-allowlist)
+#: carve-outs (REVIEW2 over-refusal note): git, rg and ``sed -n N[,M]p``.
+_R7_READ_HEADS = _R6_INSPECTORS | {"git", "rg", "sed"}
+#: Read heads whose options can execute, write or never finish: an unquoted
+#: glob argument whose expansion could START with ``-`` (a staged file named
+#: ``--filter=…``) would become an option, so it is refused for these.
+_R7_GLOB_SENSITIVE = frozenset({
+    "grep", "egrep", "fgrep", "tail", "file", "git", "rg", "sed",
+})
+#: Directories a non-wrapper command word may name explicitly (root-owned,
+#: SIP-protected on macOS); every other path may be a staged binary.
+_R7_SYSTEM_BIN_DIRS = ("/bin", "/usr/bin")
+#: Transparent prefixes that are shell builtins: bare names only.
+_R7_BUILTIN_ONLY = frozenset({"exec", "command"})
+_R7_OUTPUT_REDIRECTIONS = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
+_R7_DESCRIPTOR_RE = re.compile(r"^(?:[0-9]+|-)$")
+#: ``${NAME…op`` openings (bash and zsh parameter operators, zsh ``(flags)``
+#: and the empty name ``${:-…}``): for SCOPE only, the opening is read as a
+#: space so the operator's literal word (``${x:-pool}``) is visible.
+_R7_PARAM_OPERATOR_RE = re.compile(
+    r"\$\{(?:\([^()]*\))?[#!]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])?"
+    r"(?:\[[^\]]*\])?(?::?[-=+?]|//?|/[#%]|##?|%%?|\^\^?|,,?|:)"
+)
+#: A wrapper name glued to a short option (``git grep -O'pool run …'``,
+#: ``-Opool``): the option letter hides the name from ``_WRAPPER_NAME_RE``.
+#: (Single quantifier per alternative: linear on long words — a slow hook is
+#: killed by the provider and a killed hook does not block.)
+_R7_GLUED_OPTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])-[A-Za-z](?:[A-Za-z0-9_./-]*/|[A-Za-z]*)"
+    r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
+    re.I,
+)
+#: Armed sessions refuse a Bash command longer than this outright: the
+#: provider kills a hook after its 10 s timeout and a killed hook does not
+#: block, so the gate must finish. Every armed-path scan is linear; this cap
+#: bounds the constant (measured in the C5 ledger).
+R7_MAX_ARMED_COMMAND_CHARS = 262144
+#: Nesting depth of ``${…}``/``$(…)`` the scope check unwraps; deeper text is
+#: in scope (and then refused as computed) instead of costing a pass per level.
+_R7_MAX_SUBSTITUTION_DEPTH = 32
+#: A run of plain literal word characters (read in one step: per-character
+#: string appends made long words quadratic in the lexer).
+_R7_LITERAL_RUN_RE = re.compile(r"[^\x00-\x20\x7f;&|<>()'\"\\`$]+")
+#: zsh ``<N-M>`` numeric glob; bash reads ``<`` ``N-M`` ``>`` redirections.
+_R7_ZSH_NUMERIC_GLOB_RE = re.compile(r"<[0-9]*-[0-9]*>")
+
+
+def _r7_spec(
+    short_flags: str = "", short_valued: str = "",
+    long_flags: tuple = (), long_valued: tuple = (),
+) -> tuple:
+    """A closed option grammar: (short flags, short options taking a value,
+    long flags, long options taking a value)."""
+    return (
+        frozenset(short_flags), frozenset(short_valued),
+        frozenset(long_flags), frozenset(long_valued),
+    )
+
+
+_R7_GIT_DIFF_LONG_FLAGS = (
+    "--stat", "--shortstat", "--numstat", "--name-only", "--name-status",
+    "--patch", "--no-patch", "--raw", "--color", "--no-color",
+    "--no-ext-diff", "--no-textconv", "--ignore-all-space",
+    "--ignore-space-change", "--word-diff", "--summary", "--check",
+    "--find-renames", "--no-renames", "--full-index", "--compact-summary",
+    "--patch-with-stat", "--abbrev",
+)
+_R7_GIT_DIFF_LONG_VALUED = (
+    "--unified", "--stat", "--color", "--word-diff", "--diff-filter",
+    "--abbrev", "--relative",
+)
+_R7_GIT_LOG_LONG_FLAGS = (
+    "--oneline", "--graph", "--decorate", "--no-decorate", "--all",
+    "--reverse", "--no-merges", "--merges", "--first-parent", "--follow",
+    "--abbrev-commit", "--date-order", "--topo-order", "--left-right",
+    "--regexp-ignore-case", "--all-match", "--invert-grep",
+    "--extended-regexp", "--fixed-strings", "--perl-regexp", "--source",
+)
+#: git subcommand -> closed option grammar. Exec/write-capable options are
+#: absent on purpose (-O/--open-files-in-pager, --ext-diff, --textconv,
+#: --output, --exec, -e/--edit, -p/--patch on add, -S/--gpg-sign, -c on
+#: commit), as are every git global option except --no-pager (-c,
+#: --config-env, --exec-path, -C, --git-dir, …) and every other subcommand
+#: (bisect run, rebase --exec, submodule foreach, config, …).
+_R7_GIT_SPECS = {
+    "commit": _r7_spec(
+        "aqsn", "mF",
+        ("--all", "--quiet", "--signoff", "--amend", "--no-edit",
+         "--allow-empty", "--no-verify"),
+        ("--message", "--file"),
+    ),
+    "log": _r7_spec(
+        "pusMRwbiEFPC0123456789", "nSGUL",
+        _R7_GIT_DIFF_LONG_FLAGS + _R7_GIT_LOG_LONG_FLAGS,
+        _R7_GIT_DIFF_LONG_VALUED + (
+            "--max-count", "--skip", "--since", "--after", "--until",
+            "--before", "--author", "--committer", "--grep", "--format",
+            "--pretty", "--date", "--decorate",
+        ),
+    ),
+    "show": _r7_spec(
+        "pusMRwb", "U",
+        _R7_GIT_DIFF_LONG_FLAGS + ("--oneline", "--abbrev-commit", "--no-notes"),
+        _R7_GIT_DIFF_LONG_VALUED + ("--format", "--pretty", "--date"),
+    ),
+    "diff": _r7_spec(
+        "pusMRwb", "U",
+        _R7_GIT_DIFF_LONG_FLAGS + (
+            "--cached", "--staged", "--merge-base", "--exit-code", "--quiet",
+            "--no-index", "--minimal", "--histogram", "--patience",
+        ),
+        _R7_GIT_DIFF_LONG_VALUED,
+    ),
+    "status": _r7_spec(
+        "sbv", "u",
+        ("--short", "--branch", "--porcelain", "--long", "--verbose",
+         "--ignored", "--no-renames", "--ahead-behind", "--no-ahead-behind",
+         "--show-stash"),
+        ("--porcelain", "--untracked-files", "--ignored"),
+    ),
+    "grep": _r7_spec(
+        "niIlLcwvEFGPhHoqarWpz", "eABCmf",
+        ("--line-number", "--ignore-case", "--files-with-matches",
+         "--name-only", "--files-without-match", "--count", "--word-regexp",
+         "--invert-match", "--extended-regexp", "--fixed-strings",
+         "--basic-regexp", "--perl-regexp", "--full-name", "--cached",
+         "--untracked", "--no-index", "--exclude-standard",
+         "--only-matching", "--quiet", "--all-match", "--and", "--or",
+         "--not", "--break", "--heading", "--color", "--no-color", "--text",
+         "--recursive", "--column", "--show-function", "--function-context",
+         "--null"),
+        ("--max-count", "--context", "--after-context", "--before-context",
+         "--max-depth", "--color", "--threads"),
+    ),
+    "add": _r7_spec(
+        "AunvfN", "",
+        ("--all", "--update", "--dry-run", "--verbose", "--force",
+         "--intent-to-add", "--ignore-errors", "--renormalize", "--sparse",
+         "--ignore-removal", "--no-all"),
+        (),
+    ),
+}
+#: rg option allowlist: --pre/--pre-glob (run a command per file),
+#: -z/--search-zip (spawn decompressors) and --hostname-bin (runs a binary)
+#: are absent on purpose.
+_R7_RG_SPEC = _r7_spec(
+    "isSwxvlcoFnNHILUPuqp0ab.", "efgtTABCmMdjrE",
+    ("--ignore-case", "--smart-case", "--case-sensitive", "--word-regexp",
+     "--line-regexp", "--invert-match", "--files-with-matches",
+     "--files-without-match", "--count", "--count-matches",
+     "--only-matching", "--fixed-strings", "--line-number",
+     "--no-line-number", "--with-filename", "--no-filename", "--hidden",
+     "--no-ignore", "--no-ignore-vcs", "--no-ignore-parent",
+     "--no-ignore-dot", "--follow", "--multiline", "--multiline-dotall",
+     "--pcre2", "--files", "--heading", "--no-heading", "--json",
+     "--vimgrep", "--column", "--quiet", "--stats", "--trim", "--text",
+     "--byte-offset", "--null", "--no-messages", "--unrestricted",
+     "--no-config", "--type-list", "--passthru", "--sort-files", "--crlf",
+     "--binary", "--no-binary", "--pretty", "--one-file-system",
+     "--glob-case-insensitive", "--line-buffered", "--block-buffered"),
+    ("--regexp", "--file", "--glob", "--iglob", "--type", "--type-not",
+     "--after-context", "--before-context", "--context", "--max-count",
+     "--max-depth", "--max-columns", "--max-filesize", "--threads",
+     "--replace", "--color", "--colors", "--sort", "--sortr", "--encoding",
+     "--type-add", "--type-clear", "--path-separator", "--context-separator",
+     "--engine"),
+)
+_R7_SED_SCRIPT_RE = re.compile(r"^[0-9]+(?:,[0-9]+)?p$")
+#: grep in Claude sessions is a snapshot function to ugrep: its options that
+#: run a filter/pager, read or save a config, or open the query UI.
+_R7_UGREP_EXEC_PREFIXES = (
+    "--filter", "--pager", "--save-config", "--config", "--view", "--query",
+    "--index",
+)
 #: Reserved words in command position (bash, plus the zsh/csh loop words).
 _R6_RESERVED_WORDS = frozenset({
     "if", "then", "elif", "else", "fi", "for", "while", "until", "do",
@@ -451,24 +679,44 @@ _R6_CLAUSES = {
         "NAME=value, nohup, nice [-n N], timeout DURATION, setsid, exec, "
         "command — no other options)"
     ),
-    "R6_REDIRECTION": "the redirection {detail} is not admitted on a launch",
+    "R6_REDIRECTION": (
+        "the redirection {detail} is not admitted (redirections go after the "
+        "last argument; a read form writes only to /dev/null or a duplicated "
+        "descriptor; no network or dot-path targets)"
+    ),
     "R6_NOT_A_PLAIN_LAUNCH": (
         "the wrapper name appears, but not as the command word of a plain "
-        "launch — {detail} receives it as data or program text it can execute "
-        "any number of times or later (runtime-multiplexed) while the current "
-        "binding covers exactly one attempt"
+        "launch, and {detail} is not an admitted read form — it receives the "
+        "name as data or program text it can execute any number of times or "
+        "later (runtime-multiplexed), write somewhere or never finish, while "
+        "the current binding covers exactly one attempt"
     ),
     "R6_NESTED_SHELL": (
         "a nested shell is admitted only as bash -c / sh -c '<one plain "
         "launch>' with exactly -c and nothing after the body — {detail}"
+    ),
+    "R6_HEAD_SPELLING": (
+        "the command word {detail} is not spelled as the admitted command: "
+        "prefixes, shells, python and read forms must be their exact "
+        "lowercase bare name (or /bin/… or /usr/bin/…), because any other "
+        "path or spelling may resolve to a staged binary"
     ),
 }
 _R6_REMEDY = (
     "Run the paid launch as a plain command: the wrapper (or python3 "
     "…/slot.py) as the command word, optionally behind env NAME=value / "
     "nohup / nice -n N / timeout DURATION / setsid / exec / command, with "
-    "literal arguments and nothing else on the line (or bash -c '<that one "
-    "launch>')."
+    "literal arguments, redirections only at the end and nothing else on the "
+    "line (or bash -c '<that one launch>')."
+)
+_R7_READ_REMEDY = (
+    "Not launching? Drop the bare wrapper name from the command text, or use "
+    "an admitted read form: cat/head/tail/grep/egrep/fgrep/wc/ls/stat/file/"
+    "diff/cmp/shasum/sha1sum/sha256sum/md5/md5sum/nl/od/echo, git commit "
+    "-m|-F, git log|show|diff|status|grep|add (allowlisted options, no git "
+    "global option but --no-pager), rg (allowlisted options; no --pre, -z, "
+    "--hostname-bin) or sed -n N[,M]p — piped only into each other, writing "
+    "only to /dev/null."
 )
 
 
@@ -513,6 +761,88 @@ def _r6_decode_ansi_c(body: str) -> str:
     return "".join(out)
 
 
+def _r7_parts_match(name: str, parts: list[str]) -> bool:
+    """``name`` fullmatches ``parts[0] .* parts[1] .* … parts[-1]`` (literal
+    parts): greedy leftmost, linear — no regex backtracking."""
+    first, last = parts[0], parts[-1]
+    if not name.startswith(first):
+        return False
+    position = len(first)
+    for part in parts[1:-1]:
+        found = name.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part)
+    return len(name) - len(last) >= position and name.endswith(last)
+
+
+def _r7_glob_atom_matches(atom: tuple, char: str) -> bool:
+    if atom[0] == "?":
+        return True
+    if atom[0] == "lit":
+        return atom[1] == char
+    body, negate = atom[1], atom[2]
+    hit = False
+    index = 0
+    while index < len(body):
+        if index + 2 < len(body) and body[index + 1] == "-":
+            hit = hit or body[index] <= char <= body[index + 2]
+            index += 3
+        else:
+            hit = hit or body[index] == char
+            index += 1
+    return hit != negate
+
+
+def _r7_glob_match(name: str, pattern: str) -> bool:
+    """fnmatch-style ``*``/``?``/``[set]`` matching by a position-set walk,
+    O(len(pattern) * len(name)). r7 replaces ``fnmatch`` here: its regex
+    translation backtracks catastrophically on patterns like ``*?*?*?…``
+    (a slow hook is killed and does not block)."""
+    atoms: list[tuple] = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "*":
+            if not atoms or atoms[-1] != ("*",):
+                atoms.append(("*",))
+            index += 1
+            continue
+        if char == "?":
+            atoms.append(("?",))
+            index += 1
+            continue
+        if char == "[":
+            body_at = index + 1
+            if body_at < len(pattern) and pattern[body_at] in "!^":
+                body_at += 1
+            if body_at < len(pattern) and pattern[body_at] == "]":
+                body_at += 1
+            close = pattern.find("]", body_at)
+            if close >= 0:
+                body = pattern[index + 1:close]
+                negate = body[:1] in ("!", "^")
+                atoms.append(("set", body[1:] if negate else body, negate))
+                index = close + 1
+                continue
+        atoms.append(("lit", char))
+        index += 1
+    if sum(1 for atom in atoms if atom != ("*",)) > len(name):
+        return False
+    positions = {0}
+    for atom in atoms:
+        if atom == ("*",):
+            positions = set(range(min(positions), len(name) + 1))
+            continue
+        positions = {
+            position + 1 for position in positions
+            if position < len(name) and _r7_glob_atom_matches(atom, name[position])
+        }
+        if not positions:
+            return False
+    return len(name) in positions
+
+
 def _r6_partial_wrapper(base: str) -> bool:
     """True when a word's basename, with computed parts (``\\x00``) or glob
     and brace patterns as wildcards, can spell a wrapper basename."""
@@ -520,41 +850,102 @@ def _r6_partial_wrapper(base: str) -> bool:
     if "\x00" in lowered:
         if not lowered.replace("\x00", ""):
             return False  # entirely computed: names nothing (r2 limit)
-        pattern = ".*".join(re.escape(part) for part in lowered.split("\x00"))
-        return any(re.fullmatch(pattern, name) for name in _R6_WRAPPER_BASENAMES)
+        parts = re.sub("\x00+", "\x00", lowered).split("\x00")
+        return any(_r7_parts_match(name, parts) for name in _R6_WRAPPER_BASENAMES)
     if not any(char in lowered for char in "*?[{"):
         return False
     pattern = re.sub(r"\{[^{}]*\}", "*", lowered)
     for name in _R6_WRAPPER_BASENAMES:
         stem, extension = _R6_WRAPPER_STEMS[name]
-        if not fnmatch.fnmatchcase(name, pattern):
+        if not _r7_glob_match(name, pattern):
             continue
         stem_pattern = (
             pattern[:-len(extension)]
             if extension and pattern.endswith(extension) else pattern
         )
         literal = re.sub(r"\[[^\]]*\]|[*?{}\[\]]", "", stem_pattern)
-        if len(literal) >= 2:
+        if len(literal) >= 1:
             return True
     return False
 
 
+def _r7_glob_head_names_wrapper(text: str) -> bool:
+    """True when a unit's COMMAND WORD (after assignments and transparent
+    prefixes) is an unquoted glob/brace pattern that can match a wrapper
+    basename (``* run …``, ``p* run …``): the shell resolves it from the
+    current directory, so it may BE the wrapper. An unreadable line is left
+    to the other scope checks."""
+    tokens, error = _r6_lex(text)
+    if error:
+        return False
+    units: list[list[_R6Word]] = [[]]
+    pending = False
+    for kind, item in tokens:
+        if kind == "word":
+            if pending:
+                pending = False
+            else:
+                units[-1].append(item)
+            continue
+        if kind == "op":
+            operator = str(item)
+            if operator in _R6_REDIRECTIONS or operator == "<<<":
+                pending = True
+                continue
+            units.append([])
+    for words in units:
+        index = 0
+        while index < len(words) and _R6_ASSIGNMENT_RE.match(
+            words[index].leading_unquoted()
+        ):
+            index += 1
+        while index < len(words):
+            base = _r7_command_name(words[index])[0].lower()
+            if base not in _R6_TRANSPARENT_PREFIXES:
+                break
+            index = _r6_prefix(base, words, index + 1, [], [])
+        if index < len(words) and words[index].has_glob():
+            pattern = re.sub(
+                r"\{[^{}]*\}", "*", words[index].value.rsplit("/", 1)[-1].lower()
+            )
+            if any(_r7_glob_match(name, pattern) for name in _R6_WRAPPER_BASENAMES):
+                return True
+    return False
+
+
 def r6_names_wrapper(raw: str) -> bool:
-    """True when the command text names a paid-launch wrapper (r6 scope).
+    """True when the command text names a paid-launch wrapper (r6/r7 scope).
 
     Literal wrapper names (quote/backslash/continuation-insensitive, like
-    the r4 gate), ANSI-C quoted text decoded first, and partial wrapper
-    names glued to a $-expansion, command substitution or glob/brace
-    pattern. A wholly computed word names nothing: that is the documented
-    arbitrary-process limit (REVIEW_2329 r2), not this gate's fence.
+    the r4 gate), ANSI-C quoted text decoded first, the literal word of a
+    parameter operator read as a word (r7: ``${x:-pool}``, ``${x-sub.sh}``,
+    zsh ``${:-pool}``), bash locale quoting read as plain quoting (r7:
+    ``p$""ool``, ``p$"o"ol``), a wrapper name glued to a short option
+    (r7: ``-O'pool run …'``), partial wrapper names glued to a
+    $-expansion, command substitution or glob/brace pattern (r7: one
+    literal stem character suffices — ``p*``, ``s*.py``), and any glob in
+    command-word position that can match a wrapper basename. A wholly
+    computed word names nothing: that is the documented arbitrary-process
+    limit (REVIEW_2329 r2), not this gate's fence; so is a wholly wildcard
+    operand (``python3 *.py``) and a name spelled with other characters
+    (homoglyphs name a different file).
     """
     text = raw.replace("\\\n", "")
     text = _R6_ANSI_C_RE.sub(lambda match: _r6_decode_ansi_c(match.group(1)), text)
-    if _WRAPPER_NAME_RE.search(re.sub(r"[\"'\\]", "", text)):
+    widened = re.sub(
+        r"[\"'\\]", "", _R7_PARAM_OPERATOR_RE.sub(" ", text).replace('$"', '"')
+    )
+    if _WRAPPER_NAME_RE.search(widened) or _R7_GLUED_OPTION_RE.search(widened):
+        return True
+    if _r7_glob_head_names_wrapper(raw):
         return True
     marked = text
     previous = None
+    passes = 0
     while previous != marked:
+        passes += 1
+        if passes > _R7_MAX_SUBSTITUTION_DEPTH:
+            return True  # nested beyond any honest launch: judge it (fail closed)
         previous = marked
         marked = _R6_COMPUTED_RE.sub("\x00", marked)
     for word in _R6_ROUGH_WORD_SPLIT_RE.split(marked):
@@ -820,6 +1211,15 @@ def _r6_double_quoted(text: str, index: int, word: _R6Word) -> int:
 
 
 def _r6_lex(text: str) -> tuple[list[tuple[str, object]], str]:
+    """``_r6_lex_unbounded`` with nesting too deep to read (``"$("$(…``
+    exhausts the recursion limit) reported as a tokenizer failure."""
+    try:
+        return _r6_lex_unbounded(text)
+    except RecursionError:
+        return [], "substitutions nested too deeply to read"
+
+
+def _r6_lex_unbounded(text: str) -> tuple[list[tuple[str, object]], str]:
     """Tokenise a command line: ``("word", _R6Word)``, ``("op", str)`` and
     ``("procsub", str)`` tokens. Returns ``(tokens, error)``; a non-empty
     error means the line cannot be read and must be refused. Lexing stops
@@ -851,6 +1251,12 @@ def _r6_lex(text: str) -> tuple[list[tuple[str, object]], str]:
             newline = text.find("\n", index)
             index = length if newline < 0 else newline
             continue
+        if char == "<" and _R7_ZSH_NUMERIC_GLOB_RE.match(text, index):
+            # zsh: a numeric glob; bash: two redirections. Refuse, never pick.
+            return tokens, (
+                f"{_R7_ZSH_NUMERIC_GLOB_RE.match(text, index).group(0)} is a "
+                "zsh numeric glob but bash redirections"
+            )
         if char in ";&|<>()\n":
             if char in "<>" and word is not None and word.is_fd_number():
                 word = None  # the fd number belongs to this redirection
@@ -902,6 +1308,11 @@ def _r6_lex(text: str) -> tuple[list[tuple[str, object]], str]:
             if index < 0:
                 return tokens, "unterminated $-expansion"
             continue
+        run = _R7_LITERAL_RUN_RE.match(text, index)
+        if run is not None:
+            word.add("lit", run.group(0))
+            index = run.end()
+            continue
         word.add("lit", char)
         index += 1
     flush()
@@ -909,16 +1320,56 @@ def _r6_lex(text: str) -> tuple[list[tuple[str, object]], str]:
 
 
 class _R6Unit:
-    """One simple command: argv words and its redirections."""
+    """One simple command: argv words and its redirections.
+    ``order_violation`` records the first redirection that was followed by
+    another word (r7 grammar order: redirections only after the arguments)."""
 
-    __slots__ = ("words", "redirects")
+    __slots__ = ("words", "redirects", "order_violation")
 
     def __init__(self) -> None:
         self.words: list[_R6Word] = []
         self.redirects: list[tuple[str, _R6Word]] = []
+        self.order_violation = ""
 
     def empty(self) -> bool:
         return not self.words and not self.redirects
+
+
+class _R7Launch:
+    """One admitted unit whose command word is a wrapper (or python +
+    slot.py), as the shell will run it: ``wrapper`` (lowercased basename),
+    ``argv`` (the exact literal arguments after the wrapper word / slot.py
+    operand) and ``assignments`` (every identity ``(NAME, exact value)``
+    that reaches the child, in the order the shell and ``env`` apply them:
+    nested outer unit first, prefix assignments before ``env`` arguments;
+    the last one wins)."""
+
+    __slots__ = ("wrapper", "argv", "assignments")
+
+    def __init__(
+        self, wrapper: str, argv: list[str], assignments: list[tuple[str, str]]
+    ) -> None:
+        self.wrapper = wrapper
+        self.argv = argv
+        self.assignments = assignments
+
+
+class _R7Parse:
+    """The r7 reading of one command line: every ``(code, detail)``
+    (``refused`` when any is not advisory), every wrapper-head unit as an
+    ``_R7Launch`` (the gate's launch census), and whether any unit's command
+    word is a wrapper, python or a shell (selects the refusal wording)."""
+
+    __slots__ = ("codes", "launches", "launch_like")
+
+    def __init__(self) -> None:
+        self.codes: list[tuple[str, str]] = []
+        self.launches: list[_R7Launch] = []
+        self.launch_like = False
+
+    @property
+    def refused(self) -> bool:
+        return any(code not in _R6_ADVISORY_CODES for code, _ in self.codes)
 
 
 def _r6_clip(text: str) -> str:
@@ -928,6 +1379,52 @@ def _r6_clip(text: str) -> str:
 def _r6_name(word: _R6Word) -> str:
     """The basename of a literal word (``""`` when computed)."""
     return word.value.rsplit("/", 1)[-1] if word.literal else ""
+
+
+def _r7_command_name(word: _R6Word) -> tuple[str, bool]:
+    """``(basename, resolvable)`` of a literal command word. ``resolvable``
+    is True for a bare name (resolved through the session PATH) or a word
+    naming exactly ``/bin/<name>`` or ``/usr/bin/<name>``; any other path —
+    relative, ``/tmp/…``, ``~/…`` — may name a staged binary."""
+    if not word.literal:
+        return "", False
+    value = word.value
+    if "/" not in value:
+        return value, True
+    directory, base = value.rsplit("/", 1)
+    return base, directory in _R7_SYSTEM_BIN_DIRS
+
+
+def _r7_spelled(word: _R6Word, names: frozenset) -> bool:
+    """True when a non-wrapper command word is admitted as written: exact
+    (case-sensitive) name, bare or in a system bin directory, builtins bare."""
+    base, resolvable = _r7_command_name(word)
+    if base not in names or not resolvable:
+        return False
+    return not (base in _R7_BUILTIN_ONLY and "/" in word.value)
+
+
+def _r7_value_problem(word: _R6Word) -> str:
+    """'' when an assignment word's VALUE is exactly the literal text the
+    child receives: no unquoted ``~`` (tilde expansion after ``=``) and no
+    unquoted glob/brace character (an ``env`` argument is pathname- and
+    brace-expanded)."""
+    seen_equals = False
+    for kind, text in word.segments:
+        if not seen_equals:
+            if "=" not in text:
+                continue
+            seen_equals = True
+            if kind != "lit":
+                continue
+            text = text.split("=", 1)[1]
+        if kind != "lit":
+            continue
+        if "~" in text:
+            return "an unquoted ~ in its value (tilde expansion)"
+        if any(char in _R6_GLOB_CHARS for char in text):
+            return "an unquoted glob/brace character in its value"
+    return ""
 
 
 def _r6_assignment_problem(word: _R6Word, name: str, append: bool) -> str:
@@ -944,13 +1441,19 @@ def _r6_assignment_problem(word: _R6Word, name: str, append: bool) -> str:
         return f"assignment {name}+= appends to a value the guard cannot see"
     if not word.literal:
         return f"assignment {name}= has a computed value"
+    problem = _r7_value_problem(word)
+    if problem:
+        return f"assignment {name}= has {problem}"
     return ""
 
 
 def _r6_prefix(
-    name: str, words: list[_R6Word], index: int, codes: list[tuple[str, str]]
+    name: str, words: list[_R6Word], index: int, codes: list[tuple[str, str]],
+    assignments: list[tuple[str, str]],
 ) -> int:
-    """Consume one transparent prefix's own arguments; the next index."""
+    """Consume one transparent prefix's own arguments; the next index.
+    ``env`` identity arguments are appended to ``assignments`` with their
+    exact literal value."""
     if name == "env":
         while index < len(words):
             word = words[index]
@@ -964,6 +1467,8 @@ def _r6_prefix(
             problem = _r6_assignment_problem(word, match.group(1), bool(match.group(2)))
             if problem:
                 codes.append(("R6_ASSIGNMENT", problem))
+            elif match.group(1) in _R6_ADMITTED_ASSIGNMENTS:
+                assignments.append((match.group(1), word.value[match.end():]))
             index += 1
         return index
     if name == "nice" and index + 1 < len(words) and words[index].value == "-n":
@@ -983,11 +1488,184 @@ def _r6_prefix(
     return index
 
 
-def _r6_nested(
+def _r7_target_problem(operator: str, target: _R6Word, *, read_form: bool) -> str:
+    """'' when a redirection target is admitted for this form.
+
+    Descriptor duplication/close (``2>&1``, ``<&-``) and literal input files
+    are admitted everywhere. A read form writes ONLY to /dev/null (REVIEW2
+    finding 5: ``echo '…' >> ~/.zshenv`` stages a function every later zsh
+    sources). A launch may log to a file, but never into a dot-path — a
+    shell startup file, git hook, config or ``~/.local/bin`` wrapper that a
+    later command would execute."""
+    value = target.value
+    if operator in ("<&", ">&") and _R7_DESCRIPTOR_RE.match(value):
+        return ""
+    if operator == "<":
+        return ""
+    if operator == "<&":
+        return f"<& {value} (not a descriptor)"
+    if value == "/dev/null":
+        return ""
+    if read_form:
+        return f"{operator} {value} (a read form may write only to /dev/null)"
+    if any(part.startswith(".") and part not in (".", "..")
+           for part in value.split("/")):
+        return (
+            f"{operator} {value} (a dot-path: a startup file, hook, config or "
+            "installed wrapper a later command executes)"
+        )
+    return ""
+
+
+def _r7_options_problem(
+    words: list[_R6Word], spec: tuple
+) -> tuple[str, set[str]]:
+    """Walk ``words`` with a closed option grammar ``spec`` (``_r7_spec``):
+    ``(problem, seen option names)``. ``--`` ends option parsing; an
+    option-looking word outside the grammar is the problem."""
+    short_flags, short_valued, long_flags, long_valued = spec
+    seen: set[str] = set()
+    index = 0
+    while index < len(words):
+        value = words[index].value
+        if value == "--":
+            break
+        if value.startswith("--"):
+            name, equals, _ = value.partition("=")
+            if equals:
+                if name not in long_valued:
+                    return value, seen
+            elif name in long_flags:
+                pass
+            elif name in long_valued:
+                index += 1
+                if index >= len(words):
+                    return f"{value} without its value", seen
+            else:
+                return value, seen
+            seen.add(name)
+            index += 1
+            continue
+        if value.startswith("-") and len(value) > 1:
+            cluster = value[1:]
+            for position, char in enumerate(cluster):
+                if char in short_flags:
+                    seen.add("-" + char)
+                    continue
+                if char in short_valued:
+                    seen.add("-" + char)
+                    if position + 1 == len(cluster):
+                        index += 1
+                        if index >= len(words):
+                            return f"{value} without its value", seen
+                    break
+                return f"-{char} (in {value})", seen
+            index += 1
+            continue
+        index += 1
+    return "", seen
+
+
+def _r7_glob_may_inject(word: _R6Word) -> bool:
+    """True when an unquoted glob/brace word may expand to a name that
+    STARTS with ``-`` (its first fixed character is a pattern character)."""
+    if not word.has_glob():
+        return False
+    for kind, text in word.segments:
+        if text:
+            return kind == "lit" and text[0] in "*?[{"
+    return False
+
+
+def _r7_git_problem(args: list[_R6Word]) -> str:
+    values = [arg.value for arg in args]
+    index = 1 if values[:1] == ["--no-pager"] else 0
+    if index >= len(values):
+        return "git without a subcommand"
+    sub = values[index]
+    spec = _R7_GIT_SPECS.get(sub)
+    if spec is None:
+        return (
+            f"git {_r6_clip(sub)} (read forms: commit -m|-F, log, show, diff, "
+            "status, grep, add; no git global option but --no-pager)"
+        )
+    problem, seen = _r7_options_problem(args[index + 1:], spec)
+    if problem:
+        return (
+            f"git {sub} {_r6_clip(problem)} (outside the option allowlist: it "
+            "can execute, write, page or open an editor)"
+        )
+    if sub == "commit" and not (
+        seen & {"-m", "-F", "--message", "--file"}
+        or {"--amend", "--no-edit"} <= seen
+    ):
+        return "git commit without -m/-F (it opens an editor)"
+    return ""
+
+
+def _r7_read_form_problem(name: str, args: list[_R6Word]) -> str:
+    """'' when ``name args`` is a closed read form (redirections aside)."""
+    if name in _R7_GLOB_SENSITIVE and any(_r7_glob_may_inject(arg) for arg in args):
+        return (
+            f"{name} with a leading glob argument (an expanded file name "
+            "starting with '-' becomes an option)"
+        )
+    values = [arg.value for arg in args]
+    try:
+        options = values[:values.index("--")]
+    except ValueError:
+        options = values
+    if name == "git":
+        return _r7_git_problem(args)
+    if name == "rg":
+        problem, _ = _r7_options_problem(args, _R7_RG_SPEC)
+        return (
+            f"rg {_r6_clip(problem)} (outside the rg option allowlist: --pre, "
+            "-z/--search-zip and --hostname-bin execute programs)"
+            if problem else ""
+        )
+    if name == "sed":
+        if (len(values) >= 2 and values[0] == "-n"
+                and _R7_SED_SCRIPT_RE.match(values[1])
+                and not any(value.startswith("-") for value in values[2:])):
+            return ""
+        return "sed outside the read form sed -n N[,M]p FILE… (scripts can execute and write)"
+    if name == "tail":
+        for value in options:
+            if (value.startswith(("--follow", "--retry"))
+                    or (value[:1] in "-+" and not value.startswith("--")
+                        and len(value) > 1 and ("f" in value or "F" in value))):
+                return f"tail {_r6_clip(value)} (follow never finishes)"
+        return ""
+    if name in ("grep", "egrep", "fgrep"):
+        for value in options:
+            if value.startswith(_R7_UGREP_EXEC_PREFIXES) or (
+                value.startswith("-") and not value.startswith("--")
+                and "Q" in value
+            ):
+                return (
+                    f"{name} {_r6_clip(value)} (ugrep runs filters/pagers, "
+                    "reads or saves configs, or opens its query UI)"
+                )
+        return ""
+    if name == "file":
+        for value in options:
+            if value == "--compile" or (
+                value.startswith("-") and not value.startswith("--") and "C" in value
+            ):
+                return f"file {_r6_clip(value)} (compiles and writes a magic file)"
+        return ""
+    return ""
+
+
+def _r7_nested(
     shell: str, args: list[_R6Word], *, nested: bool,
-    codes: list[tuple[str, str]],
+    codes: list[tuple[str, str]], parse: _R7Parse,
+    outer: list[tuple[str, str]],
 ) -> str:
-    """Judge ``<shell> …`` as the NESTED form; returns ``"nested"`` or ``""``."""
+    """Judge ``<shell> …`` as the NESTED form; returns ``"nested"`` or ``""``.
+    The body's launches join the census with the outer unit's identity
+    assignments in front of their own."""
     problems: list[str] = []
     if nested:
         problems.append("a shell inside a nested -c body")
@@ -1009,33 +1687,58 @@ def _r6_nested(
                 f"the session environment sets {name}, which the nested "
                 "shell may load before the body"
             )
-    body_codes: list[tuple[str, str]] = []
+    body: _R7Parse | None = None
     body_at = next(
         (position for position, word in enumerate(args)
          if word.literal and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word.value)),
         None,
     )
-    if body_at is not None and body_at + 1 < len(args):
-        body = args[body_at + 1]
-        if body.literal:
-            body_codes = _r6_analyse(body.value, nested=True)
-        # A computed body is reported by the computed-word scan.
+    if not nested and body_at is not None and body_at + 1 < len(args):
+        if args[body_at + 1].literal:
+            body = _r7_parse(args[body_at + 1].value, nested=True)
+        # A computed body is reported by the computed-word scan; a shell
+        # inside a body is already refused and its body is not read.
     if problems:
         codes.append(("R6_NESTED_SHELL", "; ".join(problems)))
-    codes.extend(body_codes)
-    return "" if problems or body_codes else "nested"
+    if body is not None:
+        codes.extend(body.codes)
+        for launch in body.launches:
+            parse.launches.append(_R7Launch(
+                launch.wrapper, launch.argv, [*outer, *launch.assignments]
+            ))
+    return "" if problems or (body is not None and body.codes) else "nested"
 
 
-def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> str:
+def _r7_unit(
+    unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]],
+    parse: _R7Parse,
+) -> str:
     """Classify one simple command: ``"launch"``, ``"nested"``,
-    ``"inspector"`` or ``""`` (not admitted; reason appended to codes)."""
+    ``"inspector"`` (any closed read form) or ``""`` (not admitted; reason
+    appended to codes). A launch (wrapper head, or python + slot.py) is
+    appended to ``parse.launches`` with its exact argv and identity values."""
     for operator, target in unit.redirects:
         if target.has_glob():
             codes.append(("R6_GLOB_OR_BRACE", f"{operator} {target.value}"))
+        if target.literal and target.value.startswith("!"):
+            codes.append((
+                "R6_TOKENIZE_FAILED",
+                f"{operator}{target.value} (zsh reads {operator}! as a clobber "
+                "operator, bash as a file named '!…')",
+            ))
+        if target.literal and target.value.startswith(("/dev/tcp/", "/dev/udp/")):
+            codes.append(("R6_REDIRECTION", f"{operator} {target.value} (network)"))
+    if unit.order_violation:
+        codes.append((
+            "R6_REDIRECTION",
+            f"{unit.order_violation} before the command word or between "
+            "arguments",
+        ))
     words = unit.words
     if not words:
         codes.append(("R6_NOT_A_PLAIN_LAUNCH", "a command with no command word"))
         return ""
+    assignments: list[tuple[str, str]] = []
     index = 0
     while index < len(words):
         match = _R6_ASSIGNMENT_RE.match(words[index].leading_unquoted())
@@ -1046,6 +1749,10 @@ def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> st
         )
         if problem:
             codes.append(("R6_ASSIGNMENT", problem))
+        elif match.group(1) in _R6_ADMITTED_ASSIGNMENTS:
+            assignments.append(
+                (match.group(1), words[index].value[match.end():])
+            )
         index += 1
     assigned = index > 0
     if index == len(words):
@@ -1056,12 +1763,18 @@ def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> st
         ))
         return ""
     prefixes = 0
-    while index < len(words) and _r6_name(words[index]).lower() in _R6_TRANSPARENT_PREFIXES:
+    while index < len(words):
+        base = _r7_command_name(words[index])[0]
+        if base.lower() not in _R6_TRANSPARENT_PREFIXES:
+            break
+        if not _r7_spelled(words[index], _R6_TRANSPARENT_PREFIXES):
+            codes.append(("R6_HEAD_SPELLING", _r6_clip(words[index].value)))
+            return ""
         prefixes += 1
         if prefixes > _R6_MAX_PREFIXES:
             codes.append(("R6_PREFIX_FORM", "more than four stacked prefixes"))
             return ""
-        index = _r6_prefix(_r6_name(words[index]).lower(), words, index + 1, codes)
+        index = _r6_prefix(base, words, index + 1, codes, assignments)
     if index >= len(words):
         codes.append(("R6_NOT_A_PLAIN_LAUNCH", "no command word after the prefixes"))
         return ""
@@ -1081,8 +1794,13 @@ def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> st
         return ""
     lowered = name.lower()
     if lowered in _R6_WRAPPER_BASENAMES:
-        args = words[index + 1:]
+        parse.launch_like = True
+        wrapper, args = lowered, words[index + 1:]
     elif _R6_PYTHON_RE.match(lowered):
+        parse.launch_like = True
+        if not (_R6_PYTHON_RE.match(name) and _r7_command_name(head)[1]):
+            codes.append(("R6_HEAD_SPELLING", _r6_clip(head.value)))
+            return ""
         script = words[index + 1] if index + 1 < len(words) else None
         if (script is None or not script.literal or script.has_glob()
                 or script.value.startswith("-")
@@ -1093,27 +1811,63 @@ def _r6_unit(unit: _R6Unit, *, nested: bool, codes: list[tuple[str, str]]) -> st
                 "(inline program, option, stdin or another script)",
             ))
             return ""
-        args = words[index + 2:]
+        wrapper, args = "slot.py", words[index + 2:]
     elif lowered in _R6_NESTED_SHELLS or lowered in _R6_OTHER_SHELLS:
-        return _r6_nested(lowered, words[index + 1:], nested=nested, codes=codes)
-    elif lowered in _R6_INSPECTORS and not assigned and not prefixes and not nested:
-        return "inspector"
+        parse.launch_like = True
+        if lowered in _R6_NESTED_SHELLS and not _r7_spelled(head, _R6_NESTED_SHELLS):
+            codes.append(("R6_HEAD_SPELLING", _r6_clip(head.value)))
+            return ""
+        form = _r7_nested(
+            lowered, words[index + 1:], nested=nested, codes=codes,
+            parse=parse, outer=assignments,
+        )
+        for operator, target in unit.redirects:
+            problem = _r7_target_problem(operator, target, read_form=False)
+            if problem:
+                codes.append(("R6_REDIRECTION", problem))
+                form = ""
+        return form
+    elif lowered in _R7_READ_HEADS and not assigned and not prefixes and not nested:
+        if not _r7_spelled(head, _R7_READ_HEADS):
+            codes.append(("R6_HEAD_SPELLING", _r6_clip(head.value)))
+            return ""
+        form = "inspector"
+        problem = _r7_read_form_problem(name, words[index + 1:])
+        if problem:
+            codes.append(("R6_NOT_A_PLAIN_LAUNCH", problem))
+            form = ""
+        for operator, target in unit.redirects:
+            problem = _r7_target_problem(operator, target, read_form=True)
+            if problem:
+                codes.append(("R6_REDIRECTION", problem))
+                form = ""
+        return form
     else:
         codes.append(("R6_NOT_A_PLAIN_LAUNCH", repr(name)))
         return ""
     for arg in args:
         if arg.has_glob():
             codes.append(("R6_GLOB_OR_BRACE", _r6_clip(arg.value)))
+    for operator, target in unit.redirects:
+        problem = _r7_target_problem(operator, target, read_form=False)
+        if problem:
+            codes.append(("R6_REDIRECTION", problem))
+    parse.launches.append(
+        _R7Launch(wrapper, [arg.value for arg in args], assignments)
+    )
     return "launch"
 
 
-def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
-    """Every r6 code for ``text`` (``[]`` = admitted). ``nested`` judges a
-    ``bash -c`` body: only a single LAUNCH is admitted there."""
+def _r7_parse(text: str, *, nested: bool) -> _R7Parse:
+    """The r7 reading of ``text`` (``nested`` judges a ``bash -c`` body:
+    only a single LAUNCH is admitted there)."""
+    parse = _R7Parse()
+    codes = parse.codes
     tokens, error = _r6_lex(text)
     if error:
-        return [("R6_TOKENIZE_FAILED", error)]
-    codes: list[tuple[str, str]] = []
+        codes.append(("R6_TOKENIZE_FAILED", error))
+        parse.launch_like = True  # unreadable: never claim "only as data"
+        return parse
     units = [_R6Unit()]
     separators: list[str] = []
     pending: str | None = None
@@ -1123,7 +1877,11 @@ def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
                 units[-1].redirects.append((pending, item))
                 pending = None
             else:
-                units[-1].words.append(item)
+                unit = units[-1]
+                if unit.redirects and not unit.order_violation:
+                    operator, target = unit.redirects[0]
+                    unit.order_violation = _r6_clip(f"{operator} {target.value}")
+                unit.words.append(item)
             continue
         if kind == "procsub":
             codes.append(("R6_PROCESS_SUBSTITUTION", _r6_clip(str(item))))
@@ -1164,7 +1922,7 @@ def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
                     codes.append(("R6_EXPANSION", _r6_clip(segment)))
                 elif segment_kind == "sq" and ("$" in segment or "`" in segment):
                     codes.append(("R6_DEFERRED_EXPANSION", _r6_clip(segment)))
-    forms = [_r6_unit(unit, nested=nested, codes=codes) for unit in units]
+    forms = [_r7_unit(unit, nested=nested, codes=codes, parse=parse) for unit in units]
     list_operators = sorted({op for op in separators if op in _R6_LIST_OPERATORS})
     if list_operators:
         codes.append((
@@ -1175,22 +1933,34 @@ def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
         nested or any(form != "inspector" for form in forms)
     ):
         codes.append(("R6_PIPELINE", "| with a non-inspector stage"))
-    return codes
+    return parse
+
+
+def _r6_analyse(text: str, *, nested: bool) -> list[tuple[str, str]]:
+    """Every r6/r7 code for ``text`` (``[]`` = admitted)."""
+    return _r7_parse(text, nested=nested).codes
+
+
+def r7_parse(raw: str, *, force: bool = False) -> _R7Parse | None:
+    """The r7 reading of a command line, or None when it is out of scope
+    (names no wrapper — the arbitrary-process limit). ``force`` parses
+    regardless of scope (used when the r4 text view sees a launch)."""
+    if not force and not r6_names_wrapper(raw):
+        return None
+    return _r7_parse(raw, nested=False)
 
 
 def r6_refusal_codes(raw: str) -> list[tuple[str, str]]:
-    """The r6 ADMIT rule: ``[]`` when ``raw`` is out of scope (names no
+    """The r6/r7 ADMIT rule: ``[]`` when ``raw`` is out of scope (names no
     wrapper) or is exactly one admitted form; otherwise every typed
     ``(code, detail)`` explaining the refusal."""
-    if not r6_names_wrapper(raw):
+    parse = r7_parse(raw)
+    if parse is None or not parse.refused:
         return []
-    codes = _r6_analyse(raw, nested=False)
-    if all(code in _R6_ADVISORY_CODES for code, _ in codes):
-        return []
-    return codes
+    return parse.codes
 
 
-def _r6_reason(codes: list[tuple[str, str]]) -> str:
+def _r6_reason(codes: list[tuple[str, str]], *, launch_like: bool = True) -> str:
     grouped: dict[str, list[str]] = {}
     for code, detail in codes:
         details = grouped.setdefault(code, [])
@@ -1200,11 +1970,21 @@ def _r6_reason(codes: list[tuple[str, str]]) -> str:
         _R6_CLAUSES[code].format(detail=", ".join(details) or "-")
         for code, details in grouped.items()
     ]
+    summary = "; ".join(clauses) + ". "
+    refusal = "(r7 admit rule; refusal codes: " + ", ".join(grouped) + "): "
+    if launch_like:
+        return (
+            "Mastermind shared-placement guard: unobservable launch — this "
+            "command names a paid-launch wrapper but is not one plain "
+            "top-level launch " + refusal + summary + _R6_REMEDY
+        )
     return (
         "Mastermind shared-placement guard: unobservable launch — this "
-        "command names a paid-launch wrapper but is not one plain top-level "
-        "launch (r6 admit rule; refusal codes: " + ", ".join(grouped) + "): "
-        + "; ".join(clauses) + ". " + _R6_REMEDY
+        "command mentions a paid-launch wrapper name (pool, sub.sh, "
+        "remote_sub.sh, slot.py) only as data or program text, and it is "
+        "not an admitted read form, so the guard cannot prove that text is "
+        "never executed " + refusal + summary + _R7_READ_REMEDY
+        + " Launching? " + _R6_REMEDY
     )
 
 
@@ -1441,16 +2221,8 @@ def _canonical_command(command: str) -> str:
     return re.sub(r"[\"'\\]", "", command.replace("\\\n", ""))
 
 
-def _simple_command_head(canon: str, offset: int) -> str:
-    """Basename of the first word of the simple command containing
-    ``offset`` (assignments and compound-command keywords skipped)."""
-    starts = [m.end() for m in _SIMPLE_COMMAND_SPLIT_RE.finditer(canon, 0, offset)]
-    prefix = canon[(starts[-1] if starts else 0):offset].split()
-    for word in prefix:
-        if word in _COMMAND_PREFIX_WORDS or re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
-            continue
-        return word.rsplit("/", 1)[-1].lower()
-    return ""
+_SHELL_WORD_RE = re.compile(r"\S+")
+_ASSIGNMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 
 
 def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
@@ -1463,8 +2235,40 @@ def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
     passing unobserved. A wrapper name with no argument, an argument of a
     read-only inspector (``cat sub.sh``), or a documented pure helper mode
     (``sub.sh __launch_plan``) is not a paid launch.
+
+    The inspector test reads the first word of the simple command around
+    each invocation (assignments and compound-command keywords skipped),
+    truncated at the invocation. r7: separator positions are computed once
+    and each simple command's first word is found once (bounded by its
+    next separator), so the scan stays linear in the command length.
     """
     canon = _canonical_command(command)
+    separators = [match.span() for match in _SIMPLE_COMMAND_SPLIT_RE.finditer(canon)]
+    separator_ends = [end for _, end in separators]
+    separator_starts = [start for start, _ in separators]
+    first_words: dict[int, tuple[int, int]] = {}
+
+    def head_at(offset: int) -> str:
+        count = bisect.bisect_right(separator_ends, offset)
+        unit_start = separator_ends[count - 1] if count else 0
+        if unit_start not in first_words:
+            following = bisect.bisect_left(separator_starts, unit_start)
+            unit_end = (
+                separator_starts[following]
+                if following < len(separator_starts) else len(canon)
+            )
+            first_words[unit_start] = (len(canon), len(canon))
+            for word in _SHELL_WORD_RE.finditer(canon, unit_start, unit_end):
+                text = word.group(0)
+                if text in _COMMAND_PREFIX_WORDS or _ASSIGNMENT_WORD_RE.match(text):
+                    continue
+                first_words[unit_start] = word.span()
+                break
+        position, end = first_words[unit_start]
+        if position >= offset:
+            return ""
+        return canon[position:min(end, offset)].rsplit("/", 1)[-1].lower()
+
     found: list[tuple[int, str, str, bool]] = []
     for match in _WRAPPER_RE.finditer(canon):
         wrapper = re.sub(r"\s+", " ", match.group("wrapper").lower())
@@ -1479,8 +2283,7 @@ def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
             position = arg.end()
         if not args:
             continue
-        head = _simple_command_head(canon, match.start())
-        if head in _INSPECTORS:
+        if head_at(match.start()) in _INSPECTORS:
             continue
         token = args[index] if len(args) > index else ""
         if token in NON_LAUNCH_WRAPPER_MODES or (
@@ -1517,23 +2320,52 @@ def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
     xargs/parallel/find -exec executor's argument tail (REVIEW_2329 r2
     N-2). One binding covers exactly one attempt, so N runtime children
     under one lexical launch are refused as unaccounted descendants."""
-    spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
+    spans: list[tuple[int, int]] = []
+    opened: int | None = None
+    for match in _LOOP_KEYWORD_RE.finditer(canon):
+        if match.group(0) == "do":
+            if opened is None:
+                opened = match.start()
+        elif opened is not None:
+            spans.append((opened, match.end()))
+            opened = None
     spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
     return any(
         start <= offset < end for start, end in spans for offset in offsets
     )
 
 
+#: Words of ``env`` options/assignments read per ``env`` (each ``env`` would
+#: otherwise re-read ``env -u env -u …`` to the end: quadratic). More than
+#: this many is judged as a clear (fail closed).
+_R7_ENV_WORD_LIMIT = 32
+_ENV_WORD_RE = re.compile(r"(?<![A-Za-z0-9_.-])env(?=[ \t])")
+_ENV_SEPARATOR_RE = re.compile(r"[;&|\n()`]")
+
+
 def _env_clear_offsets(canon: str) -> list[int]:
     """Offsets of ``env`` invocations that clear the inherited environment
     (``env -i``, ``env -``, ``--ignore-environment``, clustered ``-iv``) or
-    re-split their arguments (``-S``), which can hide a clear."""
+    re-split their arguments (``-S``), which can hide a clear. (r7: each
+    ``env`` reads at most ``_R7_ENV_WORD_LIMIT`` words up to the next
+    separator — linear.)"""
+    separator_starts = [match.start() for match in _ENV_SEPARATOR_RE.finditer(canon)]
     offsets: list[int] = []
-    for match in re.finditer(r"(?<![A-Za-z0-9_.-])env(?=[ \t])", canon):
-        words = re.match(r"[^;&|\n()`]*", canon[match.end():]).group(0).split()
-        index = 0
-        while index < len(words):
-            word = words[index]
+    for match in _ENV_WORD_RE.finditer(canon):
+        following = bisect.bisect_left(separator_starts, match.end())
+        limit = (
+            separator_starts[following]
+            if following < len(separator_starts) else len(canon)
+        )
+        skip = 0
+        for count, found in enumerate(_SHELL_WORD_RE.finditer(canon, match.end(), limit)):
+            if count >= _R7_ENV_WORD_LIMIT:
+                offsets.append(match.start())  # unread options: treat as a clear
+                break
+            word = found.group(0)
+            if skip:
+                skip -= 1
+                continue
             if (
                 word in ("-", "--ignore-environment", "-S")
                 or word.startswith("--split-string")
@@ -1542,13 +2374,15 @@ def _env_clear_offsets(canon: str) -> list[int]:
                 offsets.append(match.start())
                 break
             if word in ("-u", "-C", "-P", "--unset", "--chdir"):
-                index += 2
+                skip = 1
                 continue
-            if word.startswith("-") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word):
-                index += 1
+            if word.startswith("-") or _ASSIGNMENT_WORD_RE.match(word):
                 continue
             break
     return offsets
+
+
+_IDENTITY_VALUE_RE = re.compile(r"=([^\s;&|<>()`{}]*)")
 
 
 def _effective_identity_values(command: str, name: str) -> list[str] | None:
@@ -1562,7 +2396,8 @@ def _effective_identity_values(command: str, name: str) -> list[str] | None:
     non-literal form (``unset``, ``env -u``, ``env -i`` not followed by a
     reassignment, ``printf -v``, ``read``, ``declare -n``, ``${NAME:=…}``,
     dynamic ``$``/backtick values). The caller refuses unless every value
-    equals the server-derived projection.
+    equals the server-derived projection. (r7: every test reads a bounded
+    window around the occurrence instead of slicing the whole command.)
     """
     canon = _canonical_command(command)
     values = list(_command_assignments(command, name))
@@ -1571,28 +2406,43 @@ def _effective_identity_values(command: str, name: str) -> list[str] | None:
         rf"(?:(?<![A-Za-z0-9_])|(?<=-u)){re.escape(name)}(?![A-Za-z0-9_])"
     )
     for match in occurrence.finditer(canon):
-        before, after = canon[:match.start()], canon[match.end():]
-        if after.startswith("="):
-            value = re.match(r"=([^\s;&|<>()`{}]*)", after).group(1)
-            events.append((match.start(), "" if "$" in value else value))
-        elif before.endswith("$") or (
-            before.endswith("${") and not re.match(r":?=", after)
+        start, end = match.span()
+        if canon.startswith("=", end):
+            value = _IDENTITY_VALUE_RE.match(canon, end).group(1)
+            events.append((start, "" if "$" in value else value))
+        elif canon[start - 1:start] == "$" or (
+            canon[max(0, start - 2):start] == "${"
+            and not canon.startswith(("=", ":="), end)
         ):
             continue  # a read of the value, not a change
-        elif re.search(r"(?:^|[\s;&|(])export\s+$", before) and re.match(
-            r"(?:[\s;&|)]|$)", after
+        elif _bare_export_before(canon, start) and (
+            end == len(canon) or canon[end] in " \t\n\r\f\v;&|)"
         ):
             continue  # bare `export NAME` re-exports the inherited value
         else:
-            events.append((match.start(), ""))
+            events.append((start, ""))
+    last_set = max((at for at, value in events if value), default=-1)
     for offset in _env_clear_offsets(canon):
-        if not any(at > offset and value for at, value in events):
+        if not last_set > offset:
             events.append((offset, ""))
     canonical = [value for _, value in events]
-    extra = [value for value in values if value not in canonical]
+    seen = set(canonical)
+    extra = [value for value in values if value not in seen]
     if not canonical and not extra:
         return None
     return canonical + extra
+
+
+def _bare_export_before(canon: str, start: int) -> bool:
+    """True when ``export`` + whitespace ends exactly at ``start`` and the
+    ``export`` word starts the text or follows whitespace/``;&|(``."""
+    position = start
+    while position > 0 and canon[position - 1].isspace():
+        position -= 1
+    if position == start or not canon.startswith("export", position - 6, position):
+        return False
+    before = position - 6
+    return before == 0 or canon[before - 1].isspace() or canon[before - 1] in ";&|("
 
 
 def _principal_ids() -> tuple[int, frozenset[int]]:
@@ -1701,7 +2551,7 @@ def _expected_projection(binding: dict) -> dict[str, str]:
     }
 
 
-def validate_execution_binding(command: str) -> None:
+def validate_execution_binding(command: str, parse: _R7Parse | None = None) -> None:
     """Refuse paid launches/delegations not covered by the CURRENT
     broker-issued ExecutionBinding (WO-11; Rev 4 S3.D l.287-289, S4 steps
     3-4).
@@ -1734,18 +2584,21 @@ def validate_execution_binding(command: str) -> None:
       re-projecting, ``lease_expires_at_ms`` still bounds the lease.
 
     Lexical scope (documented, not claimed): the gate judges the command
-    text it is shown — every wrapper invocation in it (all five shapes,
-    repeated, heredoc bodies included, off-list modes refused) and every
-    identity assignment form, with backslash-newline canonicalised as a
-    POSIX join (empty string). Before this function runs, the r6 ADMIT rule
-    (``r6_refusal_codes``) has already refused every command that names a
-    wrapper but is not one plain launch / one faithful ``bash -c`` launch /
-    an inspector-only read. The r4 deny checks below stay as defence in
-    depth on what r6 admitted. Not observed: a command that names no
-    wrapper at all (arbitrary-process limit), scripts or binaries staged
-    in an EARLIER command or file and executed later (including a staged
-    file shadowing the wrapper on PATH), and environment injected by
-    provider-side mechanisms outside the command.
+    text it is shown. Before this function runs, the r6/r7 ADMIT rule
+    (``r7_parse``) has already refused every command that names a wrapper
+    but is not one plain launch / one faithful ``bash -c`` launch / a
+    closed read form. r7: when ``parse`` is given (armed sessions), the
+    launch census is the parse's — wrapper, mode and token read from the
+    lexer's argv — and every identity assignment is compared by its EXACT
+    literal value; the r4 text view (every wrapper invocation in the text,
+    all five shapes, heredoc bodies included, backslash-newline joined) must
+    find exactly the same invocations or the launch is refused. The r4
+    identity and eval/loop/batch checks stay as defence in depth. Not
+    observed: a command that names no wrapper at all (arbitrary-process
+    limit), scripts or binaries staged in an EARLIER command or file and
+    executed later (including a staged file shadowing the wrapper on PATH),
+    and environment injected by provider-side mechanisms outside the
+    command.
     """
     raw_binding = os.environ.get(BINDING_ENV, "").strip()
     if not raw_binding:
@@ -1876,6 +2729,7 @@ def validate_execution_binding(command: str) -> None:
             "authority instead of launching on a superseded assignment."
         )
 
+    text_view: list[tuple[int, str, str, bool]] = []
     if not command:
         launches: list[tuple[int, str, str, bool]] = []
     else:
@@ -1887,10 +2741,28 @@ def validate_execution_binding(command: str) -> None:
                 "what this guard can check. Run the paid launch as a plain "
                 "command."
             )
-        launches = _wrapper_invocations(command)
-        if launches and _runtime_multiplexed(
+        text_view = _wrapper_invocations(command)
+        launches = text_view
+        if parse is not None:
+            # r7: the census is the PARSE (the lexer's argv); the r4 text
+            # view must find exactly the same invocations, in order.
+            census = _r7_census(parse)
+            parsed = [(wrapper, token) for wrapper, token, _ in census]
+            seen = [(wrapper, token) for _, wrapper, token, _ in text_view]
+            if parsed != seen:
+                deny(
+                    "Mastermind shared-placement guard: unaccounted descendant "
+                    f"— the parsed command line carries the paid launch(es) "
+                    f"{parsed} but its text carries the wrapper invocation(s) "
+                    f"{seen}; the two readings must agree exactly, so a "
+                    "launch the guard cannot attribute is refused. Pass task "
+                    "text that names a wrapper in a packet file, not on the "
+                    "command line."
+                )
+            launches = [(0, wrapper, token, known) for wrapper, token, known in census]
+        if text_view and _runtime_multiplexed(
             _canonical_command(command),
-            [offset for offset, _, _, _ in launches],
+            [offset for offset, _, _, _ in text_view],
         ):
             deny(
                 "Mastermind shared-placement guard: runtime-multiplexed "
@@ -1901,10 +2773,38 @@ def validate_execution_binding(command: str) -> None:
                 "placement authority before launch."
             )
 
+    expected_projection = _expected_projection(binding)
+    if parse is not None:
+        # r7 (REVIEW2 finding 3): the EXACT literal value the shell passes —
+        # every assignment of every wrapper-head unit (prefix, env argument,
+        # nested outer and body) — must equal the projection; with no
+        # assignment the inherited session value governs.
+        for launch in parse.launches:
+            for env_name, expected_value in expected_projection.items():
+                values = [v for n, v in launch.assignments if n == env_name]
+                if not values:
+                    values = [os.environ.get(env_name, "").strip()]
+                for value in values:
+                    if value != expected_value:
+                        deny(
+                            "Mastermind shared-placement guard: "
+                            f"{env_name} is a server-derived projection of the "
+                            f"current {EXECUTION_BINDING_SCHEMA}; this launch "
+                            f"declares {value!r} (the exact value the shell "
+                            f"passes) but the binding projects {expected_value!r}"
+                            + (
+                                f" ({len(values)} assignments of {env_name} in "
+                                "one command; every one must equal the "
+                                "projection)" if len(values) > 1 else ""
+                            )
+                            + ". A child cannot re-root, re-parent or promote "
+                            "itself by changing the environment."
+                        )
+
     # Server-derived projections: EVERY identity value the launched child
     # could receive must equal what the binding projects (canonical view of
     # all assignment/clearing forms; see _effective_identity_values).
-    for env_name, expected_value in _expected_projection(binding).items():
+    for env_name, expected_value in expected_projection.items():
         declared = _effective_identity_values(command, env_name)
         if declared is None:
             declared = [os.environ.get(env_name, "").strip()]
@@ -1957,32 +2857,109 @@ def validate_execution_binding(command: str) -> None:
         )
 
 
+def _r7_census(parse: _R7Parse) -> list[tuple[str, str, bool]]:
+    """``(wrapper shape, token, known mode)`` for every PAID launch in the
+    parse, read from the lexer's argv with the r4 shape law: ``pool run
+    <pool>`` / ``pool remote <host> <pool>`` (other ``pool`` subcommands —
+    status, plan, hosts, … — are not paid launches), ``sub.sh <mode>``,
+    ``remote_sub.sh <host> <mode>``, ``slot.py <pool>``. A wrapper with no
+    argument and the documented pure helper modes are not paid launches;
+    an off-list or missing mode is (``known=False``) and is refused."""
+    census: list[tuple[str, str, bool]] = []
+    for launch in parse.launches:
+        argv = [value.lower() for value in launch.argv]
+        if launch.wrapper == "pool":
+            if not argv or argv[0] not in ("run", "remote"):
+                continue
+            shape, rest = "pool " + argv[0], argv[1:]
+        else:
+            shape, rest = launch.wrapper, argv
+        index, modes = _WRAPPER_SHAPES[shape]
+        if not rest:
+            continue
+        token = rest[index] if len(rest) > index else ""
+        if token in NON_LAUNCH_WRAPPER_MODES or (
+            len(rest) > index + 1 and rest[index + 1] == "__launch_plan"
+        ):
+            continue
+        census.append((shape, token, bool(token) and (modes is None or token in modes)))
+    return census
+
+
+def _r7_identity_values(parse: _R7Parse, name: str) -> tuple[list[str], list[str]]:
+    """``(every exact assigned value, every effective value)`` of ``name``
+    across the parse's wrapper-head units: the effective value is the last
+    assignment that reaches the child, else the inherited session value."""
+    assigned: list[str] = []
+    effective: list[str] = []
+    for launch in parse.launches:
+        values = [value for found, value in launch.assignments if found == name]
+        assigned.extend(values)
+        effective.append(values[-1] if values else os.environ.get(name, "").strip())
+    return assigned, effective
+
+
+def _guard_armed_launch(command: str, raw: str) -> None:
+    """r7 armed gate (WO-11; REVIEW2 A1). The PARSE decides: out of scope
+    (names no wrapper) → nothing to judge; refused shape → deny; closed read
+    forms only → no unit executes a wrapper; otherwise EVERY wrapper-head
+    unit reaches the binding gate — there is no early return for it."""
+    parse = r7_parse(
+        raw,
+        force=bool(FABRIC_LAUNCH_RE.search(raw) or _wrapper_invocations(raw)),
+    )
+    if parse is None:
+        return
+    if parse.refused:
+        deny(_r6_reason(parse.codes, launch_like=parse.launch_like))
+    if not parse.launches:
+        return
+    validate_execution_binding(raw, parse)
+
+    inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
+    assigned_roots = _r7_identity_values(parse, "POOL_ORCHESTRATOR_ID")[0]
+    assigned_roots += _command_assignments(command, "POOL_ORCHESTRATOR_ID")
+    if inherited_root and any(root != inherited_root for root in assigned_roots):
+        deny(
+            "Mastermind Fabric root-budget guard: POOL_ORCHESTRATOR_ID may not "
+            "be rebound inside an already-rooted provider session. Preserve the "
+            "original root identity; a new chat/helper is not a fresh budget."
+        )
+    missing = [
+        name
+        for name in _FABRIC_IDENTITY_NAMES
+        if not _command_or_environment_value(command, name)
+        or not all(value.strip() for value in _r7_identity_values(parse, name)[1])
+    ]
+    if missing:
+        deny(
+            "Mastermind Fabric root-budget guard: provider launch is missing "
+            + ", ".join(missing)
+            + ". Every Fabric launch (pool run/remote or direct approved wrapper) "
+            "must preserve the existing root "
+            "orchestrator identity, true parent run, and task class so fair-share, "
+            "descendant accounting, and routing economics cannot be reset by a new "
+            "chat or helper."
+        )
+
+
 def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
     raw = command if raw_command is None else raw_command
-    launches = list(FABRIC_LAUNCH_RE.finditer(command))
-    armed = shared_placement_armed()
-    # An off-list wrapper mode is still an observed launch (REVIEW_2329
-    # M-4): under shared placement it is refused by the gate; otherwise it
-    # gets the legacy identity checks instead of passing unchecked.
-    invocations = _wrapper_invocations(raw if armed else command)
-    if armed:
-        # WO-11 r6 ADMIT rule (REVIEW_C_E_OPUS_20261109 A1): a command that
-        # names a wrapper is admitted only as one plain LAUNCH, one faithful
-        # bash -c '<plain launch>' or an inspector-only read; every other
-        # shape is refused HERE — before the no-launch early return, so a
-        # shape that hides its launch never reaches it unvalidated.
-        refusal = r6_refusal_codes(raw)
-        if refusal:
-            deny(_r6_reason(refusal))
-    if not launches and not invocations:
+    if shared_placement_armed():
+        # WO-11 r7: the armed gate is driven by the parse, never by the
+        # legacy text regexes (REVIEW2 A1 finding 1).
+        _guard_armed_launch(command, raw)
         return
-
-    # WO-11: shared-placement sessions validate the broker-issued
-    # ExecutionBinding against the owner's current lease BEFORE any other
-    # launch check — on the common paid-launch path, engine-independent.
-    # The armed gate judges the raw command, heredoc bodies included.
-    if armed:
-        validate_execution_binding(raw)
+    # Unarmed sessions: the legacy identity checks on the legacy census. An
+    # off-list wrapper mode is still an observed launch (REVIEW_2329 M-4).
+    # r7: a launch the parse finds but the text regexes miss
+    # (``pool </dev/null run …``) is checked too, never skipped.
+    launches = list(FABRIC_LAUNCH_RE.finditer(command))
+    invocations = _wrapper_invocations(command)
+    if not launches and not invocations and not (
+        r6_names_wrapper(command) and _r7_census(_r7_parse(command, nested=False))
+    ):
+        return
 
     inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
     assigned_roots = _command_assignments(command, "POOL_ORCHESTRATOR_ID")
@@ -2014,8 +2991,22 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
     if not is_project_scope(payload):
         return
     command = str(tool_input.get("command") or "")
-    clean = strip_heredocs(command)
-    guard_fabric_launch(clean, command)
+    if shared_placement_armed():
+        # r7: the armed launch gate judges the raw text FIRST and in linear
+        # time; the heredoc stripper below serves only the CI-wait checks.
+        if len(command) > R7_MAX_ARMED_COMMAND_CHARS:
+            deny(
+                "Mastermind shared-placement guard: this command is "
+                f"{len(command)} characters, above the {R7_MAX_ARMED_COMMAND_CHARS}"
+                "-character limit the guard judges within its hook budget; "
+                "refused fail-closed. Write long content to a file with a "
+                "non-shell tool and run a short command."
+            )
+        guard_fabric_launch(command, command)
+        clean = strip_heredocs(command)
+    else:
+        clean = strip_heredocs(command)
+        guard_fabric_launch(clean, command)
     if "gh " not in clean:
         return
 
@@ -2137,12 +3128,23 @@ def main() -> None:
     if not isinstance(tool_input, dict):
         return
 
-    if tool == "Bash":
-        guard_bash(payload, tool_input)
-        return
+    try:
+        if tool == "Bash":
+            guard_bash(payload, tool_input)
+            return
 
-    if tool in ("Agent", "Task") and is_project_scope(payload):
-        guard_native_child(tool_input)
+        if tool in ("Agent", "Task") and is_project_scope(payload):
+            guard_native_child(tool_input)
+    except Exception as error:  # noqa: BLE001 — a crashed hook does not block
+        # r7: an unexpected guard failure must not fail OPEN for an armed
+        # session (the provider treats a crashed hook as non-blocking).
+        if shared_placement_armed():
+            deny(
+                "Mastermind shared-placement guard: internal guard error "
+                f"({type(error).__name__}) while judging this command; refused "
+                "fail-closed. Report the command to the guard owner."
+            )
+        raise
 
 
 if __name__ == "__main__":
