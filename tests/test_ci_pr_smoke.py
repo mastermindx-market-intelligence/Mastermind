@@ -145,6 +145,12 @@ def test_real_smoke_runner_propagates_stage_pin_drift(tmp_path, monkeypatch):
     # The paper journey is under test here; the synthetic root is not a real
     # git repository, and the registry reader must fail closed on it.
     monkeypatch.setattr(ci_pr_smoke, "_reviewed_registries", lambda *_: ())
+    # main() always appends the live registry guard node; the synthetic root
+    # carries a passing stand-in so this test isolates the stage pin.
+    (root / ci_pr_smoke._REGISTRY_GUARD_TEST).write_text(
+        "def test_live_identity_registry_keys_are_quoted_literals_in_their_chain():\n"
+        "    pass\n"
+    )
     monkeypatch.setattr(sys, "argv", ["smoke", "--repo", str(root),
                                       "--base", "base", "--head", "head"])
     assert ci_pr_smoke.main() == 0
@@ -470,25 +476,60 @@ def test_main_passes_identity_modules_to_the_test_runner(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["smoke", "--repo", str(root),
                                       "--base", "base", "--head", "head"])
     assert ci_pr_smoke.main() == 0
-    assert list(argv) == ["tests/test_ci_pytest_policy.py", *FABRIC_TESTS]
+    assert list(argv) == ["tests/test_ci_pytest_policy.py", *FABRIC_TESTS,
+                          ci_pr_smoke._REGISTRY_GUARD_NODE]
+
+
+def test_main_runs_the_live_registry_guard_on_every_smoke_candidate(tmp_path, monkeypatch):
+    """A registry can gain keys with no chain member in the diff (a deferred
+    import starts resolving once a later PR adds its module), so the guard
+    must run even when nothing identity-related changed; when the whole guard
+    module is already selected it is not added twice."""
+    import sys
+    from scripts import ci_pr_smoke
+
+    root = repo(tmp_path)
+    (root / ".git").mkdir()
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs/guide.md").write_text("x\n")
+    (root / ci_pr_smoke._REGISTRY_GUARD_TEST).write_text("def test_x():\n    pass\n")
+    argv: list[str] = []
+
+    class _Done:
+        returncode = 0
+
+    def fake_run(cmd, **_):
+        argv[:] = [arg for arg in cmd[cmd.index("pytest") + 1:] if not arg.startswith("-")]
+        return _Done()
+
+    monkeypatch.setattr(ci_pr_smoke.subprocess, "run", fake_run)
+    monkeypatch.setattr(ci_pr_smoke, "_reviewed_registries", lambda *_: ())
+    monkeypatch.setattr(sys, "argv", ["smoke", "--repo", str(root),
+                                      "--base", "base", "--head", "head"])
+    monkeypatch.setattr(ci_pr_smoke, "_diff_paths", lambda *_: ("docs/guide.md",))
+    assert ci_pr_smoke.main() == 0
+    assert ci_pr_smoke._REGISTRY_GUARD_NODE in argv
+    monkeypatch.setattr(ci_pr_smoke, "_diff_paths",
+                        lambda *_: (ci_pr_smoke._REGISTRY_GUARD_TEST,))
+    assert ci_pr_smoke.main() == 0
+    assert ci_pr_smoke._REGISTRY_GUARD_TEST in argv
+    assert ci_pr_smoke._REGISTRY_GUARD_NODE not in argv
 
 
 def _chain_text_at_head(root: Path, chain: Sequence[str]) -> bytes:
-    """Concatenated chain blobs at HEAD; absent members fail with a message."""
-    try:
-        head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            check=True, stdout=subprocess.PIPE, timeout=12,
-        ).stdout.decode("ascii").strip()
-    except (subprocess.SubprocessError, OSError) as error:
-        pytest.fail(f"cannot resolve HEAD for the live registry guard: {error}")
+    """Concatenated chain files from the checkout the guard imports from.
+
+    Reading the same tree the registry module is imported from keeps the
+    comparison like for like (CI checks out the candidate; a dirty local tree
+    is compared against itself). Absent members fail with a message.
+    """
     parts: list[bytes] = []
     for member in chain:
-        blob = _registry_blob(root, head, member)
-        assert blob is not None, (
-            f"identity registry chain path {member} is absent at HEAD; "
+        file = root / member
+        assert file.is_file() and not file.is_symlink(), (
+            f"identity registry chain path {member} is absent from the checkout; "
             "update _IDENTITY_PIN_REGISTRIES with the chain change")
-        parts.append(blob)
+        parts.append(file.read_bytes())
     return b"".join(parts)
 
 
@@ -510,7 +551,7 @@ def test_live_identity_registry_keys_are_quoted_literals_in_their_chain():
     Selection reads only quoted literals from trusted-base blobs, so a key
     constructed dynamically at import time would never select its owning
     tests. This guard imports each registry under the exact dotted name its
-    owning pin tests use, reads the chain at HEAD, and fails the registry PR
+    owning pin tests use, reads the chain from the same checkout, and fails
     when any runtime key lacks a quoted spelling there. The one residual is
     a key built dynamically inside a function body, gated on a condition
     that is false while this guard runs.
@@ -538,6 +579,40 @@ def test_dynamic_runtime_key_is_flagged_by_the_guard(tmp_path):
     with pytest.raises(AssertionError, match=r"ops/x\.py"):
         _assert_runtime_keys_are_quoted_literals(
             module, source.read_bytes(), str(source))
+
+
+def test_deferred_sub_registry_import_is_flagged_once_it_resolves(tmp_path, monkeypatch):
+    """A registry edit can add a guarded import of a module that does not
+    exist yet; the guard passes then. When a later PR adds that module, its
+    keys reach the runtime registry without any chain member changing, so
+    only the always-on guard (main appends it to every smoke run) sees them.
+    Modeled on tmp modules, never the real registries."""
+    registry = tmp_path / "tmp_deferred_registry.py"
+    registry.write_text(
+        "REVIEWED_FILES = {'app/main.py': {}}\n"
+        "try:\n"
+        "    from tmp_late_sub_registry import REVIEWED_FILES as LATE\n"
+        "    REVIEWED_FILES.update(LATE)\n"
+        "except ImportError:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    def load():
+        spec = importlib.util.spec_from_file_location("tmp_deferred_registry", registry)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    # Registry PR: the sub-registry does not exist yet, so the guard passes.
+    _assert_runtime_keys_are_quoted_literals(load(), registry.read_bytes(), "pr1")
+    # Later PR adds the sub-registry; the listed chain is still just the
+    # registry, so the new key is not quoted there and the guard refuses.
+    (tmp_path / "tmp_late_sub_registry.py").write_text(
+        "REVIEWED_FILES = {'ops/late.py': {}}\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match=r"ops/late\.py"):
+        _assert_runtime_keys_are_quoted_literals(load(), registry.read_bytes(), "pr2")
 
 
 _EDIT_CASES = [

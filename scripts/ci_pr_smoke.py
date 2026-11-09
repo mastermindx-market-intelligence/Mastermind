@@ -10,9 +10,12 @@ chain text read from the trusted base. Every real registry key is a literal
 path string in the registry source, so bytes containment covers the same set
 an interpreter would build without an allow/deny vocabulary that new Python
 shapes could launder. Over-selection (a quoted path that is not a live key)
-costs a few extra test modules; the live guard in tests/test_ci_pr_smoke.py
-fails the registry PR when a runtime key is not present as a quoted literal
-anywhere in its chain. The single residual is a key built dynamically inside
+costs a few extra test modules. The live guard in tests/test_ci_pr_smoke.py
+runs on every smoke candidate and fails when a runtime key is not present as
+a quoted literal anywhere in its chain, so a registry that gains keys through
+a module outside the listed chain (for example a deferred import that starts
+resolving once a later PR adds the module) is refused on the PR that makes
+those keys appear, not just on registry edits. The single residual is a key built dynamically inside
 a function body, gated on a condition that is false when the guard runs: the
 guard imports the real module, so such a key stays hidden from both selection
 and the guard until the gating condition flips.
@@ -78,9 +81,15 @@ _MAX_REGISTRY_BYTES = 256_000
 # without ever meeting selection or the guard, and every later smoke
 # candidate would silently lose that registry's ownership mapping. Editing
 # any chain path therefore selects its owning tests and this live guard,
-# which proves at HEAD that every runtime key is a quoted literal in the
-# chain text.
+# which proves on the candidate checkout that every runtime key is a quoted
+# literal in the chain text.
 _REGISTRY_GUARD_TEST = "tests/test_ci_pr_smoke.py"
+# The guard alone also runs on every smoke candidate (see main); a missing
+# guard is a pytest collection error, so it fails closed rather than skipping.
+_REGISTRY_GUARD_NODE = (
+    _REGISTRY_GUARD_TEST
+    + "::test_live_identity_registry_keys_are_quoted_literals_in_their_chain"
+)
 
 
 class SmokeUnqualified(ValueError):
@@ -281,6 +290,11 @@ def main() -> int:
     selected = select_modules(
         root, paths, identity_registries=_reviewed_registries(root, args.base),
     )
+    # Registry keys can change without any chain member changing (a deferred
+    # import that starts resolving when another PR adds its module), so the
+    # live guard checks the candidate on every smoke run, not only on edits.
+    if _REGISTRY_GUARD_TEST not in selected:
+        selected = (*selected, _REGISTRY_GUARD_NODE)
     print(f"CI_PR_SMOKE selected_tests={len(selected)} changed_paths={len(paths)}",
           flush=True)
     try:
