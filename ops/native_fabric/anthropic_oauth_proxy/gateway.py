@@ -19,6 +19,7 @@ from http import HTTPStatus
 import ipaddress
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -137,7 +138,17 @@ class QueueFull(Exception):
 
 
 class QueueExpired(Exception):
-    pass
+    """Queue wait exceeded before an account could serve the request.
+
+    ``ready_at`` (ledger clock, epoch seconds) is set when the refusal is
+    immediate — no account can become affordable before the caller's
+    deadline and nothing in flight can free a slot sooner — so the caller
+    can be told exactly when capacity returns instead of parking.
+    """
+
+    def __init__(self, ready_at: float | None = None):
+        super().__init__("queue wait exceeded")
+        self.ready_at = ready_at
 
 
 class NoAccounts(Exception):
@@ -572,6 +583,20 @@ class Gateway:
                         self.pending_bytes -= body_bytes
                         self.condition.notify_all()
                         return Lease(by_id[account_id], row_id, now, weight, model)
+                    ready_in = (float("inf") if next_ready == float("inf")
+                                else max(0.0, next_ready - now))
+                    # Duration-vs-duration only: next_ready is ledger-clock
+                    # (epoch) and deadline is monotonic; never compare them
+                    # directly.
+                    if (ready_in >= deadline - time.monotonic()
+                            and not any(self.inflight.values())):
+                        # No account can become affordable before this
+                        # request's deadline, and nothing in flight can free
+                        # a slot sooner: waiting would only park the caller
+                        # until the deadline while its own client timeout
+                        # fires and it retries blind. Refuse now, carrying
+                        # the earliest capacity time.
+                        raise QueueExpired(next_ready)
                     sleep_s = 1.0 if next_ready == float("inf") else max(0.01, next_ready - now)
                     sleep_s = min(sleep_s, max(0.001, deadline - time.monotonic()), 30.0)
                     try:
@@ -827,7 +852,15 @@ def create_app(
         except QueueFull:
             return JSONResponse({"error": {"message": "local queue full"}},
                                 status_code=HTTPStatus.SERVICE_UNAVAILABLE, headers={"retry-after": "1"})
-        except QueueExpired:
+        except QueueExpired as exc:
+            if exc.ready_at is not None and math.isfinite(exc.ready_at):
+                retry_after = max(1, min(int(exc.ready_at - time.time()) + 1, 86400))
+                return JSONResponse(
+                    {"error": {"message": "all anthropic oauth accounts are at their "
+                                          "budget window; next capacity in "
+                                          f"~{retry_after}s",
+                               "type": "fabric_capacity_error"}},
+                    status_code=429, headers={"retry-after": str(retry_after)})
             return JSONResponse({"error": {"message": "local capacity wait deadline exceeded"}}, status_code=504)
         except NoAccounts:
             return JSONResponse({"error": {"message": "no anthropic oauth accounts"}}, status_code=503)
