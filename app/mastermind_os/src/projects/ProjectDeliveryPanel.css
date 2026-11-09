@@ -1,0 +1,37 @@
+/* TD03 project delivery. */
+.mm-delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.mm-delivery h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.mm-delivery-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+}
+.mm-delivery-objective {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.mm-delivery-open-plan {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  color: var(--noir-champagne);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.mm-delivery-coding,
+.mm-delivery-trail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

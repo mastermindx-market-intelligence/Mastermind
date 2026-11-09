@@ -89,21 +89,49 @@ afterEach(() => {
 describe("React read lifecycle fences", () => {
   it("reports Programs collection state independently of unresolved Mission roots", async () => {
     history.replaceState(null, "", "/os/");
-    const pending = deferred<unknown>(), readMission = vi.fn();
-    window.MastermindMissionHost = { readPrograms: () => pending.promise, readMission };
+    const pending = deferred<unknown>(),
+      readMission = vi.fn();
+    window.MastermindMissionHost = {
+      readPrograms: () => pending.promise,
+      readMission,
+    };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
-    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
+    const header = within(
+      screen
+        .getByRole("heading", { name: "Programs", level: 1 })
+        .closest("header")!,
+    );
     expect(header.getByText("SOURCE READ PENDING")).toBeTruthy();
     const raw = controlRoomFixture();
     raw.autonomy.responsibilities = [];
     await act(async () => pending.resolve(raw));
     expect(header.getByText("AVAILABLE")).toBeTruthy();
-    expect(header.getByText(`${raw.work.length} Programs from the bounded source observation.`)).toBeTruthy();
-    expect(header.queryByText("No producer document is currently admitted.")).toBeNull();
-    expect((screen.getByRole("button", { name: /Alpha program/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /Beta program/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      header.getByText(
+        `${raw.work.length} Programs from the bounded source observation.`,
+      ),
+    ).toBeTruthy();
+    expect(
+      header.queryByText("No producer document is currently admitted."),
+    ).toBeNull();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /Alpha program/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /Beta program/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
     expect(readMission).not.toHaveBeenCalled();
     expect(window.location.search).toBe("");
   });
@@ -114,39 +142,80 @@ describe("React read lifecycle fences", () => {
     raw.autonomy.responsibilities = [];
     window.MastermindMissionHost = { readPrograms: async () => raw };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
-    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
+    const header = within(
+      screen
+        .getByRole("heading", { name: "Programs", level: 1 })
+        .closest("header")!,
+    );
     expect(await header.findByText("AVAILABLE")).toBeTruthy();
-    expect(header.getByText("0 Programs from the bounded source observation.")).toBeTruthy();
-    expect(screen.getByText("No Programs were projected. This is not evidence of zero work.")).toBeTruthy();
+    expect(
+      header.getByText("0 Programs from the bounded source observation."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No Programs were projected. This is not evidence of zero work.",
+      ),
+    ).toBeTruthy();
   });
   it("reports Programs read failure in its own header without exposing the error", async () => {
     history.replaceState(null, "", "/os/");
-    window.MastermindMissionHost = { readPrograms: async () => { throw new Error("private producer detail"); } };
+    window.MastermindMissionHost = {
+      readPrograms: async () => {
+        throw new Error("private producer detail");
+      },
+    };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
-    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
-    expect(await header.findByText("Program source unavailable; current company movement is not inferred.")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
+    const header = within(
+      screen
+        .getByRole("heading", { name: "Programs", level: 1 })
+        .closest("header")!,
+    );
+    expect(
+      await header.findByText(
+        "Program source unavailable; current company movement is not inferred.",
+      ),
+    ).toBeTruthy();
     expect(header.getByText("UNAVAILABLE")).toBeTruthy();
     expect(document.body.textContent).not.toContain("private producer detail");
   });
   it("keeps Programs and exact Mission navigation available with a withheld next action", async () => {
-    const raw = controlRoomFixture(), unsafe = "token=synthetic-fixture";
+    const raw = controlRoomFixture(),
+      unsafe = "token=synthetic-fixture";
     raw.work[1].agent_os.next_action = unsafe;
-    const readMission = vi.fn(async ({ workRef, rootJobId }) => missionFixture(workRef, rootJobId));
-    window.MastermindMissionHost = { readPrograms: async () => raw, readMission };
+    const readMission = vi.fn(async ({ workRef, rootJobId }) =>
+      missionFixture(workRef, rootJobId),
+    );
+    window.MastermindMissionHost = {
+      readPrograms: async () => raw,
+      readMission,
+    };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     expect(await screen.findByText(/Next action withheld/)).toBeTruthy();
     expect(document.body.innerHTML).not.toContain(unsafe);
     await user.click(screen.getByRole("button", { name: /Beta program/ }));
-    expect(await screen.findByText("Exact project context · JOB-B")).toBeTruthy();
-    expect(readMission).toHaveBeenLastCalledWith(expect.objectContaining({ workRef: "WS:BETA", rootJobId: "JOB-B" }));
-    expect(window.location.search).toBe("?work_ref=WS%3ABETA&root_job_id=JOB-B");
+    expect(
+      await screen.findByText("Exact project context · JOB-B"),
+    ).toBeTruthy();
+    expect(readMission).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workRef: "WS:BETA", rootJobId: "JOB-B" }),
+    );
+    expect(window.location.search).toBe(
+      "?work_ref=WS%3ABETA&root_job_id=JOB-B",
+    );
   });
   it("hides displayed A synchronously while B is pending and after B rejects", async () => {
-    const b = deferred<unknown>(), collectionB = deferred<unknown>(),
+    const b = deferred<unknown>(),
+      collectionB = deferred<unknown>(),
       read = vi.fn(({ workRef }: { workRef: string }) =>
         workRef === "WS:ALPHA"
           ? Promise.resolve(missionFixture("WS:ALPHA", "JOB-A"))
@@ -154,7 +223,10 @@ describe("React read lifecycle fences", () => {
       );
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
-      readPrograms: vi.fn().mockImplementationOnce(readPrograms).mockImplementation(() => collectionB.promise),
+      readPrograms: vi
+        .fn()
+        .mockImplementationOnce(readPrograms)
+        .mockImplementation(() => collectionB.promise),
       readMission: read,
     };
     const user = userEvent.setup();
@@ -194,7 +266,9 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -254,7 +328,9 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(document.body.textContent).not.toContain("private detail");
   });
@@ -293,7 +369,9 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: () => pending.promise };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     expect(
       screen.getByText(/Reading the bounded Control Room projection/),
     ).toBeTruthy();
@@ -312,7 +390,9 @@ describe("React read lifecycle fences", () => {
     const failed = deferred<unknown>();
     window.MastermindMissionHost = { readPrograms: () => failed.promise };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     await act(async () => failed.reject(new Error("private detail")));
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(
@@ -421,7 +501,9 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    expect(await screen.findByText("Exact project context · JOB-A")).toBeTruthy();
+    expect(
+      await screen.findByText("Exact project context · JOB-A"),
+    ).toBeTruthy();
 
     cleanup();
     render(<App />);
@@ -497,7 +579,11 @@ describe("Executive OS convergence surfaces", () => {
     expect(
       screen.getByRole("heading", { name: "Resources & systems", level: 1 }),
     ).toBeTruthy();
-    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
   });
 
@@ -528,7 +614,9 @@ describe("Executive OS convergence surfaces", () => {
 
   it("does not turn the absent Chairman-decision feed into an all-clear", async () => {
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Meta-CEO" }));
     const attention = screen
       .getByRole("heading", {
         name: "Decisions not yet known.",
@@ -542,23 +630,55 @@ describe("Executive OS convergence surfaces", () => {
         { exact: false },
       ),
     ).toBeTruthy();
-    expect(within(attention!).queryByText("The owner has requested Chairman attention.")).toBeNull();
+    expect(
+      within(attention!).queryByText(
+        "The owner has requested Chairman attention.",
+      ),
+    ).toBeNull();
   });
 });
 
 describe("native and interaction contracts", () => {
-  it("keeps five Company destinations and readable advanced operational routes", async () => {
+  it("keeps seven Company destinations (Team/Code per the accepted Paper nav) and readable advanced operational routes", async () => {
     render(<App />);
-    const company = screen.getByRole("navigation", { name: "Company navigation" });
-    expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
-      "Today", "Projects", "Inbox", "Conversations", "Knowledge",
+    const company = screen.getByRole("navigation", {
+      name: "Company navigation",
+    });
+    expect(
+      within(company)
+        .getAllByRole("button")
+        .map((button) => button.textContent?.trim().replace(/^[^A-Za-z]+/, "")),
+    ).toEqual([
+      "Today",
+      "Team",
+      "Projects",
+      "Code",
+      "Inbox",
+      "Conversations",
+      "Knowledge",
     ]);
-    const operations = screen.getByRole("navigation", { name: "Mission navigation" });
-    expect(within(operations).getByRole("button", { name: "Work queue" })).toBeTruthy();
-    expect(within(operations).getByRole("button", { name: "Programs workspace" })).toBeTruthy();
-    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity workspace" }));
-    expect(screen.getByRole("heading", { name: "Resources & systems", level: 1 })).toBeTruthy();
-    expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
+    const operations = screen.getByRole("navigation", {
+      name: "Mission navigation",
+    });
+    expect(
+      within(operations).getByRole("button", { name: "Work queue" }),
+    ).toBeTruthy();
+    expect(
+      within(operations).getByRole("button", { name: "Programs workspace" }),
+    ).toBeTruthy();
+    await userEvent
+      .setup()
+      .click(
+        within(operations).getByRole("button", {
+          name: "Fleet & Capacity workspace",
+        }),
+      );
+    expect(
+      screen.getByRole("heading", { name: "Resources & systems", level: 1 }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("navigation", { name: "Company operations" }),
+    ).toBeNull();
   });
   it("skip to workspace retains Today and the original URL while focusing main", async () => {
     window.MastermindMissionHost = {
@@ -568,12 +688,22 @@ describe("native and interaction contracts", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: "What would you like done?",
+        level: 1,
+      }),
+    ).toBeTruthy();
     const originalUrl = location.href;
     await user.click(screen.getByRole("link", { name: "Skip to workspace" }));
     expect(document.activeElement).toBe(screen.getByRole("main"));
     expect(location.href).toBe(originalUrl);
-    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: "What would you like done?",
+        level: 1,
+      }),
+    ).toBeTruthy();
   });
   it("native mode invokes readiness only and never fetches", async () => {
     const fetchSpy = vi
@@ -588,7 +718,10 @@ describe("native and interaction contracts", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("heading", { name: "What would you like done?", level: 1 }),
+      screen.getByRole("heading", {
+        name: "What would you like done?",
+        level: 1,
+      }),
     ).toBeTruthy();
     expect(
       screen.getByText(
@@ -640,7 +773,9 @@ describe("native and interaction contracts", () => {
   it("distinguishes an absent Programs source from a malformed source", async () => {
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     expect(
       screen.getByRole("heading", { name: "Programs", level: 1 }),
     ).toBeTruthy();
@@ -653,7 +788,9 @@ describe("native and interaction contracts", () => {
       readPrograms: async () => ({ invalid: true }),
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
+    await user.click(
+      screen.getByRole("button", { name: "Programs workspace" }),
+    );
     expect(await screen.findByText("SCHEMA_INVALID")).toBeTruthy();
   });
   it("graph and list share identities and restore keyboard focus", async () => {
@@ -894,96 +1031,112 @@ describe("installed authentication and permitted content", () => {
     ).toBeNull();
   });
 
-  it.each([null, "USER_SIGNED_OUT"])("consumes the fixed content callback and clears visible text on sign-out (%s)", async reason => {
-    let listener!: (state: import("./host").AuthState) => void;
-    const signIn = vi.fn(async () => {});
-    const h = "a".repeat(64),
-      readCurrentWindow = vi.fn(async () => ({
-        schema: "mastermind.workspace.window_read_candidate.v1" as const,
-        selection_ref: "managed-window:fixture",
-        mode: "observed-turn-window" as const,
-        view: {
-          schema: "mastermind.workspace.visible_window_candidate.v1" as const,
-          source_ref: "managed-window:fixture",
-          scope: "one-managed-turn-window" as const,
-          observed_at: "2026-09-21T07:00:00Z",
-          epoch: h,
-          terminal: false,
-          coverage: "OBSERVED_WINDOW" as const,
-          history: "NOT_PROVEN" as const,
-          acceptance: "NOT_PROJECTED" as const,
-          capabilities: {
-            send: false as const,
-            provider_control: false as const,
-            history: false as const,
-          },
-          items: [
-            {
-              id: `visible:${h}`,
-              source_sequence: 0,
-              publication_sequence: 1,
-              state: "completed" as const,
-              kind: "visible-response" as const,
-              text: "Permitted fixture response",
-              representation: "VISIBLE_TEXT" as const,
-              display_sha256: h,
+  it.each([null, "USER_SIGNED_OUT"])(
+    "consumes the fixed content callback and clears visible text on sign-out (%s)",
+    async (reason) => {
+      let listener!: (state: import("./host").AuthState) => void;
+      const signIn = vi.fn(async () => {});
+      const h = "a".repeat(64),
+        readCurrentWindow = vi.fn(async () => ({
+          schema: "mastermind.workspace.window_read_candidate.v1" as const,
+          selection_ref: "managed-window:fixture",
+          mode: "observed-turn-window" as const,
+          view: {
+            schema: "mastermind.workspace.visible_window_candidate.v1" as const,
+            source_ref: "managed-window:fixture",
+            scope: "one-managed-turn-window" as const,
+            observed_at: "2026-09-21T07:00:00Z",
+            epoch: h,
+            terminal: false,
+            coverage: "OBSERVED_WINDOW" as const,
+            history: "NOT_PROVEN" as const,
+            acceptance: "NOT_PROJECTED" as const,
+            capabilities: {
+              send: false as const,
+              provider_control: false as const,
+              history: false as const,
             },
-          ],
-          gaps: [],
+            items: [
+              {
+                id: `visible:${h}`,
+                source_sequence: 0,
+                publication_sequence: 1,
+                state: "completed" as const,
+                kind: "visible-response" as const,
+                text: "Permitted fixture response",
+                representation: "VISIBLE_TEXT" as const,
+                display_sha256: h,
+              },
+            ],
+            gaps: [],
+          },
+        }));
+      window.MastermindMissionHost = {
+        readPrograms,
+        readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+        readCurrentWindow,
+        auth: {
+          getState: () => ({
+            status: "signed_in",
+            reason: null,
+            acquisition: true,
+            content: true,
+          }),
+          subscribe(fn) {
+            listener = fn;
+            return () => {};
+          },
+          signIn,
+          signOut: async () => {
+            listener({
+              status: "signed_out",
+              reason,
+              acquisition: false,
+              content: false,
+            });
+          },
         },
-      }));
-    window.MastermindMissionHost = {
-      readPrograms,
-      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
-      readCurrentWindow,
-      auth: {
-        getState: () => ({
-          status: "signed_in",
-          reason: null,
-          acquisition: true,
-          content: true,
-        }),
-        subscribe(fn) {
-          listener = fn;
-          return () => {};
-        },
-        signIn,
-        signOut: async () => {
-          listener({
-            status: "signed_out",
-            reason,
-            acquisition: false,
-            content: false,
-          });
-        },
-      },
-    };
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Conversation" }));
-    expect(await screen.findByText("Permitted fixture response")).toBeTruthy();
-    expect(readCurrentWindow).toHaveBeenCalledWith({
-      signal: expect.any(AbortSignal),
-    });
-    await user.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(screen.queryByText("Permitted fixture response")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Welcome back." })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
-    expect(screen.queryByText("Sign-in could not complete. Please try again.")).toBeNull();
-    expect(signIn).not.toHaveBeenCalled();
-  });
+      };
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(screen.getByRole("button", { name: "Conversation" }));
+      expect(
+        await screen.findByText("Permitted fixture response"),
+      ).toBeTruthy();
+      expect(readCurrentWindow).toHaveBeenCalledWith({
+        signal: expect.any(AbortSignal),
+      });
+      await user.click(screen.getByRole("button", { name: "Sign out" }));
+      expect(screen.queryByText("Permitted fixture response")).toBeNull();
+      expect(
+        screen.getByRole("heading", { name: "Welcome back." }),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+      expect(
+        screen.queryByText("Sign-in could not complete. Please try again."),
+      ).toBeNull();
+      expect(signIn).not.toHaveBeenCalled();
+    },
+  );
 
   it("retains real entry errors after a failed native sign-out", async () => {
     window.MastermindMissionHost = {
       auth: {
-        getState: () => ({ status: "error", reason: "KEYCHAIN_DELETE_FAILED", acquisition: false, content: false }),
+        getState: () => ({
+          status: "error",
+          reason: "KEYCHAIN_DELETE_FAILED",
+          acquisition: false,
+          content: false,
+        }),
         subscribe: () => () => {},
         signIn: async () => {},
         signOut: async () => {},
       },
     };
     render(<App />);
-    expect((await screen.findByRole("alert")).textContent).toContain("Sign-in could not complete. Please try again.");
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Sign-in could not complete. Please try again.",
+    );
   });
 
   it("associates a v2 window with a qualifying current plan child and stays unbound for v1", async () => {
@@ -1354,7 +1507,9 @@ describe("route focus handoff", () => {
     };
     render(<App />);
     expect(document.activeElement).toBe(document.body);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Meta-CEO" }));
     const action = screen.getByRole("button", { name: "Open Programs" });
     action.focus();
     await act(async () => pending.resolve(controlRoomFixture()));
@@ -1446,67 +1601,142 @@ describe("result card and same-observation Mission lifecycle", () => {
     expect(await screen.findByText("Result detail")).toBeTruthy();
   });
   it("opens a source-qualified selected Mission worker result using the existing Projects reader", async () => {
-    const h = resultHost(); const ref = h.mission.result_refs.refs[0];
-    h.mission.children.items = [{
-      job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED",
-      depth: 1, orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
-      attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
-      worker_id: "fixture-worker",
-      latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
-        started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:10:00Z",
-        exit_code: 0, has_result: true, error_present: false, error_class: null },
-    }];
-    h.mission.children.state = "AVAILABLE"; h.mission.children.coverage = "COMPLETE";
-    h.mission.children.total_count = 1; h.mission.children.overflow_count = 0;
-    h.mission.children.unjoined_job_count = 0; h.mission.children.unjoined_job_ids = [];
+    const h = resultHost();
+    const ref = h.mission.result_refs.refs[0];
+    h.mission.children.items = [
+      {
+        job_id: ref.job_id,
+        parent_job_id: ref.root_job_id,
+        status: "COMPLETED",
+        depth: 1,
+        orchestration_role: ref.orchestration_role,
+        plan_step_id: "step-1",
+        attempt_count: 1,
+        attempt_limit: 2,
+        current_attempt_id: ref.attempt_id,
+        worker_id: "fixture-worker",
+        latest_attempt: {
+          attempt_id: ref.attempt_id,
+          attempt_number: 1,
+          status: "COMPLETED",
+          started_at: "2026-10-15T12:00:00Z",
+          finished_at: "2026-10-15T12:10:00Z",
+          exit_code: 0,
+          has_result: true,
+          error_present: false,
+          error_class: null,
+        },
+      },
+    ];
+    h.mission.children.state = "AVAILABLE";
+    h.mission.children.coverage = "COMPLETE";
+    h.mission.children.total_count = 1;
+    h.mission.children.overflow_count = 0;
+    h.mission.children.unjoined_job_count = 0;
+    h.mission.children.unjoined_job_ids = [];
     const user = userEvent.setup();
     render(<App />);
-    await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(
+        1,
+      ),
+    );
     expect(h.detail).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.click(screen.getByText("Subagent Fabric · inspect execution"));
-    const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
-    await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
-    await user.click(inside.getByRole("button", { name: "Inspect indexed result" }));
+    const inside = within(
+      screen.getByRole("region", { name: "Inside this mission" }),
+    );
+    await user.click(
+      await inside.findByRole("button", {
+        name: new RegExp("^" + ref.job_id + " ·"),
+      }),
+    );
+    await user.click(
+      inside.getByRole("button", { name: "Inspect indexed result" }),
+    );
     await waitFor(() => expect(h.detail).toHaveBeenCalledTimes(1));
-    expect(h.detail).toHaveBeenCalledWith(expect.objectContaining({
-      workRef: resultAvailable.selection.work_ref,
-      rootJobId: ref.root_job_id, jobId: ref.job_id,
-      attemptId: ref.attempt_id, resultEnvelopeDigest: ref.result_envelope_digest,
-      signal: expect.any(AbortSignal),
-    }));
-    expect(await screen.findByRole("heading", { name: "Projects", level: 1 })).toBeTruthy();
+    expect(h.detail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workRef: resultAvailable.selection.work_ref,
+        rootJobId: ref.root_job_id,
+        jobId: ref.job_id,
+        attemptId: ref.attempt_id,
+        resultEnvelopeDigest: ref.result_envelope_digest,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Projects", level: 1 }),
+    ).toBeTruthy();
     expect(await screen.findByText("Result detail")).toBeTruthy();
     expect(h.legacy).not.toHaveBeenCalled();
   });
   it.each(["identity-generation", "lost-principal"] as const)(
-    "refuses a pending Office result click when the actual source loses %s", async boundary => {
-      const h = resultHost(); const ref = h.mission.result_refs.refs[0];
-      h.mission.children.items = [{
-        job_id: ref.job_id, parent_job_id: ref.root_job_id, status: "COMPLETED",
-        depth: 1, orchestration_role: ref.orchestration_role, plan_step_id: "step-1",
-        attempt_count: 1, attempt_limit: 2, current_attempt_id: ref.attempt_id,
-        worker_id: "fixture-worker",
-        latest_attempt: { attempt_id: ref.attempt_id, attempt_number: 1, status: "COMPLETED",
-          started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:10:00Z", exit_code: 0,
-          has_result: true, error_present: false, error_class: null },
-      }];
-      h.mission.children.state = "AVAILABLE"; h.mission.children.coverage = "COMPLETE";
-      h.mission.children.total_count = 1; h.mission.children.overflow_count = 0;
-      h.mission.children.unjoined_job_count = 0; h.mission.children.unjoined_job_ids = [];
+    "refuses a pending Office result click when the actual source loses %s",
+    async (boundary) => {
+      const h = resultHost();
+      const ref = h.mission.result_refs.refs[0];
+      h.mission.children.items = [
+        {
+          job_id: ref.job_id,
+          parent_job_id: ref.root_job_id,
+          status: "COMPLETED",
+          depth: 1,
+          orchestration_role: ref.orchestration_role,
+          plan_step_id: "step-1",
+          attempt_count: 1,
+          attempt_limit: 2,
+          current_attempt_id: ref.attempt_id,
+          worker_id: "fixture-worker",
+          latest_attempt: {
+            attempt_id: ref.attempt_id,
+            attempt_number: 1,
+            status: "COMPLETED",
+            started_at: "2026-10-15T12:00:00Z",
+            finished_at: "2026-10-15T12:10:00Z",
+            exit_code: 0,
+            has_result: true,
+            error_present: false,
+            error_class: null,
+          },
+        },
+      ];
+      h.mission.children.state = "AVAILABLE";
+      h.mission.children.coverage = "COMPLETE";
+      h.mission.children.total_count = 1;
+      h.mission.children.overflow_count = 0;
+      h.mission.children.unjoined_job_count = 0;
+      h.mission.children.unjoined_job_ids = [];
       const user = userEvent.setup();
       render(<App />);
-      await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(
+          window.MastermindMissionHost!.readMissionV3,
+        ).toHaveBeenCalledTimes(1),
+      );
       await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
-    await user.click(screen.getByText("Subagent Fabric · inspect execution"));
-      const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
-      await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
-      const button = inside.getByRole("button", { name: "Inspect indexed result" });
+      await user.click(screen.getByText("Subagent Fabric · inspect execution"));
+      const inside = within(
+        screen.getByRole("region", { name: "Inside this mission" }),
+      );
+      await user.click(
+        await inside.findByRole("button", {
+          name: new RegExp("^" + ref.job_id + " ·"),
+        }),
+      );
+      const button = inside.getByRole("button", {
+        name: "Inspect indexed result",
+      });
       if (boundary === "identity-generation")
         window.MastermindMissionHost!.invalidationGeneration = () => 1;
       else
-        window.MastermindMissionHost!.auth!.getState = () =>
-          ({ status: "signed_out", acquisition: false, content: false, reason: null });
+        window.MastermindMissionHost!.auth!.getState = () => ({
+          status: "signed_out",
+          acquisition: false,
+          content: false,
+          reason: null,
+        });
       await user.click(button);
       expect(h.detail).not.toHaveBeenCalled();
       expect(screen.queryByText("Result detail")).toBeNull();
@@ -1575,7 +1805,9 @@ describe("result card and same-observation Mission lifecycle", () => {
     resultHost(value);
     render(<App />);
     await openResult();
-    expect(await screen.findByText(/The source did not supply the result text/)).toBeTruthy();
+    expect(
+      await screen.findByText(/The source did not supply the result text/),
+    ).toBeTruthy();
     expect(screen.getByText(/verdict: reject/)).toBeTruthy();
     expect(screen.queryByText("Structured result")).toBeNull();
   });
@@ -1671,11 +1903,11 @@ function memoryStore(): PendingPointerStore {
   return {
     read: (scope) => data.get(scope) ?? null,
     reserve: (scope, pointer) => {
-        const existing = data.get(scope);
-        if (existing) return { reserved: false, pointer: existing };
-        data.set(scope, pointer);
-        return { reserved: true };
-      },
+      const existing = data.get(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      data.set(scope, pointer);
+      return { reserved: true };
+    },
     clearIfEqual: (scope, pointer) => {
       const current = data.get(scope);
       if (
@@ -1684,10 +1916,10 @@ function memoryStore(): PendingPointerStore {
         current.kind === pointer.kind &&
         current.targetKey === pointer.targetKey
       ) {
-          data.delete(scope);
-          return true;
-        }
-        return false;
+        data.delete(scope);
+        return true;
+      }
+      return false;
     },
   };
 }
@@ -1695,7 +1927,11 @@ function memoryStore(): PendingPointerStore {
 const defaultSession = {
   sessionKey: "sess-1",
   title: "Session One",
-  messages: [] as { id: string; role: "user" | "assistant" | "activity"; text: string }[],
+  messages: [] as {
+    id: string;
+    role: "user" | "assistant" | "activity";
+    text: string;
+  }[],
   observedAt: null as string | null,
   connection: "connected" as const,
   coverage: "COMPLETE",
@@ -1704,18 +1940,20 @@ const defaultSession = {
   selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
 };
 
-function makeCommandBinding(overrides: {
-  ctx?: OwnerContext | null;
-  view?: OrchestratorCommandBinding["getView"] extends () => infer V
-    ? V
-    : never;
-  store?: PendingPointerStore;
-  submit?: FiniteCommandPort["submit"];
-  readOperation?: FiniteCommandPort["readOperation"];
-  makeLaunchIntent?: OrchestratorCommandBinding["makeLaunchIntent"];
-  makeMessageIntent?: OrchestratorCommandBinding["makeMessageIntent"];
-  makeStopIntent?: OrchestratorCommandBinding["makeStopIntent"];
-} = {}) {
+function makeCommandBinding(
+  overrides: {
+    ctx?: OwnerContext | null;
+    view?: OrchestratorCommandBinding["getView"] extends () => infer V
+      ? V
+      : never;
+    store?: PendingPointerStore;
+    submit?: FiniteCommandPort["submit"];
+    readOperation?: FiniteCommandPort["readOperation"];
+    makeLaunchIntent?: OrchestratorCommandBinding["makeLaunchIntent"];
+    makeMessageIntent?: OrchestratorCommandBinding["makeMessageIntent"];
+    makeStopIntent?: OrchestratorCommandBinding["makeStopIntent"];
+  } = {},
+) {
   let ctx: OwnerContext | null =
     overrides.ctx === undefined
       ? { principalScope: "owner-a", generation: "gen-1" }
@@ -1734,15 +1972,20 @@ function makeCommandBinding(overrides: {
   }));
   const submit =
     overrides.submit ??
-    vi.fn(async (pointer: OperationPointer, intent: CommandIntent): Promise<EffectReceipt> => ({
-      operationKey: pointer.operationKey,
-      kind: pointer.kind,
-      targetKey: pointer.targetKey,
-      disposition: "accepted",
-      ...(intent.kind === "launch"
-        ? { missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" } }
-        : {}),
-    }));
+    vi.fn(
+      async (
+        pointer: OperationPointer,
+        intent: CommandIntent,
+      ): Promise<EffectReceipt> => ({
+        operationKey: pointer.operationKey,
+        kind: pointer.kind,
+        targetKey: pointer.targetKey,
+        disposition: "accepted",
+        ...(intent.kind === "launch"
+          ? { missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" } }
+          : {}),
+      }),
+    );
   const readOperation =
     overrides.readOperation ??
     vi.fn(async (pointer: OperationPointer): Promise<EffectReceipt> => ({
@@ -1847,88 +2090,142 @@ function installCommandHost(
 
 async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
   await navigateCompanyOperation(user, "Work");
-  await user.type(
-    screen.getByLabelText("Goal"),
-    "Ship the orchestrator",
-  );
+  await user.type(screen.getByLabelText("Goal"), "Ship the orchestrator");
   await user.click(screen.getByRole("button", { name: "Launch" }));
 }
 
 describe("App command composition", () => {
   it("retains a user-written Launch goal after passive expiry with no command access", async () => {
-    const made = makeCommandBinding(), auth = installCommandHost(made.binding);
+    const made = makeCommandBinding(),
+      auth = installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Work");
-    await user.type(screen.getByLabelText("Goal"), "Unsent launch goal must survive expiry.");
-    act(() => auth.notify({status:"signed_out",reason:null,acquisition:false,content:false}));
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value)
-      .toBe("Unsent launch goal must survive expiry.");
-    expect(screen.queryByRole("button", {name:"Launch"})).toBeNull();
+    await user.type(
+      screen.getByLabelText("Goal"),
+      "Unsent launch goal must survive expiry.",
+    );
+    act(() =>
+      auth.notify({
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      }),
+    );
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Unsent launch goal must survive expiry.",
+    );
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    await user.click(screen.getByRole("button", {name:"Discard goal"}));
+    await user.click(screen.getByRole("button", { name: "Discard goal" }));
     expect(canNavigateForAutomaticSignIn()).toBe(true);
     expect(made.submit).not.toHaveBeenCalled();
   });
 
   it("does not reuse a Session draft when a different session key appears", async () => {
-    const made = makeCommandBinding(), original = made.binding.getView();
+    const made = makeCommandBinding(),
+      original = made.binding.getView();
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", {name:"Conversation"}));
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
     await user.type(screen.getByLabelText("Message"), "Private session A note");
-    act(() => made.setView({ ...original, session: {...defaultSession, sessionKey:"sess-B"} }));
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("");
+    act(() =>
+      made.setView({
+        ...original,
+        session: { ...defaultSession, sessionKey: "sess-B" },
+      }),
+    );
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("");
     act(() => made.setView(original));
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("");
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("");
     expect(made.submit).not.toHaveBeenCalled();
   });
 
   it("retains Session Message text after passive expiry and clears it on a new grant", async () => {
-    const made = makeCommandBinding(), auth = installCommandHost(made.binding);
+    const made = makeCommandBinding(),
+      auth = installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", {name:"Conversation"}));
-    await user.type(screen.getByLabelText("Message"), "Unsent session text must survive expiry.");
-    act(() => auth.notify({status:"signed_out",reason:null,acquisition:false,content:false}));
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value)
-      .toBe("Unsent session text must survive expiry.");
-    expect(screen.queryByRole("button", {name:"Send"})).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(
+      screen.getByLabelText("Message"),
+      "Unsent session text must survive expiry.",
+    );
+    act(() =>
+      auth.notify({
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      }),
+    );
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("Unsent session text must survive expiry.");
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    act(() => auth.notify({status:"signing_in",reason:null,acquisition:false,content:false}));
+    act(() =>
+      auth.notify({
+        status: "signing_in",
+        reason: null,
+        acquisition: false,
+        content: false,
+      }),
+    );
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(canNavigateForAutomaticSignIn()).toBe(true);
     expect(made.submit).not.toHaveBeenCalled();
   });
 
-
   it("does not show a late refusal after leaving and returning to the same session", async () => {
     const response = deferred<EffectReceipt>();
     const made = makeCommandBinding({ submit: vi.fn(() => response.promise) });
-    installCommandHost(made.binding); const user = userEvent.setup(); render(<App />);
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
     await user.type(screen.getByLabelText("Message"), "original draft");
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
     const view = made.binding.getView();
-    act(() => made.setView({ ...view, session: { ...defaultSession, sessionKey: "sess-2" } }));
+    act(() =>
+      made.setView({
+        ...view,
+        session: { ...defaultSession, sessionKey: "sess-2" },
+      }),
+    );
     act(() => made.setView(view));
     await user.type(screen.getByLabelText("Message"), "new draft");
     const pointer = await made.binding.store.read("owner-a");
-    await act(async () => response.resolve({ ...pointer!, disposition: "refused" }));
+    await act(async () =>
+      response.resolve({ ...pointer!, disposition: "refused" }),
+    );
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("new draft");
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("new draft");
     expect(made.submit).toHaveBeenCalledTimes(1);
   });
 
   it("clears an earlier refusal when a new Send is awaiting its own outcome", async () => {
     const response = deferred<EffectReceipt>();
-    const submit = vi.fn<FiniteCommandPort["submit"]>()
-      .mockImplementationOnce(async pointer => ({ ...pointer, disposition: "refused" }))
+    const submit = vi
+      .fn<FiniteCommandPort["submit"]>()
+      .mockImplementationOnce(async (pointer) => ({
+        ...pointer,
+        disposition: "refused",
+      }))
       .mockImplementationOnce(() => response.promise);
     const made = makeCommandBinding({ submit });
-    installCommandHost(made.binding); const user = userEvent.setup(); render(<App />);
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
     await user.type(screen.getByLabelText("Message"), "draft survives refusal");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -1936,59 +2233,108 @@ describe("App command composition", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("draft survives refusal");
-    await act(async () => response.resolve({ ...(await made.binding.store.read("owner-a"))!, disposition: "accepted" }));
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("draft survives refusal");
+    await act(async () =>
+      response.resolve({
+        ...(await made.binding.store.read("owner-a"))!,
+        disposition: "accepted",
+      }),
+    );
   });
 
-  it.each(["session", "binding", "owner", "auth", "selection"])("never retains a command refusal across a %s change", async (change) => {
-    const submit = vi.fn(async (pointer: OperationPointer): Promise<EffectReceipt> => ({
-      ...pointer, disposition: "refused", reason: "private-receipt-reason",
-    }));
-    const made = makeCommandBinding({ submit });
-    const host = installCommandHost(made.binding);
-    const user = userEvent.setup();
-    const page = render(<App />);
-    await user.click(screen.getByRole("button", { name: "Conversation" }));
-    await user.type(screen.getByLabelText("Message"), "keep this draft");
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("REFUSED");
-    expect(screen.queryByText("private-receipt-reason")).toBeNull();
-    if (change === "session") {
-      const view = made.binding.getView();
-      act(() => made.setView({ ...view, session: { ...defaultSession, sessionKey: "sess-2" } }));
-      expect(screen.queryByRole("alert")).toBeNull();
-      act(() => made.setView(view));
-    } else if (change === "binding") {
-      const replacement = makeCommandBinding();
-      window.MastermindMissionHost!.commandBinding = replacement.binding;
-      page.rerender(<App />);
-    } else if (change === "owner") {
-      made.setCtx({ principalScope: "owner-a", generation: "gen-2" });
-      page.rerender(<App />);
-      made.setCtx({ principalScope: "owner-a", generation: "gen-1" });
-      page.rerender(<App />);
-    } else if (change === "auth") {
-      act(() => host.notify({ status: "signed_out", reason: null, acquisition: false, content: false }));
-      act(() => host.notify({ status: "signed_in", reason: null, acquisition: true, content: true }));
-    } else {
-      act(() => {
-        history.pushState(null, "", "/os/?work_ref=WS%3ABETA&root_job_id=JOB-B");
-        window.dispatchEvent(new PopStateEvent("popstate"));
-      });
-      act(() => {
-        history.pushState(null, "", "/os/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
-        window.dispatchEvent(new PopStateEvent("popstate"));
-      });
+  it.each(["session", "binding", "owner", "auth", "selection"])(
+    "never retains a command refusal across a %s change",
+    async (change) => {
+      const submit = vi.fn(
+        async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+          ...pointer,
+          disposition: "refused",
+          reason: "private-receipt-reason",
+        }),
+      );
+      const made = makeCommandBinding({ submit });
+      const host = installCommandHost(made.binding);
+      const user = userEvent.setup();
+      const page = render(<App />);
       await user.click(screen.getByRole("button", { name: "Conversation" }));
-    }
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(submit).toHaveBeenCalledTimes(1);
-  });
+      await user.type(screen.getByLabelText("Message"), "keep this draft");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "REFUSED",
+      );
+      expect(screen.queryByText("private-receipt-reason")).toBeNull();
+      if (change === "session") {
+        const view = made.binding.getView();
+        act(() =>
+          made.setView({
+            ...view,
+            session: { ...defaultSession, sessionKey: "sess-2" },
+          }),
+        );
+        expect(screen.queryByRole("alert")).toBeNull();
+        act(() => made.setView(view));
+      } else if (change === "binding") {
+        const replacement = makeCommandBinding();
+        window.MastermindMissionHost!.commandBinding = replacement.binding;
+        page.rerender(<App />);
+      } else if (change === "owner") {
+        made.setCtx({ principalScope: "owner-a", generation: "gen-2" });
+        page.rerender(<App />);
+        made.setCtx({ principalScope: "owner-a", generation: "gen-1" });
+        page.rerender(<App />);
+      } else if (change === "auth") {
+        act(() =>
+          host.notify({
+            status: "signed_out",
+            reason: null,
+            acquisition: false,
+            content: false,
+          }),
+        );
+        act(() =>
+          host.notify({
+            status: "signed_in",
+            reason: null,
+            acquisition: true,
+            content: true,
+          }),
+        );
+      } else {
+        act(() => {
+          history.pushState(
+            null,
+            "",
+            "/os/?work_ref=WS%3ABETA&root_job_id=JOB-B",
+          );
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        act(() => {
+          history.pushState(
+            null,
+            "",
+            "/os/?work_ref=WS%3AALPHA&root_job_id=JOB-A",
+          );
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        await user.click(screen.getByRole("button", { name: "Conversation" }));
+      }
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(submit).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("does not present a refused message as a Launch error", async () => {
-    const made = makeCommandBinding({ submit: vi.fn(async (pointer): Promise<EffectReceipt> => ({ ...pointer, disposition: "refused" })) });
+    const made = makeCommandBinding({
+      submit: vi.fn(async (pointer): Promise<EffectReceipt> => ({
+        ...pointer,
+        disposition: "refused",
+      })),
+    });
     installCommandHost(made.binding);
-    const user = userEvent.setup(); render(<App />);
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
     await user.type(screen.getByLabelText("Message"), "keep this draft");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -1998,23 +2344,156 @@ describe("App command composition", () => {
   });
 
   it("shows a qualified exact-session owner error in Conversation", async () => {
-    const made = makeCommandBinding({ view: {
-      projects: [{ ref: "proj-a", label: "Project A" }],
-      profiles: [{ ref: "prof-a", label: "Profile A" }],
-      session: { ...defaultSession, error: "SESSION_OWNER_UNAVAILABLE" },
-    } });
+    const made = makeCommandBinding({
+      view: {
+        projects: [{ ref: "proj-a", label: "Project A" }],
+        profiles: [{ ref: "prof-a", label: "Profile A" }],
+        session: { ...defaultSession, error: "SESSION_OWNER_UNAVAILABLE" },
+      },
+    });
     installCommandHost(made.binding);
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Conversation" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("SESSION_OWNER_UNAVAILABLE");
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Conversation" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "SESSION_OWNER_UNAVAILABLE",
+    );
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
   });
 
-  it.each(["projects", "profiles"] as const)("retains the unsent launch draft across unavailable %s and requires reselection", async (field) => {
+  it.each(["projects", "profiles"] as const)(
+    "retains the unsent launch draft across unavailable %s and requires reselection",
+    async (field) => {
+      const original = {
+        projects: [
+          { ref: "proj-a", label: "Project A" },
+          { ref: "proj-b", label: "Project B" },
+        ],
+        profiles: [
+          { ref: "prof-a", label: "Profile A" },
+          { ref: "prof-b", label: "Profile B" },
+        ],
+        session: defaultSession,
+      };
+      const made = makeCommandBinding({ view: original });
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await navigateCompanyOperation(user, "Work");
+      await user.type(
+        screen.getByLabelText("Goal"),
+        "Keep this draft while choices are unavailable",
+      );
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {
+        target: { value: "Keep the original proof requirements" },
+      });
+      await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+      await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+      act(() => made.setView({ ...original, [field]: [] }));
+      expect(screen.queryByLabelText("Goal")).toBeNull();
+      expect(made.prepare).not.toHaveBeenCalled();
+      expect(made.submit).not.toHaveBeenCalled();
+      act(() => made.setView({ ...original, [field]: [original[field][0]] }));
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "Keep this draft while choices are unavailable",
+      );
+      expect(
+        (screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement)
+          .value,
+      ).toBe("Keep the original proof requirements");
+      expect(
+        (
+          screen.getByLabelText(
+            field === "projects" ? "Project" : "Profile",
+          ) as HTMLSelectElement
+        ).value,
+      ).toBe(field === "projects" ? "proj-b" : "prof-b");
+      expect(
+        screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled"),
+      ).toBe(true);
+      expect(made.prepare).not.toHaveBeenCalled();
+      await user.selectOptions(
+        screen.getByLabelText(field === "projects" ? "Project" : "Profile"),
+        field === "projects" ? "proj-a" : "prof-a",
+      );
+      await user.click(screen.getByRole("button", { name: "Launch" }));
+      await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+      expect(made.prepare).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["pending", "lost-response"])(
+    "retains draft and pointer through a whole-catalog interruption during %s",
+    async (state) => {
+      const response = deferred<EffectReceipt>(),
+        store = memoryStore();
+      const made = makeCommandBinding({
+        store,
+        submit: vi.fn(() => response.promise),
+      });
+      const original = made.binding.getView();
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await launchFromWork(user);
+      await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+      const pointer = await store.read("owner-a");
+      if (state === "lost-response")
+        await act(async () => response.reject(new Error("lost response")));
+      act(() => made.setView({ projects: [], profiles: [], session: null }));
+      expect(
+        screen.getByText("Work options are unavailable. Your draft is kept."),
+      ).toBeTruthy();
+      expect(screen.queryByLabelText("Goal")).toBeNull();
+      expect(await store.read("owner-a")).toEqual(pointer);
+      if (state === "lost-response")
+        expect(
+          screen.getByRole("button", { name: "Check status" }),
+        ).toBeTruthy();
+      act(() => made.setView(original));
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "Ship the orchestrator",
+      );
+      expect(
+        screen
+          .getByRole("button", { name: "Launching…" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      expect(
+        screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled"),
+      ).toBe(true);
+      expect(made.prepare).toHaveBeenCalledTimes(1);
+      expect(made.submit).toHaveBeenCalledTimes(1);
+      expect(made.readOperation).not.toHaveBeenCalled();
+      if (state === "lost-response") {
+        await user.click(screen.getByRole("button", { name: "Check status" }));
+        await waitFor(() =>
+          expect(made.readOperation).toHaveBeenCalledTimes(1),
+        );
+        expect(made.readOperation).toHaveBeenCalledWith(
+          pointer,
+          expect.any(AbortSignal),
+        );
+        expect(made.prepare).toHaveBeenCalledTimes(1);
+        expect(made.submit).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it("pins an ordinary criteria-only draft to its original default workstream through catalogue changes and return", async () => {
+    const projects = [{ ref: "proj-a", label: "Project A" }];
+    const profiles = [{ ref: "prof-a", label: "Profile A" }];
+    const workstreams = [
+      { ref: "WS:ORIGINAL", label: "Original workstream", projects, profiles },
+      { ref: "WS:OTHER", label: "Other workstream", projects, profiles },
+    ];
     const original = {
-      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
-      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
+      projects,
+      profiles,
+      workstreams,
+      defaultWorkstream: "WS:ORIGINAL",
       session: defaultSession,
     };
     const made = makeCommandBinding({ view: original });
@@ -2022,267 +2501,371 @@ describe("App command composition", () => {
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Work");
-    await user.type(screen.getByLabelText("Goal"), "Keep this draft while choices are unavailable");
-    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {target:{value:"Keep the original proof requirements"}});
-    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
-    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
-    act(() => made.setView({ ...original, [field]: [] }));
-    expect(screen.queryByLabelText("Goal")).toBeNull();
-    expect(made.prepare).not.toHaveBeenCalled();
-    expect(made.submit).not.toHaveBeenCalled();
-    act(() => made.setView({ ...original, [field]: [original[field][0]] }));
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep this draft while choices are unavailable");
-    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Keep the original proof requirements");
-    expect((screen.getByLabelText(field === "projects" ? "Project" : "Profile") as HTMLSelectElement).value)
-      .toBe(field === "projects" ? "proj-b" : "prof-b");
-    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
-    expect(made.prepare).not.toHaveBeenCalled();
-    await user.selectOptions(screen.getByLabelText(field === "projects" ? "Project" : "Profile"), field === "projects" ? "proj-a" : "prof-a");
-    await user.click(screen.getByRole("button", { name: "Launch" }));
-    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
-    expect(made.prepare).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["pending", "lost-response"])("retains draft and pointer through a whole-catalog interruption during %s", async (state) => {
-    const response = deferred<EffectReceipt>(), store = memoryStore();
-    const made = makeCommandBinding({ store, submit: vi.fn(() => response.promise) });
-    const original = made.binding.getView();
-    installCommandHost(made.binding);
-    const user = userEvent.setup();
-    render(<App />);
-    await launchFromWork(user);
-    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
-    const pointer = await store.read("owner-a");
-    if (state === "lost-response") await act(async () => response.reject(new Error("lost response")));
-    act(() => made.setView({ projects: [], profiles: [], session: null }));
-    expect(screen.getByText("Work options are unavailable. Your draft is kept.")).toBeTruthy();
-    expect(screen.queryByLabelText("Goal")).toBeNull();
-    expect(await store.read("owner-a")).toEqual(pointer);
-    if (state === "lost-response") expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
-    act(() => made.setView(original));
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
-    expect(screen.getByRole("button", { name: "Launching…" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
-    expect(made.prepare).toHaveBeenCalledTimes(1);
-    expect(made.submit).toHaveBeenCalledTimes(1);
-    expect(made.readOperation).not.toHaveBeenCalled();
-    if (state === "lost-response") {
-      await user.click(screen.getByRole("button", { name: "Check status" }));
-      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
-      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
-      expect(made.prepare).toHaveBeenCalledTimes(1);
-      expect(made.submit).toHaveBeenCalledTimes(1);
-    }
-  });
-
-  it("pins an ordinary criteria-only draft to its original default workstream through catalogue changes and return", async () => {
-    const projects = [{ref:"proj-a",label:"Project A"}];
-    const profiles = [{ref:"prof-a",label:"Profile A"}];
-    const workstreams = [
-      {ref:"WS:ORIGINAL",label:"Original workstream",projects,profiles},
-      {ref:"WS:OTHER",label:"Other workstream",projects,profiles},
-    ];
-    const original = {projects,profiles,workstreams,defaultWorkstream:"WS:ORIGINAL",session:defaultSession};
-    const made = makeCommandBinding({view:original});
-    installCommandHost(made.binding);
-    const user = userEvent.setup();render(<App/>);
-    await navigateCompanyOperation(user,"Work");
-    fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:"Proof for the original workstream"}});
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
-    act(()=>made.setView({...original,defaultWorkstream:"WS:OTHER"}));
-    await user.click(screen.getByRole("button",{name:"Meta-CEO"}));
-    await navigateCompanyOperation(user,"Work");
-    expect((screen.getByLabelText("Workstream") as HTMLSelectElement).value).toBe("WS:ORIGINAL");
-    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Proof for the original workstream");
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {
+      target: { value: "Proof for the original workstream" },
+    });
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "",
+    );
+    act(() => made.setView({ ...original, defaultWorkstream: "WS:OTHER" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
+    await navigateCompanyOperation(user, "Work");
+    expect(
+      (screen.getByLabelText("Workstream") as HTMLSelectElement).value,
+    ).toBe("WS:ORIGINAL");
+    expect(
+      (screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement)
+        .value,
+    ).toBe("Proof for the original workstream");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "",
+    );
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
   });
 
   it("retains ordinary criteria through passive expiry and removes an emptied criteria-only draft", async () => {
-    const made=makeCommandBinding();
-    const auth=installCommandHost(made.binding);
-    const user=userEvent.setup();render(<App/>);
-    await navigateCompanyOperation(user,"Work");
-    fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:"Unsent original criteria"}});
-    act(()=>auth.notify({status:"signed_out",reason:"TOKEN_EXPIRED",acquisition:false,content:false}));
-    const retained=await screen.findByLabelText(/Acceptance criteria/);
-    expect((retained as HTMLTextAreaElement).value).toBe("Unsent original criteria");
-    expect(screen.queryByRole("button",{name:"Launch"})).toBeNull();
-    fireEvent.change(retained,{target:{value:""}});
-    expect(screen.queryByLabelText(/Acceptance criteria/)).toBeNull();
-    expect(screen.queryByRole("button",{name:"Discard goal"})).toBeNull();
-    expect(made.prepare).not.toHaveBeenCalled();
-    expect(made.submit).not.toHaveBeenCalled();
-  });
-
-  it.each(["principal", "generation", "sign-out"])("does not restore a retained launch draft across %s changes", async (change) => {
-    const made = makeCommandBinding(), original = made.binding.getView();
+    const made = makeCommandBinding();
     const auth = installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Work");
-    await user.type(screen.getByLabelText("Goal"), "Draft of the original owner epoch");
-    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {target:{value:"Requirements of the original owner epoch"}});
-    act(() => made.setView({ projects: [], profiles: [], session: null }));
-    if (change === "sign-out") {
-      act(() => auth.notify({ status: "signed_out", reason: null, acquisition: false, content: false }));
-      act(() => auth.notify({ status: "signed_in", reason: null, acquisition: true, content: true }));
-    } else {
-      act(() => made.setCtx({ principalScope: change === "principal" ? "owner-b" : "owner-a", generation: change === "generation" ? "gen-2" : "gen-1" }));
-    }
-    act(() => made.setView(original));
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
-    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {
+      target: { value: "Unsent original criteria" },
+    });
+    act(() =>
+      auth.notify({
+        status: "signed_out",
+        reason: "TOKEN_EXPIRED",
+        acquisition: false,
+        content: false,
+      }),
+    );
+    const retained = await screen.findByLabelText(/Acceptance criteria/);
+    expect((retained as HTMLTextAreaElement).value).toBe(
+      "Unsent original criteria",
+    );
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    fireEvent.change(retained, { target: { value: "" } });
+    expect(screen.queryByLabelText(/Acceptance criteria/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard goal" })).toBeNull();
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
   });
 
-  it.each(["Project", "Profile"] as const)("requires explicit eligible %s reselection before preparing a launch", async (field) => {
-    const original = {
-      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
-      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
-      session: defaultSession,
-    };
-    const made = makeCommandBinding({ view: original });
-    installCommandHost(made.binding);
-    const user = userEvent.setup();
-    render(<App />);
-    await navigateCompanyOperation(user, "Work");
-    await user.type(screen.getByLabelText("Goal"), "Keep the original launch goal");
-    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
-    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
-    act(() => made.setView({ ...original,
-      ...(field === "Project" ? { projects: [original.projects[0]] } : { profiles: [original.profiles[0]] }),
-    }));
-    const select = screen.getByLabelText(field) as HTMLSelectElement;
-    const staleRef = field === "Project" ? "proj-b" : "prof-b";
-    expect(select.value).toBe(staleRef);
-    expect(select.selectedOptions[0].disabled).toBe(true);
-    expect(select.getAttribute("aria-describedby")).toBeTruthy();
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep the original launch goal");
-    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
-    act(() => { screen.getByLabelText("Goal").closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(made.prepare).not.toHaveBeenCalled();
-    expect(made.submit).not.toHaveBeenCalled();
-    await user.selectOptions(select, field === "Project" ? "proj-a" : "prof-a");
-    await user.click(screen.getByRole("button", { name: "Launch" }));
-    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
-    expect(made.prepare).toHaveBeenCalledTimes(1);
-    expect(made.prepare.mock.calls[0][0]).toMatchObject({ kind: "launch", payload: {
-      goal: "Keep the original launch goal",
-      projectRef: field === "Project" ? "proj-a" : "proj-b",
-      profileRef: field === "Profile" ? "prof-a" : "prof-b",
-    } });
-    expect(made.readOperation).not.toHaveBeenCalled();
-  });
+  it.each(["principal", "generation", "sign-out"])(
+    "does not restore a retained launch draft across %s changes",
+    async (change) => {
+      const made = makeCommandBinding(),
+        original = made.binding.getView();
+      const auth = installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await navigateCompanyOperation(user, "Work");
+      await user.type(
+        screen.getByLabelText("Goal"),
+        "Draft of the original owner epoch",
+      );
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {
+        target: { value: "Requirements of the original owner epoch" },
+      });
+      act(() => made.setView({ projects: [], profiles: [], session: null }));
+      if (change === "sign-out") {
+        act(() =>
+          auth.notify({
+            status: "signed_out",
+            reason: null,
+            acquisition: false,
+            content: false,
+          }),
+        );
+        act(() =>
+          auth.notify({
+            status: "signed_in",
+            reason: null,
+            acquisition: true,
+            content: true,
+          }),
+        );
+      } else {
+        act(() =>
+          made.setCtx({
+            principalScope: change === "principal" ? "owner-b" : "owner-a",
+            generation: change === "generation" ? "gen-2" : "gen-1",
+          }),
+        );
+      }
+      act(() => made.setView(original));
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "",
+      );
+      expect(
+        (screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement)
+          .value,
+      ).toBe("");
+      expect(made.prepare).not.toHaveBeenCalled();
+      expect(made.submit).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each(["pending", "lost-response"])("preserves the original operation while launch choices change during %s", async (state) => {
-    const response = deferred<EffectReceipt>(), store = memoryStore();
-    const original = {
-      projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
-      profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
-      session: defaultSession,
-    };
-    const made = makeCommandBinding({ view: original, store, submit: vi.fn(() => response.promise) });
-    installCommandHost(made.binding);
-    const user = userEvent.setup();
-    render(<App />);
-    await navigateCompanyOperation(user, "Work");
-    await user.type(screen.getByLabelText("Goal"), "Keep the pending launch goal");
-    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
-    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
-    await user.click(screen.getByRole("button", { name: "Launch" }));
-    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
-    const pointer = await store.read("owner-a");
-    if (state === "lost-response") {
-      await act(async () => response.reject(new Error("lost response")));
-      await screen.findByRole("button", { name: "Check status" });
-    }
-    act(() => made.setView({ ...original, projects: [original.projects[0]], profiles: [original.profiles[0]] }));
-    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-b");
-    expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-b");
-    expect(screen.getByLabelText("Project").hasAttribute("disabled")).toBe(true);
-    expect(screen.getByLabelText("Profile").hasAttribute("disabled")).toBe(true);
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep the pending launch goal");
-    act(() => { screen.getByLabelText("Goal").closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
-    expect(await store.read("owner-a")).toEqual(pointer);
-    expect(made.prepare).toHaveBeenCalledTimes(1);
-    expect(made.submit).toHaveBeenCalledTimes(1);
-    expect(made.readOperation).not.toHaveBeenCalled();
-    if (state === "lost-response") {
-      await user.click(screen.getByRole("button", { name: "Check status" }));
-      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
-      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+  it.each(["Project", "Profile"] as const)(
+    "requires explicit eligible %s reselection before preparing a launch",
+    async (field) => {
+      const original = {
+        projects: [
+          { ref: "proj-a", label: "Project A" },
+          { ref: "proj-b", label: "Project B" },
+        ],
+        profiles: [
+          { ref: "prof-a", label: "Profile A" },
+          { ref: "prof-b", label: "Profile B" },
+        ],
+        session: defaultSession,
+      };
+      const made = makeCommandBinding({ view: original });
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await navigateCompanyOperation(user, "Work");
+      await user.type(
+        screen.getByLabelText("Goal"),
+        "Keep the original launch goal",
+      );
+      await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+      await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+      act(() =>
+        made.setView({
+          ...original,
+          ...(field === "Project"
+            ? { projects: [original.projects[0]] }
+            : { profiles: [original.profiles[0]] }),
+        }),
+      );
+      const select = screen.getByLabelText(field) as HTMLSelectElement;
+      const staleRef = field === "Project" ? "proj-b" : "prof-b";
+      expect(select.value).toBe(staleRef);
+      expect(select.selectedOptions[0].disabled).toBe(true);
+      expect(select.getAttribute("aria-describedby")).toBeTruthy();
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "Keep the original launch goal",
+      );
+      expect(
+        screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled"),
+      ).toBe(true);
+      act(() => {
+        screen
+          .getByLabelText("Goal")
+          .closest("form")!
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+      });
+      expect(made.prepare).not.toHaveBeenCalled();
+      expect(made.submit).not.toHaveBeenCalled();
+      await user.selectOptions(
+        select,
+        field === "Project" ? "proj-a" : "prof-a",
+      );
+      await user.click(screen.getByRole("button", { name: "Launch" }));
+      await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+      expect(made.prepare).toHaveBeenCalledTimes(1);
+      expect(made.prepare.mock.calls[0][0]).toMatchObject({
+        kind: "launch",
+        payload: {
+          goal: "Keep the original launch goal",
+          projectRef: field === "Project" ? "proj-a" : "proj-b",
+          profileRef: field === "Profile" ? "prof-a" : "prof-b",
+        },
+      });
+      expect(made.readOperation).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["pending", "lost-response"])(
+    "preserves the original operation while launch choices change during %s",
+    async (state) => {
+      const response = deferred<EffectReceipt>(),
+        store = memoryStore();
+      const original = {
+        projects: [
+          { ref: "proj-a", label: "Project A" },
+          { ref: "proj-b", label: "Project B" },
+        ],
+        profiles: [
+          { ref: "prof-a", label: "Profile A" },
+          { ref: "prof-b", label: "Profile B" },
+        ],
+        session: defaultSession,
+      };
+      const made = makeCommandBinding({
+        view: original,
+        store,
+        submit: vi.fn(() => response.promise),
+      });
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await navigateCompanyOperation(user, "Work");
+      await user.type(
+        screen.getByLabelText("Goal"),
+        "Keep the pending launch goal",
+      );
+      await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+      await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+      await user.click(screen.getByRole("button", { name: "Launch" }));
+      await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+      const pointer = await store.read("owner-a");
+      if (state === "lost-response") {
+        await act(async () => response.reject(new Error("lost response")));
+        await screen.findByRole("button", { name: "Check status" });
+      }
+      act(() =>
+        made.setView({
+          ...original,
+          projects: [original.projects[0]],
+          profiles: [original.profiles[0]],
+        }),
+      );
+      expect(
+        (screen.getByLabelText("Project") as HTMLSelectElement).value,
+      ).toBe("proj-b");
+      expect(
+        (screen.getByLabelText("Profile") as HTMLSelectElement).value,
+      ).toBe("prof-b");
+      expect(screen.getByLabelText("Project").hasAttribute("disabled")).toBe(
+        true,
+      );
+      expect(screen.getByLabelText("Profile").hasAttribute("disabled")).toBe(
+        true,
+      );
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "Keep the pending launch goal",
+      );
+      act(() => {
+        screen
+          .getByLabelText("Goal")
+          .closest("form")!
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+      });
+      expect(await store.read("owner-a")).toEqual(pointer);
       expect(made.prepare).toHaveBeenCalledTimes(1);
       expect(made.submit).toHaveBeenCalledTimes(1);
-    }
-  });
+      expect(made.readOperation).not.toHaveBeenCalled();
+      if (state === "lost-response") {
+        await user.click(screen.getByRole("button", { name: "Check status" }));
+        await waitFor(() =>
+          expect(made.readOperation).toHaveBeenCalledTimes(1),
+        );
+        expect(made.readOperation).toHaveBeenCalledWith(
+          pointer,
+          expect.any(AbortSignal),
+        );
+        expect(made.prepare).toHaveBeenCalledTimes(1);
+        expect(made.submit).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
 
-  it.each(["pointer", "keyboard"])("dismisses an unsent launch draft with %s Cancel and restores page focus", async (input) => {
-    const made = makeCommandBinding({
-      view: {
-        projects: [{ ref: "proj-a", label: "Project A" }, { ref: "proj-b", label: "Project B" }],
-        profiles: [{ ref: "prof-a", label: "Profile A" }, { ref: "prof-b", label: "Profile B" }],
-        session: defaultSession,
-      },
-    });
-    installCommandHost(made.binding);
-    const user = userEvent.setup();
-    render(<App />);
-    await navigateCompanyOperation(user, "Work");
-    const location = window.location.href;
-    await user.type(screen.getByLabelText("Goal"), "Unsent draft");
-    await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
-    await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    if (input === "keyboard") {
-      cancel.focus();
-      await user.keyboard("{Enter}");
-    } else await user.click(cancel);
-    expect(screen.queryByLabelText("Goal")).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Work", level: 1 }));
-    expect(window.location.href).toBe(location);
-    await user.click(screen.getByRole("button", { name: "Write a new goal" }));
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
-    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-a");
-    expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-a");
-    expect(made.prepare).not.toHaveBeenCalled();
-    expect(made.submit).not.toHaveBeenCalled();
-    expect(made.readOperation).not.toHaveBeenCalled();
-  });
+  it.each(["pointer", "keyboard"])(
+    "dismisses an unsent launch draft with %s Cancel and restores page focus",
+    async (input) => {
+      const made = makeCommandBinding({
+        view: {
+          projects: [
+            { ref: "proj-a", label: "Project A" },
+            { ref: "proj-b", label: "Project B" },
+          ],
+          profiles: [
+            { ref: "prof-a", label: "Profile A" },
+            { ref: "prof-b", label: "Profile B" },
+          ],
+          session: defaultSession,
+        },
+      });
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await navigateCompanyOperation(user, "Work");
+      const location = window.location.href;
+      await user.type(screen.getByLabelText("Goal"), "Unsent draft");
+      await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
+      await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      if (input === "keyboard") {
+        cancel.focus();
+        await user.keyboard("{Enter}");
+      } else await user.click(cancel);
+      expect(screen.queryByLabelText("Goal")).toBeNull();
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Work", level: 1 }),
+      );
+      expect(window.location.href).toBe(location);
+      await user.click(
+        screen.getByRole("button", { name: "Write a new goal" }),
+      );
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "",
+      );
+      expect(
+        (screen.getByLabelText("Project") as HTMLSelectElement).value,
+      ).toBe("proj-a");
+      expect(
+        (screen.getByLabelText("Profile") as HTMLSelectElement).value,
+      ).toBe("prof-a");
+      expect(made.prepare).not.toHaveBeenCalled();
+      expect(made.submit).not.toHaveBeenCalled();
+      expect(made.readOperation).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each(["pending", "lost-response"])("keeps Cancel disabled and the original pointer during a %s launch", async (state) => {
-    const response = deferred<EffectReceipt>();
-    const store = memoryStore();
-    const made = makeCommandBinding({ store, submit: vi.fn(() => response.promise) });
-    installCommandHost(made.binding);
-    const user = userEvent.setup();
-    render(<App />);
-    await launchFromWork(user);
-    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
-    if (state === "lost-response") {
-      await act(async () => response.reject(new Error("lost response")));
-      await screen.findByRole("button", { name: "Check status" });
-    }
-    const pointer = await store.read("owner-a");
-    expect(pointer?.operationKey).toBe("op-1");
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    expect(cancel.hasAttribute("disabled")).toBe(true);
-    await user.click(cancel);
-    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
-    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
-    expect(await store.read("owner-a")).toEqual(pointer);
-    expect(made.prepare).toHaveBeenCalledTimes(1);
-    expect(made.submit).toHaveBeenCalledTimes(1);
-    expect(made.readOperation).not.toHaveBeenCalled();
-    if (state === "lost-response") {
-      await user.click(screen.getByRole("button", { name: "Check status" }));
-      await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
-      expect(made.readOperation).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
+  it.each(["pending", "lost-response"])(
+    "keeps Cancel disabled and the original pointer during a %s launch",
+    async (state) => {
+      const response = deferred<EffectReceipt>();
+      const store = memoryStore();
+      const made = makeCommandBinding({
+        store,
+        submit: vi.fn(() => response.promise),
+      });
+      installCommandHost(made.binding);
+      const user = userEvent.setup();
+      render(<App />);
+      await launchFromWork(user);
+      await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+      if (state === "lost-response") {
+        await act(async () => response.reject(new Error("lost response")));
+        await screen.findByRole("button", { name: "Check status" });
+      }
+      const pointer = await store.read("owner-a");
+      expect(pointer?.operationKey).toBe("op-1");
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      expect(cancel.hasAttribute("disabled")).toBe(true);
+      await user.click(cancel);
+      expect(
+        screen.queryByRole("button", { name: "Write a new goal" }),
+      ).toBeNull();
+      expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+        "Ship the orchestrator",
+      );
+      expect(await store.read("owner-a")).toEqual(pointer);
+      expect(made.prepare).toHaveBeenCalledTimes(1);
       expect(made.submit).toHaveBeenCalledTimes(1);
-    }
-  });
+      expect(made.readOperation).not.toHaveBeenCalled();
+      if (state === "lost-response") {
+        await user.click(screen.getByRole("button", { name: "Check status" }));
+        await waitFor(() =>
+          expect(made.readOperation).toHaveBeenCalledTimes(1),
+        );
+        expect(made.readOperation).toHaveBeenCalledWith(
+          pointer,
+          expect.any(AbortSignal),
+        );
+        expect(made.submit).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
 
   it("dispatches nothing for absent, incomplete, or unauthenticated bindings", async () => {
     const incomplete = makeCommandBinding();
@@ -2294,7 +2877,9 @@ describe("App command composition", () => {
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Write a new goal" }),
+    ).toBeNull();
     cleanup();
 
     window.MastermindMissionHost = {
@@ -2327,7 +2912,9 @@ describe("App command composition", () => {
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Write a new goal" }),
+    ).toBeNull();
     cleanup();
 
     const signedOut = makeCommandBinding();
@@ -2345,7 +2932,9 @@ describe("App command composition", () => {
     expect(signedOut.prepare).not.toHaveBeenCalled();
     expect(signedOut.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Write a new goal" }),
+    ).toBeNull();
   });
 
   it("selects the exact returned mission after an accepted launch", async () => {
@@ -2362,7 +2951,9 @@ describe("App command composition", () => {
       screen.getByRole("heading", { name: "Projects", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected"),
+      screen
+        .getByRole("tab", { name: "Conversation" })
+        .getAttribute("aria-selected"),
     ).toBe("true");
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);
@@ -2429,7 +3020,9 @@ describe("App command composition", () => {
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
-    expect(await screen.findByRole("button", { name: "Check status" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: "Check status" }),
+    ).toBeTruthy();
     expect(document.body.textContent).not.toContain("transport lost secret");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
@@ -2439,7 +3032,9 @@ describe("App command composition", () => {
 
   it("does not let an A-B-A late receipt set the new selection", async () => {
     const pending = deferred<EffectReceipt>();
-    const submit = vi.fn((_pointer: OperationPointer, _intent: CommandIntent) => pending.promise);
+    const submit = vi.fn(
+      (_pointer: OperationPointer, _intent: CommandIntent) => pending.promise,
+    );
     const made = makeCommandBinding({ submit });
     const host = installCommandHost(made.binding);
     const user = userEvent.setup();
@@ -2500,14 +3095,18 @@ describe("App command composition", () => {
 
   it("suppresses a stale launch result after a mission switch", async () => {
     const pending = deferred<EffectReceipt>();
-    const submit = vi.fn((_pointer: OperationPointer, _intent: CommandIntent) => pending.promise);
+    const submit = vi.fn(
+      (_pointer: OperationPointer, _intent: CommandIntent) => pending.promise,
+    );
     const made = makeCommandBinding({ submit });
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
     await navigateCompanyOperation(user, "Programs");
-    await user.click(await screen.findByRole("button", { name: /Beta program/ }));
+    await user.click(
+      await screen.findByRole("button", { name: /Beta program/ }),
+    );
     await act(async () =>
       pending.resolve({
         operationKey: "op-1",
@@ -2571,9 +3170,7 @@ describe("host-composition repair regressions (R2)", () => {
       kind: "launch",
       targetKey: "opaque-launch",
     };
-    const data = new Map<string, OperationPointer>([
-      ["owner-a", seeded],
-    ]);
+    const data = new Map<string, OperationPointer>([["owner-a", seeded]]);
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
       reserve: (scope, pointer) => {
@@ -2652,9 +3249,9 @@ describe("host-composition repair regressions (R2)", () => {
       expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
     );
     expect(store.read("owner-a")).toBeNull();
-    expect(
-      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
-    ).toBe("Ship the orchestrator");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Ship the orchestrator",
+    );
     expect(window.location.search).toContain("work_ref=WS%3AALPHA");
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
@@ -2677,7 +3274,13 @@ describe("host-composition repair regressions (R2)", () => {
       },
       clearIfEqual: (scope, pointer) => {
         const current = data.get(scope);
-        if (!current || current.operationKey !== pointer.operationKey || current.kind !== pointer.kind || current.targetKey !== pointer.targetKey) return false;
+        if (
+          !current ||
+          current.operationKey !== pointer.operationKey ||
+          current.kind !== pointer.kind ||
+          current.targetKey !== pointer.targetKey
+        )
+          return false;
         data.delete(scope);
         return true;
       },
@@ -2719,7 +3322,9 @@ describe("host-composition repair regressions (R2)", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    expect(screen.getByRole("heading",{name:"Session controls"})).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Session controls" }),
+    ).toBeTruthy();
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     // No fabricated session, connection, or dispatch surface.
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
@@ -2792,7 +3397,9 @@ describe("host-composition repair regressions (R2)", () => {
 
     // A second dispatch from a remounted leaf (mission switch and back).
     await navigateCompanyOperation(user, "Programs");
-    await user.click(await screen.findByRole("button", { name: /Beta program/ }));
+    await user.click(
+      await screen.findByRole("button", { name: /Beta program/ }),
+    );
     await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Second launch");
     await user.click(screen.getByRole("button", { name: "Launch" }));
@@ -2800,9 +3407,9 @@ describe("host-composition repair regressions (R2)", () => {
     expect(made.submit).toHaveBeenCalledTimes(1);
     // Refused once at click time: the second form is usable, draft preserved.
     expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
-    ).toBe("Second launch");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Second launch",
+    );
     expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
 
     // The original launch is still the only pending operation; its receipt
@@ -2855,9 +3462,9 @@ describe("host-composition repair regressions (R2)", () => {
     expect(window.location.search).not.toContain("WS%3ALAUNCH");
     expect(replacement.prepare).not.toHaveBeenCalled();
     expect(replacement.submit).not.toHaveBeenCalled();
-    expect(
-      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
-    ).toBe("Ship the orchestrator");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Ship the orchestrator",
+    );
     // The replacement route owns the next dispatch through its own controller.
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
@@ -3004,7 +3611,6 @@ describe("host-composition repair regressions (R2)", () => {
   });
 });
 
-
 describe("host-composition repair regressions (R4)", () => {
   it("F5: pre-render replacement blocks status reads, then qualified empty replacement storage removes the old recovery control", async () => {
     const seeded: OperationPointer = {
@@ -3124,9 +3730,15 @@ describe("host-composition repair regressions (R4)", () => {
     await navigateCompanyOperation(user, "Work");
     // Leaving Work remounts its unsent form; supply an eligible new goal.
     await user.type(screen.getByLabelText("Goal"), "A replacement-route draft");
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Check status" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Check status" })).toBeNull(),
+    );
     expect(screen.queryByText(seeded.operationKey)).toBeNull();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(false));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
     expect(oldRead).not.toHaveBeenCalled();
     expect(replacementRead).not.toHaveBeenCalled();
     expect(window.location.search).toContain("work_ref=WS%3AALPHA");
@@ -3177,9 +3789,9 @@ describe("host-composition repair regressions (R4)", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
     );
-    expect(
-      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
-    ).toBe("Ship the orchestrator");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Ship the orchestrator",
+    );
     // The exact terminal receipt cleared the OLD store's own pointer.
     expect(old.binding.store.read("owner-a")).toBeNull();
     expect(replacement.prepare).not.toHaveBeenCalled();
@@ -3224,9 +3836,9 @@ describe("host-composition repair regressions (R4)", () => {
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
     expect(old.submit).toHaveBeenCalledTimes(1);
-    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
-      "op-1",
-    );
+    expect(
+      (await replacement.binding.store.read("owner-a"))?.operationKey,
+    ).toBe("op-1");
     // The OLD route's receipt arrives while the newer launch is in flight:
     // it must not navigate and must not complete or refuse the newer
     // callback — the newer guard belongs to its own route's receipt.
@@ -3244,9 +3856,9 @@ describe("host-composition repair regressions (R4)", () => {
     });
     expect(window.location.search).not.toContain("WS%3ASTALE");
     expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
-    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
-      "op-1",
-    );
+    expect(
+      (await replacement.binding.store.read("owner-a"))?.operationKey,
+    ).toBe("op-1");
     // The newer launch's own ACCEPTED receipt settles its own pending,
     // navigates on the live route, and clears exactly its own pointer.
     await act(async () =>
@@ -3273,62 +3885,145 @@ describe("host-composition repair regressions (R4)", () => {
 describe("Pro/native command recovery integration", () => {
   it("Check status recovers a synchronous transport failure without resubmitting or reloading", async () => {
     const made = makeCommandBinding({
-      submit: vi.fn(() => { throw new Error("transport setup failed synchronously"); }),
+      submit: vi.fn(() => {
+        throw new Error("transport setup failed synchronously");
+      }),
     });
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe(
+      "op-1",
+    );
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"));
+    await waitFor(() =>
+      expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"),
+    );
     expect(window.location.search).toContain("root_job_id=JOB-L");
     expect(made.prepare).toHaveBeenCalledTimes(1);
     expect(made.submit).toHaveBeenCalledTimes(1);
-    expect(made.readOperation).toHaveBeenCalledWith(expect.objectContaining({ operationKey: "op-1", kind: "launch", targetKey: "opaque-launch" }), expect.any(AbortSignal));
+    expect(made.readOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+      }),
+      expect.any(AbortSignal),
+    );
     expect(made.binding.store.read("owner-a")).toBeNull();
   });
 });
 
 describe("Pro/native Conversation recovery", () => {
   it("recovers an uncertain message by exact readback, clearing only its draft", async () => {
-    const made = makeCommandBinding({ submit: vi.fn(() => { throw new Error("synchronous message transport loss"); }) });
+    const made = makeCommandBinding({
+      submit: vi.fn(() => {
+        throw new Error("synchronous message transport loss");
+      }),
+    });
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    await user.type(screen.getByLabelText("Message"), "Preserve accepted scope A and report the native result.");
+    await user.type(
+      screen.getByLabelText("Message"),
+      "Preserve accepted scope A and report the native result.",
+    );
     await user.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("Preserve accepted scope A and report the native result.");
-    expect(made.binding.store.read("owner-a")).toMatchObject({ operationKey: "op-1", kind: "message", targetKey: "opaque-session" });
-    expect(screen.getByRole("button", { name: "Sending…" }).hasAttribute("disabled")).toBe(true);
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("Preserve accepted scope A and report the native result.");
+    expect(made.binding.store.read("owner-a")).toMatchObject({
+      operationKey: "op-1",
+      kind: "message",
+      targetKey: "opaque-session",
+    });
+    expect(
+      screen.getByRole("button", { name: "Sending…" }).hasAttribute("disabled"),
+    ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe(""));
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+      ).toBe(""),
+    );
     expect(made.prepare).toHaveBeenCalledTimes(1);
     expect(made.submit).toHaveBeenCalledTimes(1);
-    expect(made.readOperation).toHaveBeenCalledWith(expect.objectContaining({ operationKey: "op-1", kind: "message", targetKey: "opaque-session" }), expect.any(AbortSignal));
+    expect(made.readOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationKey: "op-1",
+        kind: "message",
+        targetKey: "opaque-session",
+      }),
+      expect.any(AbortSignal),
+    );
     expect(made.binding.store.read("owner-a")).toBeNull();
     expect(window.location.search).not.toContain("JOB-L");
   });
 
   it("keeps message recovery usable after its first read throws synchronously", async () => {
-    const readOperation = vi.fn().mockImplementationOnce(() => { throw new Error("synchronous read failure"); }).mockImplementation(async (pointer: OperationPointer): Promise<EffectReceipt> => ({ ...pointer, disposition: "accepted" }));
-    const made = makeCommandBinding({ submit: vi.fn(async () => { throw new Error("lost acknowledgement"); }), readOperation });
+    const readOperation = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("synchronous read failure");
+      })
+      .mockImplementation(
+        async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+          ...pointer,
+          disposition: "accepted",
+        }),
+      );
+    const made = makeCommandBinding({
+      submit: vi.fn(async () => {
+        throw new Error("lost acknowledgement");
+      }),
+      readOperation,
+    });
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    await user.type(screen.getByLabelText("Message"), "Continue the already accepted implementation.");
+    await user.type(
+      screen.getByLabelText("Message"),
+      "Continue the already accepted implementation.",
+    );
     await user.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe(
+      "op-1",
+    );
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(2));
     expect(made.submit).toHaveBeenCalledTimes(1);
