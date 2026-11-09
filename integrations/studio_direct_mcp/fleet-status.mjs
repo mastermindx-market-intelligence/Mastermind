@@ -44,8 +44,11 @@ export const STUDIO_FLEET_STATUS_TOOL = Object.freeze({
   title: 'Studio Fleet Status',
   description:
     'Reads the installed Studio Direct owner, showing only public seat identities and counts while retaining full owner-fleet readiness. ' +
-    'A separate bounded physical-host view remains advisory and cannot place or execute work. ' +
-    'This action cannot start, stop, restart, create, delete, or rebind any service, tunnel, app, or credential.',
+    'The physicalFleet view is advisory Fabric inventory, NOT the Studio Direct remote-route allowlist. ' +
+    'On the M2-hosted gateway, unselected Desktop Commander tools target local M2 by default. ' +
+    'studio_select_host selects only operator-configured REMOTE routes; never select hostRef m2 to reach local M2. ' +
+    'A failed remote-selection preflight does not prove the local M2 backend is down. ' +
+    'This action cannot place or execute work or start, stop, restart, create, delete, or rebind any service, tunnel, app, or credential.',
   inputSchema: {
     type: 'object',
     properties: {},
