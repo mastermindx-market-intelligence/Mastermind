@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T11:36:37.447Z. 560 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T11:44:58.029Z. 564 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
@@ -138,11 +138,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-9-0` | [00 · Start here · Build contract](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0) | — |
+| `p-9-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0) | 00 · Start here · Build contract |
 | `p-1-0` | [00 · Cover](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-1-0) | — |
 | `p-2-0` | [01 · Getting Started](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-2-0) | — |
 | `p-3-0` | [02 · Foundations](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-3-0) | — |
@@ -430,10 +430,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-3-0) | — |
 | `p-1-0` | [Market Memory · Evidence workspace · R1 · 2026-10-18](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0) | — |
 | `p-2-0` | [Build · Saved-output inspection](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-2-0) | — |
 
@@ -441,10 +442,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-5-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-5-0) | — |
 | `p-1-0` | [01 · Revision evidence · Screens & states](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0) | — |
 | `p-3-0` | [Build · Record states & implementation](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-3-0) | — |
 | `p-2-0` | [02 · Record comparison · Proposed](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | — |
@@ -464,10 +466,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-6-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-6-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-6-0) | — |
 | `p-5-0` | [00 · Product · Activity & returns](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0) | Product · Activity & returns |
 | `p-2-0` | [01 · Product · Independent news rail](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-2-0) | Product · News rail |
 | `p-1-0` | [02 · States & user help](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-1-0) | 01 · States & user help |
@@ -478,10 +481,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-2-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-2-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-2-0) | — |
 | `p-1-0` | [Reference · News desk study · 2026-09-20](https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0) | News Intelligence · 2026-09-20 |
 
 ## Synthetic Catalyst Cases · Archive Not for Build · 01M6Y37BWE719DWW5Z0DQS6DS9
@@ -678,7 +682,7 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3GS3GDTC3Q1
 
 ## Crypto Intelligence · R4 References and Archive · 01M6Y3F0NXNDPAKJMJGCAD759Z
 
-Role: retained_reference, proposal. R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.
+Role: retained_reference, proposal. R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.
 
 Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-5-0).
 

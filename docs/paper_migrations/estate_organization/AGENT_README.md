@@ -73,3 +73,7 @@ Select only the relevant FILE_INDEX record and its page list for a bounded task.
 Metadata freshness, source-decision freshness and product proof are separate. The metadata snapshot is non-atomic across active writers. Refresh a changed target before an edit and re-read relevant source decisions when a claim depends on them. The current implementation/cutover evidence remains with its original owner.
 
 File-local Agent READMEs are being added or attached to existing guidance-only starts. A `central_protocol` route is valid now; `local_agent_guide_status: not_yet_added` is an organization-progress fact, not a prohibition on assigned work. Preserved archives, recovery snapshots, technical material and staging copies keep central routes rather than receiving new product pages.
+
+## Navigation proof · 9 November 2026
+
+A separate read-only consumer started from Crypto and Commodities file IDs, found each Agent README, and selected the exact relevant boards without inferring adoption from revision. Both paths had no dead destination and clearly excluded internal guides from UI extraction. Crypto's retained-contract label was tightened after the probe to preserve behavior without reviving rejected R1 visuals. See [the bounded read ledger and qualifications](effects/agent-navigation-consumer-probe-01.json). This verifies those two navigation paths; it is not a weaker-model benchmark, production proof or estate-wide acceptance.

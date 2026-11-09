@@ -7,7 +7,7 @@
   "counts": {
     "resources": 83,
     "readable_design_files": 80,
-    "pages": 560,
+    "pages": 564,
     "dividers": 19
   },
   "entry_url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
@@ -1079,10 +1079,13 @@
         {
           "type": "page",
           "id": "p-9-0",
-          "name": "00 · Start here · Build contract",
+          "name": "00 · AGENT README · Scope & routes",
           "icon": "arrow",
           "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0",
-          "baseline_name": "00 · Start here · Build contract"
+          "baseline_name": "00 · Start here · Build contract",
+          "aliases": [
+            "00 · Start here · Build contract"
+          ]
         },
         {
           "type": "page",
@@ -1172,11 +1175,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M312VSDSZFVT45674GDVJVZN",
+        "page_id": "p-9-0",
+        "board_id": "47Q-0",
+        "node_id": "AOC-0",
+        "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0",
+        "kind": "reused_guidance_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M312VSDSZFVT45674GDVJVZN",
@@ -1197,7 +1203,7 @@
             "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0"
           },
           "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "COMPONENTS",
@@ -1208,7 +1214,7 @@
             "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-4-0"
           },
           "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "BUILD_READ",
@@ -1219,7 +1225,7 @@
             "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0"
           },
           "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "COMPLEMENT",
@@ -1230,17 +1236,18 @@
             "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0"
           },
           "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "reuse_guidance_page",
         "operation_prefix": "peo-20261109-c1-local-10",
         "page_id": "p-9-0",
         "board_id": "47Q-0",
         "dark": true
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:42:58.128Z"
     },
     {
       "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
@@ -3632,9 +3639,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -3665,11 +3679,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+        "page_id": "p-3-0",
+        "board_id": "HK-0",
+        "node_id": "HK-0",
+        "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
@@ -3687,7 +3704,7 @@
             "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0"
           },
           "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "BUILD_READ",
@@ -3701,7 +3718,7 @@
             "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-2-0"
           },
           "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "COMPLEMENT",
@@ -3712,15 +3729,16 @@
             "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0"
           },
           "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-06",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:38:25.408Z"
     },
     {
       "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -3735,9 +3753,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 4,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -3782,11 +3807,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+        "page_id": "p-5-0",
+        "board_id": "1O6-0",
+        "node_id": "1O6-0",
+        "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -3804,7 +3832,7 @@
             "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0"
           },
           "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "PROPOSAL",
@@ -3818,7 +3846,7 @@
             "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-3-0"
           },
           "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "STATES",
@@ -3829,7 +3857,7 @@
             "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0"
           },
           "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "COMPLEMENT",
@@ -3840,15 +3868,16 @@
             "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0"
           },
           "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-07",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:39:13.183Z"
     },
     {
       "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
@@ -3944,9 +3973,16 @@
       "entry_page_id": "p-5-0",
       "entry_url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0",
       "entry_basis": "explicit scope/guide selection",
-      "page_count": 5,
+      "page_count": 6,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-6-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-6-0"
+        },
         {
           "type": "page",
           "id": "p-5-0",
@@ -4000,11 +4036,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+        "page_id": "p-6-0",
+        "board_id": "43A-0",
+        "node_id": "43A-0",
+        "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-6-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
@@ -4026,7 +4065,7 @@
             "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0"
           },
           "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "DESIGN",
@@ -4037,7 +4076,7 @@
             "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-2-0"
           },
           "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "BUILD_READ",
@@ -4048,7 +4087,7 @@
             "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0"
           },
           "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "PRESERVE",
@@ -4059,15 +4098,16 @@
             "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0"
           },
           "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-08",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:39:46.812Z"
     },
     {
       "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
@@ -4082,9 +4122,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 1,
+      "page_count": 2,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-2-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-2-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -4107,11 +4154,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "page_id": "p-2-0",
+        "board_id": "2R5-0",
+        "node_id": "2R5-0",
+        "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-2-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
@@ -4129,7 +4179,7 @@
             "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0"
           },
           "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "SOURCE_SELECTION",
@@ -4140,7 +4190,7 @@
             "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
           },
           "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "WORKING_SCOPE",
@@ -4151,15 +4201,16 @@
             "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0"
           },
           "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
-      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_status": "present_verified",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-09",
         "page_name": "00 · AGENT README · Read first"
-      }
+      },
+      "agent_guide_observed_at": "2026-11-09T11:40:26.884Z"
     },
     {
       "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
@@ -5843,7 +5894,7 @@
           "baseline_name": "ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build"
         }
       ],
-      "retention_note": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
+      "retention_note": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.",
       "coverage": "live targeted guide/state comparison and fresh metadata",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "QI-0",
@@ -5886,8 +5937,8 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0"
           },
-          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.",
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "PROPOSAL",
@@ -5900,8 +5951,8 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-3-0"
           },
-          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.",
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "PROPOSAL",
@@ -5914,12 +5965,12 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-4-0"
           },
-          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.",
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         },
         {
           "task": "PRESERVE",
-          "question": "R1/R2 source and behavior contracts",
+          "question": "Retained behavior/source contracts; respect each revision's scope",
           "target": {
             "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
             "page_id": "p-2-0",
@@ -5929,12 +5980,12 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-2-0"
           },
-          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
-          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards. Earlier behavior contracts Z1-0/251-0 remain retained; Z1-0 identifies an R2 builder contract and rejects R1 visuals. Preserve applicable behavior rather than reviving rejected designs or historical operational instructions. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts retain their existing gates.",
+          "source": "AGENT_README.md; FILE_INDEX.json matching file_id; RETENTION.md with its dated scope"
         }
       ],
       "local_agent_guide_status": "present_verified",
-      "agent_guide_observed_at": "2026-11-09T11:26:41.388Z",
+      "agent_guide_observed_at": "2026-11-09T11:44:08.864Z",
       "local_agent_guide_plan": {
         "strategy": "dedicated_agent_page",
         "operation_prefix": "peo-20261109-c1-local-02",
@@ -10858,7 +10909,7 @@
     }
   ],
   "observed_at": "2026-11-09 11:03:44 UTC",
-  "organization_verified_at": "2026-11-09T11:36:37.447Z",
+  "organization_verified_at": "2026-11-09T11:44:58.029Z",
   "agent_navigation": {
     "schema": "paper.estate.agent_navigation.v1",
     "protocol": {
@@ -10871,9 +10922,9 @@
     "roles_are_navigation_not_permissions": true,
     "source_acceptance_not_refreshed_by_metadata": true,
     "product_extraction": "Agent guides and navigation-only boards are internal documentation. Select exact product boards after scope/source inspection.",
-    "rollout": "5/50 local guides verified; central protocol applied.",
+    "rollout": "10/50 local guides verified; central protocol applied.",
     "source_record": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6738066883",
-    "local_guides_verified": 5,
+    "local_guides_verified": 10,
     "local_guides_planned": 50
   }
 }

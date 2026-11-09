@@ -38,7 +38,7 @@ Original native CLI actor remains mastermindxryan on m2studio, source author Mas
 
 ## Local Agent README rollout
 
-Verified 5 of 50 planned local guides at 2026-11-09T11:36:37.447Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
+Verified 10 of 50 planned local guides at 2026-11-09T11:44:58.029Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
 
 | File ID | Guide page | Exact guide node | Strategy |
 | --- | --- | --- | --- |
@@ -47,9 +47,14 @@ Verified 5 of 50 planned local guides at 2026-11-09T11:36:37.447Z. Each complete
 | `01M6Y3GS3GDTC3Q1J64QCGZHJ8` | `p-3-0` | `52A-0` | dedicated_agent_page |
 | `01M6Y3Z73MXTN3MDX5661VV0KB` | `p-2-0` | `5G9-0` | dedicated_agent_page |
 | `01M6Y3K1SSX1M108ZY90KJX382` | `p-5-0` | `2ZU-0` | dedicated_agent_page |
+| `01M6Y2V2M0J28M2PYAHWZ8SB98` | `p-3-0` | `HK-0` | dedicated_agent_page |
+| `01M6PXFEP1E1T59M2B3N673PMG` | `p-5-0` | `1O6-0` | dedicated_agent_page |
+| `01M5EXPMQTSBFBAM8KKG83FTZH` | `p-6-0` | `43A-0` | dedicated_agent_page |
+| `01M6Y3BP50DDJVKT3Q7FMTSY3K` | `p-2-0` | `2R5-0` | dedicated_agent_page |
+| `01M312VSDSZFVT45674GDVJVZN` | `p-9-0` | `AOC-0` | reused_guidance_page |
 
 The existing FILE_INDEX.json holds each target's exact read_next routes and local_agent_guide_plan, including stable operation prefixes and the eight reusable guidance targets. Completed agent_entry locators include the small guide node_id; read that node rather than the entire canvas.
 
 ## Exact next action
 
-Continue with **Market Memory · Evidence Workspace R1**, file `01M6Y2V2M0J28M2PYAHWZ8SB98`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.
+Continue with **Design Foundations and Archetypes · Migrated References**, file `01M6Y2EJJ05SE2NCVBHKSE2BX8`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.
