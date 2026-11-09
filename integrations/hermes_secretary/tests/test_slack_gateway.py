@@ -329,6 +329,9 @@ class InThreadRoleSwitchTests(unittest.TestCase):
             f"{channel}:{root}:secretary": ids["secretary"],
         })
         self.assertEqual(self.fleet.state["bindings"][f"{channel}:{root}"], "engineering")
+        turn_run_ids = [call.kwargs["run_id"] for call in gateway.audit.call_args_list]
+        self.assertEqual(len(turn_run_ids), 3)
+        self.assertEqual(len(set(turn_run_ids)), 3)
 
     def test_legacy_single_role_session_migrates_only_to_its_bound_role(self):
         root = "1794180000.123456"
