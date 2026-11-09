@@ -34,8 +34,10 @@ default-deny** metadata action. A CURRENT Git-read grant, matching root label,
 JSON mapping/boolean, model prose or nominal type alone cannot authorize it.
 No token, grant file, new issuer or permission registry is added.
 
-There is **no concrete installed owner/carrier registration** for this action.
-That is the precise remaining control. The incumbent native owner must receive
+The original reader-only proposal has a concrete prospective native factory,
+fixed carrier registration patch and exclusive-intent composition in `owner.py`;
+see [OWNER_WIRING.md](OWNER_WIRING.md). There is **no installed registration or
+authentic native-tool permission export** for this action. The native owner must receive
 and verify the real, current, specifically scoped OS/tool action permission;
 verify the accepted original metadata records and source/namespace; bind the
 same existing SSH account and expected remote UID; and claim one durable,

@@ -1,0 +1,50 @@
+--- a/ext/artifact_delivery.py
++++ b/ext/artifact_delivery.py
+@@ -324,11 +324,13 @@
+         return read_local_at(chain, path.name, limit)
+
+
+-def read_local_at(chain, name, limit):
++def read_local_at(chain, name, limit, *, expected_inode=None):
+     chain.verify()
+     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=chain.fd)
+     try:
+         before = os.fstat(fd)
++        if expected_inode is not None and (before.st_dev, before.st_ino) != expected_inode:
++            raise ValueError("local_evidence_inode_changed")
+         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                 or before.st_mode & 0o002 or before.st_size > limit):
+             raise ValueError("local_evidence_owner_mode_type_or_size")
+@@ -893,10 +895,16 @@
+     return module
+
+
+-def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
++def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None,
++              original_directory_owner=None):
+     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
+     response_limit = reader.MAX_RESPONSE
+-    if type(request) is dict and request.get("schema") == "mastermind.original_operator_stdout_read.v1":
++    if type(request) is dict and request.get("schema") == "mastermind.original_directory_metadata.v1":
++        import original_directory_custody_owner
++        code = original_directory_custody_owner.code_for_registered_transport(
++            alias, request, original_directory_owner)
++        response_limit = 8192
++    elif type(request) is dict and request.get("schema") == "mastermind.original_operator_stdout_read.v1":
+         import operator_stdout_delivery
+         code = operator_stdout_delivery.code_for_request(request)
+         response_limit = operator_stdout_delivery.MAX_RESPONSE
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -1457,6 +1457,12 @@
+         raise
+
+
++def _original_directory_owner_factory(native_permission_source=None):
++    """Fixed native-host seam; no CLI, CURRENT grant or caller JSON admission."""
++    import original_directory_custody_owner
++    return original_directory_custody_owner.owner_factory(native_permission_source)
++
++
+ def _current_source_owner_factory(registry):
+     """Native CLI owner boundary for bounded CURRENT source observation.
