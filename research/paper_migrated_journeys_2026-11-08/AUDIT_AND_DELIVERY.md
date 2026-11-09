@@ -685,9 +685,52 @@ All7 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish releas
 
 The Shared Market Tools and Research Launcher file remains Reference. The bounded authority inspection found no current-build promotion; no F01/F02 held operation or source was changed.
 
+
+## Market Memory — visible identity for the inspected saved case
+
+The [migrated Evidence Workspace R1](https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0) remains a design reference. Its comparison fixture displayed42/58/Q1/Neutral/Mid cycle in the source panel without naming the inspected case. The Sep25 capture and evidence cutoff above are comparison-query controls, not the identity of a historical neighbor. On mobile, the source panel followed all three case rows, making this omission especially ambiguous.
+
+This phase touches four comparison treatments in that separate file. Accepted revision-evidence/exact-version recovery work in the current revision file, its newer R3 period chooser/copy outcomes, and the U2 outcome-inspection boards remain untouched.
+
+### Existing source binding
+
+Root read [`templates/market_memory_retained.js`](https://github.com/mastermindx-market-intelligence/Macro/blob/c3c955d012d71e6c95ae99a46db27057c06e00b9/templates/market_memory_retained.js) at Macro main `c3c955d012d71e6c95ae99a46db27057c06e00b9`, blob `c5b35cb29bdc058ce9b97aaab5687e73183d4991`.
+
+The incumbent normalizer retains context/capture/subject/session identity and event, known-at and capture clocks. `inspectCaseSource(contextId, field)` resolves the exact card from the committed comparison and assigns `state.sourceCase`; a missing card is rejected. Each case action carries its context ID. The current source panel renders the five fields, but its context ID/event time/known-at are inside the collapsed exact-reference disclosure.
+
+The design amendment therefore exposes identity belonging to the **committed inspected source card**. Implementation must derive it from that card, not the query selector, the first neighbor, a new source lookup or an independently maintained selection store. Where several captures share a date, actual supplied capture/context identity must distinguish them; this illustrative drawing supplies only one case for each displayed date. No missing timestamp or identifier was fabricated.
+
+### Four treatment amendments
+
+| Board | Panel identity nodes | Visible selected row | Resulting bounds |
+| --- | --- | --- | --- |
+| Dark EN desktop `1-0` | `FY-0` wrapper, `FZ-0` case line, `G0-0` original-context text | `1A-0` Selected · five original fields shown | 1440×1120 |
+| Light EN desktop `2N-0` | `G2-0`, `G3-0`, `G4-0` | `3V-0` same selected text | 1440×1120 |
+| Light ZH phone `58-0` | `G6-0`, `G7-0`, `G8-0` | `6P-0` 已保存的内部输出 · 正在核对 | 390×1866 |
+| Dark ZH phone `81-0` | `GA-0`, `GB-0`, `GC-0` | `9I-0` same selected text | 390×1866 |
+
+The fixture now explicitly designates the existing Sep18 case as inspected. Its panel reads **Inspecting saved case · Sep18,2026**, or **正在核对 · 2026年9月18日**, above the retained exact-values/original-context description. The five financial/category values remain unchanged. The original illustrative/non-live qualification, unauthenticated-underlying-facts notice, source-reference disclosure and query/cutoff controls remain.
+
+The date is an illustrative case identity, not a newly authenticated event/capture/known-at timestamp. This is a proposed visible-header refinement to the inspected source, not a claim that the deployed panel already includes it.
+
+### Verification and release
+
+Root inspected complete native screenshots of all four treatments. The identity is legible beside the source values on desktop and inside the separate phone panel. The phone frames expand from1840 to1866px so their final fixture disclosures remain visible; desktop bounds are unchanged.
+
+Exact native JSX comparison preserved54 unchanged leaves per desktop and49 per phone: **all206 leaves matched**, including every original value, date, cutoff, unaffected case and qualification. All6 phase operations returned APPLIED_RESPONSE_OBSERVED, and explicit finish released only the four amended comparison boards.
+
+- `paper-memory-inspected-case-dark-desktop-20261109-c4-sd`
+- `paper-memory-inspected-case-light-desktop-20261109-c4-sd`
+- `paper-memory-inspected-case-light-phone-20261109-c4-sd`
+- `paper-memory-inspected-case-dark-phone-20261109-c4-sd`
+- `paper-memory-inspected-case-row-labels-20261109-c4-sd`
+- `paper-memory-inspected-case-finish-20261109-c4-sd`
+
+No source implementation, runtime reader, URL/selection ownership, exact-version recovery mechanism, deployment or existing hold was changed.
+
 ## Active continuation
 
-The successor now covers ten design files. Preserve accepted work and all existing holds. The next bounded finding is in the separate migrated Market Memory evidence-workspace reference: the five-value source-inspection panel does not visibly identify its selected saved case, especially on390px after three case rows. Inspect the exact design and incumbent source card binding before adding explicit illustrative case identity. Accepted revision-evidence/recovery targets and the newer R3 chooser/copy outcomes remain outside that amendment.
+The successor now covers eleven design files. Preserve all accepted work and existing holds. A bounded read-only audit of the separate Intraday Flow R1 Draft is checking for one remaining state or meaning gap against its own authority and prior accepted work; do not promote that draft or change a held source. Continue only with a concrete useful delta, keeping native design proof separate from source/runtime acceptance.
 
 
 ## Acceptance boundary
