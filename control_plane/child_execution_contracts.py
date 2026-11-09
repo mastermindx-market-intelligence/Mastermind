@@ -407,6 +407,11 @@ class ChildRoutingPolicy:
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
+#: Bound on one idempotency-triple field.  The triple is joined into a
+#: single durable command id, so an unbounded field would inflate every
+#: event row that records it.
+BOUNDED_IDENTIFIER_MAX_LENGTH = 256
+
 
 def _record_to_dict(record: Any) -> dict[str, Any]:
     """Every dataclass field, JSON-native (tuples -> lists, nested records -> dicts)."""
@@ -431,6 +436,33 @@ def _require_non_empty(value: Any, field_name: str) -> None:
 def _require_hex64(value: Any, field_name: str) -> None:
     if not _HEX64_RE.match(str(value or "")):
         raise ValueError(f"{field_name} must be a 64-char lowercase hex sha256 digest")
+
+
+def _require_bounded_identifier(value: Any, field_name: str) -> None:
+    """Fence one idempotency-triple field: bounded, printable, unambiguous.
+
+    The triple ``(root_ref, immediate_parent_run_ref, logical_child_key)``
+    is joined with ``\\x1f`` to mint the durable command id, so a field
+    that may carry that separator — or any other control/non-printable
+    character — lets two DISTINCT triples hash to one command id, which
+    the Runtime then reports as a spurious ``CHILD_REQUEST_DIGEST_CONFLICT``
+    naming the wrong logical key.  Nothing about identity requires such a
+    character, so it is refused at the contract rather than tolerated at
+    the join.
+    """
+
+    _require_non_empty(value, field_name)
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string identifier")
+    if len(value) > BOUNDED_IDENTIFIER_MAX_LENGTH:
+        raise ValueError(
+            f"{field_name} must be at most {BOUNDED_IDENTIFIER_MAX_LENGTH} "
+            f"characters, got {len(value)}")
+    for offset, char in enumerate(value):
+        if not char.isprintable():
+            raise ValueError(
+                f"{field_name} must be a printable identifier: control or "
+                f"separator character {char!r} at offset {offset}")
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
@@ -788,9 +820,10 @@ class ChildExecutionRequest:
     declared_fanout: FanoutEnvelope | None = None
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.root_ref, "root_ref")
-        _require_non_empty(self.immediate_parent_run_ref, "immediate_parent_run_ref")
-        _require_non_empty(self.logical_child_key, "logical_child_key")
+        _require_bounded_identifier(self.root_ref, "root_ref")
+        _require_bounded_identifier(
+            self.immediate_parent_run_ref, "immediate_parent_run_ref")
+        _require_bounded_identifier(self.logical_child_key, "logical_child_key")
         complexity = canonical_task_complexity(self.requested_complexity)
         if complexity not in CANONICAL_TASK_COMPLEXITIES and complexity != REVIEW_LANE:
             raise ValueError(

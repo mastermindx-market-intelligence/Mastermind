@@ -58,6 +58,12 @@ from control_plane.executive_capacity_observation_producer import (
     WorkerCapacitySourceConfig,
     worker_capacity_source_config_digest,
 )
+from control_plane.provider_quota_observation import (
+    OBSERVATION_SCHEMA,
+    QuotaObservation,
+    QuotaObservationError,
+    load_quota_observation_document,
+)
 
 PROJECTION_SCHEMA = "mastermind.owner_ext_registry_projection/v1"
 PREVIEW_STATUS_READY = "PREVIEW_READY"
@@ -409,6 +415,7 @@ def produce_quota_economics_preview(
     projection_path: object,
     broker_db_path: object,
     observed_at: str,
+    quota_observations_path: object = None,
 ) -> QuotaEconomicsPreview:
     """Produce one read-only quota-economics preview document.
 
@@ -416,6 +423,17 @@ def produce_quota_economics_preview(
     no pytest-only constructors and no fixture receipts on this path. The
     ``source_config`` must come from the existing trusted factory
     ``validate_worker_capacity_source_config``.
+
+    ``quota_observations_path`` (optional) names one validated
+    ``mastermind.provider_quota_observation/v1`` document of live provider
+    observations. When absent, the preview is byte-for-byte identical to the
+    pre-observation producer. When present, every live ``provider_api``
+    observation replaces the resource's unknown with real observed fields and
+    a provenance block (and may supersede a registry fact for the same field,
+    keeping both provenance entries); every typed unknown is appended to the
+    resource's ``reason_codes`` and no unknown is ever converted to a number.
+    The four registry observations (bailian inline buckets, the grok window)
+    are preserved with their registry provenance.
     """
     if (
         not isinstance(source_config, WorkerCapacitySourceConfig)
@@ -432,6 +450,19 @@ def produce_quota_economics_preview(
     broker = read_broker_observation(broker_db_path)
     broker_path = Path(broker_db_path)
     broker_sha256 = _sha256_file(broker_path)
+
+    quota_observations: dict[tuple[str, str], QuotaObservation] | None = None
+    quota_observations_meta: dict[str, Any] | None = None
+    quota_observations_sha256: str | None = None
+    if quota_observations_path is not None:
+        try:
+            (
+                quota_observations,
+                quota_observations_meta,
+            ) = load_quota_observation_document(quota_observations_path)
+        except QuotaObservationError as error:
+            _refuse(error.code, error.detail)
+        quota_observations_sha256 = _sha256_file(Path(str(quota_observations_path)))
 
     merged, pools = _merge_resources(projection)
     cooldowns, unassigned_scopes = _attribute_cooldowns(broker, merged)
@@ -466,6 +497,12 @@ def produce_quota_economics_preview(
             cooldown=cooldowns.get(key),
             pool_usage=_pool_usage_for_provider(pools, provider),
             projection_produced_at=projection_produced_at,
+            observation=(
+                quota_observations.get(key)
+                if quota_observations is not None
+                else None
+            ),
+            emit_provenance=quota_observations is not None,
         )
         resources.append(row)
         option = _build_option(row, pool, priority_order)
@@ -537,6 +574,13 @@ def produce_quota_economics_preview(
             "source_config": source_config.to_dict(),
         },
     }
+    if quota_observations_meta is not None:
+        document["quota_observations"] = {
+            "schema": quota_observations_meta["schema"],
+            "observed_at": quota_observations_meta["observed_at"],
+            "path": quota_observations_meta["path"],
+            "sha256": quota_observations_sha256,
+        }
     preview_id = hashlib.sha256(
         _canonical_bytes(
             {
@@ -577,6 +621,8 @@ def _build_resource_row(
     cooldown: Mapping[str, Any] | None,
     pool_usage: Mapping[str, Any] | None,
     projection_produced_at: str | None,
+    observation: QuotaObservation | None = None,
+    emit_provenance: bool = False,
 ) -> dict[str, Any]:
     resource_ref = f"{provider}:{account}"
     observed_at_text = observed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -650,21 +696,62 @@ def _build_resource_row(
     quota_observed_at: str | None = None
     quota_source: str | None = None
     reset_at: str | None = None
+    registry_provenance: list[dict[str, Any]] = []
     inline_pct = inline.get("pct_7d") if isinstance(inline, Mapping) else None
     if inline_pct is not None:
         # Bailian 7-day per-key usage bucket exposed by the owner projection.
-        remaining = round(100.0 - float(inline_pct), 2)
+        registry_remaining = round(100.0 - float(inline_pct), 2)
+        remaining = registry_remaining
         remaining_basis = "percent_of_window_remaining"
         quota_observed_at = projection_produced_at
         quota_source = "bailian_inline_7d_local_reconstruction"
         reset_at = _inline_reset_at(pool, account)
+        if emit_provenance:
+            registry_provenance.append(
+                {
+                    "source_kind": "registry",
+                    "field": "remaining_quota",
+                    "source": quota_source,
+                    "observed_at": quota_observed_at,
+                }
+            )
     if remaining is None and pool_usage is not None and account == "default":
         # Owner-exposed provider window observation (e.g. grok weekly).
-        remaining = pool_usage.get("remaining")
+        registry_remaining = pool_usage.get("remaining")
+        remaining = registry_remaining
         remaining_basis = "percent_of_window_remaining"
         quota_observed_at = pool_usage.get("observed_at")
         quota_source = str(pool_usage.get("source") or "pool_windows")
         reset_at = pool_usage.get("reset_at")
+        if emit_provenance:
+            registry_provenance.append(
+                {
+                    "source_kind": "registry",
+                    "field": "remaining_quota",
+                    "source": quota_source,
+                    "observed_at": quota_observed_at,
+                }
+            )
+
+    # Live observation (OQ-3): supersedes an unknown and may supersede a
+    # registry fact for the same field while keeping both provenance
+    # entries. A typed unknown NEVER converts to a number.
+    if observation is not None and observation.observed:
+        provenance = observation.provenance or {}
+        remaining = _bounded_number(observation.usage)
+        remaining_basis = observation.usage_unit
+        quota_observed_at = provenance.get("observed_at")
+        if provenance.get("source_kind") == "local_gateway_state":
+            if provenance.get("source_ref"):
+                quota_source = (
+                    f"local_gateway_state:{provenance['source_ref']}"
+                )
+        elif provenance.get("endpoint_host_path"):
+            quota_source = f"provider_api:{provenance['endpoint_host_path']}"
+        if observation.reset_at is not None:
+            reset_at = observation.reset_at
+    elif observation is not None and not observation.observed:
+        reasons.append(str(observation.reason_code))
 
     quota_knowledge = "observed" if remaining is not None else "unknown"
     if quota_knowledge == "unknown":
@@ -733,7 +820,8 @@ def _build_resource_row(
         )
     ).hexdigest()[:16]
 
-    return {
+    row: dict[str, Any] = {
+        # registry_provenance appended conditionally below (observations path only)
         "pool_ref": provider,
         "shared_quota_resource_ref": resource_ref,
         "provider_ref": provider,
@@ -759,6 +847,35 @@ def _build_resource_row(
         "admission_eligibility": eligible,
         "reason_codes": reasons,
     }
+    if observation is not None and observation.observed:
+        raw_provenance = dict(observation.provenance or {})
+        provenance_block: dict[str, Any] = {
+            "source_kind": raw_provenance.get("source_kind") or "provider_api",
+            "observed_at": raw_provenance.get("observed_at"),
+            "expires_at": raw_provenance.get("expires_at"),
+            "confidence": raw_provenance.get("confidence"),
+        }
+        if raw_provenance.get("source_kind") == "local_gateway_state":
+            provenance_block["source_ref"] = raw_provenance.get("source_ref")
+        else:
+            provenance_block["endpoint_host_path"] = raw_provenance.get(
+                "endpoint_host_path"
+            )
+            provenance_block["http_status"] = raw_provenance.get("http_status")
+        windows = (observation.details or {}).get("windows")
+        if windows is not None:
+            provenance_block["windows"] = windows
+        row["quota_observation"] = provenance_block
+        row["provenance"] = list(registry_provenance) + [
+            {
+                "source_kind": provenance_block["source_kind"],
+                "field": "remaining_quota",
+                "endpoint_host_path": provenance_block.get("endpoint_host_path"),
+                "source_ref": provenance_block.get("source_ref"),
+                "observed_at": provenance_block.get("observed_at"),
+            }
+        ]
+    return row
 
 
 def _owner_parked_verdict(pool: Mapping[str, Any] | None, account: str) -> bool:
