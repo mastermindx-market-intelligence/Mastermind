@@ -68,10 +68,21 @@ finding -> fix -> test table in ``integrations/t3/docs/LANE_T3_DIRECTOR_A.md``):
   exact-run interrupt and a dedicated terminal result read.
 
   Evidence scope: the rework is PROVEN_BY_TEST (fake ports/transports, real
-  SQLite, real threads and processes).  The live receipts below predate it
-  and were produced by the pre-rework adapter with the harness ports; no
-  live T3 thread was launched through :class:`T3McpToolPort` (its wire
-  shapes follow the donor schemas at the pin, read in source).
+  SQLite, real threads and processes).  The r1 live receipts predate it and
+  were produced by the pre-rework adapter with harness ports.  Any live run
+  through :class:`T3McpToolPort` is evidenced ONLY by its own receipt
+  (``integrations/t3/live_proof/t3_durable_canary_receipt_r2.json``, which
+  records the exact adapter commit it ran) — never by this docstring.
+
+A4 re-audit fixes (N1-N9 + dry-run finding D1; table in the lane ledger):
+the lost-reply classifier is an explicit, total, donor-derived allowlist (a
+post-commit tool ``isError`` is UNKNOWN); the terminal read refuses an
+incomplete timeline; a same-name foreign table is refused by its columns; a
+spec is proven to round-trip before it is claimed; an unproven launch reply
+is UNKNOWN; a stranded launch can be adopted read-only by its deterministic
+thread id (never a replay); status/cancel/collect check namespace
+continuity; exact-run status survives more than ``runLimit`` runs; the
+donor's ``interrupted``/``rolled_back`` run statuses are terminal.
 
 Honesty notes (Rev 5 D3):
 
@@ -240,16 +251,29 @@ _TERMINAL_STATES = frozenset({
 })
 
 #: Honest native-status mapping (verified T3 census vocabulary, lowercased).
+#: A4 (dry-run finding D1): the donor's exact-run vocabulary at the pin is
+#: ``OrchestrationV2RunStatus`` = preparing | queued | starting | running |
+#: waiting (non-terminal) and completed | interrupted | failed | cancelled |
+#: rolled_back (terminal; ``NotificationMailbox.ts``).  ``interrupted`` and
+#: ``rolled_back`` were missing, so an interrupted run fell through to the
+#: non-terminal RUNNING default and a requested cancel could NEVER settle
+#: (status stuck at CANCELLING).  ``interrupted`` is the upstream-observed end
+#: of an interrupt => CANCELLED; ``rolled_back`` (a checkpoint rollback undid
+#: the run's work) is an upstream stop, never a success => CANCELLED.
 _T3_STATUS_MAP: dict[str, WorkerRunStatus] = {
+    "preparing": WorkerRunStatus.STARTING,
     "queued": WorkerRunStatus.STARTING,
     "starting": WorkerRunStatus.STARTING,
     "running": WorkerRunStatus.RUNNING,
+    "waiting": WorkerRunStatus.RUNNING,
     "in_progress": WorkerRunStatus.RUNNING,
     "succeeded": WorkerRunStatus.SUCCEEDED,
     "completed": WorkerRunStatus.SUCCEEDED,
     "failed": WorkerRunStatus.FAILED,
     "cancelled": WorkerRunStatus.CANCELLED,
     "canceled": WorkerRunStatus.CANCELLED,
+    "interrupted": WorkerRunStatus.CANCELLED,
+    "rolled_back": WorkerRunStatus.CANCELLED,
     "timed_out": WorkerRunStatus.TIMED_OUT,
     "timeout": WorkerRunStatus.TIMED_OUT,
 }
@@ -341,7 +365,28 @@ class T3ResultLedgerConflictError(T3ExecutionAdapterError):
 
 
 class T3PortRefusalError(T3ExecutionAdapterError):
-    """A port's definitive clean refusal (the native call took no effect)."""
+    """A port's definitive clean refusal (the native call took no effect).
+
+    ``code`` carries the upstream ``OrchestratorMcpFailure.code`` when the
+    refusal was a tool answer (``""`` otherwise) so callers can tell, e.g.,
+    ``thread_not_found`` from a transport refusal without parsing text.
+    """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class T3LaunchSpecNotDurableError(T3ExecutionAdapterError):
+    """The launch spec cannot be persisted and reloaded EXACTLY (re-audit N4).
+
+    Raised BEFORE the launch claim (no intent row, no native call): a spec
+    whose canonical JSON does not decode back to a spec with the SAME
+    ``worker_launch_spec_sha256`` could never be recovered after a restart
+    (reattach would refuse it as drifted), so it is never launched.
+    """
+
+    code = "T3_SPEC_NOT_DURABLE"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -728,6 +773,36 @@ def _t3_spec_from_json(raw: Any) -> WorkerLaunchSpec:
         raise T3ExecutionAdapterError(
             f"durable t3 launch spec is malformed: {exc}"
         ) from exc
+
+
+def _require_durable_spec(spec: WorkerLaunchSpec) -> str:
+    """Prove ``spec`` survives a persist/load round-trip EXACTLY (re-audit N4).
+
+    Encodes the spec exactly as the stores persist it, decodes it through the
+    same rehydrator ``load_run`` uses, and compares
+    ``worker_launch_spec_sha256`` of the decoded spec with the original's.
+    Any failure — unserializable value, undecodable field (e.g.
+    ``isolation_roots=(["x"],)`` or ``result_schema_path=123``), or a sha
+    drift — is a typed :class:`T3LaunchSpecNotDurableError`.  Total: every
+    exception becomes that refusal.  Returns the original spec's sha.
+    """
+    try:
+        original_sha = worker_launch_spec_sha256(spec)
+        decoded = _t3_spec_from_json(json.loads(_canonical_state_json(spec)))
+        decoded_sha = worker_launch_spec_sha256(decoded)
+    except Exception as exc:  # noqa: BLE001 — total by design
+        raise T3LaunchSpecNotDurableError(
+            "refused: the launch spec cannot be persisted and reloaded exactly "
+            f"({type(exc).__name__}: {exc}); no intent was claimed and no "
+            "native call was made"
+        ) from exc
+    if decoded_sha != original_sha:
+        raise T3LaunchSpecNotDurableError(
+            "refused: the launch spec does not survive a persist/load round "
+            f"trip (sha {original_sha[:12]}… -> {decoded_sha[:12]}…); a restart "
+            "could never recover it, so it is never launched"
+        )
+    return original_sha
 
 
 def _row_to_run_state(row: Mapping[str, Any]) -> T3AdapterRunState:
@@ -1126,6 +1201,64 @@ def _refuse_foreign_objects(names: set[str], path: Path) -> None:
         )
 
 
+#: Exact ``PRAGMA table_info`` shape of OUR table, ``name -> (declared type,
+#: notnull, pk)``.  The v1 base columns are mandatory (the original DDL,
+#: unchanged since the table shipped); the post-v1 columns are optional (an
+#: older file gains them by ``ALTER TABLE``).  Re-audit N3: a same-NAME table
+#: with any other column set, type, nullability or key is another owner's
+#: table and is refused BEFORE any DDL.
+_T3_STATE_BASE_COLUMNS: dict[str, tuple[str, int, int]] = {
+    "run_id": ("TEXT", 0, 1),
+    "intent_json": ("TEXT", 0, 0),
+    "receipt_json": ("TEXT", 0, 0),
+    "original_ref_json": ("TEXT", 0, 0),
+    "binding_json": ("TEXT", 0, 0),
+    "spec_json": ("TEXT", 0, 0),
+    "cursor_text": ("TEXT", 1, 0),
+    "cancel_json": ("TEXT", 0, 0),
+    "result_ref_json": ("TEXT", 0, 0),
+    "schema_version": ("TEXT", 1, 0),
+    "updated_ms": ("INTEGER", 1, 0),
+}
+_T3_STATE_OPTIONAL_COLUMNS: dict[str, tuple[str, int, int]] = {
+    name: (declared, 0, 0) for name, declared in (("spec_sha256", "TEXT"), ("claim_token", "TEXT"))
+}
+
+
+def _refuse_foreign_adapter_table(connection: sqlite3.Connection, path: Path) -> None:
+    """Refuse a same-name ``t3_adapter_runs`` whose columns are not OURS (N3).
+
+    Name-only checks let a foreign table called ``t3_adapter_runs`` pass and
+    then receive our DDL/ALTERs and writes.  Compares the existing table's
+    ``PRAGMA table_info`` rows with the expected column set (mandatory base
+    columns + optional post-v1 columns, each with declared type, NOT NULL
+    and primary-key position).  Absent table: nothing to verify.
+    """
+    rows = connection.execute(f"PRAGMA table_info({_T3_STATE_TABLE})").fetchall()
+    if not rows:
+        return
+    actual = {
+        str(row[1]): (str(row[2] or "").strip().upper(), int(row[3] or 0), int(row[5] or 0))
+        for row in rows
+    }
+    expected = dict(_T3_STATE_BASE_COLUMNS)
+    for name, shape in _T3_STATE_OPTIONAL_COLUMNS.items():
+        if name in actual:
+            expected[name] = shape
+    if actual != expected:
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        differing = sorted(
+            name for name in set(actual) & set(expected) if actual[name] != expected[name]
+        )
+        raise T3ExecutionAdapterError(
+            f"refusing to open {path.name!r} as t3 adapter state: its "
+            f"{_T3_STATE_TABLE!r} table is not this adapter's (missing "
+            f"{missing}, extra {extra}, differing {differing}); another owner's "
+            "table with the same name — no DDL was run"
+        )
+
+
 def _refuse_executive_runtime_file(path: Path) -> Path:
     """Resolve ``path`` and refuse every alias of the Executive runtime file.
 
@@ -1260,6 +1393,7 @@ class SQLiteT3AdapterStateStore:
                 raise T3StateStoreError(
                     f"{file_path.name!r} holds no t3 adapter state table"
                 )
+            _refuse_foreign_adapter_table(connection, file_path)
         except sqlite3.Error as exc:
             connection.close()
             raise T3StateStoreError(
@@ -1286,9 +1420,12 @@ class SQLiteT3AdapterStateStore:
 
     @staticmethod
     def _ensure_schema(connection: sqlite3.Connection, path: Path) -> None:
-        # Foreign-object refusal BEFORE any DDL, inside the same IMMEDIATE
-        # transaction (no window between the check and the CREATE).
+        # Foreign-object AND foreign-column refusal BEFORE any DDL, inside the
+        # same IMMEDIATE transaction (no window between the check and the
+        # CREATE/ALTER).  Re-audit N3: a same-name table is verified by its
+        # column set, never trusted by name.
         _refuse_foreign_objects(_schema_objects(connection), path)
+        _refuse_foreign_adapter_table(connection, path)
         connection.execute(_T3_STATE_DDL)
         columns = {
             str(row[1])
@@ -1672,7 +1809,9 @@ class T3NativeClientPort(Protocol):
 
     ``read_result(thread_id, run_id)`` (OPTIONAL): the dedicated terminal
     read ``collect_result`` uses; without it the adapter head-reads with an
-    empty cursor.  Transport contract: raise :class:`T3UnknownOutcomeError`
+    empty cursor.  ``read_launch_thread(thread_id)`` (OPTIONAL, read-only):
+    the deterministic-id lookup :meth:`T3ExecutionAdapter.adopt_stranded_launch`
+    uses (re-audit N6); never a launch or replay.  Transport contract: raise :class:`T3UnknownOutcomeError`
     for every failure that may have happened after the request was sent.
     """
 
@@ -1822,6 +1961,10 @@ class T3ExecutionAdapter:
         """
         if not isinstance(spec, WorkerLaunchSpec):
             raise T3ExecutionAdapterError("start requires a WorkerLaunchSpec")
+        # Re-audit N4: prove the spec round-trips EXACTLY before anything is
+        # persisted — an undecodable spec claimed here could never be
+        # reloaded by a recovering process.
+        _require_durable_spec(spec)
         binding = self._require_current_binding(spec)
         principal = self._require_attested_principal("launch")
         client_request_id = derive_t3_client_request_id(binding)
@@ -1899,13 +2042,21 @@ class T3ExecutionAdapter:
                 "persisted — reattach replays the SAME key",
                 client_request_id=client_request_id,
             )
-        if (receipt.client_request_id and receipt.client_request_id != client_request_id) or (
-            receipt.request_namespace and receipt.request_namespace != namespace
+        if (
+            receipt.client_request_id != client_request_id
+            or receipt.request_namespace != namespace
         ):
+            # Re-audit N5: the ACK needs the port's UPSTREAM-derived echo of
+            # exactly this (namespace, key).  A foreign echo AND a missing
+            # echo (a thread the port could not prove is this command's) are
+            # both unproven receipts: keep the intent, never ACK.
             raise T3LaunchEffectUnknownError(
-                "native launch receipt echoes a foreign idempotency identity; "
-                f"the intent for clientRequestId {client_request_id!r} stays "
-                "persisted for reconciliation",
+                "native launch receipt does not prove this launch's idempotency "
+                "identity (upstream echo "
+                f"{(receipt.request_namespace, receipt.client_request_id)!r} != "
+                f"{(namespace, client_request_id)!r}); the intent for "
+                f"clientRequestId {client_request_id!r} stays persisted for "
+                "reconciliation",
                 client_request_id=client_request_id,
             )
         # Persist the receipt and the ORIGINAL ref BEFORE the ACK (the
@@ -2421,6 +2572,9 @@ class T3ExecutionAdapter:
             raise T3ExecutionAdapterError(
                 "recovery binding belongs to another adapter"
             )
+        # Re-audit N4: a spec that cannot round-trip is never adopted or
+        # persisted by recovery either.
+        _require_durable_spec(spec)
         original = binding.process_ref
         if original.run_id != spec.run_id:
             raise T3ExecutionAdapterError(
@@ -2495,6 +2649,141 @@ class T3ExecutionAdapter:
             )
         envelope = self._reconstruct_envelope(spec, key)
         return await self._replay_and_adopt(spec, envelope, original, None)
+
+    async def adopt_stranded_launch(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef:
+        """Adopt a STRANDED launch by a deterministic thread-id READ (re-audit N6).
+
+        A stranded claim is an intent row with no receipt (crash zone or
+        unknown outcome) whose original principal can no longer replay it —
+        e.g. that OAuth client's token is gone.  ``reattach`` still refuses
+        any other principal (``PRINCIPAL_MISMATCH``) and that rule is NOT
+        relaxed here: this path NEVER calls ``launch_thread`` or
+        ``replay_launch`` — no mutating native call of any kind.
+
+        Upstream derives ``threadId = t3_expected_launch_thread_id(namespace,
+        key)`` and nothing else mints that id, so the thread's existence
+        under the id derived from the PERSISTED (original) namespace and key
+        is upstream proof that THIS command took effect.  The port's
+        optional ``read_launch_thread(thread_id)`` reads it under whatever
+        session the port has.  Presence + an identified launch run ⇒ the
+        receipt (echo = the persisted identity the id proves) and original
+        ref are persisted write-once.  Absence proves NOTHING (the original
+        launch may still be in flight): :class:`T3LaunchEffectUnknownError`,
+        the intent stays.  Claims never expire (an intent that may have an
+        effect must never time out into a relaunch).  After adoption the run
+        still belongs to its ORIGINAL principal: status/cancel/collect from
+        another principal stay refused (N7) — adoption only turns
+        EFFECT_UNKNOWN into a durable, observable execution.
+        """
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise T3ExecutionAdapterError("adoption requires a WorkerLaunchSpec")
+        if not isinstance(binding, WorkerRecoveryBinding):
+            raise T3ExecutionAdapterError("adoption requires a WorkerRecoveryBinding")
+        if binding.adapter_id != T3_NATIVE_ADAPTER_ID:
+            raise T3ExecutionAdapterError("recovery binding belongs to another adapter")
+        original = binding.process_ref
+        if original.run_id != spec.run_id:
+            raise T3ExecutionAdapterError(
+                "recovery binding run identity does not match the spec"
+            )
+        caller_spec_sha = _require_durable_spec(spec)
+        if binding.launch_spec_sha256 != caller_spec_sha:
+            raise T3ExecutionAdapterError("recovery binding does not bind this launch spec")
+        run = self._state.load_run(spec.run_id)
+        intent = run.intent if run is not None else None
+        if run is None or intent is None:
+            raise T3ExecutionAdapterError(
+                f"run {spec.run_id!r} has no persisted launch intent to adopt"
+            )
+        if run.receipt is not None or run.original_ref is not None:
+            raise T3ExecutionAdapterError(
+                f"run {spec.run_id!r} is not stranded (a receipt is already "
+                "persisted); use reattach"
+            )
+        persisted_sha = run.spec_sha256 or (
+            worker_launch_spec_sha256(run.spec) if run.spec is not None else ""
+        )
+        if persisted_sha and persisted_sha != caller_spec_sha:
+            raise T3ExecutionAdapterError(
+                "launch spec drifted from the persisted spec for run "
+                f"{spec.run_id!r}; refusing to adopt under a different command shape"
+            )
+        key = intent.client_request_id
+        if not key or original.launch_nonce != key:
+            raise T3ExecutionAdapterError(
+                "recovery binding carries a foreign clientRequestId; refusing "
+                "to adopt under a different key"
+            )
+        persisted_namespace = self._persisted_namespace(run)
+        upstream_namespace = _namespace_principal(persisted_namespace)
+        if not upstream_namespace.startswith("client:") or upstream_namespace == "client:":
+            raise T3NamespaceAttestationError(
+                f"refused: the persisted namespace {persisted_namespace!r} does "
+                "not name a T3 MCP client session, so the upstream thread id "
+                "cannot be derived; reconcile out of band",
+                reason="LEGACY_NAMESPACE_UNVERIFIABLE",
+            )
+        reader = getattr(self._port, "read_launch_thread", None)
+        if not callable(reader):
+            raise T3ExecutionAdapterError(
+                "the port offers no read_launch_thread seam; a stranded launch "
+                "can only be recovered by its original principal (reattach)"
+            )
+        expected_thread = t3_expected_launch_thread_id(upstream_namespace, key)
+        try:
+            found = await reader(expected_thread)
+        except T3PortRefusalError as exc:
+            raise T3LaunchEffectUnknownError(
+                f"no readable thread under the deterministic id for run "
+                f"{spec.run_id!r} ({exc.code or exc}); absence proves nothing — "
+                "the intent stays",
+                client_request_id=key,
+            ) from exc
+        except T3UnknownOutcomeError as exc:
+            raise T3LaunchEffectUnknownError(
+                f"deterministic thread read outcome unknown for run {spec.run_id!r}; "
+                "the intent stays",
+                client_request_id=key,
+            ) from exc
+        except Exception as exc:
+            raise T3ExecutionAdapterError(
+                f"deterministic thread read failed for run {spec.run_id!r}: {exc}"
+            ) from exc
+        if (
+            not isinstance(found, T3ThreadLaunchReceipt)
+            or found.thread_id != expected_thread
+            or not found.run_id
+        ):
+            raise T3LaunchEffectUnknownError(
+                "the deterministic thread read did not identify THIS launch's "
+                f"thread and run for run {spec.run_id!r}; the intent stays",
+                client_request_id=key,
+            )
+        receipt = dataclasses.replace(
+            found,
+            created_at="",
+            request_namespace=persisted_namespace,
+            client_request_id=key,
+        )
+        ref = self._neutral_process_ref(spec, receipt, key)
+        if original.provider_session_id and ref != original:
+            raise T3ExecutionAdapterError(
+                "the adopted execution does not reproduce the recovery binding's "
+                "known identity; refusing to adopt a replacement"
+            )
+        try:
+            self._state.put_launch_receipt(
+                spec.run_id, receipt=receipt, original_ref=ref, spec=spec,
+            )
+        except T3StateStoreError as exc:
+            raise T3LaunchEffectUnknownError(
+                f"adopted thread {receipt.thread_id!r} but its receipt could not "
+                f"be persisted: {exc}",
+                client_request_id=key,
+            ) from exc
+        return ref
 
     @staticmethod
     def _persisted_namespace(run: T3AdapterRunState) -> str:
@@ -2721,6 +3010,13 @@ class T3ExecutionAdapter:
             raise T3ExecutionAdapterError(
                 "ref does not match the retained original ref"
             )
+        # Re-audit N7: status/cancel/collect run under the SAME namespace
+        # continuity rule as reattach — a port attesting a different (or no)
+        # principal than the persisted one never operates on this run.  No
+        # native call is made before this check.
+        self._require_namespace_continuity(
+            self._persisted_namespace(run), native_call=False
+        )
         return run
 
     def _now_iso(self) -> str:
@@ -2741,14 +3037,84 @@ class T3ExecutionAdapter:
 #: ``apps/server/src/auth/EnvironmentAuth.ts`` ``MCP_CLIENT_SUBJECT``).
 T3_MCP_CLIENT_SUBJECT = "mcp-client"
 #: JSON-RPC errors that reject a request BEFORE execution (parse error,
-#: invalid request, method not found, invalid params).
+#: invalid request, method not found, invalid params).  Donor evidence
+#: (effect 4.1.2 ``ai/McpServer.ts``): ``InvalidParams`` (-32602) is produced
+#: only for failures whose origin is ``"parameters"`` (schema decode before
+#: the handler runs); -32600 for batches/invalid envelopes and -32601 for
+#: unknown methods are router-level; -32700 is a body parse failure.
 _JSONRPC_REJECTED_BEFORE_EXECUTION = frozenset({-32700, -32600, -32601, -32602})
+
+#: HTTP statuses the donor MCP path emits ONLY before any tool handler runs
+#: (re-audit N1: an explicit allowlist, never "4xx in general"):
+#:
+#: * 400 — T3 ``McpHttpServer`` auth middleware ``invalidModeLimit``; effect
+#:   ``McpServer`` admission rejections (header mismatch, unsupported
+#:   protocol version, session-header misuse) and the client middleware's
+#:   missing-``Mcp-Session-Id`` die BEFORE the RPC effect runs;
+#: * 401 — T3 auth middleware ``unauthorized`` (missing/unknown/expired
+#:   credential) before the MCP router;
+#: * 403 — T3 ``linkedEnvironmentsOff`` (auth middleware) and effect's
+#:   ``Origin`` check at the POST route entry;
+#: * 405 / 406 / 415 — effect's POST route method / ``Accept`` /
+#:   ``Content-Type`` checks before the body is even parsed.
+#:
+#: Deliberately EXCLUDED: 404 — effect's McpServer REPLACES an already
+#: produced tool response with a bare 404 when the session ended while the
+#: request ran (pre-response handler), so a 404 can follow a committed
+#: effect; 408/409/422/429/499 and every other status — the donor MCP path
+#: never emits them, so their origin (a proxy, a timeout) is unprovable;
+#: every 5xx; any non-``int`` status.
+_T3_MCP_PRE_DISPATCH_HTTP_STATUSES = frozenset({400, 401, 403, 405, 406, 415})
+
+#: Per MUTATING tool, the ``OrchestratorMcpFailure.code`` values the donor
+#: returns ONLY before the tool's write is dispatched.  A tool ``isError``
+#: answer is a clean refusal only with one of these codes; any other code,
+#: no code, or an unparsable error body is UNKNOWN (re-audit N1).
+#:
+#: ``t3_thread_launch`` (``mcp/toolkits/project/handlers.ts`` +
+#: ``McpToolAccess.startsThreads``): ``capability_denied`` (read-only client
+#: refusal in ``writingCaller``; ``readCaller`` capability check),
+#: ``parent_not_active`` (``assertLiveCaller``), ``thread_not_found``
+#: (``loadCaller``: the CALLING thread is gone — ``launchThread`` errors
+#: never map to it), ``target_required`` (``resolveProjectId``),
+#: ``runtime_mode_escalation_denied`` / ``interaction_mode_escalation_denied``
+#: (``started()`` and the handler's ``resolveRuntimeMode`` before
+#: ``ThreadMessageIntake.launchThread``; post-dispatch ceiling refusals map to
+#: ``invalid_request`` instead).  EXCLUDED: ``invalid_request`` — also
+#: returned AFTER ``thread.create`` committed (the initial
+#: ``message.dispatch`` refused by ``assertDispatchTargetEnabled`` /
+#: ``refuseAboveRuntimeModeCeiling``); ``orchestration_error`` — ``unavailable()``
+#: wraps post-commit failures ("create-thread errors can wrap post-message
+#: reads and prove nothing alone", ``ThreadMessageIntake.ts``).
+#:
+#: ``t3_thread_interrupt`` (``McpToolAccess.writesThreads`` +
+#: ``OrchestratorMcpService.interruptThread``): ``capability_denied``,
+#: ``parent_not_active`` (``writingCaller``), ``thread_not_found`` (the target
+#: shell is missing before any dispatch).  Everything else is UNKNOWN (the
+#: cancel ledger then records requested-but-unsettled, the honest state).
+_T3_MCP_PRE_DISPATCH_TOOL_ERROR_CODES: dict[str, frozenset[str]] = {
+    "t3_thread_launch": frozenset({
+        "capability_denied", "parent_not_active", "thread_not_found",
+        "target_required", "runtime_mode_escalation_denied",
+        "interaction_mode_escalation_denied",
+    }),
+    "t3_thread_interrupt": frozenset({
+        "capability_denied", "parent_not_active", "thread_not_found",
+    }),
+}
 #: Exact-run statuses after which a run is done (donor OrchestrationV2RunStatus
 #: + the interrupt tool's settled outcomes).
 _T3_RUN_DONE_STATUSES = frozenset({
     "completed", "failed", "cancelled", "interrupted", "rolled_back",
 })
+#: Terminal-read page budget: ``_T3_RESULT_MAX_PAGES`` × ``_T3_RESULT_PAGE_LIMIT``
+#: items from the head (1,000).  A longer timeline is refused, never
+#: guessed (re-audit N2).
 _T3_RESULT_MAX_PAGES = 20
+_T3_RESULT_PAGE_LIMIT = 50
+#: ``recentRuns`` page size requested on every read (the donor maximum); a
+#: run beyond it is looked up exactly (re-audit N9).
+_T3_READ_RUN_LIMIT = 50
 
 
 def t3_mcp_upstream_namespace(access_token: str) -> str:
@@ -2843,7 +3209,10 @@ class T3McpTransportError(Exception):
     refused, DNS failure, request build error).  ``phase="after_send"``: it
     may have been delivered (timeout, connection reset, 5xx, garbled reply).
     ``http_status`` / ``rpc_code`` / ``tool_error`` carry explicit upstream
-    answers.  Transports raise this; the port classifies it.
+    answers; ``tool_error_code`` is the ``OrchestratorMcpFailure.code`` of a
+    tool ``isError`` answer when the body carried one (see
+    :func:`t3_mcp_tool_error_code`).  Transports raise this; the port
+    classifies it.
     """
 
     PRE_SEND = "pre_send"
@@ -2857,6 +3226,7 @@ class T3McpTransportError(Exception):
         http_status: int | None = None,
         rpc_code: int | None = None,
         tool_error: bool = False,
+        tool_error_code: str | None = None,
     ) -> None:
         if phase not in (self.PRE_SEND, self.AFTER_SEND):
             raise ValueError(f"unknown transport failure phase {phase!r}")
@@ -2865,26 +3235,100 @@ class T3McpTransportError(Exception):
         self.http_status = http_status
         self.rpc_code = rpc_code
         self.tool_error = tool_error
+        self.tool_error_code = tool_error_code
 
 
-def t3_mcp_failure_is_definitive_refusal(exc: T3McpTransportError) -> bool:
-    """True only when the failure proves the native call took NO effect.
+def t3_mcp_tool_error_code(result: Any) -> str | None:
+    """The ``OrchestratorMcpFailure.code`` of a ``tools/call`` ``isError`` result.
 
-    Audit #4: clean refusals are ONLY pre-send failures and explicit upstream
-    refusals — a 4xx (except 408 Request Timeout), a JSON-RPC rejection
-    before execution, or the tool's own ``isError`` answer.  Timeouts,
-    connection resets, 5xx-after-send and unparsable replies are UNKNOWN
-    outcomes (the launch intent must be kept).
+    Donor wire shape (effect 4.1.2 ``McpServer``, ``failureMode: "return"``):
+    a handler-declared failure is ``{isError: true, content: [{type: "text",
+    text: JSON.stringify({_tag: "OrchestratorMcpFailure", code, message})}]}``.
+    Defects and undeclared failures are ``{isError: true, content: [{type:
+    "text", text: "Tool execution failed due to an internal server error."}]}``
+    — no code.  Returns the code only for the exact donor shape; ``None``
+    otherwise.  Total: never raises.
     """
+    try:
+        if not isinstance(result, Mapping):
+            return None
+        for item in result.get("content") or ():
+            if not isinstance(item, Mapping) or item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if not isinstance(text, str):
+                continue
+            try:
+                body = json.loads(text)
+            except ValueError:
+                continue
+            if (
+                isinstance(body, Mapping)
+                and body.get("_tag") == "OrchestratorMcpFailure"
+                and isinstance(body.get("code"), str)
+                and body.get("code")
+            ):
+                return str(body["code"])
+        return None
+    except Exception:  # noqa: BLE001 — total by design
+        return None
+
+
+def _is_exact_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _classify_definitive_refusal(exc: Any, tool: str | None) -> bool:
+    if not isinstance(exc, T3McpTransportError):
+        return False
     if exc.phase == T3McpTransportError.PRE_SEND:
         return True
-    if exc.tool_error:
-        return True
+    if exc.phase != T3McpTransportError.AFTER_SEND:
+        return False
+    if exc.tool_error is True:
+        code = exc.tool_error_code
+        allowed = _T3_MCP_PRE_DISPATCH_TOOL_ERROR_CODES.get(str(tool or ""), frozenset())
+        return isinstance(code, str) and code in allowed
+    if exc.tool_error not in (False, None):
+        return False
     if exc.http_status is not None:
-        return 400 <= int(exc.http_status) < 500 and int(exc.http_status) != 408
+        return (
+            _is_exact_int(exc.http_status)
+            and exc.http_status in _T3_MCP_PRE_DISPATCH_HTTP_STATUSES
+        )
     if exc.rpc_code is not None:
-        return int(exc.rpc_code) in _JSONRPC_REJECTED_BEFORE_EXECUTION
+        return (
+            _is_exact_int(exc.rpc_code)
+            and exc.rpc_code in _JSONRPC_REJECTED_BEFORE_EXECUTION
+        )
     return False
+
+
+def t3_mcp_failure_is_definitive_refusal(
+    exc: T3McpTransportError, *, tool: str | None = None
+) -> bool:
+    """True only when the failure PROVES the native call took NO effect.
+
+    Re-audit N1 (supersedes audit #4's "4xx / any isError = refusal"):
+
+    * ``pre_send`` — the request never left;
+    * an HTTP status in the explicit donor-derived pre-dispatch allowlist
+      (:data:`_T3_MCP_PRE_DISPATCH_HTTP_STATUSES`; 404, 408, 409, 422, 429,
+      499, 5xx and non-``int`` statuses are UNKNOWN);
+    * a JSON-RPC rejection before execution;
+    * a tool ``isError`` answer ONLY when ``tool`` is a known mutating tool
+      and the answer carries a code from that tool's pre-dispatch allowlist
+      (:data:`_T3_MCP_PRE_DISPATCH_TOOL_ERROR_CODES`) — the Effect MCP server
+      also reports post-commit handler failures and defects as ``isError``.
+
+    Everything else — timeouts, resets, garbled replies, codeless or
+    non-allowlisted tool errors, unknown tools — is UNKNOWN (the launch
+    intent must be kept).  Total: any exception while classifying is UNKNOWN.
+    """
+    try:
+        return bool(_classify_definitive_refusal(exc, tool))
+    except Exception:  # noqa: BLE001 — total by design
+        return False
 
 
 class T3McpToolPort:
@@ -2898,9 +3342,13 @@ class T3McpToolPort:
       the upstream ``threadId`` proves ``(namespace, key)``
       (:func:`t3_expected_launch_thread_id`), never copied from the request;
       ``created_at`` is never a local clock (replays reproduce the ref);
-    * transport failures are classified (audit #4): pre-send and explicit
-      upstream refusals are clean refusals; everything after send is
-      :class:`T3UnknownOutcomeError`;
+    * transport failures are classified (audit #4, re-audit N1): only
+      pre-send failures and the explicit donor-derived pre-dispatch
+      allowlists (HTTP status, JSON-RPC code, per-tool ``isError`` code) are
+      clean refusals; everything else after send — including a codeless or
+      post-commit tool ``isError`` — is :class:`T3UnknownOutcomeError`;
+      a launch reply whose ``threadId`` is not this client's derivation is
+      UNKNOWN too (N5);
     * reads report the EXACT run's status from ``recentRuns`` (never the
       thread status), and ``read_result`` is the dedicated terminal read
       whose ``result_ref`` names the run's final assistant item — never a
@@ -2958,10 +3406,15 @@ class T3McpToolPort:
         except T3UnknownOutcomeError:
             raise
         except T3McpTransportError as exc:
-            if t3_mcp_failure_is_definitive_refusal(exc):
-                raise T3PortRefusalError(f"{tool} refused: {exc}") from exc
+            raw_code = getattr(exc, "tool_error_code", None)
+            code = raw_code if isinstance(raw_code, str) else ""
+            if not mutating and getattr(exc, "tool_error", False) is True:
+                # A read's own tool answer is definitive and has no effect.
+                raise T3PortRefusalError(f"{tool} refused: {exc}", code=code) from exc
+            if t3_mcp_failure_is_definitive_refusal(exc, tool=tool):
+                raise T3PortRefusalError(f"{tool} refused: {exc}", code=code) from exc
             raise T3UnknownOutcomeError(
-                f"{tool} outcome unknown (failure after send): {exc}"
+                f"{tool} outcome unknown (not provably refused before dispatch): {exc}"
             ) from exc
         except Exception as exc:
             if mutating:
@@ -3016,9 +3469,18 @@ class T3McpToolPort:
         self.calls.append({"op": op, "clientRequestId": key})
         payload = self._invoke("t3_thread_launch", arguments, mutating=True)
         thread_id = str(payload.get("threadId") or "")
-        proven = bool(thread_id) and thread_id == t3_expected_launch_thread_id(
-            self._upstream_namespace, key
-        )
+        expected_thread = t3_expected_launch_thread_id(self._upstream_namespace, key)
+        if thread_id and thread_id != expected_thread:
+            # Re-audit N5: upstream answered with a thread this
+            # (namespace, key) did not derive — the reply cannot be proven
+            # to be THIS command's.  The call was delivered (a thread
+            # exists somewhere): UNKNOWN, never an echo-free receipt.
+            raise T3UnknownOutcomeError(
+                f"{op} reply names thread {thread_id!r}, not the id upstream "
+                f"derives for this client's (namespace, key) ({expected_thread!r}); "
+                "outcome unknown — the intent must be kept"
+            )
+        proven = bool(thread_id)
         return T3ThreadLaunchReceipt(
             thread_id=thread_id,
             run_id=str(payload.get("runId") or ""),
@@ -3030,6 +3492,51 @@ class T3McpToolPort:
             client_request_id=key if proven else "",
         )
 
+    async def read_launch_thread(self, thread_id: str) -> T3ThreadLaunchReceipt:
+        """Read-only lookup of a launch by its deterministic thread id (N6).
+
+        Never launches or replays.  Upstream gives the launch's initial user
+        message ``messageId = commandId = threadId``
+        (``mcp/toolkits/project/handlers.ts``), so the item carrying that
+        ``messageId`` names the launch run.  Returns an ECHO-FREE receipt
+        (the adapter, which knows the persisted identity the id proves, sets
+        the echo); ``run_id`` is ``""`` when the launch run is not visible
+        on the head page.  A missing thread is a :class:`T3PortRefusalError`
+        with ``code="thread_not_found"``.
+        """
+        thread_id = str(thread_id or "")
+        if not thread_id.startswith("mcp:launch:"):
+            raise T3PortRefusalError(
+                f"{thread_id!r} is not a deterministic launch thread id (nothing was sent)"
+            )
+        arguments = {
+            "threadId": thread_id, "view": "messages", "limit": 20,
+            "maxCharsPerItem": 200, "runLimit": 50,
+        }
+        self.calls.append({"op": "read_launch", "threadId": thread_id})
+        payload = self._invoke("t3_thread_read", arguments, mutating=False)
+        self._require_thread(payload, thread_id)
+        run_id = ""
+        for item in payload.get("items") or ():
+            if (
+                isinstance(item, Mapping)
+                and item.get("type") == "user_message"
+                and str(item.get("messageId") or "") == thread_id
+                and item.get("runId")
+            ):
+                run_id = str(item["runId"])
+                break
+        thread = payload.get("thread") if isinstance(payload.get("thread"), Mapping) else {}
+        run = self._exact_run(payload, run_id) if run_id else None
+        return T3ThreadLaunchReceipt(
+            thread_id=thread_id,
+            run_id=run_id,
+            project_id=str(thread.get("projectId") or ""),
+            status=str((run or {}).get("status") or ""),
+            link=str(thread.get("link") or ""),
+            created_at="",
+        )
+
     # -- reads -----------------------------------------------------------------
 
     @staticmethod
@@ -3038,6 +3545,55 @@ class T3McpToolPort:
             if isinstance(entry, Mapping) and str(entry.get("runId") or "") == run_id:
                 return entry
         return None
+
+    @staticmethod
+    def _runs_truncated(payload: Mapping[str, Any]) -> bool:
+        """True when ``recentRuns`` may omit runs (fewer listed than exist)."""
+        thread = payload.get("thread")
+        run_count = thread.get("runCount") if isinstance(thread, Mapping) else None
+        listed = len(payload.get("recentRuns") or ())
+        if not _is_exact_int(run_count):
+            # No count: only a FULL page can hide older runs.
+            return listed >= _T3_READ_RUN_LIMIT
+        return run_count > listed
+
+    def _lookup_exact_run(self, thread_id: str, run_id: str) -> Mapping[str, Any] | None:
+        """Exact-run status for a run ``recentRuns`` did not list (re-audit N9).
+
+        ``t3_thread_read`` lists only the newest ``runLimit`` (≤ 50) runs and
+        has no run filter; the donor's ``t3_thread_wait`` with ``runId`` looks
+        the run up by id (``ThreadManagementService.waitForThread``:
+        ``target.runs.find(id)``, ``run_not_found`` otherwise) and, with the
+        minimum ``timeoutMs`` of 1, answers immediately with that run's
+        outcome.  Read-only (``Tool.Readonly``).  A reply naming another run
+        (upstream follows a restart continuation) or ``run_not_found`` is
+        ``None`` — the status stays unknown, never guessed.
+        """
+        self.calls.append({"op": "run_lookup", "threadId": thread_id, "runId": run_id})
+        try:
+            payload = self._invoke(
+                "t3_thread_wait",
+                {"threadId": thread_id, "runId": run_id, "timeoutMs": 1},
+                mutating=False,
+            )
+        except T3PortRefusalError as exc:
+            if exc.code == "run_not_found":
+                return None
+            raise
+        if str(payload.get("threadId") or "") != thread_id or str(
+            payload.get("runId") or ""
+        ) != run_id:
+            return None
+        status = payload.get("status")
+        return {"runId": run_id, "status": status if isinstance(status, str) else ""}
+
+    def _run_status_entry(
+        self, payload: Mapping[str, Any], thread_id: str, run_id: str
+    ) -> Mapping[str, Any] | None:
+        run = self._exact_run(payload, run_id)
+        if run is None and run_id and self._runs_truncated(payload):
+            run = self._lookup_exact_run(thread_id, run_id)
+        return run
 
     @staticmethod
     def _require_thread(payload: Mapping[str, Any], thread_id: str) -> None:
@@ -3054,7 +3610,7 @@ class T3McpToolPort:
     ) -> T3ThreadReadResult:
         arguments: dict[str, Any] = {
             "threadId": thread_id, "view": "messages", "limit": 20,
-            "maxCharsPerItem": 4000, "runLimit": 10,
+            "maxCharsPerItem": 4000, "runLimit": _T3_READ_RUN_LIMIT,
         }
         if cursor:
             if not _DECIMAL_CURSOR.fullmatch(cursor):
@@ -3063,7 +3619,7 @@ class T3McpToolPort:
         self.calls.append({"op": "read", "threadId": thread_id, "cursor": cursor})
         payload = self._invoke("t3_thread_read", arguments, mutating=False)
         self._require_thread(payload, thread_id)
-        run = self._exact_run(payload, run_id)
+        run = self._run_status_entry(payload, thread_id, run_id)
         next_position = payload.get("nextPosition")
         items = payload.get("items") or ()
         return T3ThreadReadResult(
@@ -3093,20 +3649,31 @@ class T3McpToolPort:
         cursor) and keeps the LAST ``assistant_message`` item whose ``runId``
         is the exact run.  ``result_ref`` names that upstream item; with no
         such item it is ``""`` and the adapter refuses to collect.
+
+        Re-audit N2: the "last" item is only final when the timeline was read
+        to its END.  When the page budget runs out with ``hasMore`` still
+        true — or paging stalls (no usable ``nextPosition``, or one that does
+        not advance) while ``hasMore`` is true — a LATER item of the run may
+        exist, so ``result_ref`` is ``""`` (refuse) and no intermediate
+        assistant item is ever named.
         """
         position: int | None = None
         final_item: Mapping[str, Any] | None = None
         run: Mapping[str, Any] | None = None
+        last_payload: Mapping[str, Any] = {}
+        complete = False
         for _ in range(_T3_RESULT_MAX_PAGES):
             arguments: dict[str, Any] = {
-                "threadId": thread_id, "view": "messages", "limit": 50,
-                "maxCharsPerItem": 20000, "runLimit": 10,
+                "threadId": thread_id, "view": "messages",
+                "limit": _T3_RESULT_PAGE_LIMIT,
+                "maxCharsPerItem": 20000, "runLimit": _T3_READ_RUN_LIMIT,
             }
             if position is not None:
                 arguments["afterPosition"] = position
             self.calls.append({"op": "read_result", "threadId": thread_id})
             payload = self._invoke("t3_thread_read", arguments, mutating=False)
             self._require_thread(payload, thread_id)
+            last_payload = payload
             run = self._exact_run(payload, run_id) or run
             for item in payload.get("items") or ():
                 if (
@@ -3117,14 +3684,22 @@ class T3McpToolPort:
                     and item.get("text")
                 ):
                     final_item = item
+            if payload.get("hasMore") is False:
+                complete = True
+                break
             next_position = payload.get("nextPosition")
             if (
-                not payload.get("hasMore")
-                or not isinstance(next_position, int)
+                payload.get("hasMore") is not True
+                or not _is_exact_int(next_position)
+                or next_position < 0
                 or (position is not None and next_position <= position)
             ):
-                break
+                break  # stalled/garbled paging: NOT complete
             position = next_position
+        if run is None and last_payload:
+            run = self._run_status_entry(last_payload, thread_id, run_id)
+        if not complete:
+            final_item = None  # never name an intermediate item (N2)
         item_id = str((final_item or {}).get("itemId") or "")
         result_ref = (
             f"t3://thread/{thread_id}/run/{run_id}/item/{item_id}" if item_id else ""
@@ -3180,6 +3755,7 @@ __all__ = [
     "T3_MCP_CLIENT_SUBJECT",
     "T3BindingJoinDriftError",
     "T3LaunchClaimConflictError",
+    "T3LaunchSpecNotDurableError",
     "T3McpToolPort",
     "T3McpTransportError",
     "T3NamespaceAttestationError",
@@ -3188,6 +3764,7 @@ __all__ = [
     "T3StateStoreError",
     "t3_expected_launch_thread_id",
     "t3_mcp_failure_is_definitive_refusal",
+    "t3_mcp_tool_error_code",
     "t3_mcp_upstream_namespace",
     "t3_native_run_coordinates",
     "T3_ADAPTER_STATE_SCHEMA",

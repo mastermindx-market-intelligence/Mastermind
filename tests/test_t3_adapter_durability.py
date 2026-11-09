@@ -1219,3 +1219,68 @@ class AuditReworkAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter2.start(spec)
         self.assertEqual(port2.launch_calls, [])
+
+# =============================================================================
+# A4 re-audit N3 — a same-NAME foreign table is verified by its columns.
+# =============================================================================
+
+_V1_DDL = (
+    "CREATE TABLE t3_adapter_runs ("
+    " run_id TEXT PRIMARY KEY, intent_json TEXT, receipt_json TEXT,"
+    " original_ref_json TEXT, binding_json TEXT, spec_json TEXT,"
+    " cursor_text TEXT NOT NULL DEFAULT '', cancel_json TEXT,"
+    " result_ref_json TEXT,"
+    " schema_version TEXT NOT NULL DEFAULT 'mastermind.t3_adapter_state/v1',"
+    " updated_ms INTEGER NOT NULL)"
+)
+
+
+class A4ReauditN3StoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _columns(path: Path) -> list[tuple]:
+        with sqlite3.connect(path) as conn:
+            return [tuple(row) for row in conn.execute("PRAGMA table_info(t3_adapter_runs)")]
+
+    def test_n3_same_name_foreign_tables_are_refused_before_any_ddl(self) -> None:
+        foreign_ddls = {
+            "different columns": "CREATE TABLE t3_adapter_runs (run_id TEXT PRIMARY KEY, owner TEXT)",
+            "extra column": _V1_DDL[:-1] + ", foreign_note TEXT)",
+            "missing column": _V1_DDL.replace(" cancel_json TEXT,", ""),
+            "different type": _V1_DDL.replace("updated_ms INTEGER", "updated_ms TEXT"),
+            "nullability differs": _V1_DDL.replace(
+                "cursor_text TEXT NOT NULL DEFAULT ''", "cursor_text TEXT DEFAULT ''"
+            ),
+            "no primary key": _V1_DDL.replace("run_id TEXT PRIMARY KEY", "run_id TEXT"),
+            "added column with another type": _V1_DDL[:-1] + ", claim_token INTEGER)",
+        }
+        for label, ddl in foreign_ddls.items():
+            with self.subTest(label):
+                path = self.tmpdir / f"{label.replace(' ', '_')}.sqlite3"
+                with sqlite3.connect(path) as conn:
+                    conn.execute(ddl)
+                before = self._columns(path)
+                with self.assertRaises(T3ExecutionAdapterError) as ctx:
+                    SQLiteT3AdapterStateStore(path)
+                self.assertIn("not this adapter's", str(ctx.exception))
+                self.assertEqual(self._columns(path), before)  # no ALTER/CREATE ran
+                with self.assertRaises(T3ExecutionAdapterError):
+                    SQLiteT3AdapterStateStore.open_read_only(path)
+
+    def test_n3_a_genuine_v1_table_is_accepted_and_upgraded_in_place(self) -> None:
+        path = self.tmpdir / "v1.sqlite3"
+        with sqlite3.connect(path) as conn:
+            conn.execute(_V1_DDL)
+        store = SQLiteT3AdapterStateStore(path)
+        store.close()
+        names = [row[1] for row in self._columns(path)]
+        self.assertEqual(names[-2:], ["spec_sha256", "claim_token"])
+        SQLiteT3AdapterStateStore(path).close()  # reopen of our own table
+        SQLiteT3AdapterStateStore.open_read_only(path).close()
+

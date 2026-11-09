@@ -50,6 +50,7 @@ from control_plane.t3_execution_adapter import (  # noqa: E402
     T3ThreadLaunchEnvelope,
     T3ThreadLaunchReceipt,
     derive_t3_client_request_id,
+    t3_mcp_tool_error_code,
     t3_mcp_upstream_namespace,
 )
 from control_plane.worker_execution_contract import (  # noqa: E402
@@ -96,7 +97,15 @@ def _pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-def obtain_mcp_access_token() -> tuple[str, dict]:
+DEFAULT_TOKEN_PATH = (
+    "/Users/chriswong/.hermes/profiles/engineering/cache/scratch/t3_proof_token.txt"
+)
+
+
+def obtain_mcp_access_token(
+    token_path: str = DEFAULT_TOKEN_PATH,
+    label: str = "mastermind-rev5-t3-lane-proof",
+) -> tuple[str, dict]:
     """Outside-agent OAuth: register loopback client, approve with a fresh
     short-TTL pairing code via /oauth/mcp/decision, exchange for a token.
 
@@ -105,10 +114,12 @@ def obtain_mcp_access_token() -> tuple[str, dict]:
     idempotency identity (namespace+key -> commandId), so the same client +
     same clientRequestId replays the SAME thread instead of minting a new
     one (live-verified: two different clients, same key -> two threads).
-    Never committed; scratch only."""
+    Never committed; scratch only.  ``token_path`` selects the cache (one file
+    per OAuth client identity — the A4 canary's second client uses its own
+    file); ``label`` names the pairing and the registered client.  The token
+    and the pairing code are never printed or logged."""
     import subprocess
 
-    token_path = "/Users/chriswong/.hermes/profiles/engineering/cache/scratch/t3_proof_token.txt"
     if os.path.exists(token_path):
         cached = open(token_path).read().strip()
         if cached:
@@ -117,7 +128,7 @@ def obtain_mcp_access_token() -> tuple[str, dict]:
 
     proc = subprocess.run(
         ["/Users/chriswong/.t3/bin/t3", "auth", "pairing", "create",
-         "--ttl", "15m", "--label", "mastermind-rev5-t3-lane-proof", "--json"],
+         "--ttl", "15m", "--label", label, "--json"],
         capture_output=True, text=True, timeout=60,
     )
     if proc.returncode != 0:
@@ -126,13 +137,13 @@ def obtain_mcp_access_token() -> tuple[str, dict]:
     code = pairing.get("token") or pairing.get("credential") or pairing.get("code")
     if not code:
         raise RuntimeError(f"pairing create returned no code: {proc.stdout[:300]}")
-    _log("pairing.create.ok", sessionId=pairing.get("sessionId"), ttl="15m")
+    _log("pairing.create.ok", ttl="15m", label=label)
 
     redirect_uri = "http://localhost:51234/callback"
     status, reg = _http_json(
         BASE + "/oauth/mcp/register",
         {
-            "client_name": "mastermind-rev5-t3-lane-proof",
+            "client_name": label,
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_method": "none",
@@ -180,7 +191,8 @@ def obtain_mcp_access_token() -> tuple[str, dict]:
     )
     if status != 200 or not token.get("access_token"):
         raise RuntimeError(f"oauth token failed {status}: {token}")
-    with open(token_path, "w") as fh:
+    fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
         fh.write(token["access_token"])
     _log("oauth.token.ok", scope=token.get("scope"))
     return token["access_token"], reg
@@ -321,13 +333,18 @@ class McpHttp:
         if result.get("isError"):
             text = ""
             for item in result.get("content") or []:
-                if item.get("type") == "text":
-                    text = item.get("text", "")
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = str(item.get("text", ""))
             if not text and isinstance(result.get("structuredContent"), dict):
                 text = json.dumps(result["structuredContent"].get("error"))
+            # A4 / re-audit N1: carry the donor's declared-failure code (if
+            # the body has the exact donor shape) so the port can tell a
+            # proven pre-dispatch refusal from a post-commit failure; a
+            # codeless isError (defect, internal error) stays UNKNOWN.
             raise T3McpTransportError(
                 f"tool {name} returned failure: {text[:400]}",
                 phase=after, tool_error=True,
+                tool_error_code=t3_mcp_tool_error_code(result),
             )
         structured = result.get("structuredContent")
         if isinstance(structured, dict):
