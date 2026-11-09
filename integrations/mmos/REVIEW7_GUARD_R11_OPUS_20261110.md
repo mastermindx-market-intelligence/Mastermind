@@ -37,3 +37,11 @@ zsh's grammar. r12 (Director C11, Opus) changes the ARMED rule: a command is out
 admitted grammar or is denied structurally — the scanner no longer carries the armed security decision (kept as a
 secondary reading and for the unarmed legacy path). Availability cost accepted: armed sessions refuse shell expansion
 outside the admitted forms. F1/F2 scanner fixes also applied for the unarmed path.
+
+## Director C11's r12 disposition
+
+See `LANE_EXECUTIVE_DIRECTOR_C11.md` (the rule token by token, F1/F2 fixes, the reconstructed rows with r11 fail-before
+through the real hook command line and sealed ground truth, the structural escape table, the over-refusal table, fuzz
+counts, true worst budgets, limits). Integrator note: the reviewer's own 275-escape generator was not available to C11;
+its F1/F2 prefix contexts were added to the committed generator instead, and the reviewer's rows were reconstructed (12)
+plus 6 C11-found rows. Re-check #8 should re-run the reviewer's own generator against r12.

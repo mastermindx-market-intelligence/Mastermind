@@ -24,6 +24,12 @@ never split. r7: the binding gate's launch census and identity values come
 from that same parse (the lexer's argv and exact literal values), so every
 admitted unit whose command word is a wrapper reaches the binding gate; the
 text regexes remain only as a cross-check that must agree.
+r12 (re-check #7): in an ARMED session scope is STRUCTURAL — a command
+holding any shell construct (quoted or not), or naming a wrapper literally,
+is judged by that same ADMIT rule; only construct-free, literally unnamed
+text is out of scope (``r12_armed_in_scope``). The hidden-name scanner
+(``r6_names_wrapper``) is a secondary, widening-only reading there and the
+mechanism of the unarmed checks.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -1374,7 +1380,12 @@ _R10_DELIMITER_RUN_RE = re.compile(r"[^ \t\n;&|<>()'\"\\]+")
 #: Words after which the next word is still in command position.
 _R10_KEEP_COMMAND_POSITION = frozenset({
     "!", "{", "do", "elif", "else", "if", "then", "time", "until", "while",
+    "coproc",  # r12 (re-check #7 F1): ``coproc`` runs the command after it
 })
+#: r12 (re-check #7 F1): a word glued to ``<``/``>`` that is an fd number
+#: or a zsh ``{name}`` is part of the redirection, not the command word
+#: (``2>/dev/null case x in …`` — zsh runs the ``case``).
+_R12_FD_WORD_RE = re.compile(r"[0-9]+|\{[a-z_][a-z0-9_]*\}")
 
 # --- r11 (REVIEW6 N5/N6/N7) additions to the r10 reading ---------------------
 #
@@ -1658,10 +1669,20 @@ class _R10Text:
         # (``[[ a =~ ⏎(a # $(…)) ]]`` — the ``(`` is a regex group)
         in_condition = False
         pending: list[tuple[str, bool, bool]] = []
+        # r12 (re-check #7 F1): positions where zsh MAY read a command word
+        # (after ``repeat N``, ``coproc``, ``for NAME (…)``, ``if [[ … ]]``,
+        # ``((…))``, a ``(pattern)``): its keywords are recognised, but a
+        # ``(`` there is never a certain subshell
+        maybe_command = False
+        repeat_next = 0  # 1/2: the next word is ``repeat``'s count (certain/maybe)
+        for_state = 0  # 1 after ``for``/``select``/``foreach``, 2 after its NAME
+        for_list = 0  # paren level + 1 of a ``for NAME (…)`` word list
+        case_closer = "esac"  # r12: zsh ``case WORD { … }`` ends at ``}``
 
         def finish() -> None:
             nonlocal word, command_position, target_next, after_for, last_command
             nonlocal case_header, pattern_position, in_condition
+            nonlocal maybe_command, repeat_next, for_state, case_closer
             if word is None:
                 return
             after_for = last_command = False
@@ -1671,29 +1692,56 @@ class _R10Text:
                 target_next = False
                 return
             plain = done.plain()
-            if closer and command_position and plain == "case":
-                raise _R10Fail()  # pattern ``)`` would close the substitution
-            if command_position and plain == "case":
-                case_header = 2
-            elif case_header:
+            certain, keyword = command_position, command_position or maybe_command
+            maybe_command = False
+            # r12 (re-check #7 F1): ``case`` and ``[[`` are recognised
+            # ANYWHERE — r11's command-position model missed them after
+            # ``2>…``, ``repeat N``, ``coproc``, short forms and ``(pattern)``
+            if plain == "case":
+                if closer:
+                    raise _R10Fail()  # pattern ``)`` would close the substitution
+                case_header, for_state, repeat_next = 2, 0, 0
+                command_position = False
+                return
+            if case_header:
                 case_header -= 1
-                if not case_header and plain == "in":
+                if not case_header and plain in ("in", "{"):
                     pattern_position = True
+                    case_closer = "esac" if plain == "in" else "}"
                     command_position = False
                     return
-            if pattern_position and plain == "esac":
+            if pattern_position and plain == case_closer:
                 pattern_position = False
-            if command_position and plain == "[[":
+            if plain == "[[":
                 in_condition = True
             elif in_condition and plain == "]]":
                 in_condition = False
-            if command_position:
+                command_position, maybe_command = False, True  # ``if [[ … ]] cmd``
+                return
+            if repeat_next:
+                # ``repeat``'s count: a (sub)list follows
+                command_position, maybe_command = repeat_next == 1, repeat_next == 2
+                repeat_next = 0
+                return
+            if for_state == 1:
+                for_state = 2  # the loop variable
+                command_position = False
+                return
+            for_state = 0
+            if keyword:
                 after_for = plain == "for"
+                if plain in ("for", "select", "foreach"):
+                    for_state = 1
                 last_command = True
-                command_position = (
+                if plain == "repeat":
+                    repeat_next = 1 if certain else 2
+                    command_position = False
+                    return
+                keeps = (
                     plain in _R10_KEEP_COMMAND_POSITION
                     or bool(_R6_ASSIGNMENT_RE.match(plain))
                 )
+                command_position, maybe_command = keeps and certain, keeps and not certain
 
         while index < size:
             char = text[index]
@@ -1704,7 +1752,8 @@ class _R10Text:
             if char == "\n":
                 finish()
                 command_position = not (pattern_position or in_condition)
-                after_for = last_command = False
+                after_for = last_command = maybe_command = False
+                for_state = 0
                 index += 1
                 if pending:
                     index = self.heredoc_bodies(index, depth, pending)
@@ -1736,6 +1785,11 @@ class _R10Text:
                 index = end
                 continue
             if char in ";&|<>()":
+                if (char in "<>" and word is not None
+                        and _R12_FD_WORD_RE.fullmatch(word.plain())):
+                    # r12 (re-check #7 F1): ``2>…``/``3<…``/``{fd}>…`` — the
+                    # number is the redirection's, the command word follows
+                    word = None
                 # glued: a word is in progress, or the character before is a
                 # word character (a here-document delimiter just read)
                 glued = word is not None or (
@@ -1775,10 +1829,15 @@ class _R10Text:
                         except _R10Stop:
                             raise _R10Fail() from None
                         command_position = after_for = last_command = False
+                        maybe_command = True  # r12: ``if ((…)) cmd``, ``for ((…)) cmd``
+                        for_state = 0
                         continue
-                    after_for = last_command = False
+                    after_for = last_command = maybe_command = False
                     if pattern_position and not pattern_group:
                         pattern_group = paren + 1  # ``(pattern)``
+                    if for_state == 2 and not glued and not for_list:
+                        for_list = paren + 1  # r12: ``for NAME (word …) cmd``
+                    for_state = 0
                     if not certain:
                         # r11 (N8): argument position, glued to a word, a
                         # case pattern, a redirection target: zsh reads a
@@ -1797,7 +1856,9 @@ class _R10Text:
                     index += 1
                     continue
                 after_for = last_command = False
+                for_state = 0
                 if char == ")":
+                    maybe_command = False
                     index += 1
                     if paren:
                         paren -= 1
@@ -1805,17 +1866,34 @@ class _R10Text:
                             uncertain_from = 0
                         if paren < arith_from:
                             arith_from = 0
+                        # r11 (N8): after a group an operator follows — or,
+                        # after a ``(pattern)``, a case arm (left uncertain);
+                        # r12 (F1): zsh may read a command word after a
+                        # ``(pattern)`` and after a ``for NAME (…)`` list
+                        command_position = False
                         if paren < pattern_group:
                             pattern_group = 0
                             pattern_position = False
-                        # r11 (N8): after a group an operator follows — or,
-                        # after a ``(pattern)``, a case arm (left uncertain)
-                        command_position = False
+                            maybe_command = True
+                        if paren < for_list:
+                            for_list = 0
+                            maybe_command = True
                     elif closer:
                         return index
-                    else:
+                    elif pattern_position:
                         command_position = True  # ``pattern)``: a case arm
                         pattern_position = False
+                    elif not comments:
+                        # r12: a dual-read comment region (rule D) ends at
+                        # the ``)`` of the group it sits in: argument
+                        # position follows, and the count is zsh's no more
+                        command_position = False
+                        sticky = True
+                    else:
+                        # r12 (re-check #7 F2): an unmatched ``)`` is a
+                        # syntax error to both shells — here it means this
+                        # reading's paren count left the shell's: in scope
+                        raise _R10Fail()
                     continue
                 if text.startswith("<<", index) and not text.startswith("<<<", index):
                     if arith_from:
@@ -1829,12 +1907,23 @@ class _R10Text:
                     operator = ";|"  # zsh case terminator
                     index += 1
                 if operator in (";;", ";&", ";;&", ";|"):
-                    command_position = False  # r11 (N8): a case pattern follows
+                    command_position = maybe_command = False  # r11 (N8): a case pattern follows
                     pattern_position = True
                 elif operator in _R6_LIST_OPERATORS or operator in _R6_PIPE_OPERATORS:
                     command_position = not (pattern_position or in_condition)
+                    maybe_command = False
                 else:
                     target_next = True  # a redirection target follows
+                continue
+            if char == "=" and word is None and text.startswith("(", index + 1):
+                # r12 (re-check #7 F2): zsh ``=(…)`` at a word start is a
+                # process substitution (its body a script), read like ``<(…)``
+                word = _R10Word()
+                try:
+                    index = self.substitution(index + 2, depth)
+                except _R10Stop:
+                    raise _R10Fail() from None
+                word.computed([("any", "")])
                 continue
             if word is None:
                 word = _R10Word()
@@ -4342,19 +4431,217 @@ def _r7_identity_values(parse: _R7Parse, name: str) -> tuple[list[str], list[str
     return assigned, effective
 
 
+# --- r12: the STRUCTURAL scope rule for armed sessions (re-check #7) --------
+#
+# Seven distinct reviews found that every r6–r11 scope reading — "does this
+# command name a wrapper, perhaps hidden inside a shell construct?" — leaks
+# new shell grammar (r11: zsh command positions, ``=(…)``). In an ARMED
+# session r12 takes that judgement out of the security decision:
+#
+#   OUT OF SCOPE (allowed without a binding check) only when the raw text
+#   holds NO shell construct anywhere — quoted or not, see
+#   ``_R12_CONSTRUCT_RE`` / ``_R12_CONSTRUCT_WORDS_RE`` — AND names no
+#   wrapper by the literal, quote-joined check AND ``_r6_lex`` reads it AND
+#   the r6–r11 scanner (kept as a SECONDARY reading: it can only widen) finds
+#   no wrapper name;
+#   IN SCOPE otherwise: the command must be exactly one admitted ADMIT form
+#   (``_r7_parse``: LAUNCH / NESTED / READ with their carve-outs); every
+#   other in-scope command is DENIED with the structural codes.
+#
+# "No construct" is decided on the RAW characters, ignoring quoting: quoted
+# text is literal to THIS shell, but ``eval``, ``bash -c``, ``ssh HOST``,
+# ``trap``, ``find -exec sh -c``, ``watch`` … hand it to another shell that
+# expands it (``bash -c 'p*l run …'``, ``ssh h '$(…)ool …'``), and the set of
+# such programs is open. Quotes and backslashes still delimit literal words
+# (the literal check deletes them, joining the word the shells build).
+#
+# Construct-free text cannot make any shell compute a word: no parameter,
+# command, arithmetic or process substitution, no glob/brace/tilde
+# expansion (zsh ``EXTENDED_GLOB`` ``#``/``^``/``~`` too), no history
+# expansion, no here-document body (a different quoting context), no line
+# continuation (a word joined across lines), no comment (whose model differs
+# between shells), and no ``eval``/``source``/``alias``/``trap``/``coproc``/
+# ``repeat`` word. Its words are literal byte strings in every shell; the
+# literal check reads them all at once. What remains outside the rule (C11
+# ledger): a literal word that resolves to a wrapper by something other than
+# its bytes (homoglyphs, a staged copy/symlink/alias/function, PATH), and
+# programs that compute and run text themselves (``python3 -c``,
+# ``… | base64 -d | sh`` — the arbitrary-process limit since REVIEW_2329 r2).
+#
+# Trade (principal's decision, re-check #7): armed sessions refuse EVERY
+# command that uses such a construct outside the admitted forms
+# (``cd "$(git rev-parse --show-toplevel)"``, ``git commit -m "$(cat <<EOF``),
+# with ``_R12_HEADLINE``; the admitted forms (``git commit -F FILE``,
+# ``ls ~/x``, ``git log HEAD~1``, ``cat *.md`` …) keep working.
+#
+# Cost: two C-level regex scans and one ``_r9_joined`` view (linear); the
+# scanner runs only for construct-free text.
+
+#: Shell construct characters/sequences, wherever they occur (quoted or not).
+#: A ``{`` followed by a blank, newline, ``;&|<>`` or the end is a word of
+#: its own — never a brace expansion in bash or zsh (measured: ``{ a,b}``
+#: prints ``{`` ``a,b}`` in bash and is a parse error in zsh) — so the
+#: ``{ …; }`` group stays literal; ``{}`` is NOT exempt (bash expands
+#: ``p{},ool}`` to ``p}`` ``pool``).
+_R12_CONSTRUCT_RE = re.compile(
+    r"\$|`|\\\n|<<|<[0-9]*-[0-9]*>|[*?\[()~#^]|\{(?=[^ \t\n;&|<>])"
+    r"|![^ \t\n\"'=]|[\x00-\x08\x0b-\x1f\x7f]"
+)
+#: Words that re-evaluate text or change the grammar of what follows, on the
+#: quote-joined text, wherever they occur (``e\val``, ``"ev"al`` too).
+_R12_CONSTRUCT_WORDS_RE = re.compile(
+    r"(?<![^ \t\n;&|<>])(?:eval|source|alias|trap|coproc|repeat)(?![^ \t\n;&|<>])",
+    re.I,
+)
+#: ``python3 -m slot`` / ``-mslot`` / ``pkg.slot``: the module form of
+#: ``slot.py`` (Python resolves ``slot`` to ``slot.py`` on sys.path, the
+#: current directory first) — a literal name by resolution, not by bytes.
+_R12_SLOT_MODULE_RE = re.compile(r"(?:^|[^A-Za-z0-9_])m?slot(?![A-Za-z0-9_])", re.I)
+_R12_CONSTRUCT_KINDS = {
+    "$(": "$( (command substitution)", "$((": "$(( (arithmetic)",
+    "${": "${ (parameter expansion)", "$[": "$[ (arithmetic)",
+    "$'": "$' (ANSI-C quoting)", '$"': '$" (locale quoting)',
+    "`": "` (command substitution)", "\\\n": "\\⏎ (line continuation)",
+    "<<": "<< (here-document or here-string)",
+    "*": "* (glob)", "?": "? (glob)", "[": "[ (glob)",
+    "{": "{ (brace expansion or group)",
+    "(": "( ) (subshell, group, glob group, arithmetic, process "
+    "substitution or case pattern)",
+    ")": "( ) (subshell, group, glob group, arithmetic, process "
+    "substitution or case pattern)",
+    "~": "~ (tilde expansion or zsh exclusion glob)",
+    "#": "# (comment or zsh extended glob)", "^": "^ (zsh negation glob)",
+    "!": "! (history expansion)",
+}
+_R12_HEADLINE = (
+    "armed session: shell expansion is not admitted; use a literal command "
+    "or a file argument"
+)
+_R6_CLAUSES["R12_SHELL_CONSTRUCT"] = (
+    _R12_HEADLINE + " — the shell construct {detail} decides at runtime what "
+    "runs (quoted text counts: eval, bash -c, ssh or another program may "
+    "expand it)"
+)
+#: r12 wording of the grammar's catch-all code for a command that is in
+#: scope only by its construct (it names no wrapper).
+_R12_NOT_ADMITTED_CLAUSE = (
+    "{detail} is not an admitted launch or read form, which every armed "
+    "command holding a shell construct must be"
+)
+_R12_REMEDY = (
+    "Write it with literal words only — quoting is fine, but no $, "
+    "backticks, globs (* ? [), braces, parentheses, ~, #, ^, ! history, "
+    "here-documents or line continuations, even inside quotes; pass content "
+    "through a file argument (git commit -F FILE); or use the Read/Grep/Glob "
+    "tools. Admitted read forms with constructs: cat/head/tail/grep/egrep/"
+    "fgrep/wc/ls/stat/file/diff/cmp/shasum/sha1sum/sha256sum/md5/md5sum/nl/"
+    "od/echo, git commit -m|-F, git log|show|diff|status|grep|add, rg and "
+    "sed -n N[,M]p (allowlisted options, literal words, piped only into each "
+    "other, writing only to /dev/null). Launching? " + _R6_REMEDY
+)
+
+
+def _r12_construct_detail(text: str, index: int) -> str:
+    char = text[index]
+    if char == "$":
+        following = text[index + 1:index + 3]
+        for opener in ("$((", "$(", "${", "$[", "$'", '$"'):
+            if ("$" + following).startswith(opener):
+                return _R12_CONSTRUCT_KINDS[opener]
+        return "$ (parameter expansion)"
+    if text.startswith("\\\n", index):
+        return _R12_CONSTRUCT_KINDS["\\\n"]
+    if text.startswith("<<", index):
+        return _R12_CONSTRUCT_KINDS["<<"]
+    if char == "<":
+        return "<N-M> (zsh numeric glob)"
+    if char in _R12_CONSTRUCT_KINDS:
+        return _R12_CONSTRUCT_KINDS[char]
+    return f"{char!r} (control character)"
+
+
+def r12_constructs(raw: str, limit: int = 3) -> list[str]:
+    """r12: the first ``limit`` distinct shell constructs in ``raw`` —
+    quoted or not — as descriptions (``[]`` = construct-free). One linear
+    regex scan, plus the construct-word scan on the quote-joined text."""
+    kinds: list[str] = []
+    for match in _R12_CONSTRUCT_RE.finditer(raw):
+        kind = _r12_construct_detail(raw, match.start())
+        if kind not in kinds:
+            kinds.append(kind)
+            if len(kinds) >= limit:
+                return kinds
+    word = _R12_CONSTRUCT_WORDS_RE.search(_r9_joined(raw))
+    if word is not None:
+        kinds.append(f"{word.group(0).lower()} (re-evaluating or grammar word)")
+    return kinds
+
+
+def r12_literal_names_wrapper(raw: str) -> bool:
+    """r12: the LITERAL check — a wrapper name in the quote-joined text
+    (``"``/``'``/``\\`` deleted: the word every shell builds from literal
+    pieces), glued to a short option, or seen by the launch regexes; also
+    the ``slot`` module name. Linear."""
+    plain = re.sub(r"[\"'\\]", "", raw.replace('$"', '"'))
+    return bool(
+        _WRAPPER_NAME_RE.search(_r8_dash_view(plain)) or _r8_glued_option(plain)
+        or _R12_SLOT_MODULE_RE.search(plain)
+        or FABRIC_LAUNCH_RE.search(raw) or _wrapper_invocations(raw)
+    )
+
+
+def r12_armed_in_scope(raw: str) -> bool:
+    """r12: True when an ARMED session must judge ``raw`` by the ADMIT
+    grammar (see the r12 block comment). The scanner is consulted only for
+    construct-free, literally unnamed text, and can only widen."""
+    if r12_constructs(raw, 1) or r12_literal_names_wrapper(raw):
+        return True
+    if _r6_lex(raw)[1]:
+        return True  # the tokenizer must read it
+    return bool(r6_names_wrapper(raw))
+
+
+def _r12_reason(parse: _R7Parse, constructs: list[str], named: bool) -> str:
+    codes = [("R12_SHELL_CONSTRUCT", kind) for kind in constructs] + parse.codes
+    if not constructs or named:
+        return _r6_reason(codes, launch_like=parse.launch_like)
+    grouped: dict[str, list[str]] = {}
+    for code, detail in codes:
+        details = grouped.setdefault(code, [])
+        if detail and detail not in details and len(details) < 3:
+            details.append(detail)
+    clauses = [
+        (_R12_NOT_ADMITTED_CLAUSE if code == "R6_NOT_A_PLAIN_LAUNCH"
+         else _R6_CLAUSES[code]).format(detail=", ".join(details) or "-")
+        for code, details in grouped.items()
+    ]
+    return (
+        "Mastermind shared-placement guard: unobservable launch — "
+        + _R12_HEADLINE + ". In a shared-placement (paid-launch) session a "
+        "command holding a shell construct must be exactly one admitted launch "
+        "or read form, and this one is not; the guard does not search it for "
+        "hidden wrapper names (r12 structural rule; refusal codes: "
+        + ", ".join(grouped) + "): " + "; ".join(clauses) + ". " + _R12_REMEDY
+    )
+
+
 def _guard_armed_launch(command: str, raw: str) -> None:
     """r7 armed gate (WO-11; REVIEW2 A1). The PARSE decides: out of scope
-    (names no wrapper) → nothing to judge; refused shape → deny; closed read
-    forms only → no unit executes a wrapper; otherwise EVERY wrapper-head
-    unit reaches the binding gate — there is no early return for it."""
-    parse = r7_parse(
-        raw,
-        force=bool(FABRIC_LAUNCH_RE.search(raw) or _wrapper_invocations(raw)),
-    )
-    if parse is None:
+    → nothing to judge; refused shape → deny; closed read forms only → no
+    unit executes a wrapper; otherwise EVERY wrapper-head unit reaches the
+    binding gate — there is no early return for it.
+
+    r12 (re-check #7): scope is STRUCTURAL — a command is out of scope only
+    when it is construct-free and names no wrapper literally (the scanner
+    is a secondary, widening-only reading for construct-free text); any
+    construct puts it in scope, where only an admitted form passes."""
+    constructs = r12_constructs(raw)
+    named = r12_literal_names_wrapper(raw)
+    if not constructs and not named and not _r6_lex(raw)[1] and not r6_names_wrapper(raw):
         return
+    parse = _r7_parse(raw, nested=False)
     if parse.refused:
-        deny(_r6_reason(parse.codes, launch_like=parse.launch_like))
+        deny(_r12_reason(parse, constructs, named))
     if not parse.launches:
         return
     validate_execution_binding(raw, parse)
