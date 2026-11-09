@@ -333,6 +333,18 @@ class InThreadRoleSwitchTests(unittest.TestCase):
         self.assertEqual(len(turn_run_ids), 3)
         self.assertEqual(len(set(turn_run_ids)), 3)
 
+    def test_failed_native_turn_does_not_advance_resume_pointer(self):
+        root = "1794180000.123456"
+        channel = "C0CBC6AEAQZ"
+        sessions = self.fleet.state["sessions"]
+        sessions[f"{channel}:{root}:secretary"] = "previous-successful-id"
+        with patch.object(gateway, "dispatch",
+                          return_value=(False, "native error", "ambiguous-next-id")):
+            self.fleet.work({"channel": channel, "thread_ts": root,
+                             "ts": "1794180001.123456", "text": "attempt"},
+                            "secretary", "thread-binding", [])
+        self.assertEqual(sessions[f"{channel}:{root}:secretary"], "previous-successful-id")
+
     def test_legacy_single_role_session_migrates_only_to_its_bound_role(self):
         root = "1794180000.123456"
         channel = "C0CBC6AEAQZ"
