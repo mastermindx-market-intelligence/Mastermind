@@ -49,3 +49,14 @@ Direct work: PRINCIPAL_JUDGMENT for cross-runtime UX/architecture and UNIQUE_APP
 Native children: read-only donor architecture and contract reasoning; no canvas, host, source or runtime mutation.
 WHY NOT FABLE: protect Fable's already active integration and maintenance work; this design can be resolved by the assigned principal and read-only architecture analysis.
 Paper carrier: Mastermind Paper. No Paper mutation issued at this initial save. No worker/gateway restart, provider activation, bot creation, group creation, coding job, install or production deployment is included in the design effects.
+
+
+## Design milestone: conversation and creation surfaces
+
+Paper page `p-R-0` (16 · Team conversations · Product) now contains HC01 `12UW-0` and HC02: 136T-0; HC03: 13GW-0; HC04: 13RP-0; HC05: 142O-0; HC06: 14CR-0. HC01 room, HC02 new bot, HC03 new group, HC04 direct bot conversation, and HC05 delegated-task dialogue have been rendered and visually checked. HC06 coding launch form is authored; visual QA follows. All fixtures illustrate intended behavior, not live runtime execution.
+
+A donor capability review corrected the running-room composer to **Send to room / Queued next**. Direct steering remains capability-bound to a bot or task target. Group membership is checked against the actual connection (inspected upstream supports 2–6); the 12-bot fleet is not a 12-seat room guarantee. A bot profile being created is distinct from confirmed readiness.
+
+The root independently read pinned Hermes Desktop documentation and T3 ACP/outside-agent documentation via the GitHub connector. It also read the exact pinned `t3_thread_launch` schema in `apps/server/src/mcp/toolkits/project/tools.ts`: outside callers provide the project or scratch context; explicit isolated worktree strategy is required for independent writing. Successful launch returns thread/project/model selection plus nullable run/status and optional link. Reopening work uses that returned thread; lost replies preserve the same client request identity and must be reconciled before any retry.
+
+Next: complete the dense Code workspace, runtime/routine settings, responsive and recovery states, then final frame-to-contract mapping and source readback. Companion frames remain untouched; no live bot, provider, scheduler, credential, or integration effects have been issued.
