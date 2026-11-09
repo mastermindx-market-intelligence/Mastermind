@@ -61,10 +61,10 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
-CLAUDE_FABRIC_SKILL_BLOB_SHA = "3f9d0bbad57de0174b715f4186dc2d0be5ca58b7"
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "4e38e7af65974bba9ffd0a5ec7181218864df68e"
 # Keep the fixed bound explicit; this reviewed guide includes the upstream
 # read-only parent-recovery diagnostic and one short review-routing pointer.
-CLAUDE_FABRIC_SKILL_MAX_BYTES = 9216
+CLAUDE_FABRIC_SKILL_MAX_BYTES = 11264
 # Only the two exact prior protected Claude skill blobs may be upgraded.
 CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS = frozenset({
     "41d9b46459138bfef4537ab6a32fa7cd3a0559d8",
@@ -73,8 +73,8 @@ CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS = frozenset({
 CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
 CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
 # Exact former canonical Codex source: installed on M2 before this review update.
-CODEX_FABRIC_PREVIOUS_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
-CODEX_FABRIC_SKILL_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+CODEX_FABRIC_PREVIOUS_BLOB_SHA = "7255ef5971c5924f8b08fe0a1b275fc95bc0dc2a"
+CODEX_FABRIC_SKILL_BLOB_SHA = "eeb2817e589d39d8983574eb86bcb8cde1a74b53"
 CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
 CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
 CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
