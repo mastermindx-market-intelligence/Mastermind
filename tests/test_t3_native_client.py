@@ -220,7 +220,7 @@ class ClientTests(unittest.TestCase):
         self.native.responses['orchestrator_capabilities']=AssertionError('must not be called')
         v=run(self.client.stop(THREAD,request_id='stop',run_id='run-1'))
         self.assertEqual(v['status'],'interrupt_requested')
-        self.assertEqual([n for n,_ in self.native.calls],['t3_thread_interrupt'])
+        self.assertEqual([n for n,_ in self.native.calls],['t3_thread_read','t3_thread_interrupt'])
 
     def test_stop_all_is_not_just_interrupt(self):
         run(self.client.stop(THREAD,request_id='stop',stop_all=True))
@@ -283,6 +283,64 @@ class ClientTests(unittest.TestCase):
         self.native.detail['thread'].pop('pendingRequestCount')
         with self.assertRaises(Unavailable):run(self.client.original_result(RUN))
 
+    def test_stop_validates_project_before_native_mutation(self):
+        self.native.detail['thread']['projectId']='foreign-project'
+        with self.assertRaises(Conflict):run(self.client.stop(THREAD,request_id='s',stop_all=True))
+        self.assertNotIn('t3_thread_interrupt',[n for n,_ in self.native.calls])
+
+    def test_stop_refuses_when_original_identity_read_fails(self):
+        self.native.responses['t3_thread_read']=ConnectionError('lost read')
+        with self.assertRaises(Unavailable):run(self.client.stop(THREAD,request_id='s',stop_all=True))
+        self.assertNotIn('t3_thread_interrupt',[n for n,_ in self.native.calls])
+
+    def test_result_continuation_keeps_original_candidate_across_pages(self):
+        def respond(args):
+            if 'itemId' in args:
+                self.assertEqual(args['itemId'],'item-1');self.assertEqual(args['textOffset'],0)
+                return {'structuredContent':observation([item('original final')])}
+            if 'afterPosition' in args:
+                v=observation([item('later answer',rid='run-2',pos=2)])
+                v['nextPosition']=2;return {'structuredContent':v}
+            v=observation([item('original final')]);v['hasMore']=True
+            return {'structuredContent':v}
+        self.native.responses['t3_thread_read']=respond
+        first=run(self.client.original_result(RUN,max_pages=1))
+        self.assertFalse(first.complete);self.assertIsNotNone(first.progress)
+        self.assertIsNone(first.answer)
+        final=run(self.client.original_result(RUN,progress=first.progress,max_pages=1))
+        self.assertTrue(final.complete);self.assertEqual(final.answer,'original final')
+        self.assertEqual(len([a for n,a in self.native.calls if 'itemId' in a]),1)
+
+    def test_result_continuation_rejects_other_run(self):
+        from integrations.session_bridge.t3_native_client import ResultProgress
+        progress=ResultProgress(RUN,'run-1','completed',Cursor(THREAD,1),'item-1')
+        other=Run(THREAD,'run-2','request-2','queued')
+        with self.assertRaises(Conflict):run(self.client.original_result(other,progress=progress))
+        self.assertFalse(self.native.calls)
+
+    def test_result_continuation_detects_changed_native_lineage(self):
+        from integrations.session_bridge.t3_native_client import ResultProgress
+        progress=ResultProgress(RUN,'run-1','completed',Cursor(THREAD,1),'item-1')
+        self.native.responses['t3_thread_wait']={'structuredContent':dict(threadId='thread-1',runId='run-1',status='completed',timedOut=False,resultRun={'runId':'other','status':'completed'})}
+        with self.assertRaises(Conflict):run(self.client.original_result(RUN,progress=progress))
+
+    def test_result_continuation_does_not_trust_wrong_candidate(self):
+        from integrations.session_bridge.t3_native_client import ResultProgress
+        progress=ResultProgress(RUN,'run-1','completed',Cursor(THREAD,1),'forged-item')
+        def respond(args):
+            if 'itemId' in args:return {'structuredContent':observation([item('unrelated',rid='other')])}
+            v=observation([]);v['nextPosition']=None
+            return {'structuredContent':v}
+        self.native.responses['t3_thread_read']=respond
+        with self.assertRaises(Conflict):run(self.client.original_result(RUN,progress=progress))
+
+    def test_later_complete_original_message_replaces_oversized_earlier_one(self):
+        earlier=item('a'*32769,pos=1,truncated=True)
+        final=item('final answer',pos=2);final['itemId']='item-2'
+        self.native.detail['items']=[earlier,final];self.native.detail['nextPosition']=2
+        result=run(self.client.original_result(RUN))
+        self.assertTrue(result.complete);self.assertEqual(result.answer,'final answer')
+
     def test_credentials_never_sent(self):
         with self.assertRaises(ValueError):run(self.client.send(THREAD,request_id='x',message='sk-admin-'+'a'*50))
         self.assertFalse(self.native.calls)
@@ -290,6 +348,223 @@ class ClientTests(unittest.TestCase):
     def test_bool_is_not_a_cursor_or_timeout(self):
         with self.assertRaises(ValueError):Cursor(THREAD,True)
         with self.assertRaises(ValueError):run(self.client.wait(RUN,timeout_ms=True))
+
+
+class NativeThreadToolsTests(unittest.TestCase):
+    def setUp(self):
+        import hashlib
+        self.native=Native(); self.schemas=copy.deepcopy(SCHEMAS)
+        self.schemas.update({
+            't3_thread_configure':schema('environmentId','threadId','modelSelection'),
+            't3_thread_organize':schema('environmentId','threadId','action','snoozedUntil'),
+            't3_queue':schema('environmentId','threadId','action','queuedRunId','text','beforeRunId','targetRunId','cursor','limit'),
+            't3_pending_request':schema('environmentId','threadId','action','requestId','answers'),
+        })
+        self.client=T3NativeClient(SCOPE,self.native,self.schemas)
+        self.updated=self.native.detail['thread']['updatedAt']
+        self.config=dict(threadId='thread-1',modelSelection={'instanceId':'capacity_fabric','model':'glm-5.3'},runtimeMode='approval-required',interactionMode='default')
+        self.queued={'run-q':dict(queuedRunId='run-q',text='original queued work',truncated=False)}
+        self.questions={'question-1':dict(requestId='question-1',questions=[dict(id='answer-1',question='Which bounded implementation?')])}
+        def configure(args):
+            if 'modelSelection' in args:
+                self.config['modelSelection']=copy.deepcopy(args['modelSelection'])
+                self.native.detail['thread'].update(providerInstanceId=args['modelSelection']['instanceId'],model=args['modelSelection']['model'])
+                return {'structuredContent':{'sequence':17}}
+            return {'structuredContent':self.config}
+        def organize(args):
+            self.native.detail['thread']['archived']=args['action']=='archive'
+            return {'structuredContent':{'sequence':18}}
+        def queue(args):
+            action=args['action'];rid=args.get('queuedRunId')
+            if action=='list':return {'structuredContent':dict(items=list(self.queued.values()),nextCursor=None)}
+            if rid not in self.queued:return {'isError':True,'structuredContent':{'code':'invalid_request'}}
+            if action=='read':return {'structuredContent':self.queued[rid]}
+            if action=='edit':self.queued[rid]['text']=args['text']
+            if action=='cancel':self.queued.pop(rid)
+            return {'structuredContent':{'sequence':19}}
+        def question(args):
+            if args['action']=='list':return {'structuredContent':{'requestIds':list(self.questions)}}
+            if args['action']=='read':return {'structuredContent':self.questions[args['requestId']]}
+            return {'structuredContent':{'sequence':20}}
+        self.native.responses.update(t3_thread_configure=configure,t3_thread_organize=organize,t3_queue=queue,t3_pending_request=question)
+        self.sha=hashlib.sha256(b'original queued work').hexdigest()
+
+    def mutations(self,name):
+        return [args for n,args in self.native.calls if n==name and (('modelSelection' in args) if name=='t3_thread_configure' else args.get('action') not in ('read','list'))]
+
+    def test_native_second_toolkit_capabilities_are_discovered(self):
+        c=self.client.capabilities()
+        for key in ('archive','model_configuration','queue_management','pending_questions'):self.assertTrue(c[key])
+        self.assertFalse(c['lifecycle_extension'])
+
+    def test_configuration_is_read_without_native_mutation(self):
+        self.assertEqual(run(self.client.configuration(THREAD)),self.config)
+        self.assertFalse(self.mutations('t3_thread_configure'))
+
+    def test_set_model_explicit_capacity_and_modes_retained(self):
+        result=run(self.client.set_model(THREAD,request_id='model-change',model='fabric/fast',expected_updated_at=self.updated))
+        self.assertEqual(result['receipt']['sequence'],17)
+        self.assertEqual(result['observed']['modelSelection'],{'instanceId':'capacity_fabric','model':'fabric/fast'})
+        self.assertEqual(result['observed']['runtimeMode'],'approval-required')
+        self.assertFalse(result['native_atomic_precondition'])
+        self.assertEqual(len(self.mutations('t3_thread_configure')),1)
+        self.assertEqual(set(self.mutations('t3_thread_configure')[0]),{'environmentId','threadId','modelSelection'})
+
+    def test_model_change_rejects_stale_snapshot(self):
+        with self.assertRaises(Conflict):run(self.client.set_model(THREAD,request_id='x',model='fabric/fast',expected_updated_at='older'))
+        self.assertFalse(self.mutations('t3_thread_configure'))
+
+    def test_model_change_rejects_active_and_pending(self):
+        for patch in ({'activeRunId':'run-1'},{'pendingRequestCount':1},{'status':'queued'}):
+            with self.subTest(patch=patch):
+                self.native.detail=observation(**patch)
+                with self.assertRaises(Conflict):run(self.client.set_model(THREAD,request_id='x',model='fabric/fast',expected_updated_at=self.updated))
+        self.assertFalse(self.mutations('t3_thread_configure'))
+
+    def test_model_change_requires_delegated_work_settled(self):
+        self.native.responses['t3_thread_wait']={'structuredContent':dict(threadId='thread-1',runId='run-1',status='running',timedOut=True)}
+        with self.assertRaises(Conflict):run(self.client.set_model(THREAD,request_id='x',model='fabric/fast',expected_updated_at=self.updated))
+        self.assertFalse(self.mutations('t3_thread_configure'))
+
+    def test_model_change_unknown_model_cannot_fallback(self):
+        with self.assertRaises(Rejected):run(self.client.set_model(THREAD,request_id='x',model='foreign-model',expected_updated_at=self.updated))
+        self.assertFalse(self.mutations('t3_thread_configure'))
+
+    def test_model_readback_failure_retains_committed_sequence(self):
+        original=self.native.responses['t3_thread_configure'];changed=[False]
+        def fail(args):
+            if 'modelSelection' in args:changed[0]=True;return original(args)
+            if changed[0]:raise ConnectionError('lost readback')
+            return original(args)
+        self.native.responses['t3_thread_configure']=fail
+        with self.assertRaises(EffectUnknown) as c:run(self.client.set_model(THREAD,request_id='x',model='fabric/fast',expected_updated_at=self.updated))
+        self.assertEqual(c.exception.receipt,{'sequence':17})
+        self.assertEqual(len(self.mutations('t3_thread_configure')),1)
+
+    def test_model_permission_drift_not_reported_success(self):
+        original=self.native.responses['t3_thread_configure']
+        def mutate(args):
+            result=original(args)
+            if 'modelSelection' in args:self.config['runtimeMode']='full-access'
+            return result
+        self.native.responses['t3_thread_configure']=mutate
+        with self.assertRaises(EffectUnknown):run(self.client.set_model(THREAD,request_id='x',model='fabric/fast',expected_updated_at=self.updated))
+
+    def test_archive_and_unarchive_reuse_existing_tool(self):
+        result=run(self.client.archive(THREAD,request_id='arc',expected_updated_at=self.updated))
+        self.assertTrue(result['observed']['archived']);self.assertFalse(result['native_atomic_precondition'])
+        result=run(self.client.archive(THREAD,request_id='unarc',expected_updated_at=self.updated,archived=False))
+        self.assertFalse(result['observed']['archived'])
+        self.assertEqual([x['action'] for x in self.mutations('t3_thread_organize')],['archive','unarchive'])
+
+    def test_archive_refuses_active_run(self):
+        self.native.detail['thread']['activeRunId']='run-1'
+        with self.assertRaises(Conflict):run(self.client.archive(THREAD,request_id='arc',expected_updated_at=self.updated))
+        self.assertFalse(self.mutations('t3_thread_organize'))
+
+    def test_unarchive_refuses_noncapacity_execution_route(self):
+        self.native.detail['thread'].update(archived=True,providerInstanceId='direct-provider')
+        with self.assertRaises(Rejected):run(self.client.archive(THREAD,request_id='unarc',expected_updated_at=self.updated,archived=False))
+        self.assertFalse(self.mutations('t3_thread_organize'))
+
+    def test_archive_same_state_is_not_a_second_mutation(self):
+        self.native.detail['thread']['archived']=True
+        with self.assertRaises(Conflict):run(self.client.archive(THREAD,request_id='arc',expected_updated_at=self.updated))
+        self.assertFalse(self.mutations('t3_thread_organize'))
+
+    def test_archive_bad_readback_retains_native_receipt(self):
+        self.native.responses['t3_thread_organize']={'structuredContent':{'sequence':18}}
+        with self.assertRaises(EffectUnknown) as c:run(self.client.archive(THREAD,request_id='arc',expected_updated_at=self.updated))
+        self.assertEqual(c.exception.receipt,{'sequence':18})
+
+    def test_queue_list_and_exact_read(self):
+        self.assertEqual(run(self.client.queue_list(THREAD))['items'],list(self.queued.values()))
+        self.assertEqual(run(self.client.queue_read(THREAD,'run-q'))['text'],'original queued work')
+        self.assertFalse(self.mutations('t3_queue'))
+
+    def test_queue_duplicate_and_stalled_cursor_refused(self):
+        for body in [dict(items=[self.queued['run-q']]*2,nextCursor=None),dict(items=[],nextCursor=0)]:
+            self.native.responses['t3_queue']={'structuredContent':body}
+            with self.assertRaises(Unavailable):run(self.client.queue_list(THREAD))
+
+    def test_queue_read_foreign_run_is_rejected(self):
+        self.native.responses['t3_queue']={'structuredContent':dict(queuedRunId='other',text='x',truncated=False)}
+        with self.assertRaises(Conflict):run(self.client.queue_read(THREAD,'run-q'))
+
+    def test_queue_edit_preserves_target_and_explicit_original_text(self):
+        r=run(self.client.queue_change(THREAD,request_id='edit',action='edit',queued_run_id='run-q',text='revised bounded work',expected_text_sha256=self.sha))
+        self.assertEqual(r,{'sequence':19});self.assertEqual(self.queued['run-q']['text'],'revised bounded work')
+        self.assertEqual(len(self.mutations('t3_queue')),1)
+
+    def test_queue_stale_or_truncated_text_not_overwritten(self):
+        with self.assertRaises(Conflict):run(self.client.queue_change(THREAD,request_id='edit',action='edit',queued_run_id='run-q',text='x',expected_text_sha256='a'*64))
+        self.queued['run-q']['truncated']=True
+        with self.assertRaises(Conflict):run(self.client.queue_change(THREAD,request_id='edit',action='edit',queued_run_id='run-q',text='x',expected_text_sha256=self.sha))
+        self.assertFalse(self.mutations('t3_queue'))
+
+    def test_queue_cancel_does_not_need_healthy_capacity(self):
+        self.native.responses['orchestrator_capabilities']=ConnectionError('down')
+        run(self.client.queue_change(THREAD,request_id='cancel',action='cancel',queued_run_id='run-q'))
+        self.assertFalse(self.queued)
+        self.assertNotIn('orchestrator_capabilities',[n for n,_ in self.native.calls])
+
+    def test_queue_reorder_to_end_is_explicit_null(self):
+        run(self.client.queue_change(THREAD,request_id='reorder',action='reorder',queued_run_id='run-q'))
+        self.assertIsNone(self.mutations('t3_queue')[0]['beforeRunId'])
+
+    def test_queue_promotion_requires_exact_active_capacity_run(self):
+        self.native.detail['thread']['activeRunId']='run-active'
+        run(self.client.queue_change(THREAD,request_id='promote',action='promote_to_steer',queued_run_id='run-q',target_run_id='run-active'))
+        self.assertEqual(self.mutations('t3_queue')[0]['targetRunId'],'run-active')
+
+    def test_queue_promotion_refuses_replaced_target(self):
+        self.native.detail['thread']['activeRunId']='changed'
+        with self.assertRaises(Conflict):run(self.client.queue_change(THREAD,request_id='p',action='promote_to_steer',queued_run_id='run-q',target_run_id='old'))
+        self.assertFalse(self.mutations('t3_queue'))
+
+    def test_queue_promotion_never_uses_direct_provider(self):
+        self.native.detail['thread'].update(activeRunId='run-active',providerInstanceId='other')
+        with self.assertRaises(Rejected):run(self.client.queue_change(THREAD,request_id='p',action='promote_to_steer',queued_run_id='run-q',target_run_id='run-active'))
+        self.assertFalse(self.mutations('t3_queue'))
+
+    def test_queue_unrelated_arguments_refuse_before_native_read(self):
+        with self.assertRaises(ValueError):run(self.client.queue_change(THREAD,request_id='x',action='cancel',queued_run_id='run-q',text='unrelated'))
+        self.assertFalse(self.native.calls)
+
+    def test_pending_questions_are_native_user_questions_only(self):
+        self.assertEqual(run(self.client.pending_questions(THREAD)),('question-1',))
+        self.assertEqual(run(self.client.read_question(THREAD,'question-1')),self.questions['question-1'])
+        self.assertFalse(self.mutations('t3_pending_request'))
+
+    def test_answer_only_original_question_and_capacity(self):
+        receipt=run(self.client.answer_question(THREAD,request_id='question-1',operation_id='answer',answers={'answer-1':'Preserve the existing interface'}))
+        self.assertEqual(receipt,{'sequence':20})
+        args=self.mutations('t3_pending_request')[0]
+        self.assertEqual(args['requestId'],'question-1');self.assertEqual(args['action'],'respond')
+        self.assertNotIn('permission',args)
+
+    def test_answer_unknown_question_cannot_mutate(self):
+        with self.assertRaises(Conflict):run(self.client.answer_question(THREAD,request_id='question-1',operation_id='answer',answers={'permission-approval':True}))
+        self.assertFalse(self.mutations('t3_pending_request'))
+
+    def test_answer_secret_refused_before_native_call(self):
+        with self.assertRaises(ValueError):run(self.client.answer_question(THREAD,request_id='question-1',operation_id='a',answers={'answer-1':'sk-admin-'+'a'*50}))
+        self.assertFalse(self.native.calls)
+
+    def test_answer_unready_capacity_does_not_fallback(self):
+        self.native.detail['thread']['providerInstanceId']='direct'
+        with self.assertRaises(Rejected):run(self.client.answer_question(THREAD,request_id='question-1',operation_id='a',answers={'answer-1':'x'}))
+        self.assertFalse(self.mutations('t3_pending_request'))
+
+    def test_unsupported_second_toolkit_is_not_invented(self):
+        client=T3NativeClient(SCOPE,self.native,SCHEMAS)
+        with self.assertRaises(Unavailable):run(client.configuration(THREAD))
+        self.assertNotIn('t3_thread_configure',[n for n,_ in self.native.calls])
+
+    def test_native_invalid_request_is_not_transport_unknown(self):
+        self.native.responses['t3_queue']={'isError':True,'structuredContent':{'code':'invalid_request'}}
+        with self.assertRaises(Rejected) as c:run(self.client.queue_read(THREAD,'run-q'))
+        self.assertEqual(c.exception.code,'invalid_request')
 
 
 if __name__ == '__main__':unittest.main()

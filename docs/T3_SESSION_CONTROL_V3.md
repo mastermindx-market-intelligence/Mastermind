@@ -58,20 +58,45 @@ T3/Executive execution owner must enforce Capacity-only policy at the actual nat
 effect. This release neither edits provider settings nor silently installs that
 admission patch. Catalog visibility alone is not funding/settlement proof.
 
-## Archive, delete and live model changes
+## Native configuration, archive, queue and questions
 
-At pinned upstream `pingdotgg/t3code@0770446`, T3 MCP exposes launch/send/read/wait/
-interrupt, while `t3_thread_update` only changes metadata. Archive/unarchive,
-delete and model changes are not aliases for that tool. A native extension is
-being implemented in an isolated T3-owned scratch checkout; it is not installed
-in the running Electron app. The extension must reuse T3's command/event owner,
-permission middleware and truthful atomic expected-state checks. A client must
-report unavailable until its exact schema is advertised.
+**Capability-census correction:** the second native toolkit at
+`apps/server/src/mcp/toolkits/thread/` in exact upstream
+`0770446869d247a8b28c27d7ed93f47f8ff0c1e4` already provides:
 
-Delete is explicit, exact-target and non-bulk: no project/worktree/files deletion.
-Model changes are Capacity-only and at an idle boundary, preserving conversation
-history. Stop-current-run and Stop-all are different operations. A generic user
-request to build deletion features is not permission to delete existing threads.
+- `t3_thread_configure`: read/set provider-model selection; native permission
+  modes stay unchanged. The client targets only `capacity_fabric` and observes
+  an idle, settled-work boundary, then verifies model/mode readback.
+- `t3_thread_organize`: archive/unarchive plus other native organization actions.
+  The client exposes archive/unarchive on an observed idle exact target, with
+  native readback. Unarchive refuses a non-Capacity execution route.
+- `t3_queue`: list/read/edit/cancel/reorder/promote-to-steer. Exact native queued
+  run identity remains authoritative. Edits require the observed text fingerprint;
+  clipped/stale text refuses. Promotion requires the exact current active run
+  and Capacity selection. Cancel does not need a healthy inference provider.
+- `t3_pending_request`: list/read/respond to **user-input questions only**.
+  Permission approvals are not exposed by this tool. Responses must name the
+  actual question and stay inside the original work/authority envelope.
+
+The earlier orchestrator-toolkit-only absence statement was incomplete. Reuse
+these native operations; do not introduce replacement model/archive/queue owners.
+These APIs commit through T3's command owner and return a native sequence, not
+parent acceptance. Readback loss retains the committed sequence in the unknown
+postcondition error. Client-side expected timestamp/text checks are **not atomic
+multi-writer CAS**; their results explicitly report this limitation. Preserve
+one modifying owner, or require the native strict extension before raced writes.
+
+**Deletion and strict atomic guards:** the original native extension task is
+being reviewed in its isolated scratch checkout. The first candidate's
+check-then-act guards do not satisfy strict atomic acceptance and are not accepted
+for installation. Preconditions must be joined to the original serialized native
+command decision/commit boundary, not merely checked in an MCP handler. Delete
+must be explicit, exact-target, non-bulk and native-tombstone-only: no project,
+worktree or file deletion. The parent may not invent or call absent native tools.
+
+Stop-current-run and Stop-all are different operations. A generic request to
+build deletion features is not permission to delete existing user threads. No
+live Electron/server patch or restart is part of these source clients.
 
 ## Shared notes through the existing source owner
 
@@ -139,4 +164,36 @@ separately at closeout; never convert this document into a completion claim.
 - https://github.com/pingdotgg/t3code/blob/0770446/docs/user/outside-agents.md
 - https://github.com/pingdotgg/t3code/blob/0770446/packages/contracts/src/orchestratorMcp.ts
 - https://github.com/pingdotgg/t3code/blob/0770446/apps/server/src/mcp/toolkits/orchestrator/tools.ts
+- https://github.com/pingdotgg/t3code/blob/0770446869d247a8b28c27d7ed93f47f8ff0c1e4/apps/server/src/mcp/toolkits/thread/tools.ts
 - https://developers.openai.com/plugins/build/mcp-events
+
+## Result-resume and stop-scope hardening
+
+`original_result` now returns `ResultProgress` when its page budget ends. Pass that
+progress back to continue: it retains only original run/cursor/item references,
+not a caller-supplied answer. The final result re-reads the candidate from the
+native owner, so an earlier result is not lost when later unrelated turns span
+more pages. Changed lineage or a forged/missing candidate refuses. A later complete
+original assistant result supersedes an earlier oversized message.
+
+Stop now confirms native project/thread identity even when model capacity is down.
+It still never requires the provider to be available to stop, but a fabricated
+client-side Thread object cannot target a different project. These changes add
+seven focused regressions. The current combined client/notes/mission suite has
+118 isolated cases after adding the original second-toolkit coverage.
+
+## Host CLI control path and active native work
+
+The incumbent CLI's `thread` subcommands do not yet expose all native MCP tools.
+A disjoint Capacity-backed T3 coordinator (`web-t3-cli-adapter-20261109-a1`) was
+assigned exactly one native implementation child to extend the existing CLI with
+a closed tool allowlist while reusing its native `withThreadTools` and
+EnvironmentAuth lifecycle. No replacement credential store, public server or
+live application restart is allowed. This is active source work, not a claimed
+installed command. The original lifecycle worker and its queued review/notes
+phases remain in their own native thread; neither lane overwrites the other.
+
+T3's own `up --connect` help explicitly warns that a noninteractive restart can
+stop running turns. It has not been invoked against active user sessions. Direct
+cloud activation therefore remains a deliberate native maintenance/OAuth step,
+not a hidden side effect of installing this skill.
