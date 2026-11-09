@@ -14,6 +14,7 @@ from ops.native_fabric.unified_router.gateway import Settings, create_app
 from ops.native_fabric.unified_router.routes import Route, RouteState, select_route
 from ops.native_fabric.unified_router.wire import (
     OpenAIStreamTranslator,
+    WireTranslationError,
     anthropic_to_openai,
     openai_to_anthropic,
 )
@@ -386,3 +387,97 @@ def test_config_file_route_key_pointers(tmp_path):
     assert key == "key-b" and base == ""
     with pytest.raises(ValueError):
         config_file_route_key(str(config), "token-plan.missing")
+
+
+@run_async_test
+async def test_missing_model_is_bounded_constant_refusal(tmp_path):
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/messages",
+                                          headers={"Authorization": f"Bearer {TOKEN}"},
+                                          json={"max_tokens": 8, "messages": []})
+            assert response.status_code == 400
+            error = response.json()["error"]
+            assert error["message"] == "FABRIC_EXACT_MODEL_REQUIRED"
+            assert error["type"] == "invalid_request_error"
+
+
+@run_async_test
+async def test_credential_failure_never_leaks_path_detail(tmp_path):
+    missing = tmp_path / "absent-glm-config.json"
+    config_route = Route(route_id="glm_missing", kind="config_file",
+                         base_url="https://api.example/api/anthropic",
+                         wire="anthropic", models=("glm-5.3",), priority=1,
+                         config_path=str(missing), key_pointer="api_key")
+    app = create_app(settings(tmp_path, routes=(config_route,)),
+                     transport=httpx.MockTransport(lambda req: httpx.Response(200, json={})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/messages",
+                                          headers={"Authorization": f"Bearer {TOKEN}"},
+                                          json=anthropic_body("glm-5.3"))
+            assert response.status_code == 503
+            error = response.json()["error"]
+            assert error["code"] == "credential_unavailable"
+            assert error["message"] == "fabric route unavailable: credential_unavailable"
+            assert str(missing) not in response.text
+            assert "api.example" not in response.text
+
+
+@run_async_test
+async def test_openai_translation_refusal_keeps_constant_reason(tmp_path):
+    write_auth_store(tmp_path)
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post(
+                "/v1/messages", headers={"Authorization": f"Bearer {TOKEN}"},
+                json=anthropic_body("minimax-m3",
+                                    messages=[{"role": "wizard", "content": "hi"}]))
+            assert response.status_code == 400
+            error = response.json()["error"]
+            assert error["message"] == "FABRIC_TRANSLATE_ROLE"
+            assert error["type"] == "invalid_request_error"
+
+
+@run_async_test
+async def test_non_constant_exception_text_never_reaches_client(tmp_path, monkeypatch):
+    write_auth_store(tmp_path)
+    hostile = "translation exploded at /Users/chriswong/.glm/config.json key sk-ant-abcdefghij"
+
+    def raise_hostile(body):
+        raise WireTranslationError(hostile)
+
+    monkeypatch.setattr(gateway_module, "anthropic_to_openai", raise_hostile)
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/messages",
+                                          headers={"Authorization": f"Bearer {TOKEN}"},
+                                          json=anthropic_body("minimax-m3"))
+            assert response.status_code == 400
+            error = response.json()["error"]
+            assert error["message"] == "FABRIC_TRANSLATE_INVALID"
+            for fragment in ("/Users/chriswong", "sk-ant-", "exploded"):
+                assert fragment not in response.text
+
+
+@run_async_test
+async def test_openai_response_translation_failure_is_bounded_502(tmp_path):
+    write_auth_store(tmp_path)
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: streamed(200, {"id": "c", "object": "chat.completion",
+                                   "choices": [], "usage": {}})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/messages",
+                                          headers={"Authorization": f"Bearer {TOKEN}"},
+                                          json=anthropic_body("minimax-m3"))
+            assert response.status_code == 502
+            error = response.json()["error"]
+            assert error["message"] == "translation failed: FABRIC_TRANSLATE_RESPONSE"
+            assert error["type"] == "fabric_route_error"

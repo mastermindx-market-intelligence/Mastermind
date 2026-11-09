@@ -14,7 +14,9 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -46,6 +48,22 @@ from ops.native_fabric.unified_router.wire import (
 
 ALLOWED = {("POST", "v1/messages"), ("POST", "v1/messages/count_tokens"),
            ("GET", "v1/models")}
+
+_log = logging.getLogger(__name__)
+
+# The only exception text a client may ever see is a router-authored refusal
+# reason of constant FABRIC_* shape (py/stack-trace-exposure): free-form
+# detail from OSError/ValueError paths stays in the server-side log.
+_FABRIC_REASON_RE = re.compile(r"^FABRIC_[A-Z0-9_]+$")
+
+
+def _public_reason(exc: Exception, fallback: str) -> str:
+    """Bound a caught exception to a publishable constant reason code."""
+    text = str(exc)
+    if _FABRIC_REASON_RE.match(text):
+        return text
+    _log.warning("unified router withheld exception detail: %s", type(exc).__name__)
+    return fallback
 
 
 @dataclass(frozen=True)
@@ -280,9 +298,10 @@ def create_app(cfg: Settings | None = None, *,
         try:
             candidates = _model_candidates(payload, cfg.aliases)
         except WireTranslationError as exc:
-            return JSONResponse({"error": {"message": str(exc),
-                                           "type": "invalid_request_error"}},
-                                status_code=400)
+            return JSONResponse({"error": {
+                "message": _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
+                "type": "invalid_request_error"}},
+                status_code=400)
         alias = ""
         resolved = ""
         route = None
@@ -313,9 +332,13 @@ def create_app(cfg: Settings | None = None, *,
                                         cooldown_s=cfg.route_cooldown_s)
             state.refused += 1
             state.count(route.route_id, "refused")
-            return JSONResponse({"error": {"message": f"fabric route unavailable: {exc}",
-                                           "type": "fabric_route_error"}},
-                                status_code=HTTPStatus.SERVICE_UNAVAILABLE)
+            _log.warning("route %s credential unavailable: %s",
+                         route.route_id, type(exc).__name__)
+            return JSONResponse({"error": {
+                "message": "fabric route unavailable: credential_unavailable",
+                "type": "fabric_route_error",
+                "code": "credential_unavailable"}},
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE)
 
         forwarded = dict(payload, model=route.wire_model(resolved))
         wants_stream = payload.get("stream") is True
@@ -405,9 +428,10 @@ def create_app(cfg: Settings | None = None, *,
         try:
             openai_request = anthropic_to_openai(payload)
         except WireTranslationError as exc:
-            return JSONResponse({"error": {"message": str(exc),
-                                           "type": "invalid_request_error"}},
-                                status_code=400)
+            return JSONResponse({"error": {
+                "message": _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
+                "type": "invalid_request_error"}},
+                status_code=400)
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/chat/completions",
             headers={"authorization": authorization,
@@ -431,9 +455,11 @@ def create_app(cfg: Settings | None = None, *,
             try:
                 translated = openai_to_anthropic(json.loads(data), model=payload["model"])
             except (ValueError, WireTranslationError) as exc:
-                return JSONResponse({"error": {"message": f"translation failed: {exc}",
-                                               "type": "fabric_route_error"}},
-                                    status_code=502)
+                return JSONResponse({"error": {
+                    "message": "translation failed: "
+                               + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
+                    "type": "fabric_route_error"}},
+                    status_code=502)
             return JSONResponse(translated)
         translator = OpenAIStreamTranslator(model=payload["model"])
 
