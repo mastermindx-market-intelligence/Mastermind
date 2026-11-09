@@ -31,6 +31,8 @@ RECEIPT = LIVE / "t3_durable_canary_receipt_r2.json"
 R1_RECEIPT = LIVE / "t3_durable_canary_receipt.json"
 #: r1 is immutable evidence: r2 never rewrote it.
 R1_RECEIPT_SHA256 = "e18afad965eba1a2d3755760bc480158cb72774de449612eaa9ba915f24d0038"
+#: The r2 receipt is immutable live evidence (re-audit #3 R5): pin its own bytes.
+R2_RECEIPT_SHA256 = "29692b54b421c4913976f138ebbe232fc3b87ab4ba276db6b2d8d953cdeff3b1"
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
@@ -94,6 +96,9 @@ class R2ReceiptStructureTests(unittest.TestCase):
         self.assertRegex(ns["client_a_upstream_namespace_sha256"], _HEX64)
         self.assertRegex(ns["client_a_qualified_namespace_sha256"], _HEX64)
         self.assertIn("client:<auth session id>", ns["attestation"])
+
+    def test_r2_receipt_bytes_are_pinned(self) -> None:
+        self.assertEqual(hashlib.sha256(RECEIPT.read_bytes()).hexdigest(), R2_RECEIPT_SHA256)
 
     def test_r1_receipt_is_untouched(self) -> None:
         self.assertEqual(hashlib.sha256(R1_RECEIPT.read_bytes()).hexdigest(), R1_RECEIPT_SHA256)

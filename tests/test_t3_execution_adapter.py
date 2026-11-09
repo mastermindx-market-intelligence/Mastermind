@@ -147,6 +147,10 @@ class FakeT3Port:
     def authenticated_namespace(self) -> str | None:
         return self.principal
 
+    def expected_launch_thread_id(self, client_request_id: str) -> str:
+        """Mirror this fake's principal-independent minting rule (re-audit R1)."""
+        return f"thr-{client_request_id[:8]}"
+
     async def launch_thread(self, envelope) -> T3ThreadLaunchReceipt:
         key = envelope.client_request_id
         self.trace.append(("launch", key))

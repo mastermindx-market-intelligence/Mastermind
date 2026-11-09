@@ -2650,6 +2650,32 @@ class T3ExecutionAdapter:
                 "original thread cannot prove a replay returns the ORIGINAL "
                 "execution (the launching principal was never recorded)"
             )
+        # Re-audit #3 R1: a replay is a REAL launch call upstream.  Under a
+        # different OAuth client it would mint a SECOND thread before
+        # `_verify_replayed_thread` could refuse it.  So prove, with ZERO
+        # mutating calls, that the thread the CURRENT attested principal would
+        # own for this key IS the original thread; otherwise refuse typed.
+        principal = self._require_attested_principal("replay")
+        prover = getattr(self._port, "expected_launch_thread_id", None)
+        if not callable(prover):
+            raise T3NamespaceAttestationError(
+                "refused: this port cannot derive the thread id its principal "
+                f"({principal!r}) would own for the original key, so a "
+                "pre-durability replay cannot be proven to return the ORIGINAL "
+                "thread; nothing was sent (re-audit R1)",
+                reason="PRINCIPAL_UNPROVABLE",
+            )
+        expected_thread = str(prover(key) or "")
+        if expected_thread != original.provider_session_id:
+            raise T3NamespaceAttestationError(
+                "refused: the current authenticated principal "
+                f"({principal!r}) would own thread {expected_thread!r} for the "
+                f"original key, not the original thread "
+                f"{original.provider_session_id!r}; replaying here would mint a "
+                "second execution — recover under the original OAuth client "
+                "(nothing was sent)",
+                reason="PRINCIPAL_MISMATCH",
+            )
         envelope = self._reconstruct_envelope(spec, key)
         return await self._replay_and_adopt(spec, envelope, original, None)
 
@@ -3379,7 +3405,25 @@ class T3McpToolPort:
         self._call_tool = call_tool
         self._upstream_namespace = namespace
         self._launch_arguments = dict(launch_arguments or {})
+        if "environmentId" in self._launch_arguments:
+            # Re-audit #3 R4: the donor's linked-environment forwarding
+            # (PeerMcpClient) renews sessions on 404 and remaps 401 to
+            # capability_denied, so an allowlisted pre-dispatch code can follow
+            # a commit on the peer.  This port only speaks to the local
+            # environment; forwarding is refused before anything is sent.
+            raise T3PortRefusalError(
+                "refusing launch_arguments.environmentId: linked-environment "
+                "forwarding changes the error semantics the lost-reply "
+                "classifier relies on (nothing was sent)"
+            )
         self.calls: list[dict[str, Any]] = []
+
+    def expected_launch_thread_id(self, client_request_id: str) -> str:
+        """The thread id THIS principal would own for ``client_request_id``
+        (upstream derivation over the attested upstream namespace); used by
+        the adapter to refuse a pre-durability replay under a foreign
+        principal with zero mutating calls (re-audit R1)."""
+        return t3_expected_launch_thread_id(self._upstream_namespace, str(client_request_id or ""))
 
     @classmethod
     def from_access_token(
@@ -3455,6 +3499,11 @@ class T3McpToolPort:
         if not key:
             raise T3PortRefusalError(f"refusing to {op} without a clientRequestId")
         arguments: dict[str, Any] = dict(self._launch_arguments)
+        if "environmentId" in arguments:
+            raise T3PortRefusalError(
+                f"refusing to {op} with environmentId (linked-environment "
+                "forwarding; nothing was sent)"
+            )
         arguments.update(
             title=envelope.title, message=envelope.message, clientRequestId=key,
         )

@@ -24,6 +24,7 @@ import unittest
 from pathlib import Path
 
 from control_plane.t3_execution_adapter import (
+    T3NamespaceAttestationError,
     SQLiteT3AdapterStateStore,
     T3ExecutionAdapter,
     T3ExecutionAdapterError,
@@ -81,6 +82,11 @@ class CountingT3Port:
 
     def authenticated_namespace(self) -> str:
         return self.principal
+
+    def expected_launch_thread_id(self, client_request_id: str) -> str:
+        """This fake mints principal-INDEPENDENT ids (``thr-<key8>``), so the
+        derivation is the same rule; principal-qualified fakes override it."""
+        return f"thr-{client_request_id[:8]}"
 
     async def launch_thread(self, envelope) -> T3ThreadLaunchReceipt:
         self.launch_count += 1
@@ -1284,3 +1290,82 @@ class A4ReauditN3StoreTests(unittest.TestCase):
         SQLiteT3AdapterStateStore(path).close()  # reopen of our own table
         SQLiteT3AdapterStateStore.open_read_only(path).close()
 
+
+
+
+class PrincipalQualifiedT3Port(CountingT3Port):
+    """Fake upstream that, like T3, derives the thread id from (principal,
+    key): the same key under another OAuth client is a DIFFERENT thread."""
+
+    def _thread_for(self, key: str) -> str:
+        return f"thr-{self.principal}-{key[:8]}"
+
+    def expected_launch_thread_id(self, client_request_id: str) -> str:
+        return self._thread_for(client_request_id)
+
+    async def launch_thread(self, envelope) -> T3ThreadLaunchReceipt:
+        self.launch_count += 1
+        key = envelope.client_request_id
+        receipt = self.receipts_by_key.get(key)
+        if receipt is None:
+            receipt = T3ThreadLaunchReceipt(
+                thread_id=self._thread_for(key), run_id=f"t3run-{key[:8]}",
+                project_id="proj-1", status="running",
+                link=f"https://t3.example/thread/{self._thread_for(key)}",
+                created_at="2026-11-08T12:00:00+00:00",
+                request_namespace=envelope.request_namespace, client_request_id=key,
+            )
+            self.receipts_by_key[key] = receipt
+        return receipt
+
+
+class ReAuditR1NoRowReplayTests(unittest.IsolatedAsyncioTestCase):
+    """Re-audit #3 R1: a pre-durability recovery (store has NO row) must never
+    replay under a principal that cannot prove it owns the original thread —
+    a replay is a real launch call and would mint a second thread upstream."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    async def _original(self):
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        port_a = PrincipalQualifiedT3Port(principal=_PRINCIPAL_A)
+        adapter_a = _adapter(_store(self.tmpdir, "a.sqlite3"), port_a)
+        ref = await adapter_a.start(spec)
+        return spec, port_a, ref, _recovery_binding(spec, ref)
+
+    async def test_foreign_principal_is_refused_with_zero_mutating_calls(self) -> None:
+        spec, port_a, ref, binding = await self._original()
+        port_b = PrincipalQualifiedT3Port(principal="oauth-client-B")
+        port_b.receipts_by_key.update(port_a.receipts_by_key)  # upstream knows A's thread
+        adapter_b = _adapter(SQLiteT3AdapterStateStore(self.tmpdir / "lost-row.sqlite3"), port_b)
+        with self.assertRaises(T3NamespaceAttestationError) as ctx:
+            await adapter_b.reattach(spec, binding)
+        self.assertEqual(ctx.exception.reason, "PRINCIPAL_MISMATCH")
+        self.assertEqual((port_b.launch_count, port_b.replay_count), (0, 0))
+        self.assertEqual(len(port_a.receipts_by_key), 1)  # upstream still has ONE thread
+        self.assertIsNone(adapter_b.retained_original_ref(spec.run_id))
+
+    async def test_port_without_derivation_is_refused_before_any_call(self) -> None:
+        spec, port_a, ref, binding = await self._original()
+        class Underivable(PrincipalQualifiedT3Port):
+            expected_launch_thread_id = None  # type: ignore[assignment]
+        port = Underivable(principal=_PRINCIPAL_A)
+        port.receipts_by_key.update(port_a.receipts_by_key)
+        adapter = _adapter(SQLiteT3AdapterStateStore(self.tmpdir / "lost-row2.sqlite3"), port)
+        with self.assertRaises(T3NamespaceAttestationError) as ctx:
+            await adapter.reattach(spec, binding)
+        self.assertEqual(ctx.exception.reason, "PRINCIPAL_UNPROVABLE")
+        self.assertEqual((port.launch_count, port.replay_count), (0, 0))
+
+    async def test_original_principal_still_replays_and_adopts(self) -> None:
+        spec, port_a, ref, binding = await self._original()
+        port_a2 = PrincipalQualifiedT3Port(principal=_PRINCIPAL_A)
+        port_a2.receipts_by_key.update(port_a.receipts_by_key)
+        adapter = _adapter(SQLiteT3AdapterStateStore(self.tmpdir / "lost-row3.sqlite3"), port_a2)
+        adopted = await adapter.reattach(spec, binding)
+        self.assertEqual(adopted.provider_session_id, ref.provider_session_id)
+        self.assertEqual((port_a2.launch_count, port_a2.replay_count), (0, 1))
+        self.assertEqual(len(port_a.receipts_by_key), 1)
