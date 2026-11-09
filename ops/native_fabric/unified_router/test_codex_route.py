@@ -302,7 +302,7 @@ class TestGatewayResponsesRoute(FabricTestCase):
                                       "messages": [
                                           {"role": "user", "content": "hi"}]})
             assert reply.status_code == 503
-            assert "exhausted" in reply.json()["error"]["message"]
+            assert reply.json()["error"]["code"] == "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED"
 
 
 if __name__ == "__main__":

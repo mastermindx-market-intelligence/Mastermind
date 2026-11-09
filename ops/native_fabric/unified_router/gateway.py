@@ -403,8 +403,8 @@ def create_app(cfg: Settings | None = None, *,
                 state.refused += 1
                 state.count(route.route_id, "refused")
                 return JSONResponse({"error": {
-                    "message": f"fabric route unavailable: {exc}",
-                    "type": "fabric_route_error"}},
+                    "message": f"fabric route unavailable: {exc.reason}",
+                    "type": "fabric_route_error", "code": exc.reason}},
                     status_code=HTTPStatus.SERVICE_UNAVAILABLE)
         try:
             authorization = _route_authorization(route, cfg)
@@ -574,11 +574,17 @@ def create_app(cfg: Settings | None = None, *,
                                  headers={"cache-control": "no-store"})
 
     class _ResponsesRouteRefused(RuntimeError):
-        """Admission-time refusal; no upstream effect has occurred."""
+        """Admission-time refusal; no upstream effect has occurred.
 
-        def __init__(self, reason: str):
+        The client sees only the constant FABRIC_* reason code; free-form
+        upstream detail stays in the server-side log (py/stack-trace-exposure).
+        """
+
+        def __init__(self, reason: str, detail: str = ""):
             super().__init__(reason)
             self.reason = reason
+            if detail:
+                _log.warning("responses route %s: %s", reason, detail)
 
     def _oauth_headers(account) -> dict[str, str]:
         headers = {"authorization": f"Bearer {account.access_token}",
@@ -619,7 +625,8 @@ def create_app(cfg: Settings | None = None, *,
         accounts, eligible = _oauth_accounts(route)
         if not eligible:
             raise _ResponsesRouteRefused(
-                f"all {len(accounts)} accounts of pool {route.pool!r} are "
+                "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
+                f"pool {route.pool!r}: {len(accounts)} rows all "
                 "exhausted or benched")
         cursor = state.oauth_cursor.get(route.route_id, 0)
         tried: set[str] = set()
@@ -677,12 +684,14 @@ def create_app(cfg: Settings | None = None, *,
                         account.id, reset_at=reset_at,
                         reason=f"http_429 {detail}")
                 last_refusal = _ResponsesRouteRefused(
-                    f"account {account.label!r} refused 429 ({detail})")
+                    "FABRIC_OAUTH_ACCOUNT_LIMIT",
+                    f"account {account.label!r} 429: {detail}")
                 continue
             if status >= 500:
                 await response.aclose()
                 last_refusal = _ResponsesRouteRefused(
-                    f"account {account.label!r} upstream {status}")
+                    "FABRIC_OAUTH_UPSTREAM_5XX",
+                    f"account {account.label!r} status {status}")
                 continue
             if status >= 400:
                 data = await response.aread()
@@ -703,7 +712,8 @@ def create_app(cfg: Settings | None = None, *,
                         json.loads(data), model=payload["model"])
                 except (ValueError, WireTranslationError) as exc:
                     return JSONResponse({"error": {
-                        "message": f"translation failed: {exc}",
+                        "message": "translation failed: "
+                                   + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
                         "type": "fabric_route_error"}},
                         status_code=502)
                 return JSONResponse(translated)
@@ -741,7 +751,8 @@ def create_app(cfg: Settings | None = None, *,
 
             return StreamingResponse(stream(), media_type="text/event-stream",
                                      headers={"cache-control": "no-store"})
-        raise last_refusal or _ResponsesRouteRefused("no eligible account remained")
+        raise last_refusal or _ResponsesRouteRefused(
+            "FABRIC_OAUTH_NO_ACCOUNT")
 
     def _sse(event: str, data: str) -> bytes:
         return f"event: {event}\ndata: {data}\n\n".encode()
