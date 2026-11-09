@@ -623,6 +623,10 @@ def create_app(cfg: Settings | None = None, *,
             return JSONResponse({"error": {"message": str(exc),
                                            "type": "invalid_request_error"}},
                                 status_code=400)
+        # The ChatGPT Responses backend refuses non-streaming requests
+        # ("Stream must be set to true"); always stream upstream and
+        # aggregate server-side when the client did not ask for SSE.
+        responses_request["stream"] = True
         accounts, eligible = _oauth_accounts(route)
         if not eligible:
             raise _ResponsesRouteRefused(
@@ -706,18 +710,33 @@ def create_app(cfg: Settings | None = None, *,
             state.served += 1
             state.count(route.route_id, "served")
             if not wants_stream:
-                data = await response.aread()
-                await response.aclose()
+                translator = ResponsesStreamTranslator(model=payload["model"])
+                buffer = b""
                 try:
-                    translated = responses_to_anthropic(
-                        json.loads(data), model=payload["model"])
-                except (ValueError, WireTranslationError) as exc:
+                    async for part in response.aiter_bytes():
+                        buffer += part
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            text_line = line.decode("utf-8", "replace").strip()
+                            if not text_line.startswith("data:"):
+                                continue
+                            data = text_line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                translator.feed(json.loads(data))
+                            except ValueError:
+                                continue
+                finally:
+                    await response.aclose()
+                try:
+                    return JSONResponse(translator.to_message())
+                except WireTranslationError as exc:
                     return JSONResponse({"error": {
                         "message": "translation failed: "
                                    + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
                         "type": "fabric_route_error"}},
                         status_code=502)
-                return JSONResponse(translated)
             translator = ResponsesStreamTranslator(model=payload["model"])
 
             async def stream():

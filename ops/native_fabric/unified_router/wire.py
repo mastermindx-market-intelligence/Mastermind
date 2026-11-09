@@ -400,6 +400,32 @@ class ResponsesStreamTranslator:
         self._finish: str | None = None
         self._usage: dict = {}
         self._block_index = 0
+        self._text_parts: list[str] = []
+
+    def to_message(self) -> dict:
+        """Assemble the accumulated stream into one Messages response."""
+        content: list[dict] = []
+        text = "".join(self._text_parts)
+        if text:
+            content.append({"type": "text", "text": text})
+        for call_id in self._order:
+            tool = self._calls[call_id]
+            try:
+                arguments = json.loads(tool["arguments"] or "{}")
+            except ValueError:
+                raise WireTranslationError(
+                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            content.append({"type": "tool_use", "id": tool["id"],
+                            "name": tool["name"], "input": arguments})
+        if not content:
+            content.append({"type": "text", "text": ""})
+        return {"id": "msg_fabric", "type": "message", "role": "assistant",
+                "model": self.model, "content": content,
+                "stop_reason": self._finish or (
+                    "tool_use" if self._order else "end_turn"),
+                "stop_sequence": None,
+                "usage": {"input_tokens": self._usage.get("input_tokens", 0),
+                          "output_tokens": self._usage.get("output_tokens", 0)}}
 
     def _events(self, event: str, data: dict) -> tuple[str, str]:
         return event, json.dumps(data, separators=(",", ":"))
@@ -418,6 +444,7 @@ class ResponsesStreamTranslator:
         if kind == "response.output_text.delta":
             piece = event.get("delta")
             if isinstance(piece, str) and piece:
+                self._text_parts.append(piece)
                 if not self._text_open:
                     out.append(self._events("content_block_start", {
                         "type": "content_block_start", "index": self._block_index,

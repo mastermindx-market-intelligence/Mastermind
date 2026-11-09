@@ -253,11 +253,19 @@ class TestGatewayResponsesRoute(FabricTestCase):
             assert request.url.path.endswith("/responses")
             assert request.headers["authorization"].startswith("Bearer ")
             assert request.headers.get("ChatGPT-Account-ID") == "acct-1"
-            return httpx.Response(200, json={
-                "id": "resp_9", "status": "completed", "output": [
-                    {"type": "message", "content": [
-                        {"type": "output_text", "text": "CODEX-VIA-FABRIC"}]}],
-                "usage": {"input_tokens": 4, "output_tokens": 6}})
+            assert json.loads(request.content)["stream"] is True
+            events = [
+                {"type": "response.output_text.delta", "delta": "CODEX-VIA-"},
+                {"type": "response.output_text.delta", "delta": "FABRIC"},
+                {"type": "response.completed",
+                 "response": {"id": "resp_9", "status": "completed",
+                              "usage": {"input_tokens": 4,
+                                        "output_tokens": 6}}},
+            ]
+            body = "".join(f"data: {json.dumps(e)}\n\n" for e in events)
+            return httpx.Response(200, text=body,
+                                  headers={"content-type":
+                                           "text/event-stream"})
 
         with self._client(handler) as client:
             reply = client.post("/v1/messages",
