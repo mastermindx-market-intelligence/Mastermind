@@ -725,6 +725,20 @@ _R6_COMPUTED_RE = re.compile(
     r"|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]"
 )
 _R6_ROUGH_WORD_SPLIT_RE = re.compile(r"[\s;&|<>()\"'\\]+")
+#: r9 (REVIEW4 F1): the rough split above treats ``"``, ``'`` and ``\`` as
+#: word SEPARATORS, but the shell's quote removal JOINS adjacent quoted and
+#: unquoted segments into one word (``${x:-p}"ool"`` runs ``pool``). The
+#: joined reading deletes those characters first (``$"`` → ``"`` too: bash
+#: locale quoting) and then splits only on blanks and operators.
+_R9_QUOTE_CHARS_RE = re.compile(r"[\"'\\]")
+_R9_JOINED_WORD_SPLIT_RE = re.compile(r"[\s;&|<>()]+")
+
+
+def _r9_joined(text: str) -> str:
+    """The text with every quote character and backslash deleted (shell
+    quote removal: quotes delimit, they do not separate; a backslash only
+    makes the next character literal). Linear: one replace, one sub."""
+    return _R9_QUOTE_CHARS_RE.sub("", text.replace('$"', '"'))
 #: Codes that only explain a refusal; on their own they admit.
 _R6_ADVISORY_CODES = frozenset({"R6_DEFERRED_EXPANSION"})
 _R6_CLAUSES = {
@@ -1049,6 +1063,12 @@ _R8_DOLLAR_WORD_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])")
 _R8_BRACKET_RE = re.compile(r"\$[(\[{]|[`()\[\]{}]")
 #: Construct nesting the scope reader descends into; deeper text is in scope
 #: (and then refused as computed) — r7 stopped at 32 regex passes.
+#: r9 (REVIEW4 depth note), stated exactly: the reader recurses into a body
+#: only when it holds a ``$``/backtick, so a chain of k nested constructs is
+#: read down to reader depth k-1; the cap fires at reader depth 9, i.e. an
+#: honest ``echo $(echo $(… echo hi))`` chain is in scope from k = 10 nested
+#: constructs on (k ≤ 9 stays out). Pinned by
+#: ``test_r9_construct_depth_boundary_is_ten_nested_constructs``.
 _R8_MAX_CONSTRUCT_DEPTH = 8
 
 
@@ -1299,6 +1319,13 @@ def r6_names_wrapper(raw: str) -> bool:
     limit (REVIEW_2329 r2), not this gate's fence; so is a wholly wildcard
     operand (``python3 *.py``) and a name spelled with other characters
     (homoglyphs name a different file).
+
+    r9 (REVIEW4 F1): quoting is shell-transparent for scope. Both partial-
+    word readers also read the JOINED text (``"``, ``'``, ``\\`` deleted,
+    ``$"`` read as ``"``, before splitting on blanks and operators), so
+    ``${x:-p}"ool"``, ``"p"$(true)"ool"`` and ``$(printf p)"ool"`` are the
+    one word the shell builds. The r8 readings are kept (union: never
+    narrower than r8).
     """
     text = raw.replace("\\\n", "")
     text = _R6_ANSI_C_RE.sub(lambda match: _r6_decode_ansi_c(match.group(1)), text)
@@ -1322,9 +1349,20 @@ def r6_names_wrapper(raw: str) -> bool:
     for word in _R6_ROUGH_WORD_SPLIT_RE.split(marked):
         if word and _r6_partial_wrapper(word.rsplit("/", 1)[-1]):
             return True
+    # r9 (REVIEW4 F1): the same partial-word reading on the JOINED text —
+    # quotes and backslashes deleted before splitting, so ``$(printf p)"ool"``
+    # is the one word ``\x00ool`` the shell builds. Additive: it can only
+    # widen scope. Splitting also at a quoted blank or operator cannot cut a
+    # word whose basename spells a wrapper (a wrapper basename holds neither;
+    # one before the last literal ``/`` is followed by that basename restart).
+    for word in _R9_JOINED_WORD_SPLIT_RE.split(_r9_joined(marked)):
+        if word and _r6_partial_wrapper(word.rsplit("/", 1)[-1]):
+            return True
     # r8: the nesting-aware construct reading (arithmetic glue, split
-    # operator words) — additive: it can only widen scope.
-    return _r8_computed_glue(text)
+    # operator words) — additive: it can only widen scope. r9: read on the
+    # raw text (r8) AND on the joined text (``${x:-p}"ool"``, nested bodies
+    # included: each view recurses within itself, so the cost is 2× r8).
+    return _r8_computed_glue(text) or _r8_computed_glue(_r9_joined(text))
 
 
 class _R6Word:
@@ -3565,8 +3603,9 @@ def guard_native_child(tool_input: dict[str, object]) -> None:
 # constant depends on the host; so an ARMED session also runs under a
 # SIGALRM watchdog that, when it fires, writes a DENY decision and exits 0
 # well inside the provider's timeout. It interrupts Python code and long
-# ``re`` searches (the regex engine checks for signals). Unarmed sessions
-# keep the previous behaviour (no watchdog).
+# ``re`` searches (the regex engine checks for signals). r9 (REVIEW4 F4):
+# unarmed sessions run the same watchdog, but its firing there is NO
+# DECISION (exit 0, no output) — see ``main``.
 
 #: Default budget in seconds; the provider's timeout is 10 s.
 R8_WATCHDOG_DEFAULT_S = 7.0
@@ -3626,20 +3665,28 @@ def _r8_budget_denial() -> NoReturn:
 
 
 def main() -> None:
+    # r9 (REVIEW4 F4, choice (a)): the watchdog runs in EVERY session. Armed:
+    # exactly r8 — firing is a fail-closed DENY. Unarmed: firing is NO
+    # DECISION (exit 0, nothing written — never an allow), so adversarial
+    # CI-wait text (``gh …`` + newline/``do`` runs, heredoc markers) no
+    # longer stalls an unarmed hook into the provider's 10 s timeout, which
+    # the ``onFailure: "block"`` row turns into a blocked tool call.
     armed = shared_placement_armed()
-    previous = _r8_arm_watchdog() if armed else None
+    previous = _r8_arm_watchdog()
     try:
         _main_body()
         # Disarmed inside the try: an alarm landing between the verdict and
-        # here is still a (fail-closed) budget denial, never a traceback.
+        # here is still a budget firing (armed: fail-closed denial; unarmed:
+        # no decision), never a traceback.
         _r8_disarm_watchdog()
     except _R8BudgetExceeded:
-        _r8_budget_denial()
-    finally:
         if armed:
-            _r8_disarm_watchdog()
-            if previous is not None:
-                signal.signal(signal.SIGALRM, previous)
+            _r8_budget_denial()
+        # unarmed: no decision — return normally, nothing written.
+    finally:
+        _r8_disarm_watchdog()
+        if previous is not None:
+            signal.signal(signal.SIGALRM, previous)
 
 
 def _main_body() -> None:
