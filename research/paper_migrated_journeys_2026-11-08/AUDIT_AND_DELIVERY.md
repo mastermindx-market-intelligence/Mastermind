@@ -852,7 +852,7 @@ The candidate runtime has additional table columns and formats ATR/price as a pe
 
 ### Native populated view
 
-New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390**, is390×2892 at x4545/y−901, with an80px horizontal gap from the existing source-data companion. It reuses the existing dark phone shell, with content-sized sections and20px side padding.
+New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390**, is now390×2780 after the product/build separation below, at x4545/y−901, with an80px horizontal gap from the existing source-data companion. It reuses the existing dark phone shell, with content-sized sections and20px side padding.
 
 | Section | Native node | Delivered behavior and meaning |
 | --- | --- | --- |
@@ -861,7 +861,7 @@ New board `1JP-0`, **07 · Stage universe · Populated screener · Dark EN ·390
 | Navigation | `1OQ-0` | Six existing domain tabs reflow into two rows of44px targets. |
 | Screener controls | `1P6-0` | US, All stages, labeled company/ticker search and Export current view have44px targets. The five displayed samples are distinct from the1,300-name population. |
 | Five cards | `1PO-0` | Every original company, stage, last value, stored rating, ATR multiple, raw ATR/price fraction, recency and watch marker is preserved. Each watch target is44×44. |
-| Reading/source binding | `1T7-0` | Explains stored illustrative ratings, stale/unverified exclusion from current ranks, raw fraction versus ATR multiple, browser-local watch scope, and the proposed layout/runtime-proof boundary. |
+| Reading limits | `1T7-0` | Explains stored illustrative ratings, stale/unverified exclusion from current ranks, raw fraction versus ATR multiple, and browser-local watch scope. The implementation binding is in the separate build reference below. |
 | Closing disclosure | `1JQ-0` | Retains the illustrative companies/values and classification-as-research-context qualification. |
 
 The five card roots are `1PP-0`, `1QE-0`, `1R3-0`, `1RS-0` and `1SH-0`. CHAR retains **Stale ·2026-10-23**; DELT retains **Week unverified**. ALFA, BRAV and ECHO retain their2026-10-30 current classification labels. BRAV alone retains the filled watch star. The precise0.020 fraction and0.0 ATR zero remain distinct from unavailable evidence.
@@ -870,7 +870,7 @@ The desktop footer `U8-0` now points to **07 /1JP-0** and preserves its specimen
 
 ### Verification and release
 
-Root inspected native screenshots of the header, population grid, navigation, controls, all five complete cards, reading contract and desktop reference footer. Native bounds verify the final footer ends20px above the2892px frame bottom; all child sections fit the350px content width. No accent rail was added.
+Root inspected native screenshots of the header, population grid, navigation, controls, all five complete cards, reading contract and desktop reference footer. Initial native bounds verified the footer20px above the2892px frame bottom; the separated final layout below retains that20px bottom padding; all child sections fit the350px content width. No accent rail was added.
 
 Exact native text comparison passed:
 
@@ -892,6 +892,23 @@ All10 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish relea
 - `paper-stage-populated-phone-finish-20261109-c4-sd`
 
 This phase completes the missing populated phone design. It does not prove browser filtering, keyboard behavior, watch-storage persistence, CSV download, account behavior, deployment or release acceptance.
+
+
+### Separate the product view from its builder reference
+
+A subsequent clarity pass found that the new phone's candidate SHA, source ownership and unexecuted implementation notes belonged outside the product frame. Moved the existing binding frame `1TC-0` from the reading panel to new **BUILD · Stage populated phone · Source and interaction binding**, `1ZE-0`. Both original text nodes `1TD-0` / `1TE-0` and their exact text are preserved; this is relocation, not deletion of a requirement.
+
+The720×852 builder reference sits at x5015/y−901,80px to the right of the phone. It names the product, desktop and recovery targets; records the same immutable candidate; and explains the existing loaded-row, local-watch and current-view CSV owners, raw-fraction versus runtime-percentage difference, static proof and remaining browser obligations. It introduces no new owner or implementation claim.
+
+The phone now contains only the user-facing reading limits in `1T7-0`. Its height contracts from2892 to2780px; its final disclosure remains20px above the bottom. Root inspected the complete builder screenshot and the revised reading panel, verified native geometry, and compared both moved text nodes byte-for-byte. The row values, population values and desktop data were not touched by this relocation.
+
+All5 follow-up operations returned APPLIED_RESPONSE_OBSERVED; explicit finish released only `1JP-0` and `1ZE-0`.
+
+- `paper-stage-build-reference-copy-20261109-c4-sd`
+- `paper-stage-build-reference-content-20261109-c4-sd`
+- `paper-stage-build-reference-move-binding-20261109-c4-sd`
+- `paper-stage-build-reference-name-20261109-c4-sd`
+- `paper-stage-build-reference-finish-20261109-c4-sd`
 
 ### Additional bounded audits — preserve existing work
 
