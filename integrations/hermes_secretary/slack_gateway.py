@@ -410,11 +410,19 @@ def dispatch(profile: str, prompt: str, session_id: str | None, timeout: int,
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     sid = None
-    m = re.search(r"session_id:\s*(\S+)", out)
+    # Hermes -Q emits the exact session-id receipt to stderr, not stdout.
+    # Keep stdout strictly as user-facing assistant text; stderr is diagnostic.
+    m = re.search(r"(?m)^session_id:\s*([A-Za-z0-9_-]{8,160})\s*$", err)
     if m:
         sid = m.group(1)
-        out = out[: m.start()].strip()
-    if proc.returncode != 0 and not out:
+    else:
+        # Preserve compatibility with older Hermes releases which printed
+        # the receipt on stdout. Do not accidentally include it in the reply.
+        m = re.search(r"(?m)^session_id:\s*([A-Za-z0-9_-]{8,160})\s*$", out)
+        if m:
+            sid = m.group(1)
+            out = (out[:m.start()] + out[m.end():]).strip()
+    if proc.returncode != 0:
         return False, (err or f"hermes exited {proc.returncode}")[-1500:], sid
     return True, out or "(no output)", sid
 
