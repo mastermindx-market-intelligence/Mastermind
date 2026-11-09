@@ -6,9 +6,19 @@ floor (``control_plane/worker_adapter.py``) plus the optional
 child-execution contracts (WO-02, ``control_plane/child_execution_contracts.py``):
 
 * ``start`` validates the *current* broker ``ExecutionBinding.v1`` resolved
-  through the authenticated owner, launches only through the native
-  process/session owner port, and retains the original native
-  ``WorkerProcessRef`` *before* acknowledging start.
+  through the authenticated owner — type, adapter identity, worker
+  assignment, per-child Job/Attempt identity (``job_ref`` == ``spec.job_id``
+  and ``attempt_ref`` == ``spec.run_id``, shared with #2330's
+  ``execution_binding_compat`` validator), fence currency
+  (``fence_counter`` >= 1 and equal to the broker's current fence when one
+  is injected) and a non-empty, unexpired lease — launches only through the
+  native process/session owner port, and retains the original native
+  ``WorkerProcessRef`` *before* acknowledging start.  Fence-currency
+  comparison against the coordinator's live claim fence needs the
+  coordinator side of the authenticated owner channel: when a
+  ``fence_source`` anchor is injected it is enforced here; WO-11's
+  common-launch-path guard carries the residual stale-fence refusal for
+  lanes without one (PROGRAM WO-11 acceptance evidence).
 * ``cancel`` invokes the real native stop owner and reports requested versus
   settled cancellation honestly; a requested-but-unsettled stop surfaces as
   ``CANCELLING`` until the native state settles.
@@ -37,6 +47,10 @@ from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
 from control_plane.child_execution_contracts import ExecutionBinding
+from control_plane.execution_binding_compat import (
+    ExecutionBindingCompatError,
+    binding_for_launch_spec,
+)
 from control_plane.worker_adapter import AdapterBindingError
 from control_plane.worker_execution_contract import (
     CancelReceipt,
@@ -155,11 +169,18 @@ class HermesWorkerAdapter:
         inspector: ProcessInspector,
         *,
         clock: Callable[[], datetime] | None = None,
+        fence_source: Callable[[WorkerLaunchSpec], int | None] | None = None,
     ) -> None:
         self._runner = runner
         self._binding_source = binding_source
         self.inspector = inspector
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        # The authenticated owner channel's current fence generation for one
+        # launch spec (the coordinator side of the broker claim), when that
+        # side is reachable from this seam.  None keeps the structural fence
+        # checks only (fence_counter >= 1); WO-11's guard carries the
+        # residual stale-fence comparison then.
+        self._fence_source = fence_source
         # The original native ref per run, retained at start BEFORE the ACK.
         self._original_refs: dict[str, WorkerProcessRef] = {}
         # The broker binding that authorized each start (observability only).
@@ -205,10 +226,18 @@ class HermesWorkerAdapter:
             raise HermesWorkerAdapterError(
                 f"broker ExecutionBinding resolution failed: {exc}"
             ) from exc
-        if binding is None:
-            raise HermesWorkerAdapterError(
-                "refused: no current broker ExecutionBinding for this launch"
+        # Shared binding gate (lifted #2330 validator + the M1 extension):
+        # identity, type, required presence, non-empty lease, fence currency.
+        try:
+            binding = binding_for_launch_spec(
+                spec,
+                binding,
+                required=True,
+                require_issued=True,
+                current_fence=self._broker_current_fence(spec),
             )
+        except ExecutionBindingCompatError as exc:
+            raise HermesWorkerAdapterError(f"refused: {exc}") from exc
         if not isinstance(binding, ExecutionBinding):
             raise HermesWorkerAdapterError(
                 "refused: broker binding is not an ExecutionBinding.v1"
@@ -222,24 +251,35 @@ class HermesWorkerAdapter:
             raise HermesWorkerAdapterError(
                 "refused: binding worker assignment does not match the launch spec"
             )
-        if binding.lease_expiry:
-            try:
-                expiry = datetime.fromisoformat(
-                    binding.lease_expiry.replace("Z", "+00:00")
-                )
-            except ValueError as exc:
-                raise HermesWorkerAdapterError(
-                    "refused: binding lease expiry is malformed"
-                ) from exc
-            if expiry.tzinfo is None or expiry.utcoffset() is None:
-                raise HermesWorkerAdapterError(
-                    "refused: binding lease expiry is not timezone aware"
-                )
-            if expiry <= self._clock():
-                raise HermesWorkerAdapterError(
-                    "refused: binding lease has expired (stale fenced assignment)"
-                )
+        # The shared gate guarantees a non-empty lease_expiry; the format,
+        # timezone-awareness and expiry checks below stay fail-closed.
+        try:
+            expiry = datetime.fromisoformat(
+                binding.lease_expiry.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise HermesWorkerAdapterError(
+                "refused: binding lease expiry is malformed"
+            ) from exc
+        if expiry.tzinfo is None or expiry.utcoffset() is None:
+            raise HermesWorkerAdapterError(
+                "refused: binding lease expiry is not timezone aware"
+            )
+        if expiry <= self._clock():
+            raise HermesWorkerAdapterError(
+                "refused: binding lease has expired (stale fenced assignment)"
+            )
         return binding
+
+    def _broker_current_fence(self, spec: WorkerLaunchSpec) -> int | None:
+        if self._fence_source is None:
+            return None
+        try:
+            return self._fence_source(spec)
+        except Exception as exc:
+            raise HermesWorkerAdapterError(
+                f"broker current-fence resolution failed: {exc}"
+            ) from exc
 
     # --- status ------------------------------------------------------------
 

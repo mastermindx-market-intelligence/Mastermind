@@ -98,6 +98,7 @@ def test_implemented_true_requires_master_set_or_documented_receipt_path() -> No
 # =============================================================================
 
 _HEX64 = "a" * 64
+_OTHER_HEX64 = "b" * 64
 _LEASE_FUTURE = "2099-01-01T00:00:00Z"
 _LEASE_PAST = "2000-01-01T00:00:00Z"
 
@@ -138,10 +139,20 @@ def _binding(**overrides) -> ExecutionBinding:
         root_run_ref="root-1", immediate_parent_run_ref="parent-7",
         logical_child_key="child-a", request_digest=_HEX64,
         effective_complexity=C2_COMPLEX_BOUNDED, adapter_id="hermes-native",
-        worker_id="workers/12", fence_counter=7, lease_expiry=_LEASE_FUTURE,
+        worker_id="workers/12", job_ref="jobs/77", attempt_ref="run-1",
+        fence_counter=7, lease_expiry=_LEASE_FUTURE,
     )
     kwargs.update(overrides)
     return ExecutionBinding(**kwargs)
+
+
+def _foreign_child_binding() -> ExecutionBinding:
+    """A binding that is entirely valid — for a DIFFERENT child (probe P4)."""
+    return _binding(
+        root_run_ref="root-foreign", immediate_parent_run_ref="parent-foreign",
+        logical_child_key="child-foreign", request_digest=_OTHER_HEX64,
+        job_ref="jobs/66", attempt_ref="run-9",
+    )
 
 
 class FakeInspector(ProcessInspector):
@@ -230,6 +241,7 @@ def _adapter(
     runner: FakeNativeRunner | None = None,
     binding=None,
     binding_error: Exception | None = None,
+    fence=None,
 ):
     runner = runner or FakeNativeRunner()
 
@@ -239,7 +251,7 @@ def _adapter(
         return binding
 
     adapter = HermesWorkerAdapter(
-        runner, binding_source, FakeInspector(),
+        runner, binding_source, FakeInspector(), fence_source=fence,
     )
     return adapter, runner
 
@@ -282,10 +294,92 @@ class HermesStartTests(unittest.IsolatedAsyncioTestCase):
                     await adapter.start(_launch_spec())
                 self.assertEqual(runner.launches, [])
 
+    async def test_start_refused_for_foreign_or_unissued_binding_shapes(
+        self,
+    ) -> None:
+        # WO-10 M1: foreign-child, zero-fence and empty-lease bindings refuse
+        # through the shared gate even without a fence anchor.
+        cases = [
+            ("foreign child", _foreign_child_binding()),
+            ("empty job_ref", _binding(job_ref="")),
+            ("empty attempt_ref", _binding(attempt_ref="")),
+            ("zero fence", _binding(fence_counter=0)),
+            ("empty lease", _binding(lease_expiry="")),
+        ]
+        for label, binding in cases:
+            with self.subTest(label):
+                adapter, runner = _adapter(binding=binding)
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.start(_launch_spec())
+                self.assertEqual(runner.launches, [])
+
     async def test_start_refused_when_binding_source_raises(self) -> None:
         adapter, runner = _adapter(binding_error=RuntimeError("broker down"))
         with self.assertRaises(HermesWorkerAdapterError):
             await adapter.start(_launch_spec())
+        self.assertEqual(runner.launches, [])
+
+    async def test_start_accepts_current_fence_under_fence_anchor(self) -> None:
+        # WO-10 M1: with the broker's current fence anchored, the honest
+        # binding for THIS launch is still accepted — the probes below only
+        # refuse what drifts.
+        adapter, runner = _adapter(binding=_binding(), fence=lambda spec: 7)
+        spec = _launch_spec()
+        ref = await adapter.start(spec)
+        self.assertEqual(runner.launches, [spec])
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
+
+    async def test_probe_wrong_fence_refused_under_fence_anchor(self) -> None:
+        # Probe P1: fence_counter=3, valid shape, unexpired — REFUSED before
+        # the native launch (accepted-and-launched on d869179a).
+        adapter, runner = _adapter(
+            binding=_binding(fence_counter=3), fence=lambda spec: 7
+        )
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_FENCE_NOT_CURRENT", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_zero_fence_refused_without_anchor(self) -> None:
+        # Probe P2: fence_counter=0 is the WO-02 contract default of a
+        # binding nobody issued — REFUSED even with no fence anchor.
+        adapter, runner = _adapter(binding=_binding(fence_counter=0))
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_FENCE_NOT_CURRENT", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_sub_one_or_mistyped_fence_refused_without_anchor(
+        self,
+    ) -> None:
+        # Probe P1 variant: no coordinator-side anchor reachable, but a
+        # wrong-typed / sub-1 fence still refuses (P2's rule; the P1
+        # fence-vs-current comparison is WO-11's residual guard here).
+        # (Fence < 0 or non-numeric fences are refused at WO-02 construction.)
+        for bad in (0, True, 3.0):
+            with self.subTest(repr(bad)):
+                adapter, runner = _adapter(binding=_binding(fence_counter=bad))
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.start(_launch_spec())
+                self.assertEqual(runner.launches, [])
+
+    async def test_probe_foreign_child_refused_without_anchor(self) -> None:
+        # Probe P4: a binding fencing a DIFFERENT child (its own root /
+        # parent / child key / digest / job / attempt), same adapter+worker,
+        # unexpired — REFUSED on the Job/Attempt identity mismatch.
+        adapter, runner = _adapter(binding=_foreign_child_binding())
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_IDENTITY_MISMATCH", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_empty_lease_refused_without_anchor(self) -> None:
+        # Probe (empty lease_expiry, WO-02 contract default '' used to skip
+        # the expiry check entirely) — REFUSED.
+        adapter, runner = _adapter(binding=_binding(lease_expiry=""))
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_LEASE_REQUIRED", str(ctx.exception))
         self.assertEqual(runner.launches, [])
 
     async def test_start_retains_original_native_ref_before_ack(self) -> None:
