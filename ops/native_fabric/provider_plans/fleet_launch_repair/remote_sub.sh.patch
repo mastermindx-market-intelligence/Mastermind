@@ -1,0 +1,42 @@
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -293,6 +293,23 @@
+   fi
+ }
+ 
++# Name why the broker refused an acquire. Only its closed snake_case codes are
++# echoed (first reason= and detail= tokens); free text never reaches the log.
++lease_refusal_detail() {
++  awk '
++    function keep(key, value) {
++      if (length(value) >= 1 && length(value) <= 64 && value ~ /^[a-z0-9_]+$/) out = out " " key "=" value
++    }
++    {
++      for (i = 1; i <= NF; i++) {
++        if (!reason_seen && $i ~ /^reason=/) { reason_seen = 1; keep("reason", substr($i, 8)) }
++        else if (!detail_seen && $i ~ /^detail=/) { detail_seen = 1; keep("detail", substr($i, 8)) }
++      }
++    }
++    END { printf "%s", out }
++  ' "$LEASE_OUTPUT_FILE" 2>/dev/null
++}
++
+ # Route one already-prepared APPLICATION dispatch. The closed data contract is
+ # validated here for routing only; the receiving executor authenticates the
+ # dispatch against the trusted owner.
+@@ -1356,13 +1373,13 @@
+     if [ "$NATIVE_MODE" -eq 1 ]; then
+       broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${BROKER_NOT_BEFORE_ARGS[@]+"${BROKER_NOT_BEFORE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+-        log "LEASE_REFUSED rc=$RC"
++        log "LEASE_REFUSED rc=$RC$(lease_refusal_detail)"
+         exit "$RC"
+       }
+     else
+       broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${BROKER_NOT_BEFORE_ARGS[@]+"${BROKER_NOT_BEFORE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
+         RC=$?
+-        log "LEASE_REFUSED rc=$RC"
++        log "LEASE_REFUSED rc=$RC$(lease_refusal_detail)"
+         exit "$RC"
+       }
+     fi

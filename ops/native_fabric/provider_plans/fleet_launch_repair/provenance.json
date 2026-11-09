@@ -1,0 +1,25 @@
+{
+  "actual_current_or_publication_claim": false,
+  "all_other_base_members_exact": true,
+  "base_count": 119,
+  "changed_target_members": [
+    "ext/fabric_task.py",
+    "ext/lease_broker.py",
+    "ext/remote_sub.sh",
+    "ext/support_bundle.py"
+  ],
+  "default_unchanged": true,
+  "native_release_or_runtime_effects": false,
+  "pool_policy_content_unchanged": true,
+  "predecessor_profile": "ops/native_fabric/provider_plans/memory118_support_status/after_terminal_diagnostics/profile.json",
+  "predecessor_profile_sha256": "b519661302ec46c508006de4c7a6a224c10cbcfcb9f4555bb65a2eb2e5d9493c",
+  "prospective_predecessor": {
+    "generation": "8404cb15c5322690a8b805140e9f987710881e8ac020f2eee4f6cafa41fdee03",
+    "previous": "5b5713e6870b688b1cc2f9978df9d7539159b25b291f5019853a293f905a5b3a",
+    "schema": "native-code-selection.v1",
+    "sequence": 42
+  },
+  "schema": "mastermind.fleet_launch_repair_source.v1",
+  "source_base": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "target_count": 119
+}
