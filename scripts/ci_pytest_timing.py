@@ -367,8 +367,29 @@ class ModuleTiming:
         if nodeid.split("::", 1)[0] == self.module:
             self.cases_finished += 1
 
+    def _exit_observation(self, event, exitstatus):
+        if self.diagnostics is not None:
+            try:self.diagnostics.lifecycle_record(event, exitstatus)
+            except Exception:pass  # Optional diagnostics cannot change pytest.
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
     def pytest_sessionfinish(self, session, exitstatus):
+        self._exitstatus = int(exitstatus) if isinstance(exitstatus,int) and not isinstance(exitstatus,bool) else None
+        self._exit_observation('SESSION_FINISH_ENTERED', self._exitstatus)
         self._summarize()
+        try:
+            yield
+        finally:
+            self._exit_observation('SESSION_FINISH_RETURNED', self._exitstatus)
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_unconfigure(self, config):
+        status = getattr(self, '_exitstatus', None)
+        self._exit_observation('UNCONFIGURE_ENTERED', status)
+        try:
+            yield
+        finally:
+            self._exit_observation('UNCONFIGURE_RETURNED', status)
 
 
 def pytest_sessionstart(session):

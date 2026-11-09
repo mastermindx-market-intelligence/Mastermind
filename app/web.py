@@ -3621,8 +3621,9 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
     try:
         from brain import runlog
         return JSONResponse(runlog.read_run(run_id or None))
-    except Exception as exc:
-        return JSONResponse({"run_id": run_id, "steps": [], "error": str(exc)}, status_code=500)
+    except Exception:
+        _log.exception("runlog read failed")
+        return JSONResponse({"run_id": run_id, "steps": [], "error": "runlog unavailable"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
