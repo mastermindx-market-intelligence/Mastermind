@@ -1,3 +1,5 @@
+import {bindNativeWorkAuthorization, type NativeWorkAuthorizationOwner} from "./native-work-authorization";
+import {bindNativePrimaryAccount, type NativePrimaryAccountOwner} from "./native-primary-account";
 import {bindNativeAuthorizationContinuation, type NativeAuthorizationContinuationOwner} from "./native-authorization-continuation-host";
 import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
@@ -84,6 +86,9 @@ import {
 } from "./control-room";
 
 export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  signInPrimary?(): Promise<unknown>;
+  readWorkAuthorization?(): Promise<unknown>;
+  signInForWork?(): Promise<unknown>;
   readAuthorizationContinuation?(request: {signal: AbortSignal}): Promise<unknown>;
   continueAuthorization?(): Promise<unknown>;
   /** Explicit fixed local metadata read; never refreshes an authorization owner. */
@@ -186,6 +191,8 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readonly primaryAccount?: NativePrimaryAccountOwner;
+  readonly workAuthorization?: NativeWorkAuthorizationOwner;
   readonly authorizationContinuation?: NativeAuthorizationContinuationOwner;
   readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<NativeExecutiveObservation>;
   readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
@@ -456,6 +463,8 @@ export function bindMissionHost(
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   const authorizationContinuation = bindNativeAuthorizationContinuation(client, () => epoch);
+  const primaryAccount = bindNativePrimaryAccount(client, () => {epoch++;});
+  const workAuthorization = bindNativeWorkAuthorization(client, () => epoch);
   const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
   const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
   const companySubscribe=companyTransport?.subscribe;
@@ -504,6 +513,8 @@ export function bindMissionHost(
     ...(memoryRead ? {readProjectKnowledgeMemory: memoryRead} : {}),
     ...(sourceRead ? {readProjectKnowledgeSource: sourceRead} : {}),
     ...(authorizationContinuation ? {authorizationContinuation} : {}),
+    ...(primaryAccount ? {primaryAccount} : {}),
+    ...(workAuthorization ? {workAuthorization} : {}),
     auth: {
       getState: () => client.getState(),
       subscribe: (listener) => client.subscribe(listener),
@@ -1137,6 +1148,9 @@ export async function createNativeClient(
   };
   let control = 0;
   let continuationPending = false;
+  let primarySignInPending = false;
+  let primarySignInUncertain = false;
+  let workSignInPending = false, workSignInUncertain = false;
   const update = (raw: unknown) => {
     current = authState(raw);
     invalidateReads();
@@ -1263,6 +1277,28 @@ export async function createNativeClient(
       return () => {
         listeners.delete(listener);
       };
+    },
+    async readWorkAuthorization() { return invoke("read_work_authorization"); },
+    async signInForWork() {
+      if (workSignInPending || workSignInUncertain) throw new Error("WORK_AUTHORIZATION_PENDING");
+      workSignInPending = true;
+      executive.invalidate(); invalidateReads();
+      const ticket = ++control, started = epoch;
+      try { const result = await invoke("sign_in_for_work"); if (ticket === control && started === epoch) update(result); }
+      catch (error) { workSignInUncertain = true; throw error; }
+      finally { workSignInPending = false; }
+    },
+    async signInPrimary() {
+      if (primarySignInPending || primarySignInUncertain) throw new Error("PRIMARY_AUTH_PENDING");
+      primarySignInPending = true;
+      executive.invalidate();
+      invalidateReads();
+      const ticket = ++control, started = epoch;
+      try {
+        const result = await invoke("sign_in_primary");
+        if (ticket === control && started === epoch) update(result);
+      } catch (error) {primarySignInUncertain = true; throw error;}
+      finally {primarySignInPending = false;}
     },
     async signIn() {
       executive.invalidate();
