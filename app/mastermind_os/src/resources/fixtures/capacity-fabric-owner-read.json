@@ -1,0 +1,191 @@
+{
+  "schema": "mastermind.workspace_capacity_fabric.v1",
+  "availability": "AVAILABLE",
+  "reason_codes": [],
+  "observed_at": "2027-01-15T07:59:50Z",
+  "expires_at": "2027-01-15T08:09:30Z",
+  "source_revision": "948e2b629765f0b938f1fec9f6722ddc582d0312a0e2575924a441d92d22d936",
+  "resources": [
+    {
+      "resource_ref": "glm:fixture-account",
+      "provider": "glm",
+      "pool": "glm",
+      "allowance_scope": "glm:fixture-allowance",
+      "identity_qualified": true,
+      "readiness": "ready",
+      "configured_concurrency": 4,
+      "configured_cap_basis": "ACCOUNT",
+      "active": 1,
+      "queued": 0,
+      "cooldown_until": null,
+      "pressure": "LOW_ALLOWANCE",
+      "reason_codes": [],
+      "windows": [
+        {
+          "window": "5h",
+          "required": true,
+          "remaining_pct": 70.0,
+          "observed_at": "2027-01-15T07:59:30Z",
+          "reset_at": "2027-01-15T09:00:00Z",
+          "state": "CURRENT",
+          "reason": "CURRENT"
+        },
+        {
+          "window": "weekly",
+          "required": true,
+          "remaining_pct": 11.0,
+          "observed_at": "2027-01-15T07:59:30Z",
+          "reset_at": "2027-01-15T09:00:00Z",
+          "state": "CURRENT",
+          "reason": "CURRENT"
+        },
+        {
+          "window": "monthly",
+          "required": false,
+          "remaining_pct": null,
+          "observed_at": null,
+          "reset_at": null,
+          "state": "UNKNOWN",
+          "reason": "WINDOW_MISSING"
+        }
+      ],
+      "preview_eligible": true,
+      "single_window_remaining_pct": null,
+      "single_window_observed_at": null,
+      "single_window_source": "UNKNOWN"
+    },
+    {
+      "resource_ref": "go:fixture-account",
+      "provider": "go",
+      "pool": "go",
+      "allowance_scope": "go:fixture-allowance",
+      "identity_qualified": true,
+      "readiness": "ready",
+      "configured_concurrency": 4,
+      "configured_cap_basis": "ACCOUNT",
+      "active": 1,
+      "queued": 0,
+      "cooldown_until": null,
+      "pressure": "LIMIT_REACHED",
+      "reason_codes": [],
+      "windows": [
+        {
+          "window": "5h",
+          "required": true,
+          "remaining_pct": 90.0,
+          "observed_at": "2027-01-15T07:59:30Z",
+          "reset_at": "2027-01-15T09:00:00Z",
+          "state": "CURRENT",
+          "reason": "CURRENT"
+        },
+        {
+          "window": "weekly",
+          "required": true,
+          "remaining_pct": 82.0,
+          "observed_at": "2027-01-15T07:59:30Z",
+          "reset_at": "2027-01-15T09:00:00Z",
+          "state": "CURRENT",
+          "reason": "CURRENT"
+        },
+        {
+          "window": "monthly",
+          "required": true,
+          "remaining_pct": 0.0,
+          "observed_at": "2027-01-15T07:59:30Z",
+          "reset_at": "2027-01-15T09:00:00Z",
+          "state": "EXHAUSTED",
+          "reason": "EXHAUSTED"
+        }
+      ],
+      "preview_eligible": true,
+      "single_window_remaining_pct": null,
+      "single_window_observed_at": null,
+      "single_window_source": "UNKNOWN"
+    },
+    {
+      "resource_ref": "minimax:fixture-account",
+      "provider": "minimax",
+      "pool": "minimax",
+      "allowance_scope": "minimax:fixture-allowance",
+      "identity_qualified": true,
+      "readiness": "ready",
+      "configured_concurrency": 4,
+      "configured_cap_basis": "ACCOUNT",
+      "active": 1,
+      "queued": 0,
+      "cooldown_until": null,
+      "pressure": "UNKNOWN",
+      "reason_codes": [],
+      "windows": [
+        {
+          "window": "5h",
+          "required": true,
+          "remaining_pct": null,
+          "observed_at": null,
+          "reset_at": null,
+          "state": "UNQUALIFIED",
+          "reason": "SOURCE_UNQUALIFIED"
+        },
+        {
+          "window": "weekly",
+          "required": true,
+          "remaining_pct": null,
+          "observed_at": null,
+          "reset_at": null,
+          "state": "UNQUALIFIED",
+          "reason": "SOURCE_UNQUALIFIED"
+        },
+        {
+          "window": "monthly",
+          "required": false,
+          "remaining_pct": null,
+          "observed_at": null,
+          "reset_at": null,
+          "state": "UNKNOWN",
+          "reason": "WINDOW_MISSING"
+        }
+      ],
+      "preview_eligible": true,
+      "single_window_remaining_pct": null,
+      "single_window_observed_at": null,
+      "single_window_source": "UNKNOWN"
+    }
+  ],
+  "consumers": [
+    {
+      "consumer": "hermes",
+      "source_state": "BUILT",
+      "runtime_state": "NOT_OBSERVED",
+      "observed_at": null,
+      "evidence_ref": null
+    },
+    {
+      "consumer": "deepseek",
+      "source_state": "BUILT",
+      "runtime_state": "NOT_OBSERVED",
+      "observed_at": null,
+      "evidence_ref": null
+    },
+    {
+      "consumer": "t3_code",
+      "source_state": "SPEC_ONLY",
+      "runtime_state": "NOT_OBSERVED",
+      "observed_at": null,
+      "evidence_ref": null
+    },
+    {
+      "consumer": "website",
+      "source_state": "BUILT",
+      "runtime_state": "NOT_OBSERVED",
+      "observed_at": null,
+      "evidence_ref": null
+    }
+  ],
+  "recommendations": [
+    "UPDATE_USAGE",
+    "WAIT_FOR_RESET",
+    "CONSERVE_ALLOWANCE",
+    "MEASURE_DEMAND"
+  ],
+  "admission_authorized": false
+}
