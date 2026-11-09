@@ -38,7 +38,7 @@ Original native CLI actor remains mastermindxryan on m2studio, source author Mas
 
 ## Local Agent README rollout
 
-Verified 15 of 50 planned local guides at 2026-11-09T11:52:30.837Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
+Verified 15 of 50 planned local guides at 2026-11-09T11:56:17.029Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector, Crypto and F02 pilot screenshots are readable without clipping or overlap. The central bounded-reading recipe is also visually verified. The first 15 guide footers explicitly distinguish dated scope evidence from the current checkpoint; later guides use that same template. No product board was rewritten.
 
 | File ID | Guide page | Exact guide node | Strategy |
 | --- | --- | --- | --- |

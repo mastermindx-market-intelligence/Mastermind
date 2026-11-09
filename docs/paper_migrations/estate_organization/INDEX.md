@@ -1,6 +1,6 @@
 # Paper estate · File and agent-entry index
 
-Observed metadata: 2026-11-09 11:03:44 UTC. Navigation updated 2026-11-09T11:52:30.837Z. 83 resources; 80 readable design files; 569 pages; 19 dividers. Non-atomic snapshot; source acceptance and historical parity are separate.
+Observed metadata: 2026-11-09 11:03:44 UTC. Navigation updated 2026-11-09T11:56:17.029Z. 83 resources; 80 readable design files; 569 pages; 19 dividers. Non-atomic snapshot; source acceptance and historical parity are separate.
 
 AI workers start with [AGENT_README.md](AGENT_README.md) or [the Paper protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0). 15 of 50 local Agent README routes are verified. Existing scope entry IDs remain stable. Internal guides are excluded from product UI extraction. Titles such as Current, Canonical or R4 do not independently select an implementation source.
 

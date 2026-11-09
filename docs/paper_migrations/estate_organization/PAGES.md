@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T11:52:30.837Z. 569 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T11:56:17.029Z. 569 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
