@@ -119,6 +119,32 @@ header/first-content/completion latency EWMAs. These measurements are not
 provider quota estimates. Latency is observed; automatic learned weights and
 quality/model substitutions remain off pending representative evaluation.
 
+The same selector that chooses the route produces a bounded explanation: disjoint
+drain/circuit/probe/route/group exclusions, eligible count, chosen priority tier,
+least-pressure candidate count and the actual affinity/random tie-break. Selection
+and local permit acquisition share the hard exclusion predicate. The explanation
+does not make another random choice or reserve capacity.
+
+`selection.last` means the most recently evaluated model candidate, with a sequence
+and monotonic age. It retains no requested model, alias, user/session identifier,
+account, prompt or credential. Alias position/count is numeric. Owner-preflight
+exclusions count routes matching that candidate and are separate from local health.
+An empty post-preflight selector can report `FABRIC_MODEL_UNKNOWN` while the gateway
+returns an owner refusal; `selector_reason` and `preflight_refusal` distinguish them.
+`local_permit_acquired` proves only that local step. Owner eligibility is rechecked
+before send, so this historical snapshot is never provider admission or send proof.
+Fixed `selection.not_run` counters describe overload, invalid input or cancellation
+before selection without attributing those requests to an older route decision.
+Reading status serializes existing observations and performs no selection or owner
+read. Route and reason metric keys are bounded by the configuration and fixed enums.
+
+Fixed latency bins supplement the EWMA. They use noncumulative counts with inclusive
+upper bounds and a final overflow bin (`null` upper bound). Their population is
+successful completions only, and their clock begins at local admission reservation,
+including body upload and credential preflight. Missing first-content observations
+stay missing. These are not pure provider TTFT or all-attempt latency measurements;
+failed/cancelled requests remain visible in their separate outcome counters.
+
 Successful routed responses carry `x-fabric-route`, `x-fabric-model`,
 `x-fabric-request-id` and `x-fabric-policy`. They expose neither account identity,
 credentials nor prompts. Counters and local circuit history are process-local
@@ -133,6 +159,28 @@ python -m pytest -q tests/test_unified_fabric_router.py tests/test_unified_route
 Release and installed acceptance are tracked in
 `docs/CAPACITY_ROUTER_RESILIENCE.md`. A passing suite is not evidence that an
 unmerged candidate has been installed or that a consumer completed a real turn.
+
+### Graceful release boundary
+
+The observed incumbent M2 job uses one Uvicorn worker, `KeepAlive.SuccessfulExit=false`
+and a loaded launchd stop timeout of five seconds. Its old application has neither
+a drain endpoint nor a total request deadline. Uvicorn's first SIGTERM closes new
+connections and waits for active responses; a launchd stop can impose its separate
+short kill deadline. `kickstart -k`, SIGHUP and an observed quiet interval do not
+establish a request-preserving upgrade.
+
+The initial cutover therefore requires the incumbent consumer/admission owner to
+hold new submissions, then one direct SIGTERM to the identity-checked original
+worker and observation of its actual completion. Keep the hold while reconciling
+any KeepAlive replacement, unloading the old definition, and selecting the exact
+protected-accepted immutable generation. A stuck old request needs its original
+owner's reconciliation; never force it away and replay it. Stage and verify the
+old generation/definition for rollback, then verify new identity, status, catalogue
+and real Hermes/DSH/T3 turns before reopening traffic. Rollback restores code and
+the recorded service definition, not old shared-auth or quota snapshots.
+
+This is a conditional operating procedure, not a performed deployment or evidence
+that an effective ingress hold exists. The acceptance record retains those gates.
 
 ## Run
 

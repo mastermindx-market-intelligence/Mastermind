@@ -876,3 +876,205 @@ async def test_older_bench_write_completion_cannot_shorten_new_local_hold(tmp_pa
             release_second.set()
             await asyncio.gather(first, second)
     assert len(calls) == 2 and app.state.router_state.in_flight == 0
+
+
+def test_selection_evidence_explains_exclusions_without_reserving_capacity():
+    from ops.native_fabric.unified_router.routes import decide_route
+    state = RouteState(cooldown_until={"cool": 110}, probes={"probe"},
+                       in_flight={"full": 1}, group_in_flight={"shared": 1})
+    items = [route("drain", weight=0), route("cool"), route("probe"),
+             route("full", max_in_flight=1),
+             route("group", concurrency_group="shared", group_max_in_flight=1),
+             route("fallback", priority=200),
+             replace(route("other"), models=("other-model",))]
+    result = decide_route(items, "m", state=state, now=100, affinity_key="private-session")
+    assert result.route.route_id == "fallback" and result.reason == ""
+    assert result.evidence["matched_routes"] == 6
+    assert result.evidence["excluded"] == {
+        "drained": 1, "circuit_open": 1, "probe_occupied": 1,
+        "route_limit": 1, "group_limit": 1}
+    assert result.evidence["eligible_routes"] == 1
+    assert result.evidence["selected_priority"] == 200
+    assert result.evidence["tie_break"] == "single_route_in_tier"
+    assert state.in_flight == {"full": 1} and state.probes == {"probe"}
+    assert "private-session" not in json.dumps(result.evidence)
+
+
+def test_selection_evidence_does_not_draw_an_extra_random_choice(monkeypatch):
+    from ops.native_fabric.unified_router import routes as route_module
+    draws = []
+
+    def draw():
+        draws.append(True)
+        return .75
+
+    monkeypatch.setattr(route_module.random, "random", draw)
+    items = [route("a"), route("b", weight=3)]
+    result = route_module.decide_route(items, "m", state=RouteState(), now=100)
+    assert result.route.route_id == "b" and len(draws) == 1
+    assert result.evidence["tie_break"] == "weighted_random"
+    assert result.evidence["least_pressure_routes"] == 2
+    selected, reason = select_route(items, "m", state=RouteState(), now=100)
+    assert selected == result.route and reason == result.reason and len(draws) == 2
+    only = route_module.decide_route(items[:1], "m", state=RouteState(), now=100)
+    assert only.route == items[0] and len(draws) == 3
+
+
+def test_selection_evidence_distinguishes_pressure_from_affinity():
+    from ops.native_fabric.unified_router.routes import decide_route
+    items = [route("a"), route("b")]
+    first = decide_route(items, "m", state=RouteState(), now=100, affinity_key="private")
+    assert first.evidence["tie_break"] == "weighted_rendezvous"
+    state = RouteState(in_flight={first.route.route_id: 1})
+    second = decide_route(items, "m", state=state, now=100, affinity_key="private")
+    assert second.route != first.route
+    assert second.evidence["tie_break"] == "lowest_local_pressure"
+    assert second.evidence["priority_routes"] == 2
+
+
+@async_test
+async def test_selection_diagnostics_follow_alias_path_and_keep_inputs_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "fixture-secret-key")
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={"id": "fixture", "content": []})
+
+    app = create_app(config(tmp_path, aliases=(("fabric/test", ("missing", "m")),)),
+                     transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        payload = dict(body(metadata={"user_id": "private-affinity"}), model="fabric/test")
+        response = await session.post("/v1/messages", headers=HEADERS, json=payload)
+        assert response.status_code == 200 and len(calls) == 1
+        status = (await session.get("/statusz", headers=HEADERS)).json()
+        evidence = status["selection"]["last"]
+        assert evidence["candidate_index"] == 2 and evidence["candidate_total"] == 2
+        assert evidence["selected_route"] == "a" and evidence["configured_alias"] is True
+        assert status["selection"]["evaluations_total"] == 2
+        assert status["selection"]["outcomes"] == {"FABRIC_MODEL_UNKNOWN": 1, "SELECTED": 1}
+        for i in range(25):
+            refused = await session.post("/v1/messages", headers=HEADERS,
+                                         json=dict(body(), model=f"private-unknown-{i}"))
+            assert refused.status_code == 503
+        final = (await session.get("/statusz", headers=HEADERS)).json()
+    assert len(calls) == 1
+    assert len(final["selection"]["outcomes"]) == 2
+    assert final["selection"]["last"]["selected_route"] is None
+    evidence_json = json.dumps(final)
+    assert "private-unknown" not in evidence_json and "private-affinity" not in evidence_json
+    assert "fixture-secret-key" not in evidence_json
+    assert len(json.dumps(final["selection"])) < 1500
+
+
+@async_test
+async def test_selection_diagnostics_separate_oauth_preflight_from_local_health(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    oauth_store(tmp_path, last_status="exhausted", last_error_reset_at=time.time()+3600)
+    calls = []
+    owner_reads = []
+    real_read = codex_oauth.read_accounts
+
+    def read_owner(*args):
+        owner_reads.append(True)
+        return real_read(*args)
+
+    monkeypatch.setattr(codex_oauth, "read_accounts", read_owner)
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={"id": "fixture", "content": []})
+
+    app = create_app(config(tmp_path, routes=(replace(oauth_route(), priority=10),
+                                              route("fallback", priority=20))),
+                     transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        response = await session.post("/v1/messages", headers=HEADERS, json=body())
+        reads_after_request = len(owner_reads)
+        status = (await session.get("/statusz", headers=HEADERS)).json()
+        again = (await session.get("/statusz", headers=HEADERS)).json()
+    assert response.status_code == 200 and len(calls) == 1
+    assert len(owner_reads) == reads_after_request == 1
+    assert again["selection"]["evaluations_total"] == status["selection"]["evaluations_total"]
+    evidence = status["selection"]["last"]
+    assert evidence["owner_preflight_excluded"] == 1
+    assert evidence["matched_routes"] == 1 and evidence["selected_route"] == "fallback"
+    assert evidence["scope"] == "local_after_owner_preflight"
+    assert status["provider_quota_authority"] is False
+
+
+def test_latency_histograms_are_bounded_and_reject_invalid_samples():
+    state = gateway.RouterState(route_ids=frozenset({"a"}))
+    for value in (0., 10., 10.1, 50., 1800000., 1800001.):
+        state.observe_latency("a", "completion_ms", value)
+    before = json.dumps(state.latency_histograms)
+    for value in (float("inf"), float("nan"), -1.):
+        state.observe_latency("a", "completion_ms", value)
+    state.observe_latency("a", "unbounded-user-metric", 12.)
+    state.observe_latency("unbounded-user-route", "completion_ms", 12.)
+    assert json.dumps(state.latency_histograms) == before
+    buckets = state.latency_histograms["a"]["completion_ms"]
+    assert len(buckets) == len(gateway.LATENCY_BUCKET_UPPER_MS)+1
+    assert buckets[0] == 2 and buckets[1] == 2 and buckets[-2:] == [1, 1]
+    assert sum(buckets) == 6
+    json.dumps(state.latency, allow_nan=False)
+
+
+@async_test
+async def test_status_latency_bins_are_labelled_success_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    replies = iter([200, 503])
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(next(replies), json={"id": "fixture", "content": []})))
+    async with client(app) as session:
+        await session.post("/v1/messages", headers=HEADERS, json=body())
+        await session.post("/v1/messages", headers=HEADERS, json=body())
+        status = (await session.get("/statusz", headers=HEADERS)).json()
+    assert status["served_total"] == 1 and status["failed_total"] == 1
+    hist = status["routes"][0]["latency_histogram"]
+    assert hist["population"] == "successful_completions"
+    assert hist["bucket_upper_ms"][-1] is None
+    assert sum(hist["counts"]["completion_ms"]) == 1
+    assert sum(hist["counts"]["headers_ms"]) == 1
+
+
+@pytest.mark.parametrize("owner_state,reset,reason", [
+    ("dead", None, "FABRIC_OAUTH_OWNER_HELD"),
+    ("exhausted", None, "FABRIC_OAUTH_QUOTA_UNKNOWN"),
+    ("exhausted", 3600, "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED"),
+])
+@async_test
+async def test_selection_diagnostics_preserve_owner_refusal_with_empty_selector_input(
+        tmp_path, owner_state, reset, reason):
+    oauth_store(tmp_path, last_status=owner_state,
+                last_error_reset_at=time.time()+reset if reset else None)
+    calls = []
+    app = create_app(config(tmp_path, routes=(oauth_route(),)),
+                     transport=httpx.MockTransport(lambda req: calls.append(req)))
+    async with client(app) as session:
+        response = await session.post("/v1/messages", headers=HEADERS, json=body())
+        status = (await session.get("/statusz", headers=HEADERS)).json()
+    assert response.status_code == 503 and response.json()["error"]["code"] == reason
+    evidence = status["selection"]["last"]
+    assert evidence["selector_reason"] == "FABRIC_MODEL_UNKNOWN"
+    assert evidence["owner_preflight_excluded"] == 1 and evidence["matched_routes"] == 0
+    assert evidence["preflight_refusal"] == reason
+    assert evidence["local_permit_acquired"] is False and not calls
+
+
+@async_test
+async def test_preselection_refusal_never_relabels_an_older_route_decision(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    app = create_app(config(tmp_path, max_in_flight=1), transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={"id": "fixture", "content": []})))
+    async with client(app) as session:
+        await session.post("/v1/messages", headers=HEADERS, json=body())
+        prior = dict(app.state.router_state.last_selection)
+        app.state.router_state.in_flight = 1
+        response = await session.post("/v1/messages", headers=HEADERS, json=body())
+        status = (await session.get("/statusz", headers=HEADERS)).json()
+        app.state.router_state.in_flight = 0
+    assert response.status_code == 503
+    assert app.state.router_state.last_selection == prior
+    assert status["selection"]["not_run"] == {"FABRIC_ROUTER_BUSY": 1}
+    assert status["selection"]["last"]["sequence"] == 1

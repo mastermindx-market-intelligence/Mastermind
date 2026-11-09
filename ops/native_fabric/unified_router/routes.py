@@ -125,8 +125,23 @@ class RouteState:
                 and (not route.concurrency_group or self.group_in_flight.get(
                     route.concurrency_group, 0) < route.group_max_in_flight))
 
+    def exclusion_reason(self, route: Route, now: float) -> str:
+        """First local hard exclusion, shared by selection and acquisition."""
+        if route.weight <= 0:
+            return "drained"
+        if self.cooldown_until.get(route.route_id, 0.0) > now:
+            return "circuit_open"
+        if route.route_id in self.probes:
+            return "probe_occupied"
+        if route.max_in_flight and self.in_flight.get(route.route_id, 0) >= route.max_in_flight:
+            return "route_limit"
+        if route.concurrency_group and self.group_in_flight.get(
+                route.concurrency_group, 0) >= route.group_max_in_flight:
+            return "group_limit"
+        return ""
+
     def acquire(self, route: Route, *, now: float) -> RoutePermit | None:
-        if route.weight <= 0 or not self.available(route.route_id, now) or not self.has_room(route):
+        if self.exclusion_reason(route, now):
             return None
         probe = self.consecutive_failures.get(route.route_id, 0) > 0
         if probe:
@@ -281,38 +296,80 @@ def affinity_route(route_ids: list[str], affinity_key: str, *, ttl_buckets: int 
     return min(route_ids, key=rank)
 
 
-def select_route(routes: list[Route], model: str, *, state: RouteState, now: float,
-                 affinity_key: str | None = None) -> tuple[Route | None, str]:
-    """Admission-time selection: healthy routes for the model, tier then weight.
+@dataclass(frozen=True)
+class RouteDecision:
+    route: Route | None
+    reason: str
+    evidence: dict
 
-    Returns (route, reason). reason is set when no route can serve the model.
+
+def decide_route(routes: list[Route], model: str, *, state: RouteState, now: float,
+                 affinity_key: str | None = None) -> RouteDecision:
+    """One selection with bounded evidence, never an admission permit.
+
+    The caller has already applied transport and owner preflight exclusions.
+    Evidence contains only configured route labels, counts and fixed reasons;
+    raw model, alias, affinity and credential inputs are never retained.
     """
     candidates = [r for r in routes if r.serves(model)]
+    excluded = {key: 0 for key in ("drained", "circuit_open", "probe_occupied",
+                                   "route_limit", "group_limit")}
+    healthy = []
+    for route in candidates:
+        # First failing gate wins, so these counts form a disjoint partition.
+        reason = state.exclusion_reason(route, now)
+        if reason:
+            excluded[reason] += 1
+        else:
+            healthy.append(route)
+    evidence = {
+        "scope": "local_after_owner_preflight", "matched_routes": len(candidates),
+        "excluded": excluded, "eligible_routes": len(healthy),
+        "selected_priority": None, "priority_routes": 0,
+        "least_pressure_routes": 0, "tie_break": "none", "selected_route": None,
+    }
+
+    def result(route: Route | None, reason: str = "") -> RouteDecision:
+        evidence["selected_route"] = route.route_id if route else None
+        return RouteDecision(route, reason, evidence)
+
     if not candidates:
-        return None, "FABRIC_MODEL_UNKNOWN"
-    enabled = [r for r in candidates if r.weight > 0]
-    if not enabled:
-        return None, "FABRIC_ROUTES_DRAINED"
-    healthy = [r for r in enabled if state.available(r.route_id, now)]
+        return result(None, "FABRIC_MODEL_UNKNOWN")
+    if excluded["drained"] == len(candidates):
+        return result(None, "FABRIC_ROUTES_DRAINED")
+    if sum(excluded[key] for key in ("drained", "circuit_open", "probe_occupied")) == len(candidates):
+        return result(None, "FABRIC_ALL_ROUTES_COOLING")
     if not healthy:
-        return None, "FABRIC_ALL_ROUTES_COOLING"
-    healthy = [r for r in healthy if state.has_room(r)]
-    if not healthy:
-        return None, "FABRIC_ROUTES_BUSY"
+        return result(None, "FABRIC_ROUTES_BUSY")
     lowest_tier = min(r.priority for r in healthy)
     tier = sorted((r for r in healthy if r.priority == lowest_tier),
                   key=lambda r: r.route_id)
+    evidence.update(selected_priority=lowest_tier, priority_routes=len(tier))
     # Affinity is soft: an idle equally eligible route wins over a busy one.
     load = {r.route_id: state.in_flight.get(r.route_id, 0) / r.weight for r in tier}
     best = min(load.values())
     tier = [r for r in tier if math.isclose(load[r.route_id], best, abs_tol=1e-12)]
+    evidence["least_pressure_routes"] = len(tier)
+    if len(tier) == 1:
+        evidence["tie_break"] = ("single_route_in_tier" if evidence["priority_routes"] == 1
+                                 else "lowest_local_pressure")
+        return result(_weighted_pick(tier))
     if affinity_key and len(tier) > 1:
+        evidence["tie_break"] = "weighted_rendezvous"
         chosen = affinity_route([r.route_id for r in tier], affinity_key,
                                 weights={r.route_id: r.weight for r in tier})
         for route in tier:
             if route.route_id == chosen:
-                return route, ""
-    return _weighted_pick(tier), ""
+                return result(route)
+    evidence["tie_break"] = "weighted_random"
+    return result(_weighted_pick(tier))
+
+
+def select_route(routes: list[Route], model: str, *, state: RouteState, now: float,
+                 affinity_key: str | None = None) -> tuple[Route | None, str]:
+    """Compatibility projection of the single explained selection path."""
+    decision = decide_route(routes, model, state=state, now=now, affinity_key=affinity_key)
+    return decision.route, decision.reason
 
 
 def _weighted_pick(tier: list[Route]) -> Route:

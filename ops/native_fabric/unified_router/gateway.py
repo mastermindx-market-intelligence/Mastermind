@@ -12,6 +12,7 @@ possible upstream effect; exhausted pools surface as typed refusals.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import functools
 import hmac
 import ipaddress
@@ -46,7 +47,7 @@ from ops.native_fabric.unified_router.routes import (
     credential_pool_key,
     env_file_value,
     retry_after_seconds,
-    select_route,
+    decide_route,
 )
 from ops.native_fabric.unified_router import codex_oauth
 from ops.native_fabric.unified_router.streaming import SSEDecoder, events, read_bounded
@@ -69,6 +70,19 @@ _log = logging.getLogger(__name__)
 # reason of constant FABRIC_* shape (py/stack-trace-exposure): free-form
 # detail from OSError/ValueError paths stays in the server-side log.
 _FABRIC_REASON_RE = re.compile(r"^FABRIC_[A-Z0-9_]+$")
+LATENCY_BUCKET_UPPER_MS = (10., 50., 100., 250., 500., 1000., 2500., 5000.,
+                          10000., 30000., 60000., 180000., 600000., 1800000.)
+LATENCY_METRICS = frozenset({"headers_ms", "first_content_ms", "completion_ms"})
+SELECTION_REASONS = frozenset({"FABRIC_MODEL_UNKNOWN", "FABRIC_ROUTES_DRAINED",
+                               "FABRIC_ALL_ROUTES_COOLING", "FABRIC_ROUTES_BUSY"})
+PRESELECTION_REASONS = frozenset({
+    "FABRIC_ROUTER_BUSY", "FABRIC_REQUEST_TOO_LARGE", "FABRIC_REQUEST_BODY_TIMEOUT",
+    "FABRIC_INVALID_REQUEST", "FABRIC_EXACT_MODEL_REQUIRED", "FABRIC_COUNT_TOKENS_UNSUPPORTED",
+    "FABRIC_ADMISSION_DEADLINE", "FABRIC_REQUEST_DISCONNECTED", "FABRIC_REQUEST_CANCELLED"})
+PREFLIGHT_REASONS = frozenset({
+    "FABRIC_OAUTH_OWNER_UNAVAILABLE", "FABRIC_OAUTH_OWNER_REFRESH_REQUIRED",
+    "FABRIC_OAUTH_OWNER_HELD", "FABRIC_OAUTH_QUOTA_UNKNOWN",
+    "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED"})
 
 
 def _public_reason(exc: Exception, fallback: str) -> str:
@@ -187,6 +201,7 @@ def settings_from_env() -> Settings:
 
 @dataclass
 class RouterState:
+    route_ids: frozenset[str] = field(default_factory=frozenset)
     routes: RouteState = field(default_factory=RouteState)
     started_at: float = field(default_factory=time.time)
     served: int = 0
@@ -199,15 +214,50 @@ class RouterState:
     oauth_cursor: dict[str, int] = field(default_factory=dict)
     oauth_bench: dict[tuple[str, str], float] = field(default_factory=dict)
     latency: dict[str, dict[str, float]] = field(default_factory=dict)
+    latency_histograms: dict[str, dict[str, list[int]]] = field(default_factory=dict)
+    selection_evaluations: int = 0
+    selection_outcomes: dict[str, int] = field(default_factory=dict)
+    selection_not_run: dict[str, int] = field(default_factory=dict)
+    last_selection: dict | None = None
+    last_selection_at: float = 0.0
 
     def count(self, route_id: str, outcome: str) -> None:
+        if route_id not in self.route_ids or outcome not in {
+                "selected", "served", "refused", "failed", "cancelled", "cleanup_failed", "admission_refused"}:
+            return
         bucket = self.per_route.setdefault(route_id, {"served": 0, "refused": 0})
         bucket[outcome] = bucket.get(outcome, 0) + 1
 
     def observe_latency(self, route_id: str, metric: str, value: float) -> None:
+        if (route_id not in self.route_ids or metric not in LATENCY_METRICS
+                or not math.isfinite(value) or value < 0):
+            return
         bucket = self.latency.setdefault(route_id, {})
         old = bucket.get(metric)
         bucket[metric] = value if old is None else .2 * value + .8 * old
+        counts = self.latency_histograms.setdefault(route_id, {}).setdefault(
+            metric, [0] * (len(LATENCY_BUCKET_UPPER_MS)+1))
+        counts[bisect.bisect_left(LATENCY_BUCKET_UPPER_MS, value)] += 1
+
+    def preselection_refused(self, reason: str) -> None:
+        key = reason if reason in PRESELECTION_REASONS else "UNCLASSIFIED"
+        self.selection_not_run[key] = self.selection_not_run.get(key, 0)+1
+
+    def record_selection(self, decision, *, candidate_index: int, candidate_total: int,
+                         configured_alias: bool, owner_excluded: int) -> dict:
+        key = ("SELECTED" if decision.route is not None else
+               decision.reason if decision.reason in SELECTION_REASONS else "UNCLASSIFIED")
+        self.selection_evaluations += 1
+        self.selection_outcomes[key] = self.selection_outcomes.get(key, 0)+1
+        self.last_selection_at = time.monotonic()
+        self.last_selection = dict(
+            decision.evidence, sequence=self.selection_evaluations,
+            selector_reason=key if decision.route is None else None,
+            candidate_index=candidate_index, candidate_total=candidate_total,
+            candidate_scope="this_candidate_only", configured_alias=configured_alias,
+            owner_preflight_excluded=owner_excluded, local_permit_acquired=False,
+            preflight_refusal=None)
+        return self.last_selection
 
 
 def _model_candidates(body: dict, aliases) -> list[tuple[str, str]]:
@@ -402,6 +452,7 @@ def create_app(cfg: Settings | None = None, *,
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = cfg or settings_from_env()
     app.state.router_state = RouterState()
+    app.state.router_state.route_ids = frozenset(r.route_id for r in app.state.settings.routes)
 
     def loopback_peer(request: Request) -> bool:
         if request.client is None:
@@ -436,6 +487,15 @@ def create_app(cfg: Settings | None = None, *,
             "ok": True, "policy": "priority-weighted-inflight-v1",
             "admission_scope": "single_process_local_bulkhead",
             "provider_quota_authority": False,
+            "selection": {
+                "scope": "historical_local_selection_only",
+                "evaluations_total": state.selection_evaluations,
+                "outcomes": state.selection_outcomes,
+                "not_run": state.selection_not_run,
+                "last": dict(state.last_selection,
+                             age_s=round(max(0, now-state.last_selection_at), 3))
+                    if state.last_selection is not None else None,
+            },
             "in_flight": state.in_flight, "max_in_flight": cfg.max_in_flight,
             "request_timeout_s": cfg.request_timeout_s,
             "request_body_timeout_s": cfg.request_body_timeout_s,
@@ -457,6 +517,12 @@ def create_app(cfg: Settings | None = None, *,
                  "last_failure_reason": state.routes.last_failure.get(r.route_id, (None, None))[1],
                  "latency_ewma_ms": {k: round(v, 3) for k, v in state.latency.get(
                      r.route_id, {}).items()},
+                 "latency_histogram": {
+                     "population": "successful_completions",
+                     "clock_origin": "local_admission_reservation",
+                     "bucket_upper_ms": [*LATENCY_BUCKET_UPPER_MS, None],
+                     "counts": state.latency_histograms.get(r.route_id, {}),
+                 },
                  **{key: state.per_route.get(r.route_id, {}).get(key, 0)
                     for key in ("selected", "served", "refused", "failed", "cancelled", "cleanup_failed", "admission_refused")}}
                 for r in cfg.routes],
@@ -743,9 +809,11 @@ def create_app(cfg: Settings | None = None, *,
         state: RouterState = app.state.router_state
         declared = request.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > cfg.max_body_bytes:
+            state.preselection_refused("FABRIC_REQUEST_TOO_LARGE")
             return _error("FABRIC_REQUEST_TOO_LARGE", 413)
         if state.in_flight >= cfg.max_in_flight:
             state.refused += 1
+            state.preselection_refused("FABRIC_ROUTER_BUSY")
             return _error("FABRIC_ROUTER_BUSY", 503, retry_after_s=1)
         # Reserve before the first body read as well as credential admission.
         # Partial uploads cannot retain unbounded buffers outside the bulkhead.
@@ -760,10 +828,12 @@ def create_app(cfg: Settings | None = None, *,
                         async for chunk in request.stream():
                             if len(body) + len(chunk) > cfg.max_body_bytes:
                                 state.refused += 1
+                                state.preselection_refused("FABRIC_REQUEST_TOO_LARGE")
                                 return _error("FABRIC_REQUEST_TOO_LARGE", 413)
                             body.extend(chunk)
                 except TimeoutError:
                     state.refused += 1
+                    state.preselection_refused("FABRIC_REQUEST_BODY_TIMEOUT")
                     return _error("FABRIC_REQUEST_BODY_TIMEOUT", 408)
                 try:
                     payload = json.loads(bytes(body))
@@ -772,14 +842,18 @@ def create_app(cfg: Settings | None = None, *,
                     candidates = _model_candidates(payload, cfg.aliases)
                 except (ValueError, RecursionError, WireTranslationError) as exc:
                     state.refused += 1
-                    return _error(_public_reason(exc, "FABRIC_INVALID_REQUEST"), 400)
+                    reason = _public_reason(exc, "FABRIC_INVALID_REQUEST")
+                    state.preselection_refused(reason)
+                    return _error(reason, 400)
                 counting = request.url.path.endswith("/count_tokens")
                 eligible_routes = [r for r in cfg.routes if not counting or r.wire == WIRE_ANTHROPIC]
                 if counting and not any(r.serves(model) for r in eligible_routes for model, _ in candidates):
                     state.refused += 1
+                    state.preselection_refused("FABRIC_COUNT_TOKENS_UNSUPPORTED")
                     return _error("FABRIC_COUNT_TOKENS_UNSUPPORTED", 501)
                 known_refusal = None
                 available_routes = []
+                owner_excluded_routes = []
                 for route in eligible_routes:
                     if not any(route.serves(model) for model, _ in candidates):
                         continue
@@ -788,32 +862,43 @@ def create_app(cfg: Settings | None = None, *,
                             await oauth_candidates(cfg, state, route)
                         except _ResponsesRouteRefused as exc:
                             known_refusal = exc
+                            owner_excluded_routes.append(route)
                             state.count(route.route_id, "admission_refused")
                             continue
                         except (OSError, ValueError, codex_oauth.OAuthPoolError):
                             known_refusal = _ResponsesRouteRefused(
                                 "FABRIC_OAUTH_OWNER_UNAVAILABLE", circuit=False)
+                            owner_excluded_routes.append(route)
                             state.count(route.route_id, "admission_refused")
                             continue
                     available_routes.append(route)
                 selected, resolved, reason = None, "", "FABRIC_MODEL_UNKNOWN"
                 # No await between selection, route/group checks and acquisition.
-                for model, _ in candidates:
-                    selected, reason = select_route(available_routes, model, state=state.routes,
-                                                    now=time.monotonic(), affinity_key=_affinity(payload))
+                for candidate_index, (model, alias) in enumerate(candidates, 1):
+                    decision = decide_route(available_routes, model, state=state.routes,
+                                            now=time.monotonic(), affinity_key=_affinity(payload))
+                    selected, reason = decision.route, decision.reason
+                    evidence = state.record_selection(
+                        decision, candidate_index=candidate_index, candidate_total=len(candidates),
+                        configured_alias=bool(alias),
+                        owner_excluded=sum(r.serves(model) for r in owner_excluded_routes))
                     if selected is not None:
                         resolved = next(m for m in selected.models if m.lower() == model.strip().lower())
                         break
                 if selected is None:
                     state.refused += 1
                     if not available_routes and known_refusal is not None:
+                        evidence["preflight_refusal"] = (known_refusal.reason
+                            if known_refusal.reason in PREFLIGHT_REASONS else "UNCLASSIFIED")
                         return _error(known_refusal.reason, 503,
                                       retry_after_s=known_refusal.retry_after_s)
                     return _error(reason, 503)
                 permit = state.routes.acquire(selected, now=time.monotonic())
                 if permit is None:
                     state.refused += 1
+                    evidence["preflight_refusal"] = "FABRIC_ROUTES_BUSY"
                     return _error("FABRIC_ROUTES_BUSY", 503, retry_after_s=1)
+                evidence["local_permit_acquired"] = True
                 ctx = _RequestLifecycle(state, cfg, selected, permit, resolved, counting,
                                         started=admission_started)
                 admission_reserved = False
@@ -821,12 +906,15 @@ def create_app(cfg: Settings | None = None, *,
                 state.count(selected.route_id, "selected")
         except TimeoutError:
             state.refused += 1
+            state.preselection_refused("FABRIC_ADMISSION_DEADLINE")
             return _error("FABRIC_ADMISSION_DEADLINE", 503)
         except ClientDisconnect:
             state.cancelled += 1
+            state.preselection_refused("FABRIC_REQUEST_DISCONNECTED")
             return _error("FABRIC_REQUEST_DISCONNECTED", 400)
         except asyncio.CancelledError:
             state.cancelled += 1
+            state.preselection_refused("FABRIC_REQUEST_CANCELLED")
             raise
         finally:
             if admission_reserved:
