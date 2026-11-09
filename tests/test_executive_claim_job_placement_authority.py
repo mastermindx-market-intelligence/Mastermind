@@ -830,12 +830,14 @@ def test_t3_claim_binding_and_real_adapter_agree_on_namespace_and_key(
     """A2 claim->adapter equality: the binding claim_job issues is fed to
     the REAL T3ExecutionAdapter. One story, byte for byte: the binding's
     caller_namespace is empty, the namespace on the wire is exactly what
-    the PORT attests (principal-qualified, or the legacy fixed namespace
-    when the port reports none — never the fixed namespace wrapped in
-    itself), and the clientRequestId on the wire is the claim's
+    the PORT attests (principal-qualified — never the fixed namespace
+    wrapped in itself), and the clientRequestId on the wire is the claim's
     operation_key. The adapter's DURABLE launch record (a second store
     instance reading the same SQLite file) holds that same namespace/key
-    and the same claim binding."""
+    and the same claim binding. A port that attests NO principal cannot
+    prove which OAuth client's idempotency identity it runs under, so the
+    reviewed adapter refuses the launch before any native call (audit #3,
+    re-audit FIXED_CONFIRMED): nothing is sent and nothing is launched."""
     import asyncio
     from datetime import datetime, timezone
     from pathlib import Path
@@ -880,11 +882,17 @@ def test_t3_claim_binding_and_real_adapter_agree_on_namespace_and_key(
         run_dir=tmp_path / "run", prompt="bounded child",
         result_schema_path=tmp_path / "run" / "schema.json",
     )
+    if principal is None:
+        from control_plane.t3_execution_adapter import T3NamespaceAttestationError
+        with pytest.raises(T3NamespaceAttestationError):
+            asyncio.run(adapter.start(spec))
+        assert port.envelopes == []
+        durable = SQLiteT3AdapterStateStore(state_path).load_run(spec.run_id)
+        assert durable is None or durable.receipt is None
+        return
     asyncio.run(adapter.start(spec))
 
-    expected_namespace = (
-        f"{T3_REQUEST_NAMESPACE}:oauth-client-X" if principal else T3_REQUEST_NAMESPACE
-    )
+    expected_namespace = f"{T3_REQUEST_NAMESPACE}:oauth-client-X"
     assert expected_namespace == t3_request_namespace(principal)
     [envelope] = port.envelopes
     assert envelope.request_namespace == expected_namespace

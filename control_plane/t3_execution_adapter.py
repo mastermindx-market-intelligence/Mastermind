@@ -1980,13 +1980,16 @@ class T3ExecutionAdapter:
 
         The claim seam (``executive_runtime._join_native_runtime_binding``)
         stamps a t3 binding with ``operation_key = derive_t3_client_request_id
-        (binding)`` and ``caller_namespace = T3_REQUEST_NAMESPACE``.  The
-        launch must run under EXACTLY that identity: a drifted
-        ``operation_key`` (or a t3 binding without one), or a
-        ``caller_namespace`` that is neither the pinned adapter namespace nor
-        the namespace qualified by the PORT-ATTESTED principal, is refused
-        typed — otherwise the broker would believe one upstream command is
-        bound while the adapter launched another.
+        (binding)`` and leaves ``caller_namespace`` EMPTY: the claim
+        transaction knows no OAuth principal (REVIEW_C_E_OPUS_20261109 A2);
+        the port attests the namespace at launch and the adapter persists it
+        with the intent and receipt.  The launch must run under EXACTLY the
+        claimed key: a drifted ``operation_key`` (or a t3 binding without
+        one) is refused typed.  A non-empty ``caller_namespace`` is admitted
+        only when it equals the pinned adapter namespace or the namespace
+        qualified by the PORT-ATTESTED principal — otherwise the broker would
+        believe one upstream command is bound while the adapter launched
+        another.
         """
         is_t3_binding = binding.runtime_kind == "t3-native"
         operation_key = str(binding.operation_key or "")
@@ -1999,7 +2002,7 @@ class T3ExecutionAdapter:
             )
         caller_namespace = str(binding.caller_namespace or "")
         allowed = {T3_REQUEST_NAMESPACE, t3_request_namespace(principal)}
-        if (is_t3_binding or caller_namespace) and caller_namespace not in allowed:
+        if caller_namespace and caller_namespace not in allowed:
             raise T3BindingJoinDriftError(
                 f"refused: the binding's caller_namespace {caller_namespace!r} "
                 "matches neither the pinned adapter namespace nor the "
