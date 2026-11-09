@@ -381,12 +381,15 @@ def route(conf: dict, *, text: str, channel: str, user: str, is_dm: bool,
     # 1) addressed to an agent that has its own Slack account
     for uid in mentioned_user_ids(text):
         for agent, rec in agents.items():
-            if rec.get("slack_user_id") == uid and rec.get("route_on_mention", True):
+            if (rec.get("slack_user_id") == uid
+                    and rec.get("route_on_mention", True)
+                    and identity_mode(conf, agent)[0] == "user"):
                 return agent, "mention:account"
     # 2) DM that arrived on an agent's own user token
     if is_dm and authorizations:
         for agent, rec in agents.items():
-            if rec.get("slack_user_id") in authorizations:
+            if (rec.get("slack_user_id") in authorizations
+                    and identity_mode(conf, agent)[0] == "user"):
                 return agent, "dm:own-token"
     # 3) dm_agents map (user id -> agent), then channel map
     if user in (conf.get("dm_agents") or {}):
@@ -650,8 +653,13 @@ class Fleet:
         # another mention. Explicit channel enrollment retains its route.
         addressed_ids = set(mentioned_user_ids(event.get("text", "")))
         our_addresses = set(self.our_bot_users)
-        our_addresses.update(rec.get("slack_user_id") for rec in routable(conf).values()
-                             if rec.get("slack_user_id"))
+        # A configured external user ID is not our Slack principal. Only a
+        # genuinely enrolled user-token identity may receive native @mentions.
+        # In particular, Grok Secretary remains an independent external peer.
+        our_addresses.update(rec.get("slack_user_id")
+                             for name, rec in routable(conf).items()
+                             if rec.get("slack_user_id")
+                             and identity_mode(conf, name)[0] == "user")
         if (etype == "message" and event.get("channel_type") in ("channel", "group")
                 and not bound
                 and not (addressed_ids & our_addresses)
