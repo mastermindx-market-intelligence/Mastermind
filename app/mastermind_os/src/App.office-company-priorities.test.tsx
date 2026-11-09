@@ -36,7 +36,9 @@ it("explicit actual App read shows authored priorities/criteria and source, then
  expect(within(rows[0]).getByText(new RegExp(company.response.priorities[0].id))).toBeTruthy();
  fireEvent.click(within(f.section).getByText("Declared phase-review criteria",{exact:true}));expect(within(f.section).getByText(company.response.phase_review_criteria.SELL_READY.criteria[0],{exact:true})).toBeTruthy();
  fireEvent.click(within(f.section).getByText("Company source details",{exact:true}));expect(within(f.section).getByText(new RegExp(company.response.source.revision))).toBeTruthy();
- expect(screen.getByText("The critical path is unavailable. The owner’s next action remains visible.")).toBeTruthy();
+ fireEvent.click(screen.getByText("Returns, dependencies and journal",{selector:"summary"}));
+ expect(screen.getByRole("heading",{level:2,name:"Declared dependencies"})).toBeTruthy();
+ expect(screen.getByText("Supplied collection only. This is not a ranked critical path or adopted company direction.")).toBeTruthy();
  f.nav("Work");f.nav("Meta-CEO");expect(screen.getByRole("textbox",{name:"Direction to Meta-CEO"}).getAttribute("value")??(screen.getByRole("textbox",{name:"Direction to Meta-CEO"}) as HTMLTextAreaElement).value).toBe("Keep exactly this unsent company question.");
  expect(f.invoke.mock.calls.filter(([c])=>c==="read_company_priorities")).toHaveLength(1);expect(f.invoke.mock.calls.some(([c])=>/submit|prepare|send|consume|pause/.test(c))).toBe(false);
 });
