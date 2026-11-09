@@ -2,6 +2,10 @@ import type { AuthState } from "./host";
 
 const copy = {
   en: {
+    sessionExpired: "Your app access has expired.",
+    someAccessExpired: "Some app access has expired.",
+    transactionTimeout: "The authorization attempt timed out before it completed.",
+    authorizationRefused: "Authorization was not granted.",
     label: "Account connected",
     pending: "Additional authorization is still pending.",
     timeout: "Additional authorization timed out. Your account remains connected.",
@@ -10,6 +14,10 @@ const copy = {
     unavailable: "Authorization is incomplete. Your account remains connected.",
   },
   "zh-CN": {
+    sessionExpired: "应用访问权限已过期。",
+    someAccessExpired: "部分应用访问权限已过期。",
+    transactionTimeout: "本次授权尚未完成便已超时。",
+    authorizationRefused: "授权未获批准。",
     label: "账户已连接",
     pending: "后续授权仍在进行中。",
     timeout: "后续授权已超时；您的账户仍保持连接。",
@@ -33,4 +41,17 @@ export function nativePartialAuthPresentation(
         : state.reason === "AUTHORIZATION_REFUSED" ? text.refused
           : text.unavailable;
   return { label: text.label, description };
+}
+
+/** Exact public native causes only. A general refusal does not identify the
+ * resource; Executive-specific text remains with its existing local observation. */
+export function nativeAuthFeedback(state: AuthState, locale: "en" | "zh-CN"): string | null {
+  const text = copy[locale];
+  switch (state.reason) {
+    case "NATIVE_TOKEN_EXPIRED":
+      return state.acquisition || state.content ? text.someAccessExpired : text.sessionExpired;
+    case "AUTH_TRANSACTION_EXPIRED": return text.transactionTimeout;
+    case "AUTHORIZATION_REFUSED": return text.authorizationRefused;
+    default: return null;
+  }
 }

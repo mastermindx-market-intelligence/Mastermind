@@ -115,6 +115,28 @@ class NativeOwnerQualification(unittest.TestCase):
             tool_calls=[{"id": call_id, "type": "function",
                          "function": {"name": TOOL, "arguments": json.dumps(args)}}])
 
+    @staticmethod
+    def wrapper(args):
+        return {"calls": [{"name": TOOL, "arguments": args}]}
+
+    def persist_wrapped(self, call_id, args, *, wrapper=None):
+        return self.db.append_message(self.agent.session_id, "assistant", content="",
+            tool_calls=[{"id": call_id, "type": "function", "function": {
+                "name": "tool_call",
+                "arguments": json.dumps(self.wrapper(args) if wrapper is None else wrapper)}}])
+
+    def invoke_wrapped(self, call_id, args, *, wrapper=None):
+        # Exercise the original broker, schema/scope checks and middleware.
+        # In particular, do not call invoke() with already-unwrapped arguments.
+        from model_tools import handle_function_call
+        with bind_subagent_parent(self.agent):
+            result = handle_function_call(
+                "tool_call", self.wrapper(args) if wrapper is None else wrapper,
+                tool_call_id=call_id, session_id=self.agent.session_id,
+                turn_id=self.agent._current_turn_id, enabled_tools=[TOOL],
+                enabled_toolsets=["mmx_fabric"], disabled_toolsets=[])
+        return json.loads(result)
+
     def mcp(self, server, action, args, timeout=30):
         self.assertEqual(server, "mastermind-fabric-exec")
         self.mcp_actions.append(action)
@@ -431,6 +453,163 @@ class NativeOwnerQualification(unittest.TestCase):
             + struct.pack("<III", 0, int(stat.st_mtime), stat.st_size)
             + marshal.dumps(code))
         self._assert_unmeasured_code_never_runs(marker)
+
+    def test_real_broker_preview_preserves_the_durable_outer_call(self):
+        cfg = json.loads((self.home / "config.yaml").read_text())
+        cfg["plugins"]["entries"]["mastermind-fabric-worker"]["mcp_allowlist"].append(
+            "mastermind-fabric-capacity")
+        (self.home / "config.yaml").write_text(json.dumps(cfg))
+        def capacity(server, action, args, timeout=30):
+            self.assertEqual(server, "mastermind-fabric-capacity")
+            self.assertEqual(action, "fabric_route_preview")
+            self.mcp_actions.append(action)
+            return {"ok": True, "structuredContent": {
+                "pool": "minimax", "model": "qualified-model", "state": "PREVIEW",
+                "reserved": False, "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH"}}
+        self.ctx.call_mcp = capacity
+        self.mount()
+        args = {k: v for k, v in self.args("broker-preview").items() if k != "work_packet"}
+        args["action"] = "preview"
+        self.persist_wrapped("broker-preview-call", args)
+        before = dict(self.db._read_one(
+            "SELECT id,tool_calls,tool_call_uids FROM messages WHERE session_id=?",
+            (self.sid,)))
+        result = self.invoke_wrapped("broker-preview-call", args)
+        self.assertEqual(result["state"], "PREVIEW_ONLY", result)
+        self.assertFalse(result["worker_started"])
+        self.assertEqual(self.mcp_actions, ["fabric_route_preview"])
+        self.assertEqual(self.requests, [])
+        after = self.db._read_all(
+            "SELECT id,tool_calls,tool_call_uids FROM messages WHERE session_id=?",
+            (self.sid,))
+        self.assertEqual([dict(row) for row in after], [before])
+
+    def test_real_broker_and_independent_facade_verify_wrapped_request_and_result(self):
+        self.ctx.call_mcp = self.mcp_wire
+        self.mount()
+        args = self.args("broker-wire")
+        self.persist_wrapped("broker-wire-submit", args)
+        submitted = self.invoke_wrapped("broker-wire-submit", args)
+        self.assertEqual(submitted["state"], "CONTROLLER_CREATED", submitted)
+        proof = self.requests[0]["native_origin"]
+        self.assertEqual(proof["tool_call_id"], "broker-wire-submit")
+        self.assertEqual(proof["session_id"], self.sid)
+        self.assertEqual(proof["turn_id"], self.agent._current_turn_id)
+        self.assertEqual(len(self.wire_last["calls"]), 2)
+        self.wire_state = "TERMINAL"
+        read = {"action": "result", "task_key": args["task_key"]}
+        self.persist_wrapped("broker-wire-result", read)
+        returned = self.invoke_wrapped("broker-wire-result", read)
+        self.assertEqual(returned["state"], "TERMINAL", returned)
+        self.assertEqual(returned["run_id"], submitted["run_id"])
+        self.assertEqual(returned["result_text"],
+                         "fixture retained result through both installed owner APIs")
+        self.assertEqual(len(self.requests), 1)
+
+    def test_real_broker_rejects_local_batches_before_native_dispatch(self):
+        self.mount()
+        args = self.args("broker-batch")
+        entry = {"name": TOOL, "arguments": args}
+        for extra in (entry, {"name": "terminal", "arguments": {}}):
+            with self.subTest(extra=extra["name"]):
+                wrapper = {"calls": [entry, extra]}
+                self.persist_wrapped("broker-batch-call", args, wrapper=wrapper)
+                result = self.invoke_wrapped("broker-batch-call", args, wrapper=wrapper)
+                self.assertIn("error", result)
+        self.assertEqual(self.mcp_actions, [])
+        self.assertEqual(self.requests, [])
+
+    def test_real_broker_does_not_accept_unpersisted_rewritten_or_wrong_id_intents(self):
+        self.mount()
+        for variant in ("unpersisted", "rewritten", "wrong-id"):
+            with self.subTest(variant=variant):
+                args = self.args("broker-" + variant)
+                if variant != "unpersisted":
+                    self.persist_wrapped("stored-" + variant, args)
+                call_id = "different-id" if variant == "wrong-id" else "stored-" + variant
+                incoming = ({**args, "work_packet": "A changed packet."}
+                            if variant == "rewritten" else args)
+                result = self.invoke_wrapped(call_id, incoming)
+                self.assertEqual(result["state"], "REFUSED", result)
+        self.assertEqual(self.mcp_actions, [])
+        self.assertEqual(self.requests, [])
+
+    def test_real_broker_cannot_replay_a_completed_durable_uid(self):
+        self.mount()
+        args = self.args("broker-completed")
+        # The native batch owner pairs assistant/result durable UIDs. Separate
+        # append_message calls intentionally have no shared tool UID index.
+        self.db.append_messages_batch(self.sid, [
+            {"role": "assistant", "content": "", "tool_calls": [{
+                "id": "broker-completed-call", "type": "function", "function": {
+                    "name": "tool_call", "arguments": json.dumps(self.wrapper(args))}}]},
+            {"role": "tool", "content": "retained prior result",
+             "tool_call_id": "broker-completed-call"},
+        ])
+        assistant = self.db._read_one(
+            "SELECT tool_call_uids FROM messages WHERE session_id=? AND role='assistant'",
+            (self.sid,))
+        completed = self.db._read_one(
+            "SELECT tool_call_uid FROM messages WHERE session_id=? AND role='tool'",
+            (self.sid,))
+        self.assertEqual(completed["tool_call_uid"],
+                         json.loads(assistant["tool_call_uids"])["broker-completed-call"])
+        result = self.invoke_wrapped("broker-completed-call", args)
+        self.assertEqual(result["state"], "REFUSED", result)
+        self.assertEqual(self.mcp_actions, [])
+        self.assertEqual(self.requests, [])
+
+    def test_direct_and_real_broker_submit_share_the_original_intent_fence(self):
+        self.mount()
+        args = self.args("mixed-submit")
+        self.persist("direct-submit", args)
+        self.persist_wrapped("broker-submit", args)
+        result = self.invoke_wrapped("broker-submit", args)
+        self.assertEqual(result["state"], "REFUSED", result)
+        self.assertNotIn("fabric_request", self.mcp_actions)
+        self.assertEqual(self.requests, [])
+
+    def test_real_broker_lost_response_cannot_create_a_second_request(self):
+        self.mount()
+        args = self.args("broker-response-loss")
+        self.persist_wrapped("broker-original", args)
+        self.response_loss = True
+        first = self.invoke_wrapped("broker-original", args)
+        self.assertEqual(first["state"], "EFFECT_UNKNOWN", first)
+        self.agent._current_turn_id = "native-turn-2"
+        self.persist_wrapped("broker-later", args)
+        second = self.invoke_wrapped("broker-later", args)
+        self.assertEqual(second["state"], "REFUSED", second)
+        self.assertEqual(first["run_id"], second["run_id"])
+        self.assertEqual(len(self.requests), 1)
+
+    def test_real_broker_compression_preserves_original_root_and_request(self):
+        self.mount()
+        args = self.args("broker-compression")
+        self.persist_wrapped("broker-original", args)
+        first = self.invoke_wrapped("broker-original", args)
+        self.assertEqual(first["state"], "CONTROLLER_CREATED", first)
+        self.db.end_session(self.sid, "compression")
+        self.db.create_session("native-broker-compression", source="cli",
+                               parent_session_id=self.sid)
+        self.agent.session_id = "native-broker-compression"
+        self.agent._current_turn_id = "native-turn-2"
+        self.persist_wrapped("broker-later", args)
+        second = self.invoke_wrapped("broker-later", args)
+        self.assertEqual(second["state"], "REFUSED", second)
+        self.assertEqual(first["run_id"], second["run_id"])
+        self.assertEqual(second["root_id"], native_root(read_enrollment(self.home), self.sid))
+        self.assertEqual(len(self.requests), 1)
+
+    def test_real_broker_lost_native_lease_refuses_before_mcp(self):
+        self.mount()
+        args = self.args("broker-revoked")
+        self.persist_wrapped("broker-revoked-call", args)
+        self.db.release_session_turn_lease(self.sid, self.holder)
+        result = self.invoke_wrapped("broker-revoked-call", args)
+        self.assertEqual(result["state"], "REFUSED", result)
+        self.assertEqual(self.mcp_actions, [])
+        self.assertEqual(self.requests, [])
 
     def test_real_facade_native_verifier_request_and_result_path(self):
         self.ctx.call_mcp = self.mcp_wire

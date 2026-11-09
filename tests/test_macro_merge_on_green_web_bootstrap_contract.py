@@ -24,7 +24,7 @@ def _contains_macro_release_instruction(text: str) -> bool:
     return all(
         snippet in _approved_project_block(text)
         for snippet in (
-            "9A. ONE-PASS DELIVERY:",
+            "9A. TASK FIRST:",
             "docs/DELIVERY_WORKFLOW.md",
             "actual repo controls/opt-ins govern",
             "Never bulk-arm/clear other holds",
@@ -53,7 +53,7 @@ def test_actual_web_project_block_exposes_release_pointer_within_budget():
 def test_outside_fence_release_note_does_not_count_as_installed_instruction():
     kernel = KERNEL.read_text(encoding="utf-8")
     assert _contains_macro_release_instruction(kernel)
-    marker = "9A. ONE-PASS DELIVERY:"
+    marker = "9A. TASK FIRST:"
     moved = kernel.replace(marker, "", 1) + "\n" + marker
     assert moved != kernel, "actual projected release pointer must exist"
     assert not _contains_macro_release_instruction(moved)

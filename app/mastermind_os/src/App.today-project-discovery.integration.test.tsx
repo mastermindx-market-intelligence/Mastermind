@@ -49,7 +49,7 @@ async function setup(){
 }
 function todayRow(){const region=screen.queryByRole('region',{name:'Your projects'});return region?within(region).queryByText((_text,node)=>node?.classList.contains('today-faint')===true && node.textContent?.startsWith(workRef)===true)?.closest('li')??null:null;}
 async function acquiredToday(){const e=await setup();await projects();e.state.stage='N';fireEvent.click(screen.getByRole('button',{name:'Refresh Projects'}));await waitFor(()=>expect(newCard()).not.toBeNull());fireEvent.click(screen.getByRole('button',{name:'Today'}));await waitFor(()=>expect(todayRow()).not.toBeNull());return e;}
-function newCard(){const browser=document.querySelector('.project-archive-browser');return browser?within(browser as HTMLElement).queryByText(workRef)?.closest('li')??null:null;}
+function newCard(){const browser=document.querySelector('.project-archive-browser');return browser?within(browser as HTMLElement).queryByText(workRef)?.closest('tr')??null:null;}
 async function projects(){fireEvent.click(screen.getByRole('button',{name:'Projects'}));await screen.findByText(actual.programs.control_room.work[0].work_ref);}
 
 describe('Today uses the same qualified current project catalogue',()=>{

@@ -3,8 +3,11 @@
 Parent: Mastermind #983 / WS:EXECUTIVE-CAPACITY-FABRIC.
 Operation: capacity-router-resilience-20261109-c4.
 Procedure pin: protected master ff6d5ab67c3535056d69f603fac0d95c058baad8,
-Skillpack 1.0.1. Actual master later observed at 3652d8907df1738de551dd3032b42aa2a2acb482;
-that disjoint Hermes GitHub-plugin advance preserved applicable procedure bytes.
+Skillpack 1.0.1. Material accepted source is integrated through
+dd45d1112cb437d8a033ef314e5bf5b8f97a65bc. The later protected advance to
+6696153d323e3ab712884fa60cdf7bda6dbe5ce6 changes only a UI execution brief and the
+Hermes manual-pool enum; applicable law and this candidate's source inputs remain
+unchanged. The new manual pool names do not qualify fleet execution or routing orders.
 Date: 2026-11-09.
 
 ## Mission and acceptance
@@ -23,23 +26,29 @@ quota registry, credential store, queue, admission owner or Executive lifecycle.
 
 ## Current source and custody
 
-- Original dependency PR #2367, branch fabric-router-codex-oauth-dsh, carries
-  dc59c41e97b263a784997a7e0fbe610e304a4dc3. Its tree is
-  3d1c015d98b1440d874970108056b58827a2f334.
+- Original dependency PR #2367 retains branch fabric-router-codex-oauth-dsh.
+  Its integrated candidate is 307642d24bc420217d834212bbca7812bf5078ec, tree
+  6c52dfd63ffa168678b91fbad41cc8ba94732447, with parents dc59c41e and accepted
+  dd45d111. Exact branch publication/readback and checks belong to that original PR.
 - Scoped router PR #2369, branch sol/web-capacity-router-resilience-20261109-c4,
   remains a nine-file extension stacked on that original dependency.
-- Combined source 01e5c7f302cd9da3922d6296c245de1a68db3830 incorporated the dependency
-  repair. This revision adds selection explanations, fixed latency bins and the
-  current release procedure to that combined source.
+- Previous scoped head b2129832673930b5b4187e0677a67ba3acca18ca added the qualified
+  selector explanations and fixed latency bins. This revision preserves those
+  features while incorporating the material parent integration and its closed
+  public-error literals. It does not revive the parent's former exception echo.
 - Registered router qualification workspace:
   /Volumes/Mastermind/agent-workspaces/web/capacity-router-resilience-20261109-c4.
 - Registered parent repair workspace:
   /Volumes/Mastermind/agent-workspaces/web/capacity-router-parent-ci-repair-20261109-c4.
-  Its local qualification commit 7d778687a41d93e054985eafd1c0291f7f857588 has the
-  exact same tree as published dc59c41e. No second parent PR was created.
+  Its prepared index/worktree exactly matches integrated candidate tree 6c52dfd6.
+  Local HEAD 7d778687 remains the earlier dc59c41e-equivalent qualification commit.
+  The prepared merge is retained; no blind reset/abort or second parent PR is used.
 - Registered Macro fixture workspace:
   /Volumes/Mastermind/agent-workspaces/macro/web/capacity-router-paired-macro-proof-20261109-c4.
   It stays at f38c5b9ea25ea598094a309f0edf48e2722408be, with no Macro source changes.
+  Current paired proof archives exact CI fixture a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c
+  into a disposable child directory; synthetic configuration never touches the
+  registered source checkout.
 - The occupied /Users/chriswong/Mastermind checkout and original live release are
   not this operation's editing surface. Preserve other active source/runtime effects.
 
@@ -58,7 +67,7 @@ is being moved to another carrier.
 | UR4 | Explain routing and health | Same-selector trace, local counters, latency EWMA and fixed bins qualified; production observations still owed |
 | UR5 | Publish qualified owned source | Ready scoped #2369; original dependency repaired in #2367; hosted required CI remains binding |
 | UR6 | Protected release and consumer proof | Not accepted: protected source, safe cutover and actual Hermes/DSH/T3 turns remain owed |
-| UR7 | Physical-account capacity composition | Existing APPLICATION owner needs the actual streaming transport and attested physical-account join |
+| UR7 | Physical-account capacity composition | Existing GLM HTTP seam shares canonical account/model counts; raw streaming, runtime enrollment and cross-product physical-account joins remain owed |
 | UR8 | Capability-aware model policy | Reuse owner tri-state/model/transport capability declarations and evaluated substitutions |
 | UR9 | Measured adaptive selection | Collect representative evidence and shadow evaluation; automatic weight changes remain off |
 | UR10 | Fairness and operations | Existing caller/queue owner supplies fairness; existing service/consumer owners supply drain and real fault proof |
@@ -98,6 +107,9 @@ or authorization to create parallel owners.
 9. Safe route/model/request trace headers and local counters are available. The
    same selector now explains hard exclusions, priority and pressure reductions
    and the actual tie-break without another RNG draw or a reservation.
+10. Public errors return registered constant reason literals or the fixed fallback.
+    Matching-looking unregistered exception text cannot leak through model selection,
+    OpenAI conversion, Responses conversion or aggregation error boundaries.
 
 The retained explicit refresh helper is outside gateway recovery. File locking
 does not establish exactly-once remote OAuth refresh after a crash. Overloading
@@ -129,7 +141,8 @@ These observations do not activate adaptive weights or model substitutions.
 
 ## Qualification evidence
 
-- All 107 affected cases pass in scratch Python 3.12.14 and on the actual installed
+- The published diagnostic source passed all 107 affected cases in scratch Python
+  3.12.14 and on the actual installed
   M2 dependency set: Python 3.14.7, FastAPI 0.162.2, Starlette 1.10.0, httpx 0.28.1.
   Native process 33306 exited 0; git diff --check passed. The live venv was unchanged.
   The original 33 cases remain included.
@@ -137,13 +150,24 @@ These observations do not activate adaptive weights or model substitutions.
   affinity, unchanged singleton/random draw counts, alias fallback, fixed cardinality,
   privacy, owner refusal despite empty selector input, status-read purity, preselection
   refusal preserving an older trace, invalid latency samples and success-only bins.
+- The closed-error integration passes all 117 affected cases in scratch, including
+  the parent's ten discriminating privacy regressions. Exact current native router
+  and HEAD guard receipts belong to the scoped PR; do not promote the earlier 107
+  result to this integrated candidate without its own run.
 - Earlier combined 01e5c7 passed all 96 resilience cases in native process 64384 and
-  the unchanged D8 HEAD source guard in process 64431.
-- The actual paired Fabric composition passed all 15 cases in native process 78436:
-  tracked Mastermind 01e5c7 plus exact CI Macro fixture f38c5b9ea25ea598094a309f0edf48e2722408be.
-  A disposable archive inside the registered SSD workspace loaded the real source
-  owners and a local synthetic provider response. No real provider was called.
-  Router-only diagnostics do not modify those paired source fixture inputs.
+  the unchanged D8 HEAD source guard in process 64431. Published b2129832 passed the
+  unchanged HEAD guard in process 41610.
+- Current actual paired Fabric composition passed all 15 cases in native process 17707:
+  Mastermind 307642d2 plus exact CI Macro fixture a82b310e. The four dispatcher and
+  eleven paired cases in test_fabric_inference_composition.py include original owner
+  admission, revocation, source refusal, usage honesty and no replay after ambiguous
+  transport. Both modules resolve to the disposable actual owner. Fixture cleanup
+  and unchanged Macro source were verified; no real provider was called.
+  This supersedes the earlier 01e5c7/f38c5b9 receipt for changed owner inputs.
+- Parent integration passed 230 precise identity cases, 25 Company/installed-wrapper
+  cases, TypeScript checking and 77 focused frontend cases. Native auth passed 211
+  cases with one existing ignored test in each refresh configuration (processes 6835
+  and 11328), bound to immutable candidate 307642d2 after exact-tree verification.
 - Distinct reasoning reviews found concrete lifecycle, owner-boundary and telemetry
   pitfalls. Root repaired and self-checked them with focused regressions. This is not
   an authenticated GitHub APPROVED review or release permission.
@@ -158,8 +182,11 @@ cases passed. The parent preserves sealed policy/profile bytes, moves additive h
 to the existing gateway, mounts the exact query-free Capacity GET transport and
 requalifies only unchanged protected source/site fingerprints. It removes 3,924
 accidental npm installation files while preserving manifests, locks and application
-changes. #2367 now has 56 changed files. No general scanner exemption or historical
-provider release repin was used.
+changes. The integrated parent has 57 changed files against accepted dd45 source.
+Its security regressions reproduced six failures before repair and passed all 43
+parent router cases afterward. The two new Capacity/auth tests preserve accepted
+primary and work flows while withdrawing stale reads. No general scanner exemption
+or historical provider release repin was used.
 
 ## Observed live generation and consumers
 
@@ -227,10 +254,19 @@ Displayed headroom, preview eligibility and queued waiters cannot grant inferenc
 
 The existing APPLICATION Broker performs atomic admission under its lock and SQLite
 transaction. GoLeaseGateway owns original selection, begin, immutable prepare,
-recovery and settlement. Its qualified contract is nonstream /v1/chat/completions
-with registered Go/Bailian HTTP and native CLI transports. It must be extended for
-the actual 8313 Anthropic/Responses streaming wire before consuming it here; a fake
-nonstream request or direct replacement ledger would bypass its commitments.
+recovery and settlement. Its qualified APPLICATION HTTP contract is nonstream
+/v1/chat/completions for registered Go, Bailian and GLM transports. Accepted GLM
+HTTP supports fixed glm-5.3 and glm-5.3-flash text/tool requests through the existing
+app4 capability, selected profile/account binding and canonical glm account/model
+budget. It preserves reasoning_content for tool continuations and declares no
+vision or streaming. The facade delegates to the original gateway and journal;
+8313 enrollment, current grant and installed native generation remain unproven.
+
+The actual 8313 Anthropic/Responses streaming wire needs an extension of that
+owner's prepare, terminal, unknown-effect and release contract before integration.
+A fake nonstream request or replacement ledger would bypass those commitments.
+Prove the existing GLM HTTP/native shared-account cap first through the common
+owner, then separately qualify cross-product physical-allowance consolidation.
 
 True configured aliases share canonical provider/account lease counts. Explicit
 quota_scope joins cooldown/recovery probes, but does not by itself prove ordinary
@@ -249,9 +285,11 @@ Local cleanup does not prove release of an unresolved provider-side account leas
 
 ## Release gates and exact next actions
 
-- Consume original #2367 required CI run 42589473107 and the current #2369 exact-head
-  checks. Repair real source failures on their original carriers, without duplicate
-  runs, empty pushes or moving a denied/unknown effect.
+- Consume exact newly published #2367/#2369 checks. Earlier parent run 42589473107
+  and scoped run 42592443374 remain bound to their original dc59c41e/b2129832 heads;
+  pending or successful old checks do not qualify this material integration.
+  Repair real failures on their original carriers, without duplicate runs, empty
+  pushes or moving a denied/unknown effect.
 - The GitHub integration's branch-protection read returned 403 Resource not accessible.
   Its exact enforcement remains UNKNOWN, not waived and not an invented approval
   requirement. Do not retry that read through another tool/account/endpoint.
@@ -265,8 +303,9 @@ Local cleanup does not prove release of an unresolved provider-side account leas
   #2369 to master. Preserve old-policy and dependency-tree removals; qualify material
   integration and use the actual protected queue, never direct/self/admin merge.
 - Before runtime action, discover and verify the existing ingress hold/service custody.
-  Preserve live requests and shared owners. Protected merge alone does not prove a
-  safe cutover or completed consumer acceptance.
+  Accepted Hermes external drain is limited to that gateway; it does not hold DSH
+  or T3 submissions. Preserve live requests and shared owners. Protected merge alone
+  does not prove a safe cutover or completed consumer acceptance.
 
 DO_NOT_REDO: accepted source investigations and unchanged paired proof; new source
 does not require another blanket independent review. Reuse exact-input evidence.

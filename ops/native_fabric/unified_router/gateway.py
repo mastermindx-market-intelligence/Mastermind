@@ -20,7 +20,7 @@ import json
 import logging
 import math
 import os
-import re
+
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -66,10 +66,35 @@ ALLOWED = {("POST", "v1/messages"), ("POST", "v1/messages/count_tokens"),
 
 _log = logging.getLogger(__name__)
 
-# The only exception text a client may ever see is a router-authored refusal
-# reason of constant FABRIC_* shape (py/stack-trace-exposure): free-form
-# detail from OSError/ValueError paths stays in the server-side log.
-_FABRIC_REASON_RE = re.compile(r"^FABRIC_[A-Z0-9_]+$")
+# Public exception reasons are a closed set of router-authored literals. Return
+# the registered literal, never exception text merely matching a FABRIC_* shape.
+_PUBLIC_REFUSAL_CODES = (
+    "FABRIC_EXACT_MODEL_REQUIRED",
+    "FABRIC_INVALID_REQUEST",
+    "FABRIC_RESPONSE_INVALID",
+    "FABRIC_RESPONSE_INVALID_JSON",
+    "FABRIC_RESPONSE_TOO_LARGE",
+    "FABRIC_STREAM_CONTENT_TYPE",
+    "FABRIC_STREAM_EVENT_TOO_LARGE",
+    "FABRIC_STREAM_INCOMPLETE",
+    "FABRIC_STREAM_INVALID",
+    "FABRIC_STREAM_INVALID_JSON",
+    "FABRIC_STREAM_INVALID_UTF8",
+    "FABRIC_STREAM_TRUNCATED",
+    "FABRIC_TRANSLATE_BLOCK",
+    "FABRIC_TRANSLATE_BODY",
+    "FABRIC_TRANSLATE_CHUNK",
+    "FABRIC_TRANSLATE_INVALID",
+    "FABRIC_TRANSLATE_MESSAGE",
+    "FABRIC_TRANSLATE_RESPONSE",
+    "FABRIC_TRANSLATE_ROLE",
+    "FABRIC_TRANSLATE_TOOL_ARGUMENTS",
+    "FABRIC_TRANSLATE_TOOL_CALL",
+    "FABRIC_TRANSLATE_TOOL_IDENTITY",
+    "FABRIC_UPSTREAM_INCOMPLETE",
+    "FABRIC_UPSTREAM_RESPONSE_ERROR",
+    "FABRIC_UPSTREAM_STREAM_ERROR",
+)
 LATENCY_BUCKET_UPPER_MS = (10., 50., 100., 250., 500., 1000., 2500., 5000.,
                           10000., 30000., 60000., 180000., 600000., 1800000.)
 LATENCY_METRICS = frozenset({"headers_ms", "first_content_ms", "completion_ms"})
@@ -86,10 +111,11 @@ PREFLIGHT_REASONS = frozenset({
 
 
 def _public_reason(exc: Exception, fallback: str) -> str:
-    """Bound a caught exception to a publishable constant reason code."""
-    text = str(exc)
-    if _FABRIC_REASON_RE.match(text):
-        return text
+    """Select a fixed public reason without propagating exception contents."""
+    detail = str(exc)
+    for public_code in _PUBLIC_REFUSAL_CODES:
+        if detail == public_code:
+            return public_code
     _log.warning("unified router withheld exception detail: %s", type(exc).__name__)
     return fallback
 

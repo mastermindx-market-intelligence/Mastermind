@@ -19,11 +19,10 @@ from test_native_launcher_successor_transition import source_owners, owner
 
 @pytest.fixture(scope="module", autouse=True)
 def reseal_modified_entry_for_disposable_fixtures():
-    """Seal the reviewed A/B deltas and changed E in disposable fixtures only."""
+    """Reseal the entry in disposable fixtures without replacing source verification."""
     import native_generation as generation
     import sys as fixture_sys
     from test_go_native_stage import builder, ROOT
-    import build_review_stage as fixture_builder
     import test_native_launcher_upgrade as fixture_upgrade
     fixture_path = str(ROOT / "tests")
     if fixture_path in sys.path:
@@ -36,23 +35,6 @@ def reseal_modified_entry_for_disposable_fixtures():
         fixture_sys.modules["test_go_native_install"].history = package_transition
 
     original = builder.stage_external_go_component
-    original_read_bytes = fixture_builder.Path.read_bytes
-    current = json.loads((ROOT / "rollout/native-manifest.json").read_bytes())
-    current_inventory = json.loads((ROOT / "rollout/native-source-inventory.json").read_bytes())
-    current, current_inventory = dict(current), dict(current_inventory)
-    current_inventory["files"] = {key: dict(value) for key, value in current_inventory["files"].items()}
-    for relative, name in (("ext/go_lease_gateway.py", "go_lease_gateway.py"),
-            ("ext/go_lease_capability.py", "go_lease_capability.py"),
-            ("ext/lease_broker.py", "lease_broker.py")):
-        raw = (ROOT / "candidate" / name).read_bytes()
-        current[relative] = generation.digest(raw)
-        current_inventory["files"][relative].update(sha256=generation.digest(raw), bytes=len(raw))
-    current_raw = (json.dumps(current, sort_keys=True, indent=2) + "\n").encode()
-    inventory_raw = (json.dumps(current_inventory, sort_keys=True, indent=2) + "\n").encode()
-    def verify_current(output):
-        assert (output / "native-manifest.json").read_bytes() == current_raw
-        assert (output / "native-source-inventory.json").read_bytes() == inventory_raw
-        return current
     def reseal(root, output, ext, staged_manifest=None):
         result = original(root, output, ext, staged_manifest=staged_manifest)
         if staged_manifest is None or not (output / "native-source-inventory.json").exists():
@@ -72,8 +54,7 @@ def reseal_modified_entry_for_disposable_fixtures():
         inventory["files"][generation.GO_ENTRY].update(sha256=digest, bytes=len(raw))
         inventory_path.write_text(json.dumps(inventory, sort_keys=True, indent=2) + "\n")
         return result
-    with mock.patch.object(builder, "stage_external_go_component", side_effect=reseal), \
-            mock.patch.object(package_transition.historical, "verify_current_stage", side_effect=verify_current):
+    with mock.patch.object(builder, "stage_external_go_component", side_effect=reseal):
         yield
 
 
