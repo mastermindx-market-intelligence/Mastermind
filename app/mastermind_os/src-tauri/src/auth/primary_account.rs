@@ -87,13 +87,15 @@ mod tests {
         let u=Url::parse(&first).unwrap(); let q:std::collections::BTreeMap<_,_>=u.query_pairs().collect();
         assert_eq!(u.origin().ascii_serialization(),Url::parse(ISSUER).unwrap().origin().ascii_serialization());
         assert_eq!(q["client_id"],"public-client"); assert_eq!(q["audience"],Resource::Acquisition.audience());
-        assert_eq!(q["scope"],Resource::Acquisition.scope()); assert_eq!(q["prompt"],"login");
+        let expected_a_scope = if crate::native_refresh::enabled() { "mastermind.workspace.read offline_access" } else { "mastermind.workspace.read" };
+        assert_eq!(q["scope"],expected_a_scope); assert_eq!(q["prompt"],"login");
         assert_eq!(i.executive_reason,ExecutiveReason::AuthorizationRefused);
         let second=complete(&mut i).unwrap();
         let c=i.pending.as_ref().unwrap(); assert!(c.intent==SignInIntent::PrimaryAccount);
         assert_ne!(c.state,a_state); assert_ne!(c.verifier,a_verifier);
         let u=Url::parse(&second).unwrap();let q:std::collections::BTreeMap<_,_>=u.query_pairs().collect();
-        assert_eq!(q["audience"],Resource::Content.audience());assert_eq!(q["scope"],Resource::Content.scope());
+        assert_eq!(q["audience"],Resource::Content.audience());let expected_c_scope = if crate::native_refresh::enabled() { "mastermind.workspace.content.read offline_access" } else { "mastermind.workspace.content.read" };
+        assert_eq!(q["scope"],expected_c_scope);
         assert!(!q.contains_key("prompt"));
         assert!(complete(&mut i).is_none());
         assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());

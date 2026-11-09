@@ -566,6 +566,13 @@ mod tests {
         let expired = Instant::now() - Duration::from_secs(1);
         inner.pending.as_mut().unwrap().expires = expired;
         assert!(inner.expire_transaction(inner.generation, expired, Instant::now()));
+        if crate::native_refresh::enabled() {
+            assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+            assert!(inner.begin_continuation_check().is_err());
+            assert!(inner.token(Resource::Acquisition).is_some());
+            assert!(inner.content.is_none() && inner.executive.is_none() && inner.pending.is_none() && !inner.exchanging);
+            return;
+        }
         let anchor = inner.begin_continuation_check().unwrap();
         assert!(anchor.intent == SignInIntent::PrimaryAccount);
         let proof = account(Resource::Acquisition, anchor.acquisition_wall, &"a".repeat(64));
@@ -600,6 +607,13 @@ mod tests {
     fn held_executive_refusal_primary_content_timeout_can_continue_content_only() {
         let (mut inner,_)=held_primary_timeout();
         assert!(inner.token(Resource::Acquisition).is_some());
+        if crate::native_refresh::enabled() {
+            assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+            assert!(inner.begin_continuation_check().is_err());
+            assert_eq!(inner.executive_reason, ExecutiveReason::AuthorizationRefused);
+            assert!(inner.content.is_none() && inner.executive.is_none() && inner.pending.is_none() && !inner.exchanging);
+            return;
+        }
         assert_eq!(inner.continuation_status().state,"ELIGIBLE");
         let anchor=inner.begin_continuation_check().unwrap();
         assert!(anchor.intent==SignInIntent::PrimaryAccount);
