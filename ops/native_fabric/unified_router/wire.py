@@ -486,7 +486,6 @@ class ResponsesStreamTranslator:
             _require(isinstance(response, dict), "FABRIC_TRANSLATE_RESPONSE")
             _require(response.get("status") in {"completed", "incomplete"},
                      "FABRIC_TRANSLATE_RESPONSE")
-            self.completed = True
             if response.get("status") == "incomplete" or kind == "response.incomplete":
                 details = response.get("incomplete_details") or {}
                 _require(isinstance(details, dict) and details.get("reason") == "max_output_tokens",
@@ -496,6 +495,7 @@ class ResponsesStreamTranslator:
                 self._finish = "tool_use"
             else:
                 self._finish = "end_turn"
+            self.completed = True
             self._usage = response.get("usage") or self._usage
         return out
 

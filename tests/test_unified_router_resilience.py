@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import fcntl
 import json
 import time
+import threading
 from dataclasses import replace
 from email.utils import formatdate
 from contextlib import asynccontextmanager
 from functools import wraps
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -21,6 +24,7 @@ from ops.native_fabric.unified_router.streaming import SSEDecoder
 from ops.native_fabric.unified_router.wire import (
     OpenAIStreamTranslator, ResponsesStreamTranslator, WireTranslationError)
 from ops.native_fabric.unified_router import codex_oauth
+from ops.native_fabric.unified_router import gateway
 
 TOKEN = "offline-router-token-32-characters"
 HEADERS = {"authorization": "Bearer " + TOKEN}
@@ -491,7 +495,7 @@ def test_refresh_preserves_concurrent_quota_hold(tmp_path, peer):
                                           client_id="fixture", client=client)
     assert updated.exhausted and updated.exhausted_until == deadline
     assert codex_oauth.read_accounts(path, "p")[0].exhausted_until == deadline
-    assert client.post.call_count == (0 if peer else 1)
+    assert client.post.call_count == 0
 
 
 @pytest.mark.parametrize("reset", [None, float("nan"), "unknown"])
@@ -499,3 +503,264 @@ def test_exhaustion_without_verified_reset_stays_unavailable(tmp_path, reset):
     path = oauth_store(tmp_path, last_status="exhausted", last_error_reset_at=reset)
     account = codex_oauth.read_accounts(path, "p")[0]
     assert account.exhausted and account.exhausted_unknown
+
+
+@pytest.mark.parametrize("removed", ["refresh_token", "access_token"])
+def test_refresh_cannot_restore_credentials_removed_by_owner(tmp_path, removed):
+    path = oauth_store(tmp_path)
+    original = codex_oauth.read_accounts(path, "p")[0]
+    doc = json.loads(path.read_text())
+    del doc["credential_pool"]["p"][0][removed]
+    path.write_text(json.dumps(doc))
+    token_client = MagicMock()
+    with pytest.raises(codex_oauth.OAuthPoolError, match="removed"):
+        codex_oauth.refresh_account(path, "p", original, token_url="https://auth.example/token",
+                                   client_id="fixture", client=token_client)
+    token_client.post.assert_not_called()
+    assert removed not in json.loads(path.read_text())["credential_pool"]["p"][0]
+
+
+def test_atomic_auth_write_keeps_old_document_on_replace_failure(tmp_path, monkeypatch):
+    path = oauth_store(tmp_path)
+    old = path.read_bytes()
+
+    def fail_replace(*args):
+        raise OSError("fixture replace failure")
+
+    monkeypatch.setattr(codex_oauth.os, "replace", fail_replace)
+    with pytest.raises(OSError):
+        codex_oauth.bench_row(path, "p", "one", reset_at=time.time()+30, reason="http_429")
+    assert path.read_bytes() == old
+    assert not list(tmp_path.glob(".auth-router-*"))
+
+
+def test_auth_write_is_private_and_does_not_replace_symlink(tmp_path):
+    path = oauth_store(tmp_path)
+    codex_oauth.bench_row(path, "p", "one", reset_at=time.time()+30, reason="http_429")
+    assert path.stat().st_mode & 0o777 == 0o600
+    link = tmp_path / "linked-auth.json"
+    link.symlink_to(path)
+    with pytest.raises(codex_oauth.OAuthPoolError, match="regular file"):
+        codex_oauth.bench_row(link, "p", "one", reset_at=time.time()+60, reason="http_429")
+    assert link.is_symlink()
+
+
+def expired_jwt():
+    return "fixture." + base64.urlsafe_b64encode(b'{"exp":0}').decode().rstrip("=") + ".fixture"
+
+
+def oauth_route():
+    return Route(route_id="oauth", kind="oauth_pool", wire="responses", models=("m",),
+                 base_url="https://upstream.example", pool="p")
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@async_test
+async def test_auth_refusal_never_refreshes_or_replays_inference(tmp_path, monkeypatch, status):
+    oauth_store(tmp_path)
+    token_client = MagicMock()
+    monkeypatch.setattr(codex_oauth, "refresh_account", token_client)
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(status, json={"error": "fixture auth refusal"})
+
+    app = create_app(config(tmp_path, routes=(oauth_route(),)), transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body())
+    assert reply.status_code == status and len(calls) == 1
+    token_client.assert_not_called()
+    assert app.state.router_state.served == 0
+
+
+def test_unknown_incomplete_reason_never_leaves_translator_completed():
+    translator = ResponsesStreamTranslator(model="m")
+    with pytest.raises(WireTranslationError, match="INCOMPLETE"):
+        translator.feed({"type": "response.incomplete", "response": {
+            "status": "incomplete", "incomplete_details": {"reason": "unknown"}}})
+    with pytest.raises(WireTranslationError, match="INCOMPLETE"):
+        translator.to_message()
+
+
+@async_test
+async def test_expired_pool_refuses_without_refresh_and_adopts_owner_rotation(tmp_path, monkeypatch):
+    path = oauth_store(tmp_path)
+    doc = json.loads(path.read_text())
+    doc["credential_pool"]["p"][0]["access_token"] = expired_jwt()
+    path.write_text(json.dumps(doc))
+    original = path.read_bytes()
+    refresh = MagicMock(side_effect=AssertionError("router cannot refresh tokens"))
+    monkeypatch.setattr(codex_oauth, "refresh_account", refresh)
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, content=b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+                              headers={"content-type": "text/event-stream"})
+
+    app = create_app(config(tmp_path, routes=(oauth_route(),)), transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        refused = await session.post("/v1/messages", headers=HEADERS, json=body())
+        assert refused.status_code == 503
+        assert refused.json()["error"]["code"] == "FABRIC_OAUTH_OWNER_REFRESH_REQUIRED"
+        assert "retry-after" not in refused.headers
+        assert calls == [] and path.read_bytes() == original
+        assert app.state.router_state.routes.circuit("oauth", time.monotonic()) == "closed"
+        # Simulate the incumbent owner completing a rotation; the router reads it live.
+        doc["credential_pool"]["p"][0]["access_token"] = "owner-new-access"
+        doc["credential_pool"]["p"][0]["refresh_token"] = "owner-new-refresh"
+        path.write_text(json.dumps(doc))
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body())
+    assert reply.status_code == 200 and len(calls) == 1
+    assert calls[0].headers["authorization"] == "Bearer owner-new-access"
+    refresh.assert_not_called()
+
+
+@async_test
+async def test_owner_held_preferred_route_uses_eligible_fallback_before_send(tmp_path, monkeypatch):
+    oauth_store(tmp_path, last_status="dead")
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={"id": "m", "content": []})
+
+    app = create_app(config(tmp_path, routes=(replace(oauth_route(), priority=10),
+                                              route("fallback", priority=20))),
+                     transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body())
+    assert reply.status_code == 200 and reply.headers["x-fabric-route"] == "fallback"
+    assert len(calls) == 1 and calls[0].url.path == "/v1/messages"
+    assert app.state.router_state.in_flight == 0
+
+
+@async_test
+async def test_pool_selection_skips_expired_account_before_send(tmp_path):
+    path = oauth_store(tmp_path)
+    doc = json.loads(path.read_text())
+    row = doc["credential_pool"]["p"][0]
+    row["access_token"] = expired_jwt()
+    doc["credential_pool"]["p"].append(dict(id="two", label="two",
+        access_token="eligible-token", refresh_token="r2"))
+    path.write_text(json.dumps(doc))
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(503, json={"error": "fixture"})
+
+    app = create_app(config(tmp_path, routes=(oauth_route(),)), transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        await session.post("/v1/messages", headers=HEADERS, json=body())
+    assert len(calls) == 1 and calls[0].headers["authorization"] == "Bearer eligible-token"
+
+
+def test_late_429_cannot_replace_owner_dead_state(tmp_path):
+    path = oauth_store(tmp_path, last_status="dead", last_status_at=time.time())
+    original = path.read_bytes()
+    codex_oauth.bench_row(path, "p", "one", reset_at=time.time()+30, reason="http_429")
+    assert path.read_bytes() == original
+    assert codex_oauth.read_accounts(path, "p")[0].owner_held
+
+
+def test_bench_timestamp_participates_in_incumbent_stale_write_merge(tmp_path):
+    path = oauth_store(tmp_path)
+    before = time.time()
+    codex_oauth.bench_row(path, "p", "one", reset_at=before+30, reason="http_429")
+    row = json.loads(path.read_text())["credential_pool"]["p"][0]
+    assert before <= row["last_status_at"] <= time.time()
+
+
+@async_test
+async def test_slow_credential_admission_is_inside_global_bulkhead(tmp_path, monkeypatch):
+    path = oauth_store(tmp_path)
+    accounts = codex_oauth.read_accounts(path, "p")
+    entered, release = threading.Event(), threading.Event()
+    reads = []
+
+    def slow_read(*args):
+        reads.append(True)
+        entered.set()
+        assert release.wait(1)
+        return accounts
+
+    monkeypatch.setattr(codex_oauth, "read_accounts", slow_read)
+    app = create_app(config(tmp_path, routes=(oauth_route(),), max_in_flight=1),
+                     transport=httpx.MockTransport(lambda req: httpx.Response(503)))
+    async with client(app) as session:
+        first = asyncio.create_task(session.post("/v1/messages", headers=HEADERS, json=body()))
+        assert await asyncio.to_thread(entered.wait, 1)
+        try:
+            refused = await session.post("/v1/messages", headers=HEADERS, json=body())
+            assert refused.status_code == 503 and len(reads) == 1
+            assert refused.json()["error"]["code"] == "FABRIC_ROUTER_BUSY"
+        finally:
+            release.set()
+            await first
+    assert app.state.router_state.in_flight == 0
+
+
+def test_explicit_refresh_wait_is_bounded_and_cancellable(tmp_path):
+    path = oauth_store(tmp_path)
+    account = codex_oauth.read_accounts(path, "p")[0]
+    token_client = MagicMock()
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(codex_oauth.OAuthPoolError, match="cancelled"):
+        codex_oauth.refresh_account(path, "p", account, token_url="https://auth.example/token",
+                                   client_id="fixture", client=token_client, cancelled=cancelled)
+    with open(tmp_path / "auth.json.lock", "a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        with pytest.raises(codex_oauth.OAuthPoolError, match="deadline"):
+            codex_oauth.refresh_account(path, "p", account, token_url="https://auth.example/token",
+                                       client_id="fixture", client=token_client,
+                                       deadline=time.monotonic()+.02)
+    token_client.post.assert_not_called()
+
+
+@async_test
+async def test_older_bench_write_completion_cannot_shorten_new_local_hold(tmp_path, monkeypatch):
+    oauth_store(tmp_path)
+    both_sent = asyncio.Event()
+    first_bench, second_bench = threading.Event(), threading.Event()
+    release_first, release_second = threading.Event(), threading.Event()
+    calls = []
+
+    async def handler(req):
+        calls.append(req)
+        index = len(calls)
+        if index == 1:
+            await both_sent.wait()
+        else:
+            both_sent.set()
+            assert await asyncio.to_thread(first_bench.wait, 1)
+        return httpx.Response(429, headers={"retry-after": "30" if index == 1 else "7200"})
+
+    def delayed_bench(*args, reset_at, **kwargs):
+        if reset_at-time.time() < 100:
+            first_bench.set()
+            assert release_first.wait(1)
+        else:
+            second_bench.set()
+            assert release_second.wait(1)
+        return reset_at
+
+    monkeypatch.setattr(codex_oauth, "bench_row", delayed_bench)
+    app = create_app(config(tmp_path, routes=(oauth_route(),)), transport=httpx.MockTransport(handler))
+    async with client(app) as session:
+        first = asyncio.create_task(session.post("/v1/messages", headers=HEADERS, json=body()))
+        second = asyncio.create_task(session.post("/v1/messages", headers=HEADERS, json=body()))
+        try:
+            assert await asyncio.to_thread(second_bench.wait, 1)
+            release_first.set()
+            done, _ = await asyncio.wait((first, second), timeout=1, return_when=asyncio.FIRST_COMPLETED)
+            assert len(done) == 1
+            assert app.state.router_state.oauth_bench[("oauth", "one")]-time.time() > 7000
+        finally:
+            release_first.set()
+            release_second.set()
+            await asyncio.gather(first, second)
+    assert len(calls) == 2 and app.state.router_state.in_flight == 0

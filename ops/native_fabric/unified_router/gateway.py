@@ -79,24 +79,6 @@ def _public_reason(exc: Exception, fallback: str) -> str:
     return fallback
 
 
-class _SyncHttpClient:
-    """Short-lived synchronous client for OAuth refresh endpoints.
-
-    Token refreshes are blocking file+HTTP transactions under the incumbent
-    auth.json lock; they run in a worker thread (see ``_run_in_executor``)
-    instead of blocking the router's event loop.
-    """
-
-    def __init__(self, timeout_s: float = 20.0):
-        self._client = httpx.Client(timeout=timeout_s, follow_redirects=False, trust_env=False)
-
-    def post(self, *args, **kwargs):
-        return self._client.post(*args, **kwargs)
-
-    def close(self) -> None:
-        self._client.close()
-
-
 async def _run_in_executor(fn, *args, **kwargs):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
@@ -338,9 +320,12 @@ class _RequestLifecycle:
         try:
             # Starlette may cancel the entire stream task scope on disconnect.
             # Cleanup also runs when its generator has never been advanced.
-            with anyio.move_on_after(5, shield=True):
+            with anyio.move_on_after(5, shield=True) as cleanup_scope:
                 if self.upstream_response is not None:
                     await self.upstream_response.aclose()
+            if cleanup_scope.cancel_called:
+                self.state.count(self.route.route_id, "cleanup_failed")
+                _log.warning("route %s close exceeded deadline", self.route.route_id)
         except Exception as exc:
             self.state.count(self.route.route_id, "cleanup_failed")
             _log.warning("route %s close failed: %s", self.route.route_id, type(exc).__name__)
@@ -468,9 +453,10 @@ def create_app(cfg: Settings | None = None, *,
                  "latency_ewma_ms": {k: round(v, 3) for k, v in state.latency.get(
                      r.route_id, {}).items()},
                  **{key: state.per_route.get(r.route_id, {}).get(key, 0)
-                    for key in ("selected", "served", "refused", "failed", "cancelled", "cleanup_failed")}}
+                    for key in ("selected", "served", "refused", "failed", "cancelled", "cleanup_failed", "admission_refused")}}
                 for r in cfg.routes],
             "aliases": {alias: list(targets) for alias, targets in cfg.aliases},
+            "oauth_refresh_authority": "incumbent_auth_owner",
             "selected_total": state.selected, "served_total": state.served,
             "refused_total": state.refused, "failed_total": state.failed,
             "cancelled_total": state.cancelled,
@@ -615,45 +601,43 @@ def create_app(cfg: Settings | None = None, *,
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"cache-control": "no-store"})
 
-    async def refresh_before_send(route, account):
-        def refresh():
-            client = _SyncHttpClient()
-            try:
-                return codex_oauth.refresh_account(
-                    app.state.settings.auth_store, route.pool, account,
-                    token_url=route.token_url, client_id=route.client_id, client=client)
-            finally:
-                client.close()
-        return await _run_in_executor(refresh)
+    async def oauth_candidates(cfg, state, route):
+        accounts = await _run_in_executor(codex_oauth.read_accounts, cfg.auth_store, route.pool)
+        wall_now = time.time()
+        unheld = [a for a in accounts if not a.owner_held]
+        if not unheld:
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_OWNER_HELD", circuit=False)
+        eligible, needs_refresh = [], False
+        for account in unheld:
+            if account.exhausted or state.oauth_bench.get((route.route_id, account.id), 0) > wall_now:
+                continue
+            expiry = codex_oauth.access_token_expiry(account.access_token)
+            if expiry is not None and expiry <= wall_now + 30:
+                needs_refresh = True
+                continue
+            eligible.append(account)
+        if eligible:
+            return eligible
+        if needs_refresh:
+            # Rotation belongs to the existing auth owner. No token endpoint
+            # POST, invented recovery deadline or upstream-health penalty.
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_OWNER_REFRESH_REQUIRED", circuit=False)
+        if any(a.exhausted_unknown for a in unheld):
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_QUOTA_UNKNOWN", circuit=False)
+        deadlines = [max(a.exhausted_until, state.oauth_bench.get(
+            (route.route_id, a.id), 0)) for a in unheld]
+        remaining = min((d-wall_now for d in deadlines if d > wall_now), default=None)
+        raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
+                                     retry_after_s=remaining, circuit=False)
 
     async def forward_responses(ctx, payload):
         translated = anthropic_to_responses(payload)
         translated["stream"] = True
         state, cfg, route = ctx.state, ctx.cfg, ctx.route
-        accounts = await _run_in_executor(codex_oauth.read_accounts, cfg.auth_store, route.pool)
-        wall_now = time.time()
-        eligible = [a for a in accounts if not a.exhausted and
-                    state.oauth_bench.get((route.route_id, a.id), 0) <= wall_now]
-        if not eligible:
-            if any(a.exhausted_unknown for a in accounts):
-                raise _ResponsesRouteRefused("FABRIC_OAUTH_QUOTA_UNKNOWN")
-            deadlines = [max(a.exhausted_until, state.oauth_bench.get(
-                (route.route_id, a.id), 0)) for a in accounts]
-            remaining = min((d - wall_now for d in deadlines if d > wall_now),
-                            default=cfg.route_cooldown_s)
-            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
-                                         retry_after_s=remaining)
+        eligible = await oauth_candidates(cfg, state, route)
         cursor = state.oauth_cursor.get(route.route_id, 0)
         account = eligible[cursor % len(eligible)]
         state.oauth_cursor[route.route_id] = cursor + 1
-        expiry = codex_oauth.access_token_expiry(account.access_token)
-        if expiry is not None and expiry <= wall_now + 30:
-            try:
-                account = await refresh_before_send(route, account)
-            except (codex_oauth.OAuthPoolError, OSError, ValueError, httpx.RequestError):
-                raise _ResponsesRouteRefused("FABRIC_OAUTH_REFRESH_UNAVAILABLE") from None
-        if account.exhausted:
-            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED")
         headers = {"authorization": f"Bearer {account.access_token}",
                    "content-type": "application/json", "accept-encoding": "identity",
                    "originator": route.originator or "hermes-agent",
@@ -670,7 +654,8 @@ def create_app(cfg: Settings | None = None, *,
             persisted_reset = await _run_in_executor(
                 codex_oauth.bench_row, cfg.auth_store, route.pool,
                 account.id, reset_at=reset_at, reason="http_429")
-            state.oauth_bench[(route.route_id, account.id)] = max(reset_at, persisted_reset)
+            key = (route.route_id, account.id)
+            state.oauth_bench[key] = max(state.oauth_bench.get(key, 0), reset_at, persisted_reset)
             # No replay: a later independent request may select another eligible row.
             raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNT_LIMIT",
                                          retry_after_s=delay, circuit=False)
@@ -773,25 +758,63 @@ def create_app(cfg: Settings | None = None, *,
         if state.in_flight >= cfg.max_in_flight:
             state.refused += 1
             return _error("FABRIC_ROUTER_BUSY", 503, retry_after_s=1)
-        selected, resolved, reason = None, "", "FABRIC_MODEL_UNKNOWN"
-        # No await between selection, all capacity checks and permit acquisition.
-        for model, _ in candidates:
-            selected, reason = select_route(eligible_routes, model, state=state.routes,
-                                            now=time.monotonic(), affinity_key=_affinity(payload))
-            if selected is not None:
-                resolved = next(m for m in selected.models if m.lower() == model.strip().lower())
-                break
-        if selected is None:
-            state.refused += 1
-            return _error(reason, 503)
-        permit = state.routes.acquire(selected, now=time.monotonic())
-        if permit is None:
-            state.refused += 1
-            return _error("FABRIC_ROUTES_BUSY", 503, retry_after_s=1)
+        # Reserve the process bulkhead before any asynchronous credential read.
+        # A burst cannot create unbounded admission/executor work ahead of it.
         state.in_flight += 1
-        state.selected += 1
-        state.count(selected.route_id, "selected")
-        ctx = _RequestLifecycle(state, cfg, selected, permit, resolved, counting)
+        admission_started = time.monotonic()
+        admission_reserved = True
+        try:
+            async with asyncio.timeout_at(admission_started + cfg.request_timeout_s):
+                known_refusal = None
+                available_routes = []
+                for route in eligible_routes:
+                    if not any(route.serves(model) for model, _ in candidates):
+                        continue
+                    if route.kind == "oauth_pool":
+                        try:
+                            await oauth_candidates(cfg, state, route)
+                        except _ResponsesRouteRefused as exc:
+                            known_refusal = exc
+                            state.count(route.route_id, "admission_refused")
+                            continue
+                        except (OSError, ValueError, codex_oauth.OAuthPoolError):
+                            known_refusal = _ResponsesRouteRefused(
+                                "FABRIC_OAUTH_OWNER_UNAVAILABLE", circuit=False)
+                            state.count(route.route_id, "admission_refused")
+                            continue
+                    available_routes.append(route)
+                selected, resolved, reason = None, "", "FABRIC_MODEL_UNKNOWN"
+                # No await between selection, route/group checks and acquisition.
+                for model, _ in candidates:
+                    selected, reason = select_route(available_routes, model, state=state.routes,
+                                                    now=time.monotonic(), affinity_key=_affinity(payload))
+                    if selected is not None:
+                        resolved = next(m for m in selected.models if m.lower() == model.strip().lower())
+                        break
+                if selected is None:
+                    state.refused += 1
+                    if not available_routes and known_refusal is not None:
+                        return _error(known_refusal.reason, 503,
+                                      retry_after_s=known_refusal.retry_after_s)
+                    return _error(reason, 503)
+                permit = state.routes.acquire(selected, now=time.monotonic())
+                if permit is None:
+                    state.refused += 1
+                    return _error("FABRIC_ROUTES_BUSY", 503, retry_after_s=1)
+                ctx = _RequestLifecycle(state, cfg, selected, permit, resolved, counting,
+                                        started=admission_started)
+                admission_reserved = False
+                state.selected += 1
+                state.count(selected.route_id, "selected")
+        except TimeoutError:
+            state.refused += 1
+            return _error("FABRIC_ADMISSION_DEADLINE", 503)
+        except asyncio.CancelledError:
+            state.cancelled += 1
+            raise
+        finally:
+            if admission_reserved:
+                state.in_flight -= 1
         transferred = False
         try:
             async with asyncio.timeout_at(ctx.deadline):

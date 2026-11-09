@@ -58,8 +58,9 @@ Keep hard admission, quotas and account identity with their incumbent owners.
 The router may limit its own process concurrency and health probes; these are local
 bulkheads, not claims of remaining five-hour/weekly/monthly provider allowance.
 Preserve exact-model constraints and current priority tiers. Affinity cannot override
-an unavailable or saturated route. Add measured latency only as a bounded tie-breaker
-after eligibility; never promote an unknown lower-quality model.
+an unavailable or saturated route. Measure latency before enabling any adaptive weight changes; a future bounded
+latency tie-breaker must follow eligibility and evaluated quality. Never promote
+an unknown lower-quality model.
 
 Reuse httpx/FastAPI and the current route/state/service interfaces. LiteLLM/Envoy
 patterns inform this extension; importing a second gateway would duplicate live
@@ -100,3 +101,97 @@ holds, tool-only block indexing and false non-stream 200 success. Those four fin
 were repaired and exercised by the 76-case set. Bounded refresh lock/deadline and
 atomic auth-store write improvements are the next safe source phase; no live
 credentials, consumer settings, service, provider or release selection changed.
+
+## Current qualified candidate — 2026-11-09 00:18 America/Vancouver
+
+UR1–UR4 are implemented and qualified in this isolated source operation.
+UR5 publication is in progress. UR6 remains unaccepted; the live source is still
+a58c34f1. The parent DONE_WHEN is not met.
+
+### Final behavior and proof
+
+- 91 affected tests pass in scratch (Python 3.12.14) and in the actual M2
+  router runtime (Python 3.14.7, FastAPI 0.162.2, Starlette 1.10.0, httpx 0.28.1).
+  The latter uses existing pytest dependencies appended after the live venv;
+  no live dependency or running service was changed. Native process 29943
+  completed with exit 0. Original 33 tests remain passing.
+- Tests cover bounded concurrent admission, weighted pressure and affinity,
+  explicit group ceilings, single half-open probes, stale generation fencing,
+  provider Retry-After, EOF/error/keepalive/size failures, disconnect before and
+  during iteration, response cleanup, exact one inference send, tool argument
+  identity, owner holds and atomic account benches.
+- The distinct reasoning review found tool-only index, malformed success,
+  owner-hold and post-await deadline races. Repairs are covered by focused
+  regressions. The last bench regression overlaps two sends and delays both
+  persistence returns; an earlier completion cannot shorten the newer
+  7,200-second local hold. This is technical reasoning evidence, not a native
+  GitHub APPROVED review.
+- The production request path performs no OAuth refresh POST. Known-expiring
+  accounts are excluded before inference; eligible alternatives can be chosen
+  before send. If all usable accounts require rotation, the response is
+  FABRIC_OAUTH_OWNER_REFRESH_REQUIRED with no invented reset or circuit penalty.
+  A subsequent request reads the auth owner's rotated token.
+- This supersedes the earlier preflight-refresh implementation milestone.
+  An uncertain rotating-token outcome has no suitable incumbent owner fence;
+  overloading DEAD was rejected because Hermes treats it as revoked and may
+  prune manual DEAD rows after 24 hours. No new auth ledger/status is added.
+  The retained explicit helper remains outside gateway recovery and cannot
+  claim exactly-once remote refresh.
+- Observed 429 benches use the existing lock/store, atomic replacement,
+  last_status_at merge timestamp, non-shortening reset and stronger-hold
+  preservation. Local post-await reconciliation includes the newest local value.
+
+### Consumer and deployment observations
+
+- Hermes model-routes plugin constructs an Anthropic Messages route to
+  127.0.0.1:8313 using the current catalogue and internal token reference.
+- T3 capacity_fabric is enabled with driver claudeAgent, the same endpoint and
+  33 configured model entries. It retains its existing provider home.
+- DSH desktop, acp and mmx-acp profile patches contain the same endpoint and
+  anthropic-messages protocol.
+- Read-only OAuth eligibility metadata: 5 owner rows, 3 eligible access tokens,
+  2 quota-held rows, 0 known-expiring and 0 owner-dead rows at observation.
+  This is a snapshot, not a quota guarantee.
+- Installed SOURCE.json remains generation
+  80141f9373320f8d8f337c8475551bc40665a9676aa0c9776685bee281609035,
+  source a58c34f1d935ee06e5ef45e77aa5705185398d77. No service restart,
+  provider request, credential mutation, route-table write or consumer-setting
+  change was performed by this operation.
+
+The candidate also loaded the real M2 router environment and route table in a
+read-only process: 14 routes, 45 catalogue entries, local maximum 32 and zero
+configured shared groups. Existing route configuration needs no migration to boot.
+
+These are binding/configuration observations and offline qualification, not
+proof of a completed real consumer turn on the new candidate.
+
+### Concrete release dependency
+
+PR #2367 is still open at a58c34f1 and targets protected master ff6d5ab6.
+GitHub reports 23 commits, 3,973 changed files and 816,847 additions; its
+inherited history includes other active integration surfaces and bundled
+node_modules. The router tests do not qualify that entire inherited diff.
+This operation must remain a scoped stacked diff against #2367 until its
+upstream source/release dependency is reconciled. Do not auto-merge into the
+unprotected feature branch or deploy this branch head.
+
+The assigned capacity mission retains recovery responsibility: inspect the
+original dependency carriers and active custody, qualify/repair their actual
+source scope on those carriers, then use the protected merge queue. Retarget
+this scoped PR after its source dependency is protected-accepted, obtain actual
+required checks/holds, install the exact accepted release through the incumbent
+launchd generation mechanism, and prove real Hermes/DSH/T3 turns and cancellation.
+No archived author/chat is a required recipient.
+
+### Next intelligence work within existing owners
+
+| Step | Capability | Required acceptance |
+|---|---|---|
+| UR7 | Physical-account capacity composition | Existing owner provides fresh account identity, quota window/reset and atomic admission; aliases cannot multiply one account's allowance |
+| UR8 | Capability-aware model policy | Explicit task/context/tool requirements; evaluated model quality and allowed substitution; exact model requests remain exact |
+| UR9 | Measured adaptive selection | Representative latency/error/load samples, shadow comparison and bounded changes after hard eligibility; no learned policy enabled from mock tests |
+| UR10 | Fairness and operations | Existing queue owner supplies caller fairness and budgets; existing deployment owner supplies graceful drain/restart/rollback and real consumer fault proof |
+
+UR7–UR10 are explicit unimplemented program obligations, not claims of delivered
+capacity, new controllers or authorization to infer provider limits. They extend
+the same parent #983; no second quota/auth/queue/workstream registry is created.
