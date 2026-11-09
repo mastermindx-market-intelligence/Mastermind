@@ -18,20 +18,50 @@ Reuse the existing React/Tauri application, host interfaces, operation controlle
 
 ## Task tree
 
+Current acceptance — 2026-11-09: **PROVEN_OUTCOME / PROVEN_LIVE** for this
+app-control contribution. Protected release
+`ed7991199ccf76027f7acccc283c539c175e7e16` from
+[PR #2305](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2305)
+is deployed and passed real authenticated direct-MCP acceptance. The
+[verification report](../evidence/2026-11-08-mmos-app-control/verification.md)
+and [live receipt](../evidence/2026-11-08-mmos-app-control/live-proof.json) bind
+the release, installed owners, 26-call live trace and durable launcher.
+
+The original completion outcome is satisfied by the direct standard MCP path.
+The optional dormant Workbench channel is not a prerequisite and was not migrated.
+Separate Programs/Work unavailable reads and provider workflows remain outside
+this acceptance claim; they are explicit limitations in the report. This does
+not mark the related Agent OS workstream or the whole application launch complete.
+
 | ID | Dependency | Outcome and acceptance | State |
 | --- | --- | --- | --- |
 | P1 | none | Identify existing app state/action/transport owners and live overlapping work; freeze the smallest complete consumer path with explicit capability limits. | source audit complete |
 | P2 | P1 | Implement discover/observe/act/readback through existing owners, with closed inputs, stable identifiers, currentness and bounded outputs; integrate into the application and appropriate web tool surface. | implemented |
-| P3 | P2 | Prove representative rendered user journeys and negative cases (stale target, disabled/unauthorized action, redaction, effect uncertainty); build succeeds. | source qualified; installed proof still owed |
-| P4 | P3 | Publish a Ready candidate, satisfy actual protected checks/review controls, use the existing permitted release path and verify the installed consumer, or establish the exact remaining boundary. | in progress; local Studio owner accessible; native release qualification held |
+| P3 | P2 | Prove representative rendered user journeys and negative cases (stale target, disabled/unauthorized action, redaction, effect uncertainty); build succeeds. | source qualified; authenticated live direct-MCP proof passed |
+| P4 | P3 | Publish a Ready candidate, satisfy actual protected checks/review controls, use the existing permitted release path and verify the installed consumer, or establish the exact remaining boundary. | protected release deployed; gateway COMPLETE; edge FINAL; durable runtime qualified |
 
-## Delegation and execution
+## Current use and do-not-redo
+
+Future authorized web sessions use the exact installed C3/M2 launcher in the
+[runbook](../MASTERMIND_OS_APP_CONTROL.md#installed-c3--m2-launcher), normal
+same-context authentication and current observations. Do not rerun the completed
+deployment or recover the already closed old transaction. Do not replay the
+historical Fabric reservation, move the dormant Workbench identity, or reinterpret
+the preserved personal-browser permission denial. Any separate backend repair
+starts with concrete evidence from its existing owner.
+
+## Historical delegation and execution
+
+The sections below preserve earlier implementation and recovery observations.
+Their pending-release/installed-proof status and Workbench-only continuation are
+superseded by the current acceptance above; original denials and uncertain effects
+retain their scope and history.
 
 Principal retains cross-system architecture, integration, source/effect custody and acceptance (C3 unresolved app/Executive/browser boundary). Native reasoning children may independently assess architectural fit and adversarial failure modes; they do not perform routine labor or acquire production effects. WHY NOT FABLE: this bounded integration does not require scarce Fable continuity. Routine implementation is retained directly where LOWER_TOTAL_OVERHEAD / CRITICAL_PATH_SHORTCUT holds in this already available isolated validation workspace; eligible paid Fabric remains preferred for independently executable bounded labor.
 
 One bounded Fabric diagnostic controller was created during boundary recovery; worker START is not proven. Its original run and terminal support-publication failure are retained below. No production operation has been started. Architecture reasoning children performed no external effects. One logical mutation retains one original carrier until reconciled. CI is verification, not a durable execution runner.
 
-## Evidence and continuation
+## Historical evidence and continuation
 
 The real app now mounts a four-tool semantic adapter and optional WebMCP registration. The existing Workbench browser owner can opt into the matching standard MCP profile, retaining original signed resources, preparation, action artifacts and reconciliation. The baseline and credential-vault package lock remain unchanged. See [implementation and usage](../MASTERMIND_OS_APP_CONTROL.md) and [verification and unresolveds](../evidence/2026-11-08-mmos-app-control/verification.md).
 
@@ -41,7 +71,7 @@ Observed release boundaries: full GitHub branch-protection read returned 403 `FO
 
 Next action: repair and publish the concrete CI failure on the same PR #2305, diagnose the original Studio and Fabric owners, and repair independently authorized source/transport defects. Preserve the GitHub administration-read denial on that exact action; do not convert unrelated technical failures into permission denials. Release through the existing native queue only after current qualification and a head-leased action are available. Then activate the original Workbench owner and complete authenticated installed proof. A source PR, green CI or this plan does not complete the parent mission.
 
-## Boundary recovery under renewed Chairman instruction
+## Historical boundary recovery under renewed Chairman instruction
 
 The Chairman explicitly requested autonomous diagnosis and repair of the two web-session blockers. This extends the bounded mission to its prerequisite consumer/transport defects; it does not grant bypass, credential migration, release-policy weakening or displacement of live owners.
 
