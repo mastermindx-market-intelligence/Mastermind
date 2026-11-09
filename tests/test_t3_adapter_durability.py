@@ -34,6 +34,7 @@ from control_plane.t3_execution_adapter import (
     T3ThreadLaunchReceipt,
     T3ThreadReadResult,
     default_t3_adapter_state_path,
+    executive_runtime_db_path,
     derive_t3_client_request_id,
     t3_request_namespace,
 )
@@ -167,9 +168,9 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         spec = _launch_spec(run_dir=_recovery_run_dir())
-        path = self.tmpdir / "executive.sqlite3"
+        path = self.tmpdir / "t3_adapter_state.sqlite3"
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
-        adapter1 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port1)
+        adapter1 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port1)
         ref = await adapter1.start(spec)
         thread_id = ref.provider_session_id
         self.assertEqual(port1.launch_count, 1)
@@ -198,7 +199,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         spec = _launch_spec(run_dir=_recovery_run_dir())
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
         port1.lose_ack = True
-        adapter1 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port1)
+        adapter1 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port1)
         with self.assertRaises(T3LaunchEffectUnknownError):
             await adapter1.start(spec)
         self.assertEqual(port1.launch_count, 1)
@@ -219,7 +220,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
 
         port2 = CountingT3Port(principal=_PRINCIPAL_A)
         port2.receipts_by_key.update(port1.receipts_by_key)  # same native owner
-        adapter2 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port2)
+        adapter2 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port2)
         reattached = await adapter2.reattach(spec, binding)
 
         # NEVER a fresh launch: recovery went through replay_launch only.
@@ -239,7 +240,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         # The adopted execution is now durable: a third process reattaches
         # with no native call at all.
         port3 = CountingT3Port(principal=_PRINCIPAL_A)
-        adapter3 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port3)
+        adapter3 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port3)
         again = await adapter3.reattach(spec, _recovery_binding(spec, reattached))
         self.assertEqual(again, reattached)
         self.assertEqual(port3.launch_count, 0)
@@ -250,7 +251,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_restart_under_a_different_namespace_is_refused(self) -> None:
         spec = _launch_spec(run_dir=_recovery_run_dir())
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
-        adapter1 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port1)
+        adapter1 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port1)
         ref = await adapter1.start(spec)
         binding = _recovery_binding(spec, ref)
 
@@ -258,7 +259,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         # the same idempotency identity.
         port2 = CountingT3Port(principal=_PRINCIPAL_B)
         port2.receipts_by_key.update(port1.receipts_by_key)
-        adapter2 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port2)
+        adapter2 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port2)
         with self.assertRaises(T3ExecutionAdapterError) as ctx:
             await adapter2.reattach(spec, binding)
         self.assertIn("authenticated namespace", str(ctx.exception))
@@ -269,7 +270,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cursor_and_cancel_ledger_survive_restart(self) -> None:
         spec = _launch_spec(run_dir=_recovery_run_dir())
-        path = self.tmpdir / "executive.sqlite3"
+        path = self.tmpdir / "t3_adapter_state.sqlite3"
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
         adapter1 = _adapter(SQLiteT3AdapterStateStore(path), port1)
         ref = await adapter1.start(spec)
@@ -300,7 +301,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_replay_returning_a_different_thread_is_refused(self) -> None:
         spec = _launch_spec(run_dir=_recovery_run_dir())
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
-        adapter1 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port1)
+        adapter1 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port1)
         ref = await adapter1.start(spec)
         binding = _recovery_binding(spec, ref)
 
@@ -324,7 +325,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         spec = _launch_spec(run_dir=_recovery_run_dir())
         port1 = CountingT3Port(principal=_PRINCIPAL_A)
         port1.lose_ack = True
-        adapter1 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port1)
+        adapter1 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port1)
         with self.assertRaises(T3LaunchEffectUnknownError):
             await adapter1.start(spec)
         key = derive_t3_client_request_id(_binding())
@@ -340,7 +341,7 @@ class ColdRestartDurabilityTests(unittest.IsolatedAsyncioTestCase):
         port2 = CountingT3Port(principal=_PRINCIPAL_A)
         port2.receipts_by_key.update(port1.receipts_by_key)
         port2.replay_echo_mismatch = True
-        adapter2 = _adapter(_store(self.tmpdir, "executive.sqlite3"), port2)
+        adapter2 = _adapter(_store(self.tmpdir, "t3_adapter_state.sqlite3"), port2)
         with self.assertRaises(T3ExecutionAdapterError) as ctx:
             await adapter2.reattach(spec, binding)
         self.assertIn("foreign", str(ctx.exception))
@@ -360,7 +361,7 @@ class StateStoreTests(unittest.TestCase):
     def test_round_trip_preserves_every_record_exactly(self) -> None:
         from control_plane.t3_execution_adapter import T3LaunchIntent
 
-        store = SQLiteT3AdapterStateStore(self.tmpdir / "executive.sqlite3")
+        store = SQLiteT3AdapterStateStore(self.tmpdir / "t3_adapter_state.sqlite3")
         spec = _launch_spec()
         binding = _binding()
         envelope = None  # intent envelope built below via the adapter shape
@@ -382,19 +383,25 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(loaded.cursor, "")
         self.assertEqual(store.run_ids(), (spec.run_id,))
 
-    def test_default_path_is_the_executive_sqlite_file(self) -> None:
+    def test_default_path_is_a_sibling_of_the_executive_sqlite_file(self) -> None:
+        # The Executive runtime pins a normalized digest over its ENTIRE
+        # sqlite_master (executive_runtime._NORMALIZED_V7_SCHEMA_DIGEST) and
+        # refuses to open on mismatch, so the adapter store must never share
+        # that file.  Sibling file, same Executive-owned data directory.
         default = default_t3_adapter_state_path()
-        self.assertEqual(default.name, "executive.sqlite3")
-        self.assertEqual(
-            default,
-            Path(__file__).resolve().parent.parent
-            / "data" / "control_plane" / "executive.sqlite3",
-        )
+        self.assertEqual(default.name, "t3_adapter_state.sqlite3")
+        self.assertEqual(default.parent, executive_runtime_db_path().parent)
+        self.assertNotEqual(default, executive_runtime_db_path())
+
+    def test_store_refuses_the_executive_runtime_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(T3ExecutionAdapterError):
+                SQLiteT3AdapterStateStore(Path(tmp) / "executive.sqlite3")
 
     def test_store_tables_coexist_with_an_existing_database_file(self) -> None:
         import sqlite3
 
-        path = self.tmpdir / "executive.sqlite3"
+        path = self.tmpdir / "t3_adapter_state.sqlite3"
         # An "Executive-owned" table pre-exists in the file.
         with sqlite3.connect(path) as conn:
             conn.execute(
@@ -434,7 +441,7 @@ class StateStoreTests(unittest.TestCase):
     def test_clear_launch_attempt_refuses_when_a_receipt_exists(self) -> None:
         from control_plane.t3_execution_adapter import T3LaunchIntent
 
-        store = SQLiteT3AdapterStateStore(self.tmpdir / "executive.sqlite3")
+        store = SQLiteT3AdapterStateStore(self.tmpdir / "t3_adapter_state.sqlite3")
         spec = _launch_spec()
         store.put_launch_intent(
             T3LaunchIntent(

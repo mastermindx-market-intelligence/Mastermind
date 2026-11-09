@@ -32,10 +32,11 @@ Durable state (Rev 5 P0 — crash-safe original execution):
   each write in its own ``BEGIN IMMEDIATE`` transaction at the ordering point
   the discipline demands — intent BEFORE the native launch call, receipt +
   original ref BEFORE the start ACK, cursor only after a successful read —
-  and its documented default file is the SAME SQLite file the Executive
-  runtime owns (namespaced ``t3_adapter_runs`` table; see the store's
-  docstring for why the Executive store's ``launch_metadata_json`` is not a
-  reusable attempt-scoped facility).  A cold-restart proof lives in
+  and its documented default file is a SIBLING of the Executive runtime's
+  SQLite file in the same Executive-owned data directory (never the Executive
+  file itself: the runtime pins its whole-file schema digest; see the store's
+  docstring, which also records why the Executive store's
+  ``launch_metadata_json`` is not a reusable attempt-scoped facility).  A cold-restart proof lives in
   ``tests/test_t3_adapter_durability.py``: a second adapter on the same store
   reattaches the SAME execution with the native launch count still one.
 * Idempotency identity is ``(authenticated principal, request namespace,
@@ -126,34 +127,50 @@ T3_REQUEST_NAMESPACE = "mastermind.control_plane.t3_execution_adapter/v1"
 #: :class:`SQLiteT3AdapterStateStore`).
 T3_ADAPTER_STATE_SCHEMA = "mastermind.t3_adapter_state/v1"
 
-#: Documented default durable location for adapter state: tables in the SAME
-#: SQLite FILE the Executive runtime owns — ``data/control_plane/executive.sqlite3``
-#: (resolved from the repository root exactly like ``RuntimeStore``'s default).
-#: NOT a new company database: the Executive durable store was inspected first
-#: for a reusable attempt-scoped adapter-state facility and has none — its
-#: ``attempts.launch_metadata_json`` column is writable only inside the
-#: Executive runtime's own guarded claim/dispatch transactions
-#: (``control_plane/executive_runtime.py``, a shared path this lane may not
-#: edit), and it offers no public write seam with the ordering discipline this
+#: Documented default durable location for adapter state: a SIBLING SQLite
+#: file in the Executive-owned data directory —
+#: ``data/control_plane/t3_adapter_state.sqlite3`` (resolved from the
+#: repository root exactly like ``RuntimeStore``'s default).  NOT a new
+#: company database: it is adapter-private execution state (intent, receipt,
+#: cursor, cancel ledger) keyed by the Executive run id, with no Job/Attempt/
+#: claim semantics of its own.  Why NOT a table inside ``executive.sqlite3``:
+#: the Executive runtime opens its file only if a normalized digest over the
+#: ENTIRE ``sqlite_master`` equals the reviewed V7 DDL digest
+#: (``control_plane/executive_runtime.py`` ``_normalized_schema_digest`` vs
+#: ``_NORMALIZED_V7_SCHEMA_DIGEST``) — any foreign table makes the runtime
+#: refuse to open with ``PersistenceError``.  Folding this table into the
+#: Executive schema is a V8 migration on the shared runtime path (Director C /
+#: integrator act), recorded as an open integration item, not a default.
+#: The Executive durable store was also inspected for a reusable attempt-
+#: scoped adapter-state facility and has none: ``attempts.launch_metadata_json``
+#: is writable only inside the runtime's own guarded claim/dispatch
+#: transactions and offers no write seam with the ordering discipline this
 #: adapter needs (intent persisted BEFORE the native call, receipt + original
-#: ref persisted BEFORE the ACK).  The store therefore opens its OWN connection
-#: to the same file and keeps its rows in the namespaced ``t3_adapter_runs``
-#: table, which never collides with Executive-owned tables.
-_T3_ADAPTER_STATE_DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
+#: ref persisted BEFORE the ACK).
+_T3_ADAPTER_STATE_DB_RELATIVE_PATH = (
+    Path("data") / "control_plane" / "t3_adapter_state.sqlite3"
+)
+#: The Executive runtime's own file — the adapter store must NEVER default to it.
+_EXECUTIVE_RUNTIME_DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _T3_ROOT = Path(__file__).resolve().parent.parent
 
 
 def default_t3_adapter_state_path() -> Path:
     """The documented default SQLite file path for durable adapter state.
 
-    Same file as the Executive runtime store (see
-    ``_T3_ADAPTER_STATE_DB_RELATIVE_PATH``); table names are namespaced so the
-    Executive schema is untouched.  The runtime composition that selects the
-    t3-native adapter decides whether to pass this default or an explicit
-    path; constructing the adapter without a store stays non-durable
-    (in-memory) and selects nothing.
+    A sibling file beside the Executive runtime store (see
+    ``_T3_ADAPTER_STATE_DB_RELATIVE_PATH``), never the Executive file itself:
+    the runtime pins its whole-file schema digest and would refuse to open.
+    The runtime composition that selects the t3-native adapter decides
+    whether to pass this default or an explicit path; constructing the
+    adapter without a store stays non-durable (in-memory) and selects nothing.
     """
     return _T3_ROOT / _T3_ADAPTER_STATE_DB_RELATIVE_PATH
+
+
+def executive_runtime_db_path() -> Path:
+    """The Executive runtime's own SQLite file (for the never-default guard)."""
+    return _T3_ROOT / _EXECUTIVE_RUNTIME_DB_RELATIVE_PATH
 
 
 def t3_request_namespace(authenticated_principal: str | None) -> str:
@@ -723,20 +740,15 @@ class InMemoryT3AdapterStateStore:
 class SQLiteT3AdapterStateStore:
     """SQLite-backed durable adapter state (the ``WorkspaceLeaseStore`` pattern).
 
-    One row per run in the namespaced ``t3_adapter_runs`` table: sqlite3,
+    One row per run in the ``t3_adapter_runs`` table: sqlite3,
     ``isolation_level=None``, explicit ``BEGIN IMMEDIATE`` per write,
     ``row_factory=sqlite3.Row``.  The DOCUMENTED DEFAULT file path is the
-    same SQLite file the Executive runtime owns
-    (``data/control_plane/executive.sqlite3`` — see
-    ``_T3_ADAPTER_STATE_DB_RELATIVE_PATH``): the Executive durable store was
-    inspected for a reusable attempt-scoped adapter-state facility and has
-    none (its ``attempts.launch_metadata_json`` is writable only inside its
-    own guarded transactions, a shared path this lane may not edit), so the
-    adapter keeps namespaced tables in that same file rather than minting a
-    new company database.  The connection deliberately does NOT switch the
-    journal mode: ``journal_mode`` is a whole-file property and this file is
-    Executive-owned; this store inherits whatever mode the file already has
-    (``busy_timeout`` is connection-local and safe).
+    sibling file ``data/control_plane/t3_adapter_state.sqlite3`` in the
+    Executive-owned data directory (see ``_T3_ADAPTER_STATE_DB_RELATIVE_PATH``
+    for why it must not be the Executive runtime's own file).  The connection
+    does not switch the journal mode (whole-file property; left to the file's
+    owner — ``busy_timeout`` is connection-local and safe).  Opening the store
+    on the Executive runtime's file is refused outright.
 
     Writes are synchronous: each ``put_*`` completes its transaction before
     returning, which is what makes "persisted BEFORE the native call / BEFORE
@@ -747,6 +759,15 @@ class SQLiteT3AdapterStateStore:
         self.path = Path(path)
         if not str(self.path):
             raise T3ExecutionAdapterError("t3 adapter state store path is empty")
+        if self.path.name == _EXECUTIVE_RUNTIME_DB_RELATIVE_PATH.name:
+            # The Executive runtime refuses to open its file when any foreign
+            # table changes its pinned whole-file schema digest; sharing the
+            # file would brick the runtime.  Fail closed here instead.
+            raise T3ExecutionAdapterError(
+                "t3 adapter state store must not live inside the Executive "
+                "runtime's own SQLite file (its reviewed schema digest is "
+                "pinned); use the sibling default path"
+            )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._connection = sqlite3.connect(
@@ -1865,6 +1886,7 @@ __all__ = [
     "T3ThreadReadResult",
     "T3UnknownOutcomeError",
     "default_t3_adapter_state_path",
+    "executive_runtime_db_path",
     "derive_t3_client_request_id",
     "t3_request_namespace",
 ]

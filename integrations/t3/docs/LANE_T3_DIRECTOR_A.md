@@ -15,9 +15,15 @@ receipts, original refs, cursors, cancel records, result references or
 launch bindings in process-local dicts. New `T3AdapterStateStore` protocol
 with two implementations:
 
-- `SQLiteT3AdapterStateStore` — namespaced `t3_adapter_runs` table in the
-  SAME `data/control_plane/executive.sqlite3` FILE path as the Executive
-  durable store (default via `default_t3_adapter_state_path()`), on its own
+- `SQLiteT3AdapterStateStore` — `t3_adapter_runs` table in the SIBLING file
+  `data/control_plane/t3_adapter_state.sqlite3` beside the Executive durable
+  store (default via `default_t3_adapter_state_path()`). Integrator
+  correction (Fable, 2026-11-09): the lane's first default placed the table
+  inside `executive.sqlite3`; the Executive runtime pins a normalized digest
+  over its ENTIRE `sqlite_master` (`_NORMALIZED_V7_SCHEMA_DIGEST`) and
+  refuses to open on mismatch, so sharing the file would have bricked the
+  runtime. The store now refuses that file outright. Folding the table into
+  the Executive schema is an optional V8 migration on the shared path. Own
   connection: `BEGIN IMMEDIATE` per write, `busy_timeout=10000`,
   `row_factory=sqlite3.Row`, following the `WorkspaceLeaseStore` pattern.
   The Executive store was inspected first
