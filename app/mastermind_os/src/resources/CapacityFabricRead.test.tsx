@@ -33,7 +33,7 @@ it("consumes the real public projection and keeps zero, missing windows, and con
   expect(capacitySummary(read.document)).toEqual({ constrained: 2, unknown: 1, qualifiedAllowances: 3 });
 });
 
-it.each(["authority", "private_path", "duplicate", "stale_window", "window_outlives_reset", "stale_consumer", "future_consumer", "unknown_zero", "boolean_count", "identity"])("refuses malformed or overstated %s evidence", fault => {
+it.each(["authority", "private_path", "duplicate", "stale_window", "window_outlives_reset", "stale_consumer", "future_consumer", "spec_only_runtime", "unknown_zero", "boolean_count", "identity"])("refuses malformed or overstated %s evidence", fault => {
   const value: any = body();
   if (fault === "authority") value.admission_authorized = true;
   else if (fault === "private_path") value.projection_path = "/private/config";
@@ -42,6 +42,9 @@ it.each(["authority", "private_path", "duplicate", "stale_window", "window_outli
   else if (fault === "window_outlives_reset") value.resources[0].windows[0].reset_at = new Date(NOW + 1_000).toISOString();
   else if (fault === "stale_consumer" || fault === "future_consumer") Object.assign(value.consumers[0], {
     runtime_state: "RESULT_PROVEN", evidence_ref: "fixture:receipt", observed_at: new Date(NOW + (fault === "stale_consumer" ? -900_000 : 1_000)).toISOString(),
+  });
+  else if (fault === "spec_only_runtime") Object.assign(value.consumers[2], {
+    runtime_state: "RUNNING", evidence_ref: "fixture:receipt", observed_at: new Date(NOW - 30_000).toISOString(),
   });
   else if (fault === "unknown_zero") value.resources[2].windows[0].remaining_pct = 0;
   else if (fault === "boolean_count") value.resources[0].active = true;

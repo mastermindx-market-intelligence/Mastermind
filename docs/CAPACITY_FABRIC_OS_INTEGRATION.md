@@ -16,6 +16,19 @@ The implementation is a bounded READ integration. The installed owner must suppl
 
 Full programme acceptance still requires installed routing/admission and actual parent-consumed results for all four consumers. Source tests, CI, a merged PR, or an adapter's existence cannot establish that outcome.
 
+### Same-session installed census correction (2026-11-09)
+
+The initial M2 remote-route preflight was the wrong operation for the gateway's local backend. Following the same-pinned `COLD_START.md` and Studio Direct README, a distinct authorized `get_config` and `hostname` on the same unselected connection succeeded; hostname was `m2studio`, exit 0. The failed remote selection was not replayed, no account/connector was changed and no permission was relaxed.
+
+Bounded local reads then established:
+
+- Engineering's existing `~/.hermes/profiles/engineering/mmos/STATUS.md`, updated `2026-11-08T21:00-07:00`, identifies the Fable seat and live Rev-5 director lanes for Capacity Fabric, T3, DSH, Hermes and contracts/integration. It records 17 live children and #2338 still at `81f0ef90`. Preserve those writers; their installation lane is actively owned, not abandoned.
+- The selected engineering preview file exists but is expired: `as_of=2026-11-08T15:31:59Z`, `expires_at=2026-11-08T15:46:59Z`, 21 resources (4 labelled observed, 17 unknown), file SHA-256 `0082c1adf1943aa1d719d3ba3749228934da0e5b893c97f9465d1dbebd47a3e4`. It cannot qualify current capacity. Registry projection has 13 pools and 24 shared resources; its file digest is `9e7553cf01fccde892ea41af5db11bf565dd402373753ca43e3d6d38751d6d86`. Neither count is free capacity.
+- The existing WO-19 dry run at `2026-11-08T20:46:27-0700` reports `cutover_performed=false`, `backend_unchanged=true`, current backend `mmx-router`, 9 roots and 35 live children covered. Its blockers are the Mastermind backend not selectable, no Executive MCP server configured, and missing WO-17 export stream/duplicate-launch guard. These are retained dry-run findings, not a new current provider probe. File digest: `ab9431a307b6adf1174e703a9c1d4e812b3e1eac8d2d5b263c5803e6677b90a0`.
+- Reading `/Library/Application Support/MastermindExecutive/config/control.json` returned filesystem `PermissionError: [Errno 13]`. That exact installed-config read is denied; it was not retried through another identity/tool or elevated. General M2 read access therefore works, while installed configuration access and live-owner custody remain real boundaries.
+
+This corrects the initial broad host-access diagnosis. It does not authorize taking over the live Fable lanes, replaying #2182 publication, flipping the delegation backend, or inventing a current quota observation.
+
 ## Census: existing owners, source and remaining integration
 
 | Capability | Existing owner/source | Census and remaining obligation |
@@ -48,6 +61,7 @@ Original [#2182](https://github.com/mastermindx-market-intelligence/Mastermind/p
 
 - Five-hour, weekly and monthly windows remain separate. An exhausted required monthly limit remains zero/exhausted even if a short window has headroom. Missing, ambiguous, stale, future or unqualified evidence has a null balance.
 - Response expiry cannot outlive any positive quota observation's 600-second lifetime or reset deadline, or a positive consumer observation's 900-second lifetime. Python and TypeScript validate this independently.
+- A qualified installed consumer enrollment/run/result receipt establishes `source_state=BUILT`; T3's baseline specification label cannot coexist with positive runtime evidence. Both wire validators reject that contradiction.
 - Currentness is an exact join, not merely a before/after counter. A fresh cache qualified under an older configuration is withheld even when the current revision stays stable during the read.
 - Physical allowances are never summed. Conflicting observations under the same qualified allowance identity are withdrawn.
 - WO09's `reserved_slots` currently counts broker waiters. This view labels it **Queued**, not reserved. No admitted reservation count is inferred.
@@ -130,9 +144,9 @@ Return exact source/integration/merge SHAs, selected installed generation, origi
 
 Local completed checks:
 
-- Python projection and signed in-process HTTP/Workspace composition: `51 passed, 11 deselected` (`python -m pytest tests/test_workspace_capacity_fabric.py -k 'not unix' -o addopts='' --tb=short -q`). Covers the actual pure H2 projector, independent windows, zero/unknown, current binding mismatch and movement, source replacement, provenance redaction, shared-scope conflict, cap basis/queue semantics, consumer/evidence expiry, auth/scope revocation and fixed request shape.
+- Python projection, signed in-process HTTP/Workspace composition and startup validation: `58 passed, 11 deselected` (`python -m pytest tests/test_workspace_capacity_fabric.py -k 'not unix' -o addopts='' --tb=short -q`). Covers the actual pure H2 projector, independent windows, zero/unknown, current binding mismatch and movement, source replacement, provenance redaction, shared-scope conflict, cap basis/queue semantics, consumer/evidence expiry and source-stage consistency, auth/scope revocation and fixed request shape.
 - The installed startup seam adds five local cases for exact-type/subclass refusal and required Workspace ownership before effects, plus two real Control Room composition cases for omitted/supplied source identity and inert construction. The real composition cases use the existing AF_UNIX fixture and are retained for hosted qualification.
-- Eight affected frontend suites: `351 passed`, including the initial Capacity Fabric suite, existing Resources/project return journey, Fabric fleet flow, Model Configuration, host capacity, Web auth, App and daily routes. Three newly added fixed Capacity Fabric Web-auth tests passed separately. The final focused Capacity Fabric component/decoder/host suite passes all 20 tests after the refinements.
+- Eight affected frontend suites: `351 passed`, including the initial Capacity Fabric suite, existing Resources/project return journey, Fabric fleet flow, Model Configuration, host capacity, Web auth, App and daily routes. Three newly added fixed Capacity Fabric Web-auth tests passed separately. The final focused Capacity Fabric component/decoder/host suite passes all 21 tests after the refinements.
 - TypeScript project/build checks and Vite production build pass. Existing bundle-size/dynamic-import warnings remain; no performance claim is made.
 - The existing compiled App/MCP browser-proof entry and runner now cover this view: manual read, independent exhausted monthly limit, missing-window gauges, consumer truth, provider filtering, evidence disclosure and four desktop/narrow light/dark EN/ZH variants. The isolated fixture builds and runner syntax check pass locally. Browser execution and retained screenshots are owed to its natural hosted job; no new browser runner or workflow is introduced.
 - `git diff --check` passes. A bounded native reasoning review found current-binding, lifetime, cap-basis and broker-attribution issues; the parent accepted and repaired them. This is technical evidence, not a GitHub APPROVED event.
@@ -142,6 +156,6 @@ Not established here:
 - The 11 Unix-socket variants are retained unchanged as real transport tests for a permitted runner/hosted CI. Local execution encountered `PermissionError: [Errno 1] Operation not permitted` creating AF_UNIX sockets. They were not silently skipped by test code, and in-process HTTP is not reported as Unix proof.
 - Browser render proof: local extension and cloud browser could not reach `http://127.0.0.1:5173/os/` (`ERR_CONNECTION_REFUSED`). A portable `data:` preview attempt was explicitly rejected by browser protocol policy; no workaround was used. JSDOM behavior tests are not screenshots, responsive proof or production-browser acceptance.
 - Cargo/native platform build is unavailable in this workspace. The native command source is implemented and the TypeScript native bridge is tested, but native compilation remains owed.
-- `session_targets` returned an empty addressable list. Studio fleet status reported gateway liveness, but `studio_select_host(hostRef="m2")` returned `REFUSED / NOT_APPLIED / FLEET_ROUTE_PREFLIGHT_REFUSED / INVALID_ARGUMENT`; subsequent ping confirms `selectedHostRef=null`. No host filesystem/process, installation, credential, provider, policy or runtime mutation was performed.
+- `session_targets` returned an empty addressable list. The wrong M2 remote selection returned `REFUSED / NOT_APPLIED / FLEET_ROUTE_PREFLIGHT_REFUSED / INVALID_ARGUMENT`; the later documented same-session local backend diagnostic succeeded, as detailed above. M2 read access is available. The installed Control configuration read is denied; no installation, credential, provider, policy, live-worktree or runtime mutation was performed.
 
 These are exact surface/integration boundaries, not a reason to abandon source delivery. Hosted CI, current repository release controls and the concrete Engineering handoff are pursued on this same owned branch. Full Capacity Fabric programme status remains PARTIAL until the installed matrix above is proven.

@@ -279,7 +279,11 @@ def project_capacity_fabric(preview, *, binding, account_views=None, consumer_vi
                     and evidence.get("source_revision") == binding["consumer_revision"]
                     and evidence.get("runtime_state") in wire.RUNTIME_STATES - {"NOT_OBSERVED"}
                     and wire.token(evidence.get("evidence_ref"))):
-                item.update(runtime_state=evidence["runtime_state"], observed_at=evidence["observed_at"], evidence_ref=evidence["evidence_ref"])
+                # A qualified installed enrollment/run/result receipt also
+                # establishes that this consumer has implementation source.
+                # Do not retain T3's baseline SPEC_ONLY label after real proof.
+                item.update(source_state="BUILT", runtime_state=evidence["runtime_state"],
+                            observed_at=evidence["observed_at"], evidence_ref=evidence["evidence_ref"])
                 deadlines.append(until)
         consumers.append(item)
     pressures = {row["pressure"] for row in rows}

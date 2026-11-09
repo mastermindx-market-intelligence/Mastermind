@@ -217,14 +217,24 @@ def test_projection_refuses_unqualified_snapshot(case):
         projection.project_capacity_fabric(preview, binding=fixture_binding(preview, views), account_views=views, now=now)
 
 
-def test_consumer_status_requires_current_existing_owner_receipt():
+@pytest.mark.parametrize("consumer", ["hermes", "t3_code"])
+def test_consumer_status_requires_current_existing_owner_receipt(consumer):
+    index = wire.CONSUMERS.index(consumer)
     evidence = dict(runtime_state="RESULT_PROVEN", source_revision="fixture-consumer-a", evidence_ref="fixture:runtime:receipt-1",
         observed_at=iso(NOW - 60), expires_at=iso(NOW + 50))
-    body = projected(consumer_views={"hermes": evidence})
-    assert body["consumers"][0]["runtime_state"] == "RESULT_PROVEN"
+    body = projected(consumer_views={consumer: evidence})
+    assert body["consumers"][index]["runtime_state"] == "RESULT_PROVEN"
+    assert body["consumers"][index]["source_state"] == "BUILT"
     assert body["expires_at"] == evidence["expires_at"]
     evidence["expires_at"] = iso(NOW)
-    assert projected(consumer_views={"hermes": evidence})["consumers"][0]["runtime_state"] == "NOT_OBSERVED"
+    assert projected(consumer_views={consumer: evidence})["consumers"][index]["runtime_state"] == "NOT_OBSERVED"
+
+
+def test_wire_refuses_spec_only_consumer_with_runtime_evidence():
+    body = projected()
+    body["consumers"][2].update(runtime_state="RUNNING", evidence_ref="fixture:receipt", observed_at=iso(NOW - 30))
+    with pytest.raises(ValueError, match="invalid_consumer_evidence"):
+        wire.validate_result(body, now=NOW)
 
 
 def test_read_only_source_rechecks_original_artifact_and_generation(tmp_path):

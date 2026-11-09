@@ -159,7 +159,7 @@ def validate_result(body, *, now=None):
         if row["runtime_state"] == "NOT_OBSERVED":
             if row["observed_at"] is not None or row["evidence_ref"] is not None:
                 raise ValueError("invalid_consumer_evidence")
-        elif not token(row["evidence_ref"]) or row["observed_at"] is None:
+        elif row["source_state"] != "BUILT" or not token(row["evidence_ref"]) or row["observed_at"] is None:
             raise ValueError("invalid_consumer_evidence")
         else:
             stamp = timestamp(row["observed_at"])

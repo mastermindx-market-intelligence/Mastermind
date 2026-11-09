@@ -85,7 +85,7 @@ export function decodeCapacityFabric(value: unknown, now = Date.now()): Capacity
         || !["NOT_OBSERVED", "ENROLLED", "RUNNING", "RESULT_PROVEN"].includes(row.runtime_state as string)) return invalid();
       if (row.runtime_state === "NOT_OBSERVED") {
         if (row.observed_at !== null || row.evidence_ref !== null) return invalid();
-      } else if (!time(row.observed_at) || Date.parse(row.observed_at) > now || !token(row.evidence_ref)
+      } else if (row.source_state !== "BUILT" || !time(row.observed_at) || Date.parse(row.observed_at) > now || !token(row.evidence_ref)
         || Date.parse(value.expires_at) - Date.parse(row.observed_at) > 900_000) return invalid();
     }
     if (!Array.isArray(value.recommendations) || value.recommendations.length > 6 || new Set(value.recommendations).size !== value.recommendations.length
