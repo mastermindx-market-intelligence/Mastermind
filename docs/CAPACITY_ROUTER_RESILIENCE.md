@@ -83,3 +83,20 @@ Initial workspace creation was NOT_APPLIED / INVALID_ARGUMENT because the canoni
 source object was not yet serviceable. A read of that exact commit materialized it;
 the same owner then acquired the same operation successfully. No source effect was
 replayed or moved. Implementation, tests, publication and installation are pending.
+
+## Verified implementation milestone
+
+The scoped candidate now implements local load-aware selection, explicit group/global
+bulkheads, bounded half-open probes, generation fencing, Retry-After handling,
+terminal-only success accounting, cancellation-safe response ownership, bounded SSE
+framing, one-send OAuth inference, and tool-call translation repairs. The original
+33 tests plus 43 new regression cases passed in the scratch Python 3.12 runner and
+on M2 Python 3.14.7 (76/76, native process 88815 exit 0). The live router's isolated
+runtime venv contains no pytest; its dependencies were not altered. The M2 test run
+used the already provisioned /opt/homebrew/bin/python3 runner.
+
+Adversarial source review found account cooldown overwrite, refresh clearing quota
+holds, tool-only block indexing and false non-stream 200 success. Those four findings
+were repaired and exercised by the 76-case set. Bounded refresh lock/deadline and
+atomic auth-store write improvements are the next safe source phase; no live
+credentials, consumer settings, service, provider or release selection changed.

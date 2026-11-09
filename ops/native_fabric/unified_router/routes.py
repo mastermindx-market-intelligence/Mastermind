@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
+import re
 import time
 from dataclasses import dataclass, field
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 DEFAULT_AUTH_STORE = Path.home() / ".hermes" / "auth.json"
@@ -47,6 +51,33 @@ class Route:
     auth_header: str = ""          # upstream header for the raw credential (default Bearer authorization)
     session_header: str = ""       # upstream header carrying a stable per-affinity session id
     notes: str = ""
+    max_in_flight: int = 0          # local bulkhead; zero leaves only the global cap
+    concurrency_group: str = ""    # explicit shared local scope, never inferred quota
+    group_max_in_flight: int = 0
+
+    def __post_init__(self) -> None:
+        if (not self.route_id or not self.models
+                or not all(isinstance(m, str) and m.strip() for m in self.models)):
+            raise ValueError("route identity and models are required")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", self.route_id):
+            raise ValueError("route identity must be a bounded safe label")
+        if any(len(m) > 256 or any(ord(c) < 33 or ord(c) > 126 for c in m) for m in self.models):
+            raise ValueError("model identifiers must be bounded visible ASCII")
+        if not math.isfinite(self.weight) or self.weight < 0:
+            raise ValueError("route weight must be finite and non-negative")
+        if self.wire not in {WIRE_ANTHROPIC, WIRE_OPENAI, WIRE_RESPONSES}:
+            raise ValueError("unsupported route wire")
+        if self.kind not in {"gateway", "credential_pool", "config_file", "oauth_pool"}:
+            raise ValueError("unsupported route kind")
+        if (self.kind == "oauth_pool") != (self.wire == WIRE_RESPONSES):
+            raise ValueError("Responses wire requires the OAuth pool owner")
+        for limit in (self.max_in_flight, self.group_max_in_flight):
+            if type(limit) is not int or limit < 0:
+                raise ValueError("concurrency limits must be non-negative integers")
+        if bool(self.concurrency_group) != bool(self.group_max_in_flight):
+            raise ValueError("a concurrency group requires its explicit positive ceiling")
+        if self.concurrency_group and not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", self.concurrency_group):
+            raise ValueError("concurrency group must be a bounded safe label")
 
     def serves(self, model: str) -> bool:
         wanted = model.strip().lower()
@@ -61,25 +92,109 @@ class Route:
 
 
 @dataclass
+class RoutePermit:
+    route_id: str
+    group: str
+    generation: int
+    probe: bool
+    released: bool = False
+
+
+@dataclass
 class RouteState:
-    """Local, in-process circuit knowledge; never a second quota ledger."""
+    """Single-event-loop circuit/bulkhead state, not provider quota authority.
+
+    Selection and acquire contain no await. The installed service uses one
+    worker; this state makes no cross-process or direct-provider guarantee.
+    """
     cooldown_until: dict[str, float] = field(default_factory=dict)
     last_failure: dict[str, tuple[float, str]] = field(default_factory=dict)
     consecutive_failures: dict[str, int] = field(default_factory=dict)
+    generation: dict[str, int] = field(default_factory=dict)
+    in_flight: dict[str, int] = field(default_factory=dict)
+    group_in_flight: dict[str, int] = field(default_factory=dict)
+    probes: set[str] = field(default_factory=set)
 
     def available(self, route_id: str, now: float) -> bool:
-        return self.cooldown_until.get(route_id, 0.0) <= now
+        return (self.cooldown_until.get(route_id, 0.0) <= now
+                and route_id not in self.probes)
+
+    def has_room(self, route: Route) -> bool:
+        return ((not route.max_in_flight
+                 or self.in_flight.get(route.route_id, 0) < route.max_in_flight)
+                and (not route.concurrency_group or self.group_in_flight.get(
+                    route.concurrency_group, 0) < route.group_max_in_flight))
+
+    def acquire(self, route: Route, *, now: float) -> RoutePermit | None:
+        if route.weight <= 0 or not self.available(route.route_id, now) or not self.has_room(route):
+            return None
+        probe = self.consecutive_failures.get(route.route_id, 0) > 0
+        if probe:
+            self.probes.add(route.route_id)
+        self.in_flight[route.route_id] = self.in_flight.get(route.route_id, 0) + 1
+        if route.concurrency_group:
+            self.group_in_flight[route.concurrency_group] = self.group_in_flight.get(
+                route.concurrency_group, 0) + 1
+        return RoutePermit(route.route_id, route.concurrency_group,
+                           self.generation.get(route.route_id, 0), probe)
+
+    def release(self, permit: RoutePermit) -> None:
+        if permit.released:
+            return
+        permit.released = True
+        self.in_flight[permit.route_id] -= 1
+        if permit.group:
+            self.group_in_flight[permit.group] -= 1
+        if permit.probe:
+            self.probes.discard(permit.route_id)
 
     def record_failure(self, route_id: str, reason: str, *, now: float,
-                       cooldown_s: float = 30.0) -> None:
+                       cooldown_s: float = 30.0,
+                       retry_after_s: float | None = None,
+                       generation: int | None = None) -> None:
+        if generation is not None and generation != self.generation.get(route_id, 0):
+            return
         count = self.consecutive_failures.get(route_id, 0) + 1
         self.consecutive_failures[route_id] = count
         self.last_failure[route_id] = (now, reason)
-        self.cooldown_until[route_id] = now + min(cooldown_s * count, 300.0)
+        self.generation[route_id] = self.generation.get(route_id, 0) + 1
+        backoff = min(cooldown_s * (2 ** min(count - 1, 10)), 300.0)
+        # Positive jitter never shortens the provider's minimum Retry-After.
+        delay = max(backoff, retry_after_s or 0.0) + random.uniform(0, min(backoff * .1, 5))
+        self.cooldown_until[route_id] = max(self.cooldown_until.get(route_id, 0), now + delay)
 
-    def record_success(self, route_id: str) -> None:
+    def record_success(self, route_id: str, *, generation: int | None = None) -> None:
+        # An older request finishing after a fresh failure cannot heal it.
+        if generation is not None and generation != self.generation.get(route_id, 0):
+            return
+        if self.consecutive_failures.get(route_id, 0):
+            self.generation[route_id] = self.generation.get(route_id, 0) + 1
         self.consecutive_failures[route_id] = 0
         self.cooldown_until.pop(route_id, None)
+
+    def circuit(self, route_id: str, now: float) -> str:
+        if route_id in self.probes:
+            return "half_open"
+        if self.cooldown_until.get(route_id, 0) > now:
+            return "open"
+        return "probe_ready" if self.consecutive_failures.get(route_id, 0) else "closed"
+
+
+def retry_after_seconds(value: str, *, wall_now: float) -> float | None:
+    """Parse delta seconds or HTTP-date once; callers use monotonic deadlines."""
+    if not value or len(value) > 128:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            seconds = date.timestamp() - wall_now
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
 def credential_pool_accounts(auth_store: Path = DEFAULT_AUTH_STORE) -> dict[str, list[dict]]:
@@ -154,10 +269,16 @@ def credential_pool_key(auth_store: Path, pool: str, label: str) -> str:
     raise ValueError(f"credential_pool.{pool} label {label!r} has no usable key")
 
 
-def affinity_route(route_ids: list[str], affinity_key: str, *, ttl_buckets: int = 64) -> str:
-    """Stable route for a caller so prompt-cache locality survives requests."""
-    digest = hashlib.sha256(affinity_key.encode("utf-8")).digest()
-    return route_ids[digest[0] % len(route_ids)]
+def affinity_route(route_ids: list[str], affinity_key: str, *, ttl_buckets: int = 64,
+                   weights: dict[str, float] | None = None) -> str:
+    """Weighted rendezvous: removing one route only remaps its own callers."""
+    def rank(route_id: str) -> tuple[float, str]:
+        digest = hashlib.sha256(json.dumps([affinity_key, route_id]).encode()).digest()
+        # 52 bits keep both endpoints strictly excluded after float rounding.
+        uniform = ((int.from_bytes(digest[:8], "big") >> 12) + 1) / (2**52 + 1)
+        weight = (weights or {}).get(route_id, 1.0)
+        return (-math.log(uniform) / weight, route_id)
+    return min(route_ids, key=rank)
 
 
 def select_route(routes: list[Route], model: str, *, state: RouteState, now: float,
@@ -169,14 +290,25 @@ def select_route(routes: list[Route], model: str, *, state: RouteState, now: flo
     candidates = [r for r in routes if r.serves(model)]
     if not candidates:
         return None, "FABRIC_MODEL_UNKNOWN"
-    healthy = [r for r in candidates if state.available(r.route_id, now)]
+    enabled = [r for r in candidates if r.weight > 0]
+    if not enabled:
+        return None, "FABRIC_ROUTES_DRAINED"
+    healthy = [r for r in enabled if state.available(r.route_id, now)]
     if not healthy:
         return None, "FABRIC_ALL_ROUTES_COOLING"
+    healthy = [r for r in healthy if state.has_room(r)]
+    if not healthy:
+        return None, "FABRIC_ROUTES_BUSY"
     lowest_tier = min(r.priority for r in healthy)
     tier = sorted((r for r in healthy if r.priority == lowest_tier),
                   key=lambda r: r.route_id)
+    # Affinity is soft: an idle equally eligible route wins over a busy one.
+    load = {r.route_id: state.in_flight.get(r.route_id, 0) / r.weight for r in tier}
+    best = min(load.values())
+    tier = [r for r in tier if math.isclose(load[r.route_id], best, abs_tol=1e-12)]
     if affinity_key and len(tier) > 1:
-        chosen = affinity_route([r.route_id for r in tier], affinity_key)
+        chosen = affinity_route([r.route_id for r in tier], affinity_key,
+                                weights={r.route_id: r.weight for r in tier})
         for route in tier:
             if route.route_id == chosen:
                 return route, ""

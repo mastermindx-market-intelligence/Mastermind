@@ -210,12 +210,13 @@ class OpenAIStreamTranslator:
         return out
 
     def finish(self) -> list[tuple[str, str]]:
+        _require(self._finish is not None, "FABRIC_STREAM_INCOMPLETE")
         out: list[tuple[str, str]] = []
+        block_index = 1 if self._text_open else 0
         if self._text_open:
             out.append(self._events("content_block_stop", {
                 "type": "content_block_stop", "index": 0}))
             self._text_open = False
-        block_index = 1
         for index in sorted(self._tools):
             tool = self._tools[index]
             try:
@@ -392,7 +393,7 @@ def responses_to_anthropic(payload: dict, *, model: str) -> dict:
 class ResponsesStreamTranslator:
     """Incremental Responses events -> Anthropic Messages SSE events."""
 
-    def __init__(self, *, model: str):
+    def __init__(self, *, model: str, retain_text: bool = True):
         self.model = model
         self._text_open = False
         self._calls: dict[str, dict] = {}
@@ -401,9 +402,13 @@ class ResponsesStreamTranslator:
         self._usage: dict = {}
         self._block_index = 0
         self._text_parts: list[str] = []
+        self._retain_text = retain_text
+        self.completed = False
+        self._item_to_call: dict[str, str] = {}
 
     def to_message(self) -> dict:
         """Assemble the accumulated stream into one Messages response."""
+        _require(self.completed, "FABRIC_STREAM_INCOMPLETE")
         content: list[dict] = []
         text = "".join(self._text_parts)
         if text:
@@ -441,10 +446,13 @@ class ResponsesStreamTranslator:
         _require(isinstance(event, dict), "FABRIC_TRANSLATE_CHUNK")
         out: list[tuple[str, str]] = []
         kind = event.get("type")
+        if kind in {"error", "response.failed"}:
+            raise WireTranslationError("FABRIC_UPSTREAM_STREAM_ERROR")
         if kind == "response.output_text.delta":
             piece = event.get("delta")
             if isinstance(piece, str) and piece:
-                self._text_parts.append(piece)
+                if self._retain_text:
+                    self._text_parts.append(piece)
                 if not self._text_open:
                     out.append(self._events("content_block_start", {
                         "type": "content_block_start", "index": self._block_index,
@@ -459,19 +467,30 @@ class ResponsesStreamTranslator:
                 call_id = str(item.get("call_id") or item.get("id")
                               or f"toolu_{len(self._calls)}")
                 self._calls[call_id] = {"id": call_id, "name": item.get("name", ""),
-                                        "arguments": ""}
+                                        "arguments": item.get("arguments") or ""}
                 self._order.append(call_id)
+                if item.get("id"):
+                    self._item_to_call[str(item["id"])] = call_id
         elif kind == "response.function_call_arguments.delta":
-            call_id = str(event.get("call_id") or "")
+            call_id = str(event.get("call_id") or self._item_to_call.get(
+                str(event.get("item_id") or ""), ""))
             tool = self._calls.get(call_id)
+            _require(tool is not None, "FABRIC_TRANSLATE_TOOL_IDENTITY")
             if tool is not None and isinstance(event.get("delta"), str):
                 tool["arguments"] += event["delta"]
         usage = event.get("usage")
         if isinstance(usage, dict):
             self._usage = usage
-        if kind == "response.completed":
+        if kind in {"response.completed", "response.incomplete"}:
             response = event.get("response") or {}
-            if response.get("status") == "incomplete":
+            _require(isinstance(response, dict), "FABRIC_TRANSLATE_RESPONSE")
+            _require(response.get("status") in {"completed", "incomplete"},
+                     "FABRIC_TRANSLATE_RESPONSE")
+            self.completed = True
+            if response.get("status") == "incomplete" or kind == "response.incomplete":
+                details = response.get("incomplete_details") or {}
+                _require(isinstance(details, dict) and details.get("reason") == "max_output_tokens",
+                         "FABRIC_UPSTREAM_INCOMPLETE")
                 self._finish = "max_tokens"
             elif self._calls:
                 self._finish = "tool_use"
@@ -481,6 +500,7 @@ class ResponsesStreamTranslator:
         return out
 
     def finish(self) -> list[tuple[str, str]]:
+        _require(self.completed, "FABRIC_STREAM_INCOMPLETE")
         out: list[tuple[str, str]] = []
         if self._text_open:
             out.append(self._events("content_block_stop", {

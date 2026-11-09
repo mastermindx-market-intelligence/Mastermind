@@ -17,14 +17,17 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
 
 import httpx
+import anyio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -34,15 +37,18 @@ from ops.native_fabric.unified_router.routes import (
     DEFAULT_AUTH_STORE,
     Route,
     RouteState,
+    RoutePermit,
     WIRE_ANTHROPIC,
     WIRE_OPENAI,
     WIRE_RESPONSES,
     config_file_route_key,
     credential_pool_key,
     env_file_value,
+    retry_after_seconds,
     select_route,
 )
 from ops.native_fabric.unified_router import codex_oauth
+from ops.native_fabric.unified_router.streaming import SSEDecoder, events, read_bounded
 from ops.native_fabric.unified_router.wire import (
     OpenAIStreamTranslator,
     ResponsesStreamTranslator,
@@ -82,7 +88,7 @@ class _SyncHttpClient:
     """
 
     def __init__(self, timeout_s: float = 20.0):
-        self._client = httpx.Client(timeout=timeout_s, follow_redirects=False)
+        self._client = httpx.Client(timeout=timeout_s, follow_redirects=False, trust_env=False)
 
     def post(self, *args, **kwargs):
         return self._client.post(*args, **kwargs)
@@ -106,6 +112,10 @@ class Settings:
     max_body_bytes: int = 8 * 1024 * 1024
     upstream_timeout_s: float = 900.0
     route_cooldown_s: float = 30.0
+    max_in_flight: int = 32
+    request_timeout_s: float = 1800.0
+    max_response_bytes: int = 16 * 1024 * 1024
+    max_sse_event_bytes: int = 1024 * 1024
 
     def __post_init__(self) -> None:
         if len(self.proxy_token) < 24:
@@ -115,6 +125,19 @@ class Settings:
         ids = [r.route_id for r in self.routes]
         if len(set(ids)) != len(ids):
             raise ValueError("route ids must be unique")
+        groups = {}
+        for route in self.routes:
+            if route.concurrency_group:
+                previous = groups.setdefault(route.concurrency_group, route.group_max_in_flight)
+                if previous != route.group_max_in_flight:
+                    raise ValueError("shared concurrency group ceilings must agree")
+        for value in (self.max_in_flight, self.max_body_bytes,
+                      self.max_response_bytes, self.max_sse_event_bytes):
+            if type(value) is not int or value <= 0:
+                raise ValueError("router limits must be positive integers")
+        for value in (self.upstream_timeout_s, self.route_cooldown_s, self.request_timeout_s):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("router timeouts must be positive and finite")
         for alias, targets in self.aliases:
             if not alias or not targets or not all(isinstance(t, str) and t for t in targets):
                 raise ValueError("every alias needs at least one model target")
@@ -147,6 +170,9 @@ def _routes_from_document(document: dict) -> tuple[Route, ...]:
                                  in entry.get("upstream_model", {}).items()),
             auth_header=entry.get("auth_header", ""),
             session_header=entry.get("session_header", ""),
+            max_in_flight=entry.get("max_in_flight", 0),
+            concurrency_group=entry.get("concurrency_group", ""),
+            group_max_in_flight=entry.get("group_max_in_flight", 0),
             notes=entry.get("notes", "")))
     return tuple(routes)
 
@@ -166,6 +192,10 @@ def settings_from_env() -> Settings:
         max_body_bytes=int(os.environ.get("FABRIC_MAX_BODY_BYTES", str(8 * 1024 * 1024))),
         upstream_timeout_s=float(os.environ.get("FABRIC_UPSTREAM_TIMEOUT_S", "900")),
         route_cooldown_s=float(os.environ.get("FABRIC_ROUTE_COOLDOWN_S", "30")),
+        max_in_flight=int(os.environ.get("FABRIC_MAX_IN_FLIGHT", "32")),
+        request_timeout_s=float(os.environ.get("FABRIC_REQUEST_TIMEOUT_S", "1800")),
+        max_response_bytes=int(os.environ.get("FABRIC_MAX_RESPONSE_BYTES", str(16 * 1024 * 1024))),
+        max_sse_event_bytes=int(os.environ.get("FABRIC_MAX_SSE_EVENT_BYTES", str(1024 * 1024))),
     )
 
 
@@ -175,13 +205,23 @@ class RouterState:
     started_at: float = field(default_factory=time.time)
     served: int = 0
     refused: int = 0
+    selected: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    in_flight: int = 0
     per_route: dict[str, dict[str, int]] = field(default_factory=dict)
     oauth_cursor: dict[str, int] = field(default_factory=dict)
     oauth_bench: dict[tuple[str, str], float] = field(default_factory=dict)
+    latency: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def count(self, route_id: str, outcome: str) -> None:
         bucket = self.per_route.setdefault(route_id, {"served": 0, "refused": 0})
         bucket[outcome] = bucket.get(outcome, 0) + 1
+
+    def observe_latency(self, route_id: str, metric: str, value: float) -> None:
+        bucket = self.latency.setdefault(route_id, {})
+        old = bucket.get(metric)
+        bucket[metric] = value if old is None else .2 * value + .8 * old
 
 
 def _model_candidates(body: dict, aliases) -> list[tuple[str, str]]:
@@ -243,16 +283,128 @@ def _session_headers(route: Route, payload: dict) -> dict[str, str]:
     return {route.session_header: f"fabric-{cleaned}"}
 
 
+@dataclass
+class _RequestLifecycle:
+    """One local permit and upstream response; completion/cleanup are idempotent."""
+    state: RouterState
+    cfg: Settings
+    route: Route
+    permit: RoutePermit
+    model: str
+    counting: bool = False
+    started: float = field(default_factory=time.monotonic)
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    upstream_response: httpx.Response | None = None
+    sent: bool = False
+    settled: bool = False
+    closed: bool = False
+    first_content_ms: float | None = None
+    headers_ms: float | None = None
+
+    @property
+    def deadline(self) -> float:
+        return self.started + self.cfg.request_timeout_s
+
+    def content_observed(self) -> None:
+        if self.first_content_ms is None:
+            self.first_content_ms = (time.monotonic() - self.started) * 1000
+
+    def settle(self, outcome: str, reason: str = "", *, circuit: bool = False,
+               retry_after_s: float | None = None) -> None:
+        if self.settled:
+            return
+        self.settled = True
+        route_id = self.route.route_id
+        self.state.count(route_id, outcome)
+        setattr(self.state, outcome, getattr(self.state, outcome) + 1)
+        if outcome == "served":
+            if not self.counting:
+                self.state.routes.record_success(route_id, generation=self.permit.generation)
+            self.state.observe_latency(route_id, "completion_ms",
+                                       (time.monotonic() - self.started) * 1000)
+            for name, value in (("first_content_ms", self.first_content_ms),
+                                ("headers_ms", self.headers_ms)):
+                if value is not None:
+                    self.state.observe_latency(route_id, name, value)
+        elif circuit:
+            self.state.routes.record_failure(
+                route_id, reason, now=time.monotonic(), cooldown_s=self.cfg.route_cooldown_s,
+                retry_after_s=retry_after_s, generation=self.permit.generation)
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            # Starlette may cancel the entire stream task scope on disconnect.
+            # Cleanup also runs when its generator has never been advanced.
+            with anyio.move_on_after(5, shield=True):
+                if self.upstream_response is not None:
+                    await self.upstream_response.aclose()
+        except Exception as exc:
+            self.state.count(self.route.route_id, "cleanup_failed")
+            _log.warning("route %s close failed: %s", self.route.route_id, type(exc).__name__)
+        finally:
+            if not self.settled:
+                self.settle("cancelled")
+            self.state.routes.release(self.permit)
+            self.state.in_flight -= 1
+
+
+class _ManagedStreamingResponse(StreamingResponse):
+    def __init__(self, content, lifecycle: _RequestLifecycle, **kwargs):
+        super().__init__(content, **kwargs)
+        self.lifecycle = lifecycle
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.lifecycle.close()
+
+
+class _ResponsesRouteRefused(RuntimeError):
+    def __init__(self, reason: str, *, retry_after_s: float | None = None,
+                 circuit: bool = True):
+        super().__init__(reason)
+        self.reason, self.retry_after_s, self.circuit = reason, retry_after_s, circuit
+
+
+def _error(reason: str, status: int, *, retry_after_s: float | None = None) -> Response:
+    headers = {}
+    if retry_after_s is not None:
+        headers["retry-after"] = str(max(1, math.ceil(retry_after_s)))
+    message = reason
+    if reason == "credential_unavailable":
+        message = "fabric route unavailable: credential_unavailable"
+    elif status == 502 and reason.startswith("FABRIC_TRANSLATE_"):
+        message = "translation failed: " + reason
+    error_type = "invalid_request_error" if status == 400 else "fabric_route_error"
+    return JSONResponse({"error": {"message": message, "type": error_type,
+                                   "code": reason}}, status_code=status, headers=headers)
+
+
+def _sse(event: str, data: str) -> bytes:
+    return f"event: {event}\ndata: {data}\n\n".encode()
+
+
+def _stream_error(reason: str) -> bytes:
+    return _sse("error", json.dumps({"type": "error", "error": {
+        "type": "fabric_route_error", "code": reason, "message": reason}}))
+
+
 def create_app(cfg: Settings | None = None, *,
                transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        settings: Settings = app.state.settings
         app.state.upstream = httpx.AsyncClient(
-            transport=transport,
+            transport=transport, trust_env=False,
             timeout=httpx.Timeout(connect=10, write=30,
-                                  read=app.state.settings.upstream_timeout_s, pool=30),
+                                  read=settings.upstream_timeout_s, pool=30),
             follow_redirects=False,
-            limits=httpx.Limits(max_connections=32, max_keepalive_connections=16))
+            limits=httpx.Limits(max_connections=settings.max_in_flight,
+                               max_keepalive_connections=min(16, settings.max_in_flight)))
         try:
             yield
         finally:
@@ -275,506 +427,414 @@ def create_app(cfg: Settings | None = None, *,
         if scheme.lower() == "bearer" and hmac.compare_digest(
                 candidate, app.state.settings.proxy_token):
             return True
-        # The Anthropic Messages wire's native credential header; accepted
-        # alongside Bearer exactly like the incumbent anthropic gateway.
         api_key = request.headers.get("x-api-key", "")
-        return bool(api_key) and hmac.compare_digest(
-            api_key, app.state.settings.proxy_token)
+        return bool(api_key) and hmac.compare_digest(api_key, app.state.settings.proxy_token)
 
     @app.get("/healthz")
     async def healthz(request: Request) -> Response:
         if not loopback_peer(request):
-            return JSONResponse({"error": {"message": "loopback access only"}},
-                                status_code=HTTPStatus.FORBIDDEN)
+            return _error("FABRIC_LOOPBACK_ONLY", 403)
         return JSONResponse({"ok": True})
 
     @app.get("/statusz")
     async def statusz(request: Request) -> Response:
         if not loopback_peer(request) or not authorized(request):
-            return JSONResponse({"error": {"message": "unauthorized",
-                                           "type": "authentication_error"}},
-                                status_code=401)
+            return _error("FABRIC_UNAUTHORIZED", 401)
         cfg: Settings = app.state.settings
         state: RouterState = app.state.router_state
-        now = time.time()
+        now = time.monotonic()
         return JSONResponse({
-            "ok": True,
+            "ok": True, "policy": "priority-weighted-inflight-v1",
+            "admission_scope": "single_process_local_bulkhead",
+            "provider_quota_authority": False,
+            "in_flight": state.in_flight, "max_in_flight": cfg.max_in_flight,
+            "request_timeout_s": cfg.request_timeout_s,
             "routes": [
                 {"route_id": r.route_id, "wire": r.wire, "models": list(r.models),
                  "weight": r.weight, "priority": r.priority,
+                 "drained": r.weight == 0,
                  "cooling": not state.routes.available(r.route_id, now),
+                 "circuit": state.routes.circuit(r.route_id, now),
+                 "cooldown_remaining_s": round(max(0, state.routes.cooldown_until.get(
+                     r.route_id, 0) - now), 3),
                  "consecutive_failures": state.routes.consecutive_failures.get(r.route_id, 0),
-                 "served": state.per_route.get(r.route_id, {}).get("served", 0),
-                 "refused": state.per_route.get(r.route_id, {}).get("refused", 0)}
+                 "in_flight": state.routes.in_flight.get(r.route_id, 0),
+                 "max_in_flight": r.max_in_flight or None,
+                 "concurrency_group": r.concurrency_group or None,
+                 "group_in_flight": state.routes.group_in_flight.get(r.concurrency_group, 0)
+                     if r.concurrency_group else None,
+                 "group_max_in_flight": r.group_max_in_flight or None,
+                 "last_failure_reason": state.routes.last_failure.get(r.route_id, (None, None))[1],
+                 "latency_ewma_ms": {k: round(v, 3) for k, v in state.latency.get(
+                     r.route_id, {}).items()},
+                 **{key: state.per_route.get(r.route_id, {}).get(key, 0)
+                    for key in ("selected", "served", "refused", "failed", "cancelled", "cleanup_failed")}}
                 for r in cfg.routes],
             "aliases": {alias: list(targets) for alias, targets in cfg.aliases},
-            "served_total": state.served, "refused_total": state.refused,
+            "selected_total": state.selected, "served_total": state.served,
+            "refused_total": state.refused, "failed_total": state.failed,
+            "cancelled_total": state.cancelled,
         })
 
     @app.get("/v1/models")
     async def models(request: Request) -> Response:
         if not loopback_peer(request) or not authorized(request):
-            return JSONResponse({"error": {"message": "unauthorized",
-                                           "type": "authentication_error"}},
-                                status_code=401)
+            return _error("FABRIC_UNAUTHORIZED", 401)
         cfg: Settings = app.state.settings
-        slugs: list[str] = []
-        for route in cfg.routes:
-            for model in route.models:
-                if model not in slugs:
-                    slugs.append(model)
-        for alias, _ in cfg.aliases:
-            if alias not in slugs:
-                slugs.append(alias)
+        slugs = list(dict.fromkeys(m for route in cfg.routes for m in route.models))
+        slugs.extend(alias for alias, _ in cfg.aliases if alias not in slugs)
         return JSONResponse({"object": "list", "data": [
             {"id": slug, "object": "model", "type": "model",
-             "display_name": slug, "owned_by": "capacity-fabric"}
-            for slug in slugs]})
+             "display_name": slug, "owned_by": "capacity-fabric"} for slug in slugs]})
+
+    async def send(ctx: _RequestLifecycle, url: str, headers: dict, payload: dict):
+        if time.monotonic() >= ctx.deadline:
+            raise TimeoutError()
+        upstream: httpx.AsyncClient = app.state.upstream
+        outgoing = upstream.build_request("POST", url, headers=headers,
+                                          content=json.dumps(payload).encode())
+        ctx.sent = True
+        # Exactly one inference send. HTTPX transport/SDK retries are not enabled.
+        ctx.upstream_response = await upstream.send(outgoing, stream=True)
+        ctx.headers_ms = (time.monotonic() - ctx.started) * 1000
+        return ctx.upstream_response
+
+    def upstream_headers(route: Route, credential: str, payload: dict) -> dict:
+        return {**_upstream_auth_headers(route, credential), **_session_headers(route, payload),
+                "content-type": "application/json", "accept-encoding": "identity",
+                "anthropic-version": "2023-06-01"}
+
+    async def raw_response(response, cfg):
+        data = await read_bounded(response, cfg.max_response_bytes)
+        return Response(data, status_code=response.status_code,
+                        headers={k: v for k, v in response.headers.items()
+                                 if k.lower() in {"content-type", "x-request-id", "retry-after"}},
+                        media_type="application/json")
+
+    def json_event(data: str) -> dict:
+        try:
+            value = json.loads(data)
+        except ValueError:
+            raise WireTranslationError("FABRIC_STREAM_INVALID_JSON") from None
+        if not isinstance(value, dict):
+            raise WireTranslationError("FABRIC_STREAM_INVALID_JSON")
+        if "error" in value or value.get("type") in {"error", "response.failed"}:
+            raise WireTranslationError("FABRIC_UPSTREAM_STREAM_ERROR")
+        return value
+
+    async def forward_anthropic(ctx, payload, credential):
+        suffix = "v1/messages/count_tokens" if ctx.counting else "v1/messages"
+        response = await send(ctx, f"{_route_base_url(ctx.route).rstrip('/')}/{suffix}",
+                              upstream_headers(ctx.route, credential, payload), payload)
+        if response.status_code >= 300:
+            return await raw_response(response, ctx.cfg)
+        if ctx.counting or payload.get("stream") is not True:
+            reply = await raw_response(response, ctx.cfg)
+            try:
+                value = json.loads(reply.body)
+            except ValueError:
+                raise WireTranslationError("FABRIC_RESPONSE_INVALID_JSON") from None
+            if not isinstance(value, dict):
+                raise WireTranslationError("FABRIC_RESPONSE_INVALID")
+            if "error" in value or value.get("type") == "error":
+                raise WireTranslationError("FABRIC_UPSTREAM_RESPONSE_ERROR")
+            if ctx.counting:
+                valid = type(value.get("input_tokens")) is int and value["input_tokens"] >= 0
+            else:
+                valid = (isinstance(value.get("id"), str) and bool(value["id"])
+                         and isinstance(value.get("content"), list)
+                         and value.get("type", "message") == "message")
+            if not valid:
+                raise WireTranslationError("FABRIC_RESPONSE_INVALID")
+            return reply
+        if "text/event-stream" not in response.headers.get("content-type", ""):
+            raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
+
+        async def stream():
+            decoder = SSEDecoder(ctx.cfg.max_sse_event_bytes)
+            received = 0
+            async for part in response.aiter_bytes():
+                received += len(part)
+                if received > ctx.cfg.max_response_bytes:
+                    raise WireTranslationError("FABRIC_RESPONSE_TOO_LARGE")
+                terminal = False
+                for event, data in decoder.feed(part):
+                    value = json_event(data)
+                    kind = value.get("type") or event
+                    if kind == "content_block_delta":
+                        ctx.content_observed()
+                    if kind == "message_stop":
+                        terminal = True
+                yield part
+                if terminal:
+                    return
+            decoder.finish()
+            raise WireTranslationError("FABRIC_STREAM_INCOMPLETE")
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"cache-control": "no-store"})
+
+    async def forward_openai(ctx, payload, credential):
+        translated = anthropic_to_openai(payload)
+        response = await send(ctx, f"{_route_base_url(ctx.route).rstrip('/')}/chat/completions",
+                              upstream_headers(ctx.route, credential, payload), translated)
+        if response.status_code >= 300:
+            return await raw_response(response, ctx.cfg)
+        if payload.get("stream") is not True:
+            data = await read_bounded(response, ctx.cfg.max_response_bytes)
+            try:
+                reply = openai_to_anthropic(json.loads(data), model=ctx.model)
+            except WireTranslationError:
+                raise
+            except (ValueError, TypeError, AttributeError):
+                raise WireTranslationError("FABRIC_TRANSLATE_INVALID") from None
+            return JSONResponse(reply)
+        if "text/event-stream" not in response.headers.get("content-type", ""):
+            raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
+        translator = OpenAIStreamTranslator(model=ctx.model)
+
+        async def stream():
+            first = True
+            async for _, data in events(response, max_event_bytes=ctx.cfg.max_sse_event_bytes,
+                                        max_response_bytes=ctx.cfg.max_response_bytes):
+                if data == "[DONE]":
+                    for event in translator.finish():
+                        yield _sse(*event)
+                    return
+                chunk = json_event(data)
+                if first:
+                    yield _sse(*translator.message_start())
+                    first = False
+                for event in translator.feed(chunk):
+                    if event[0] == "content_block_delta":
+                        ctx.content_observed()
+                    yield _sse(*event)
+            # A missing [DONE] is not an implicit successful completion.
+            raise WireTranslationError("FABRIC_STREAM_INCOMPLETE")
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"cache-control": "no-store"})
+
+    async def refresh_before_send(route, account):
+        def refresh():
+            client = _SyncHttpClient()
+            try:
+                return codex_oauth.refresh_account(
+                    app.state.settings.auth_store, route.pool, account,
+                    token_url=route.token_url, client_id=route.client_id, client=client)
+            finally:
+                client.close()
+        return await _run_in_executor(refresh)
+
+    async def forward_responses(ctx, payload):
+        translated = anthropic_to_responses(payload)
+        translated["stream"] = True
+        state, cfg, route = ctx.state, ctx.cfg, ctx.route
+        accounts = await _run_in_executor(codex_oauth.read_accounts, cfg.auth_store, route.pool)
+        wall_now = time.time()
+        eligible = [a for a in accounts if not a.exhausted and
+                    state.oauth_bench.get((route.route_id, a.id), 0) <= wall_now]
+        if not eligible:
+            if any(a.exhausted_unknown for a in accounts):
+                raise _ResponsesRouteRefused("FABRIC_OAUTH_QUOTA_UNKNOWN")
+            deadlines = [max(a.exhausted_until, state.oauth_bench.get(
+                (route.route_id, a.id), 0)) for a in accounts]
+            remaining = min((d - wall_now for d in deadlines if d > wall_now),
+                            default=cfg.route_cooldown_s)
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
+                                         retry_after_s=remaining)
+        cursor = state.oauth_cursor.get(route.route_id, 0)
+        account = eligible[cursor % len(eligible)]
+        state.oauth_cursor[route.route_id] = cursor + 1
+        expiry = codex_oauth.access_token_expiry(account.access_token)
+        if expiry is not None and expiry <= wall_now + 30:
+            try:
+                account = await refresh_before_send(route, account)
+            except (codex_oauth.OAuthPoolError, OSError, ValueError, httpx.RequestError):
+                raise _ResponsesRouteRefused("FABRIC_OAUTH_REFRESH_UNAVAILABLE") from None
+        if account.exhausted:
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED")
+        headers = {"authorization": f"Bearer {account.access_token}",
+                   "content-type": "application/json", "accept-encoding": "identity",
+                   "originator": route.originator or "hermes-agent",
+                   "user-agent": "HermesAgent/fabric-router",
+                   **codex_oauth.account_id_header(account.access_token)}
+        response = await send(ctx, f"{_route_base_url(route).rstrip('/')}/responses",
+                              headers, translated)
+        if response.status_code == 429:
+            delay = retry_after_seconds(response.headers.get("retry-after", ""), wall_now=time.time())
+            delay = max(cfg.route_cooldown_s, delay or 0)
+            reset_at = max(time.time() + delay, state.oauth_bench.get((route.route_id, account.id), 0))
+            state.oauth_bench[(route.route_id, account.id)] = reset_at
+            # Existing auth-store owner, exact account, constant non-sensitive reason.
+            persisted_reset = await _run_in_executor(
+                codex_oauth.bench_row, cfg.auth_store, route.pool,
+                account.id, reset_at=reset_at, reason="http_429")
+            state.oauth_bench[(route.route_id, account.id)] = max(reset_at, persisted_reset)
+            # No replay: a later independent request may select another eligible row.
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNT_LIMIT",
+                                         retry_after_s=delay, circuit=False)
+        if response.status_code >= 300:
+            # Includes 401/403/5xx: never refresh-and-resend or rotate after send.
+            return await raw_response(response, cfg)
+        if "text/event-stream" not in response.headers.get("content-type", ""):
+            raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
+        wants_stream = payload.get("stream") is True
+        translator = ResponsesStreamTranslator(model=ctx.model, retain_text=not wants_stream)
+
+        async def translated_stream():
+            first = True
+            async for _, data in events(response, max_event_bytes=cfg.max_sse_event_bytes,
+                                        max_response_bytes=cfg.max_response_bytes):
+                if data == "[DONE]":
+                    break
+                chunk = json_event(data)
+                if first:
+                    if wants_stream:
+                        yield _sse(*translator.message_start())
+                    first = False
+                produced = translator.feed(chunk)
+                for event in produced:
+                    if event[0] == "content_block_delta":
+                        ctx.content_observed()
+                    if wants_stream:
+                        yield _sse(*event)
+                if translator.completed:
+                    break
+            if not translator.completed:
+                raise WireTranslationError("FABRIC_STREAM_INCOMPLETE")
+            if wants_stream:
+                for event in translator.finish():
+                    yield _sse(*event)
+
+        if not wants_stream:
+            async for _ in translated_stream():
+                pass
+            return JSONResponse(translator.to_message())
+        return StreamingResponse(translated_stream(), media_type="text/event-stream",
+                                 headers={"cache-control": "no-store"})
+
+    def settle_http(ctx: _RequestLifecycle, response: Response):
+        if 200 <= response.status_code < 300:
+            ctx.settle("served")
+        elif response.status_code == 429 or response.status_code >= 500:
+            delay = retry_after_seconds(response.headers.get("retry-after", ""), wall_now=time.time())
+            ctx.settle("failed", f"http_{response.status_code}", circuit=True, retry_after_s=delay)
+        else:
+            # A caller/auth/config rejection is neither health success nor a server outage.
+            ctx.settle("refused")
+
+    async def managed_stream(ctx, iterator):
+        try:
+            async with asyncio.timeout_at(ctx.deadline):
+                async for part in iterator:
+                    if time.monotonic() >= ctx.deadline:
+                        raise TimeoutError()
+                    yield part
+            ctx.settle("served")
+        except (httpx.RequestError, TimeoutError):
+            ctx.settle("failed", "FABRIC_UPSTREAM_EFFECT_UNKNOWN", circuit=True)
+            yield _stream_error("FABRIC_UPSTREAM_EFFECT_UNKNOWN")
+        except WireTranslationError as exc:
+            reason = _public_reason(exc, "FABRIC_STREAM_INVALID")
+            ctx.settle("failed", reason, circuit=True)
+            yield _stream_error(reason)
+        finally:
+            await ctx.close()
 
     @app.post("/v1/messages")
     @app.post("/v1/messages/count_tokens")
     async def messages(request: Request) -> Response:
         if not loopback_peer(request):
-            return JSONResponse({"error": {"message": "loopback access only"}},
-                                status_code=HTTPStatus.FORBIDDEN)
+            return _error("FABRIC_LOOPBACK_ONLY", 403)
         if not authorized(request):
-            return JSONResponse({"error": {"message": "unauthorized",
-                                           "type": "authentication_error"}},
-                                status_code=401)
+            return _error("FABRIC_UNAUTHORIZED", 401)
         cfg: Settings = app.state.settings
         state: RouterState = app.state.router_state
         declared = request.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > cfg.max_body_bytes:
-            return JSONResponse({"error": {"message": "request body too large"}},
-                                status_code=413)
+            return _error("FABRIC_REQUEST_TOO_LARGE", 413)
         body = bytearray()
         async for chunk in request.stream():
             if len(body) + len(chunk) > cfg.max_body_bytes:
-                return JSONResponse({"error": {"message": "request body too large"}},
-                                    status_code=413)
+                return _error("FABRIC_REQUEST_TOO_LARGE", 413)
             body.extend(chunk)
         try:
             payload = json.loads(bytes(body))
             if not isinstance(payload, dict):
-                raise ValueError("not an object")
-        except ValueError:
-            return JSONResponse({"error": {"message": "invalid JSON body",
-                                           "type": "invalid_request_error"}},
-                                status_code=400)
-        try:
+                raise ValueError()
             candidates = _model_candidates(payload, cfg.aliases)
-        except WireTranslationError as exc:
-            return JSONResponse({"error": {
-                "message": _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                "type": "invalid_request_error"}},
-                status_code=400)
-        alias = ""
-        resolved = ""
-        route = None
-        reason = "FABRIC_MODEL_UNKNOWN"
-        for candidate_model, candidate_alias in candidates:
-            resolved, alias = candidate_model, candidate_alias
-            route, reason = select_route(list(cfg.routes), resolved,
-                                         state=state.routes, now=time.monotonic(),
-                                         affinity_key=_affinity(payload))
-            if route is not None:
-                break
-        if route is None:
-            state.refused += 1
-            return JSONResponse({"error": {"message": f"fabric routing refused: {reason}",
-                                           "type": "fabric_route_error", "code": reason}},
-                                status_code=HTTPStatus.SERVICE_UNAVAILABLE)
+        except (ValueError, WireTranslationError) as exc:
+            return _error(_public_reason(exc, "FABRIC_INVALID_REQUEST"), 400)
         counting = request.url.path.endswith("/count_tokens")
-        if counting and route.wire != WIRE_ANTHROPIC:
-            return JSONResponse({"error": {
-                "message": "count_tokens is not available on non-Anthropic-wire routes",
-                "type": "fabric_route_error", "route": route.route_id}},
-                status_code=HTTPStatus.NOT_IMPLEMENTED)
-        forwarded = dict(payload, model=route.wire_model(resolved))
-        wants_stream = payload.get("stream") is True
-        if route.wire == WIRE_RESPONSES:
-            # OAuth routes authorize per account inside the forwarder.
-            try:
-                return await _forward_responses(app, route, forwarded, wants_stream)
-            except _ResponsesRouteRefused as exc:
-                state.routes.record_failure(route.route_id, exc.reason,
-                                            now=time.monotonic(),
-                                            cooldown_s=cfg.route_cooldown_s)
-                state.refused += 1
-                state.count(route.route_id, "refused")
-                return JSONResponse({"error": {
-                    "message": f"fabric route unavailable: {exc.reason}",
-                    "type": "fabric_route_error", "code": exc.reason}},
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE)
-        try:
-            authorization = _route_authorization(route, cfg)
-        except (OSError, ValueError) as exc:
-            state.routes.record_failure(route.route_id, "credential_unavailable",
-                                        now=time.monotonic(),
-                                        cooldown_s=cfg.route_cooldown_s)
+        eligible_routes = [r for r in cfg.routes if not counting or r.wire == WIRE_ANTHROPIC]
+        if counting and not any(r.serves(model) for r in eligible_routes for model, _ in candidates):
+            return _error("FABRIC_COUNT_TOKENS_UNSUPPORTED", 501)
+        if state.in_flight >= cfg.max_in_flight:
             state.refused += 1
-            state.count(route.route_id, "refused")
-            _log.warning("route %s credential unavailable: %s",
-                         route.route_id, type(exc).__name__)
-            return JSONResponse({"error": {
-                "message": "fabric route unavailable: credential_unavailable",
-                "type": "fabric_route_error",
-                "code": "credential_unavailable"}},
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE)
-
-        try:
-            if counting:
-                return await _forward_anthropic_count(app, route, authorization,
-                                                      forwarded)
-            if route.wire == WIRE_ANTHROPIC:
-                return await _forward_anthropic(app, route, authorization,
-                                                forwarded, wants_stream)
-            return await _forward_openai(app, route, authorization,
-                                         forwarded, wants_stream)
-        except httpx.RequestError:
-            state.routes.record_failure(route.route_id, "upstream_transport",
-                                        now=time.monotonic(),
-                                        cooldown_s=cfg.route_cooldown_s)
-            return JSONResponse({"error": {
-                "message": "upstream transport failure; result may be ambiguous",
-                "type": "fabric_route_error", "route": route.route_id}},
-                status_code=502)
-
-    async def _forward_anthropic_count(app, route, authorization, payload) -> Response:
-        upstream: httpx.AsyncClient = app.state.upstream
-        upstream_request = upstream.build_request(
-            "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages/count_tokens",
-            headers={**_upstream_auth_headers(route, authorization),
-                     **_session_headers(route, payload),
-                     "content-type": "application/json",
-                     "accept-encoding": "identity"},
-            content=json.dumps(payload).encode())
-        response = await upstream.send(upstream_request)
-        data = response.content
-        return Response(content=data, status_code=response.status_code,
-                        media_type="application/json")
-
-    async def _forward_anthropic(app, route, authorization, payload,
-                                 wants_stream) -> Response:
-        cfg: Settings = app.state.settings
-        state: RouterState = app.state.router_state
-        upstream: httpx.AsyncClient = app.state.upstream
-        upstream_request = upstream.build_request(
-            "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages",
-            headers={**_upstream_auth_headers(route, authorization),
-                     **_session_headers(route, payload),
-                     "content-type": "application/json",
-                     "accept-encoding": "identity"},
-            content=json.dumps(payload).encode())
-        response = await upstream.send(upstream_request, stream=True)
-        if response.status_code >= 500 or response.status_code == 429:
-            state.routes.record_failure(route.route_id, f"http_{response.status_code}",
-                                        now=time.monotonic())
-        else:
-            state.routes.record_success(route.route_id)
-        state.served += 1
-        state.count(route.route_id, "served")
-        headers = {k: v for k, v in response.headers.items()
-                   if k.lower() in {"content-type", "x-request-id", "retry-after"}}
-        if response.status_code >= 400:
-            try:
-                data = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(data) + len(chunk) > cfg.max_body_bytes:
-                        break
-                    data.extend(chunk)
-            finally:
-                await response.aclose()
-            return Response(content=bytes(data), status_code=response.status_code,
-                            headers=headers, media_type="application/json")
-
-        async def stream():
-            async for part in response.aiter_raw():
-                yield part
-            await response.aclose()
-
-        return StreamingResponse(stream(), status_code=response.status_code,
-                                 headers=headers)
-
-    async def _forward_openai(app, route, authorization, payload,
-                              wants_stream) -> Response:
-        state: RouterState = app.state.router_state
-        cfg: Settings = app.state.settings
-        upstream: httpx.AsyncClient = app.state.upstream
-        try:
-            openai_request = anthropic_to_openai(payload)
-        except WireTranslationError as exc:
-            return JSONResponse({"error": {
-                "message": _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                "type": "invalid_request_error"}},
-                status_code=400)
-        upstream_request = upstream.build_request(
-            "POST", f"{_route_base_url(route).rstrip('/')}/chat/completions",
-            headers={**_upstream_auth_headers(route, authorization),
-                     **_session_headers(route, payload),
-                     "content-type": "application/json",
-                     "accept-encoding": "identity"},
-            content=json.dumps(openai_request).encode())
-        response = await upstream.send(upstream_request, stream=True)
-        if response.status_code >= 500 or response.status_code == 429:
-            state.routes.record_failure(route.route_id, f"http_{response.status_code}",
-                                        now=time.monotonic())
-        else:
-            state.routes.record_success(route.route_id)
-        if response.status_code >= 400:
-            data = await response.aread()
-            await response.aclose()
-            return Response(content=data, status_code=response.status_code,
-                            media_type="application/json")
-        if not wants_stream:
-            data = await response.aread()
-            await response.aclose()
-            try:
-                translated = openai_to_anthropic(json.loads(data), model=payload["model"])
-            except (ValueError, WireTranslationError) as exc:
-                return JSONResponse({"error": {
-                    "message": "translation failed: "
-                               + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                    "type": "fabric_route_error"}},
-                    status_code=502)
-            return JSONResponse(translated)
-        translator = OpenAIStreamTranslator(model=payload["model"])
-
-        async def stream():
-            first = True
-            buffer = b""
-            try:
-                async for part in response.aiter_bytes():
-                    buffer += part
-                    while b"\n" in buffer:
-                        line, buffer = buffer.split(b"\n", 1)
-                        text = line.decode("utf-8", "replace").strip()
-                        if not text.startswith("data:"):
-                            continue
-                        data = text[5:].strip()
-                        if data == "[DONE]":
-                            for event in translator.finish():
-                                yield _sse(*event)
-                            return
-                        try:
-                            chunk = json.loads(data)
-                        except ValueError:
-                            continue
-                        if first:
-                            yield _sse(*translator.message_start())
-                            first = False
-                        for event in translator.feed(chunk):
-                            yield _sse(*event)
-                for event in translator.finish():
-                    yield _sse(*event)
-            finally:
-                await response.aclose()
-
-        return StreamingResponse(stream(), media_type="text/event-stream",
-                                 headers={"cache-control": "no-store"})
-
-    class _ResponsesRouteRefused(RuntimeError):
-        """Admission-time refusal; no upstream effect has occurred.
-
-        The client sees only the constant FABRIC_* reason code; free-form
-        upstream detail stays in the server-side log (py/stack-trace-exposure).
-        """
-
-        def __init__(self, reason: str, detail: str = ""):
-            super().__init__(reason)
-            self.reason = reason
-            if detail:
-                _log.warning("responses route %s: %s", reason, detail)
-
-    def _oauth_headers(account) -> dict[str, str]:
-        headers = {"authorization": f"Bearer {account.access_token}",
-                   "content-type": "application/json",
-                   "accept-encoding": "identity",
-                   "originator": "hermes-agent",
-                   "user-agent": "HermesAgent/fabric-router"}
-        headers.update(codex_oauth.account_id_header(account.access_token))
-        return headers
-
-    def _oauth_accounts(route: Route):
-        accounts = codex_oauth.read_accounts(
-            app.state.settings.auth_store, route.pool)
-        now = time.time()
-        state: RouterState = app.state.router_state
-        eligible = [a for a in accounts
-                    if not a.exhausted
-                    and state.oauth_bench.get((route.route_id, a.id), 0.0) <= now]
-        return accounts, eligible
-
-    async def _refresh_once(route: Route, account):
-        return await _run_in_executor(
-            codex_oauth.refresh_account, app.state.settings.auth_store,
-            route.pool, account,
-            token_url=route.token_url, client_id=route.client_id,
-            client=_SyncHttpClient(upstream))
-
-    async def _forward_responses(app_, route: Route, payload: dict,
-                                 wants_stream: bool) -> Response:
-        state: RouterState = app.state.router_state
-        cfg_: Settings = app.state.settings
-        upstream: httpx.AsyncClient = app.state.upstream
-        try:
-            responses_request = anthropic_to_responses(payload)
-        except WireTranslationError as exc:
-            return JSONResponse({"error": {"message": str(exc),
-                                           "type": "invalid_request_error"}},
-                                status_code=400)
-        # The ChatGPT Responses backend refuses non-streaming requests
-        # ("Stream must be set to true"); always stream upstream and
-        # aggregate server-side when the client did not ask for SSE.
-        responses_request["stream"] = True
-        accounts, eligible = _oauth_accounts(route)
-        if not eligible:
-            raise _ResponsesRouteRefused(
-                "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
-                f"pool {route.pool!r}: {len(accounts)} rows all "
-                "exhausted or benched")
-        cursor = state.oauth_cursor.get(route.route_id, 0)
-        tried: set[str] = set()
-        order = []
-        for offset in range(len(eligible)):
-            account = eligible[(cursor + offset) % len(eligible)]
-            if account.id not in tried:
-                tried.add(account.id)
-                order.append(account)
-        body_bytes = json.dumps(responses_request).encode()
-        base = _route_base_url(route).rstrip("/")
-        last_refusal: _ResponsesRouteRefused | None = None
-        for index, account in enumerate(order):
-            state.oauth_cursor[route.route_id] = (
-                cursor + index + 1) % max(len(eligible), 1)
-            selected = account
-            response = None
-            for attempt in range(2):
-                request = upstream.build_request(
-                    "POST", f"{base}/responses",
-                    headers=_oauth_headers(selected),
-                    content=body_bytes)
-                response = await upstream.send(request, stream=True)
-                if response.status_code in (401, 403) and attempt == 0:
-                    # One refresh for this row, then one retry; a failed
-                    # refresh benches the row for this request only.
-                    await response.aclose()
-                    try:
-                        selected = await _refresh_once(route, selected)
-                    except (codex_oauth.OAuthPoolError, OSError, ValueError):
-                        break
-                    continue
+            return _error("FABRIC_ROUTER_BUSY", 503, retry_after_s=1)
+        selected, resolved, reason = None, "", "FABRIC_MODEL_UNKNOWN"
+        # No await between selection, all capacity checks and permit acquisition.
+        for model, _ in candidates:
+            selected, reason = select_route(eligible_routes, model, state=state.routes,
+                                            now=time.monotonic(), affinity_key=_affinity(payload))
+            if selected is not None:
+                resolved = next(m for m in selected.models if m.lower() == model.strip().lower())
                 break
-            if response is None:
-                continue
-            status = response.status_code
-            if status == 429:
-                retry_after = response.headers.get("retry-after", "")
-                reset_at = float(retry_after) + time.time() \
-                    if retry_after.replace(".", "", 1).isdigit() else 0.0
+        if selected is None:
+            state.refused += 1
+            return _error(reason, 503)
+        permit = state.routes.acquire(selected, now=time.monotonic())
+        if permit is None:
+            state.refused += 1
+            return _error("FABRIC_ROUTES_BUSY", 503, retry_after_s=1)
+        state.in_flight += 1
+        state.selected += 1
+        state.count(selected.route_id, "selected")
+        ctx = _RequestLifecycle(state, cfg, selected, permit, resolved, counting)
+        transferred = False
+        try:
+            async with asyncio.timeout_at(ctx.deadline):
+                forwarded = dict(payload, model=selected.wire_model(resolved))
                 try:
-                    data = json.loads(await response.aread())
-                except ValueError:
-                    data = {}
-                await response.aclose()
-                detail = ""
-                error = (data.get("error") or {}) if isinstance(data, dict) else {}
-                detail = str(error.get("message") or "usage limit")[:200]
-                if reset_at <= 0.0:
-                    reset_at = time.time() + 3600.0
-                state.oauth_bench[(route.route_id, account.id)] = reset_at
-                if time.time() < reset_at:
-                    await _run_in_executor(
-                        codex_oauth.bench_row, cfg_.auth_store, route.pool,
-                        account.id, reset_at=reset_at,
-                        reason=f"http_429 {detail}")
-                last_refusal = _ResponsesRouteRefused(
-                    "FABRIC_OAUTH_ACCOUNT_LIMIT",
-                    f"account {account.label!r} 429: {detail}")
-                continue
-            if status >= 500:
-                await response.aclose()
-                last_refusal = _ResponsesRouteRefused(
-                    "FABRIC_OAUTH_UPSTREAM_5XX",
-                    f"account {account.label!r} status {status}")
-                continue
-            if status >= 400:
-                data = await response.aread()
-                await response.aclose()
-                state.routes.record_success(route.route_id)
-                state.served += 1
-                state.count(route.route_id, "served")
-                return Response(content=data, status_code=status,
-                                media_type="application/json")
-            state.routes.record_success(route.route_id)
-            state.served += 1
-            state.count(route.route_id, "served")
-            if not wants_stream:
-                translator = ResponsesStreamTranslator(model=payload["model"])
-                buffer = b""
-                try:
-                    async for part in response.aiter_bytes():
-                        buffer += part
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            text_line = line.decode("utf-8", "replace").strip()
-                            if not text_line.startswith("data:"):
-                                continue
-                            data = text_line[5:].strip()
-                            if data == "[DONE]":
-                                break
-                            try:
-                                translator.feed(json.loads(data))
-                            except ValueError:
-                                continue
-                finally:
-                    await response.aclose()
-                try:
-                    return JSONResponse(translator.to_message())
+                    if selected.wire == WIRE_RESPONSES:
+                        response = await forward_responses(ctx, forwarded)
+                    else:
+                        credential = _route_authorization(selected, cfg)
+                        if selected.wire == WIRE_ANTHROPIC:
+                            response = await forward_anthropic(ctx, forwarded, credential)
+                        else:
+                            response = await forward_openai(ctx, forwarded, credential)
+                except _ResponsesRouteRefused as exc:
+                    ctx.settle("refused", exc.reason, circuit=exc.circuit,
+                               retry_after_s=exc.retry_after_s)
+                    response = _error(exc.reason, 503, retry_after_s=exc.retry_after_s)
                 except WireTranslationError as exc:
-                    return JSONResponse({"error": {
-                        "message": "translation failed: "
-                                   + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                        "type": "fabric_route_error"}},
-                        status_code=502)
-            translator = ResponsesStreamTranslator(model=payload["model"])
-
-            async def stream():
-                first = True
-                buffer = b""
-                try:
-                    async for part in response.aiter_bytes():
-                        buffer += part
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            text = line.decode("utf-8", "replace").strip()
-                            if not text.startswith("data:"):
-                                continue
-                            data = text[5:].strip()
-                            if data == "[DONE]":
-                                for event in translator.finish():
-                                    yield _sse(*event)
-                                return
-                            try:
-                                chunk = json.loads(data)
-                            except ValueError:
-                                continue
-                            if first:
-                                yield _sse(*translator.message_start())
-                                first = False
-                            for event in translator.feed(chunk):
-                                yield _sse(*event)
-                    for event in translator.finish():
-                        yield _sse(*event)
-                finally:
-                    await response.aclose()
-
-            return StreamingResponse(stream(), media_type="text/event-stream",
-                                     headers={"cache-control": "no-store"})
-        raise last_refusal or _ResponsesRouteRefused(
-            "FABRIC_OAUTH_NO_ACCOUNT")
-
-    def _sse(event: str, data: str) -> bytes:
-        return f"event: {event}\ndata: {data}\n\n".encode()
+                    reason = _public_reason(exc, "FABRIC_TRANSLATE_INVALID")
+                    ctx.settle("failed" if ctx.sent else "refused", reason, circuit=ctx.sent)
+                    response = _error(reason, 502 if ctx.sent else 400)
+                except (OSError, ValueError, codex_oauth.OAuthPoolError) as exc:
+                    _log.warning("route %s unavailable: %s", selected.route_id, type(exc).__name__)
+                    reason = "FABRIC_UPSTREAM_EFFECT_UNKNOWN" if ctx.sent else "credential_unavailable"
+                    ctx.settle("failed" if ctx.sent else "refused", reason, circuit=True)
+                    response = _error(reason, 502 if ctx.sent else 503)
+            if isinstance(response, StreamingResponse):
+                response = _ManagedStreamingResponse(
+                    managed_stream(ctx, response.body_iterator), ctx,
+                    status_code=response.status_code, headers=dict(response.headers))
+                transferred = True
+            else:
+                settle_http(ctx, response)
+            response.headers.update({"x-fabric-route": selected.route_id,
+                                     "x-fabric-model": resolved,
+                                     "x-fabric-request-id": ctx.request_id,
+                                     "x-fabric-policy": "priority-weighted-inflight-v1"})
+            return response
+        except (httpx.RequestError, TimeoutError):
+            ctx.settle("failed", "FABRIC_UPSTREAM_EFFECT_UNKNOWN", circuit=True)
+            return _error("FABRIC_UPSTREAM_EFFECT_UNKNOWN", 502)
+        finally:
+            if not transferred:
+                await ctx.close()
 
     return app
