@@ -82,6 +82,7 @@ class HandoffBrief:
         parts = url.path.split("/")
         if (url.scheme != "https" or url.netloc != "github.com" or url.query or url.fragment
                 or len(parts) < 6 or parts[3] != "blob" or _SHA.fullmatch(parts[4]) is None
+                or "%" in url.path or any(ord(c) <= 32 or ord(c) == 127 for c in self.source_ref)
                 or any(p in (".", "..", "") for p in parts[1:])):
             raise ValueError("source_ref must identify an exact committed GitHub brief")
         for name in ("acceptance_checks", "stop_conditions", "non_goals"):
@@ -92,6 +93,7 @@ class HandoffBrief:
             if (p.is_absolute() or str(p) != value or "\\" in value
                     or any(x in ("..", ".git") for x in p.parts)
                     or ":" in value or any(x in value for x in "*?[]")
+                    or any(ord(c) < 32 or ord(c) == 127 for c in value)
                     or value in (".", "")):
                 raise ValueError("write scope requires exact relative file/directory paths")
         if self.allowed_write_paths and self.worktree_base is None:
@@ -278,8 +280,10 @@ class T3CliClient:
                 or thread.get("threadId") != receipt.thread_id
                 or thread.get("projectId") != receipt.project_id
                 or receipt.run_id is None or thread.get("latestRunId") != receipt.run_id
-                or thread.get("status") != "completed" or thread.get("activeRunId") is not None
-                or thread.get("pendingRequestCount") != 0):
+                or thread.get("status") != "completed" or "activeRunId" not in thread
+                or thread["activeRunId"] is not None
+                or type(thread.get("pendingRequestCount")) is not int
+                or thread["pendingRequestCount"] != 0):
             return None
         for item in reversed(messages):
             if (type(item) is dict and item.get("role") == "assistant"
