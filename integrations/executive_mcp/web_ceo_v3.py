@@ -239,7 +239,10 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 # The current snapshot inherits both Session Bridge native role targets.
 # Removing only hermes_meta reproduces the previous V3 snapshot exactly;
 # tool order, other schemas, versions and legacy/v1/v2 identities stay frozen.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "acffd2d8fd3a3d83c5132127877178ef78bbc1640e217e976ef789cb1a3545a9"
+# 2026-11-09 MMOS composition pin move: commit 565cff9c2 (T3 environment
+# projection) added the t3 target kind after hermes_meta; removing both
+# promoted kinds still reproduces the previous V3 snapshot exactly.
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "98117956ba511d06b3f2c5685bb50865e451be56cfac0aa2c2b45e414a1a5565"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:

@@ -13,9 +13,12 @@ from tests.executive_identity_review import (
 ROOT = Path(__file__).resolve().parents[1]
 ACTION_PATH = "control_plane/workspace_control_room_actions.py"
 HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
+# 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
+# fabric OS read) added one route-constant line above the handler; the same
+# eight reviewed response operands are byte-identical, shifted by one line.
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
-    HTTP_PATH: ((926, 71, 74, 'int'), (937, 71, 74, 'int'), (945, 71, 74, 'int'), (951, 79, 82, 'int'), (960, 71, 74, 'int'), (970, 71, 74, 'int'), (975, 76, 79, 'int'), (981, 71, 74, 'int')),
+    HTTP_PATH: ((927, 71, 74, 'int'), (938, 71, 74, 'int'), (946, 71, 74, 'int'), (952, 79, 82, 'int'), (961, 71, 74, 'int'), (971, 71, 74, 'int'), (976, 76, 79, 'int'), (982, 71, 74, 'int')),
 }
 
 
