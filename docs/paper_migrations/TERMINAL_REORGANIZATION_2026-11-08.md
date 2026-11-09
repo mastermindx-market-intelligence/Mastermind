@@ -10,7 +10,7 @@ DONE_WHEN: a verified feature-family organization exists in Paper; each source p
 
 - Protected procedure: Mastermind `master@a9f0b4e1fc7f419e2cf377d3132061169c986a21`; Sol Skillpack 1.0.1 / bootstrap major 1.
 - Exact Terminal source: [Terminal / Start Here](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0).
-- Existing estate map: [MASTERMIND Migration Directory](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0). This is the estate entry, not a new registry.
+- Existing estate map: [Paper Estate / Start Here](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0). This is the estate entry, not a new registry.
 - Existing accepted clarity audit: [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). Existing F03 source and release holds remain distinct from this new Terminal organization task.
 - Paper metadata/navigation edits use guarded Studio Direct exact-file operations. Design copies use the signed-in Chrome Browser session's native Paper Theme and canvas copy/paste. Each logical mutation stays on its original carrier until reconciled. The Chairman resolved the former sign-in gate; the separate current Chrome extension-UI interlock is recorded below.
 - Direct work rationale: PRINCIPAL_JUDGMENT for family boundaries and preservation; UNIQUE_APPROVED_ACCESS for attended Paper operations; LOWER_TOTAL_OVERHEAD for the bounded navigation/source edits. A read-only reasoning helper challenged the split and official capacity evidence. No Fabric execution or background worker is claimed.
@@ -152,6 +152,14 @@ The complete machine-readable map and proof are in [TERMINAL_TRANSFER_RECEIPT_20
 **Builder proof:** 249 nodes / four artboards. Every exported artboard JSX is identical after native node-ID normalization. Native Fit layout was verified in source and destination. Only uniform canvas translation (-1520, +4) differs.
 
 **Personal Desk proof:** 1,615 nodes / eight artboards. All 1,614 design nodes are reached by native-tree comparison; hierarchy, order, style metadata, visibility/lock fields as serialized, vector structures, used token definitions and image payloads have no unexplained differences. Paper upgraded 642 legacy plain-text representations to exactly equivalent single-string native text blocks, and three explicit root fit-content declarations to native default Fit. These narrow equivalences are recorded, not treated as byte-identical. Representative exported JSX and actual rendered overview/recovery views were checked. Uniform canvas translation is (-1520, +1). Design proposals and FUTURE PREVIEW labels remain intact.
+
+## Directory and checkpoint readback
+
+Existing Terminal section `28T8-0` and estate section `C9-0` now both state that two pages / 12 artboards are verified in staging, no family has switched ownership, and the original remains the working source. Their existing status and record text nodes were updated in place; no parallel directory was created. Both embed immutable proof commit `2c0ff4155c826fb9c2c4811404a12f8193c138b1` and [continuation PR #2357](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2357).
+
+Separate exact-node readbacks matched all four updated text fields. Actual screenshots of both sections were inspected: complete URLs, readable text and no clipping. Terminal Start Here remains 188 nodes / two artboards. Portfolio page order and both Pending copy labels were separately read back; each pending page remains one root / zero artboards. Working indicators were released only on this session's edited/copied artboards.
+
+PR #2357 is a draft continuation stacked on #2352; it preserves the current work while the earlier queued head stays intact. Once #2352 lands, retarget the continuation to master and apply the repository's normal checks before delivery. No review, merge or release approval is claimed by this checkpoint.
 
 ## Current continuation — EXACT_HUMAN_GATE
 
