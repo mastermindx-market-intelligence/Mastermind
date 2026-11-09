@@ -25,9 +25,11 @@ Opus audits said "admission patch never booted live"). The driver:
    (admit / refuse / unreachable / hang) and pins: admitted launch -> thread
    starts and the ledger binding shows up in later revalidate consults;
    refused launch -> typed refusal, no thread; unreachable -> fail-closed, no
-   thread; hang -> observed for a bounded window only (UNKNOWN, never
-   fabricated); interrupts NEVER consult admission and are never blocked;
-   request fields claiming ``creationSource``/admission carry no authority;
+   thread; hang -> with the A6 bounded-consult patch bytes the consult aborts
+   at its bound and the launch fails closed (PASS); without a bound it was
+   observed for a bounded window only (UNKNOWN, never fabricated); interrupts
+   NEVER consult admission and are never blocked; request fields claiming
+   ``creationSource``/admission carry no authority;
 5. emits ``t3_admission_patch_boot_receipt.json`` (secret-free, user home
    redacted as ``~``) and stops every server it started.
 
@@ -43,7 +45,15 @@ modified.
 Usage:
   env -u PYTHONPATH /opt/homebrew/bin/python3.12 t3_admission_patch_boot.py \
       [--scratch DIR] [--hang-window SECONDS] [--keep] [--skip-install] \
-      [--reuse-install] [--skip-typecheck] [--skip-base]
+      [--reuse-install] [--skip-typecheck] [--skip-base] \
+      [--receipt-out PATH] [--scenarios A1,A0,B1,B2,B3,B4] [--admission-timeout-ms N]
+
+  A6 r2 re-proof (new patch bytes, new receipt; the A5 r1 receipt is never
+  overwritten):
+  env -u PYTHONPATH /opt/homebrew/bin/python3.12 t3_admission_patch_boot.py \
+      --scratch /tmp/a6-admission-boot --reuse-install --skip-install \
+      --scenarios A0,A1,B2,B3,B4 --admission-timeout-ms 3000 \
+      --receipt-out integrations/t3/live_proof/t3_admission_patch_boot_receipt_r2.json
 
 Exit code 0 = receipt written with outcome DONE or DONE_WITH_FINDINGS; the
 per-scenario PASS/FAIL/UNKNOWN verdicts are in the receipt (a FAIL scenario
@@ -78,7 +88,9 @@ MANIFEST_PATH = REPO / "integrations" / "t3" / "upstream_patches" / "MANIFEST.md
 RECEIPT_OUT = REPO / "integrations" / "t3" / "live_proof" / "t3_admission_patch_boot_receipt.json"
 
 PIN = "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
-PATCH_SHA256 = "5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f"
+#: Committed patch bytes this driver proves. History: 5785ac95... (A3/A5 bytes,
+#: unbounded consult) -> 999a1b1e... (A6 bounded consult, closes A5 finding #1).
+PATCH_SHA256 = "999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f"
 DEFAULT_PINNED_SOURCE = Path(
     os.environ.get("MMOS_T3_PINNED_SOURCE", "/Users/chriswong/.hermes/profiles/engineering/mmos/t3code-src")
 )
@@ -383,7 +395,15 @@ class FakeAdmissionServer:
 
 
 class BootedServer:
-    def __init__(self, name: str, tree: Path, scratch: Path, port: int, admission_endpoint: str | None) -> None:
+    def __init__(
+        self,
+        name: str,
+        tree: Path,
+        scratch: Path,
+        port: int,
+        admission_endpoint: str | None,
+        admission_timeout_ms: int | None = None,
+    ) -> None:
         self.name = name
         self.tree = tree
         self.dir = scratch / f"data-{name}"
@@ -394,6 +414,7 @@ class BootedServer:
         self.base = f"http://127.0.0.1:{port}"
         self.mcp_url = f"{self.base}/mcp"
         self.admission_endpoint = admission_endpoint
+        self.admission_timeout_ms = admission_timeout_ms
         self.proc: subprocess.Popen | None = None
         self.counts_file = self.run_dir / "counts.ndjson"
         self.log_path = self.run_dir / "server.log"
@@ -416,8 +437,11 @@ class BootedServer:
         )
         env.pop("MASTERMIND_ADMISSION_ENDPOINT", None)
         env.pop("MASTERMIND_ADMISSION_ROOT_REF", None)
+        env.pop("MASTERMIND_ADMISSION_TIMEOUT_MS", None)
         if self.admission_endpoint is not None:
             env["MASTERMIND_ADMISSION_ENDPOINT"] = self.admission_endpoint
+        if self.admission_timeout_ms is not None:
+            env["MASTERMIND_ADMISSION_TIMEOUT_MS"] = str(self.admission_timeout_ms)
         log_file = self.log_path.open("wb")
         self.proc = subprocess.Popen(
             ["node", "src/bin.ts", "serve", "--base-dir", str(self.dir), "--no-browser"],
@@ -923,20 +947,31 @@ def scenario_b_unreachable(server: BootedServer) -> dict:
     return evidence
 
 
-def scenario_b_hang(server: BootedServer, fake: FakeAdmissionServer, window_s: float) -> dict:
-    """Enforce mode, endpoint hangs (accepts, never answers). Observed ONLY for
-    the bounded window — a hang has no documented client-side timeout in the
-    patch (plain fetch, no AbortSignal), so the observation stays UNKNOWN unless
-    a refusal lands inside the window. The interrupt probe runs WHILE the
-    launch is hung and must answer without consulting admission."""
+def scenario_b_hang(
+    server: BootedServer,
+    fake: FakeAdmissionServer,
+    window_s: float,
+    consult_bound_ms: int | None = None,
+) -> dict:
+    """Enforce mode, endpoint hangs (accepts, never answers). With the A6
+    bounded-consult bytes the launch consult must ABORT at its bound and the
+    launch must FAIL CLOSED (isError, no thread, t3_thread_list total 0); the
+    interrupt probe runs WHILE the consult is pending and must answer without
+    consulting admission. If the refusal does not land inside the observation
+    window the observation stays honestly UNKNOWN (never fabricated)."""
     token = server.obtain_token()
     client = McpClient(server, token)
     init = client.initialize()
     fake.set_script([("hang", window_s + 60.0)])  # hang far beyond the window
-    result: dict = {"hang_window_s": window_s, "initialize_serverInfo": init.get("serverInfo")}
+    result: dict = {
+        "hang_window_s": window_s,
+        "consult_bound_ms": consult_bound_ms,
+        "initialize_serverInfo": init.get("serverInfo"),
+    }
 
     launch_reply: dict = {}
     launch_error: str | None = None
+    launch_started = time.monotonic()
 
     def _launch() -> None:
         nonlocal launch_reply, launch_error
@@ -947,8 +982,12 @@ def scenario_b_hang(server: BootedServer, fake: FakeAdmissionServer, window_s: f
 
     worker = threading.Thread(target=_launch, daemon=True)
     worker.start()
-    # give the consult time to start, then probe interrupts while it hangs
-    time.sleep(3.0)
+    # probe interrupts while the consult is still PENDING: with the A6 bound
+    # the pending window is the bound itself (probe well inside it); without
+    # one (pre-A6 behavior) keep the historical 3 s probe.
+    bound_s = 10.0 if consult_bound_ms is None else consult_bound_ms / 1000.0
+    probe_delay_s = 3.0 if consult_bound_ms is None else min(3.0, max(0.6, bound_s * 0.4))
+    time.sleep(probe_delay_s)
     consults_mid = fake.consults_matching(kind="launch")
     result["hang_consult_observed_while_pending"] = bool(consults_mid)
     before_interrupt = len(fake.snapshot_consults())
@@ -960,6 +999,7 @@ def scenario_b_hang(server: BootedServer, fake: FakeAdmissionServer, window_s: f
     result["interrupt_consults_delta"] = len(fake.snapshot_consults()) - before_interrupt
     result["interrupt_is_admission_block"] = "Mastermind" in (interrupt.get("message") or "")
     worker.join(timeout=window_s)
+    result["launch_elapsed_s"] = round(time.monotonic() - launch_started, 3)
     if worker.is_alive():
         result["launch_outcome_at_window"] = "STILL_PENDING_PAST_WINDOW"
         result["verdict"] = "UNKNOWN"
@@ -969,8 +1009,21 @@ def scenario_b_hang(server: BootedServer, fake: FakeAdmissionServer, window_s: f
         result["verdict"] = "UNKNOWN"
     else:
         result["launch"] = launch_reply
-        result["launch_outcome_at_window"] = "REFUSED_WITHIN_WINDOW" if launch_reply.get("isError") else "SUCCEEDED"
-        result["verdict"] = "REFUSED_WITHIN_WINDOW" if launch_reply.get("isError") else "PASS_WITH_SURPRISE"
+        refused = bool(launch_reply.get("isError"))
+        result["launch_outcome_at_window"] = "REFUSED_WITHIN_WINDOW" if refused else "SUCCEEDED"
+        result["verdict"] = "REFUSED_WITHIN_WINDOW" if refused else "PASS_WITH_SURPRISE"
+        if refused:
+            # A6 fail-closed evidence: the consult aborted at the bound -> the
+            # launch refused -> NO thread anywhere in the store. The reply is
+            # still the donor-generic orchestration_error (A5 finding #2 stands).
+            payload = launch_reply.get("payload") or {}
+            result["refusal_threadId_absent"] = not bool(payload.get("threadId"))
+            result["refusal_reply_is_generic_orchestration_error"] = (
+                payload.get("code") == "orchestration_error"
+                and payload.get("message") == "The operation could not be completed."
+            )
+            listed = client.call("t3_thread_list", {"allProjects": True, "limit": 100})
+            result["threads_total_after_timeout"] = (listed.get("payload") or {}).get("total")
     result["singleton_counts"] = server.singleton_counts()
     return result
 
@@ -993,7 +1046,31 @@ def main() -> int:
     )
     parser.add_argument("--skip-typecheck", action="store_true")
     parser.add_argument("--skip-base", action="store_true", help="skip the unpatched baseline boot")
+    parser.add_argument(
+        "--receipt-out",
+        default=str(RECEIPT_OUT),
+        help="receipt output path (A6 r2 runs write a NEW file; the A5 r1 receipt is never overwritten)",
+    )
+    parser.add_argument(
+        "--scenarios",
+        default=None,
+        help="comma-separated scenario filter (A1,A0,B1,B2,B3,B4); default: all",
+    )
+    parser.add_argument(
+        "--admission-timeout-ms",
+        type=int,
+        default=None,
+        help="set MASTERMIND_ADMISSION_TIMEOUT_MS on booted servers (A6 bounded-consult knob; default: unset -> patch default 10s)",
+    )
     args = parser.parse_args()
+    if Path(args.receipt_out) != RECEIPT_OUT:
+        _RECEIPT_TARGET.append(Path(args.receipt_out))
+    scenario_filter = (
+        None if args.scenarios is None else {x.strip().upper() for x in args.scenarios.split(",") if x.strip()}
+    )
+
+    def want(name: str) -> bool:
+        return scenario_filter is None or name.upper() in scenario_filter
 
     scratch = Path(args.scratch)
     started_servers: list[BootedServer] = []
@@ -1013,6 +1090,8 @@ def main() -> int:
             "dev_instance_seed_env": "VITE_DEV_SERVER_URL (devReplay recorded-turn ACP instance; no paid model)",
             "auth": "server-printed headless startup pairing credential -> /oauth/mcp/register -> /oauth/mcp/decision (pairing-code, PKCE) -> /oauth/mcp/token",
             "admission_endpoint_env": "MASTERMIND_ADMISSION_ENDPOINT",
+            "admission_timeout_env": "MASTERMIND_ADMISSION_TIMEOUT_MS (A6 bounded consult)",
+            "admission_timeout_ms_set": args.admission_timeout_ms,
             "ports_used": [],
             "real_desktop_port": 3773,
             "real_desktop_touched": False,
@@ -1169,18 +1248,19 @@ def main() -> int:
 
         scenarios: dict = receipt["scenarios"]
 
-        port = free_port(PORT_BASE)
-        a1 = BootedServer("A1-patched-unset", patched_tree, scratch, port, admission_endpoint=None)
-        started_servers.append(a1)
-        a1.start()
-        receipt["knobs"]["ports_used"].append(port)
-        log("boot.A1.ok", port=port)
-        scenarios["A1_patched_endpoint_unset"] = scenario_ab_flow(a1, "A1")
-        a1.stop()
-        started_servers.remove(a1)
-        log("A1.done", counts=scenarios["A1_patched_endpoint_unset"]["singleton_counts"])
+        if want("A1"):
+            port = free_port(PORT_BASE)
+            a1 = BootedServer("A1-patched-unset", patched_tree, scratch, port, admission_endpoint=None)
+            started_servers.append(a1)
+            a1.start()
+            receipt["knobs"]["ports_used"].append(port)
+            log("boot.A1.ok", port=port)
+            scenarios["A1_patched_endpoint_unset"] = scenario_ab_flow(a1, "A1")
+            a1.stop()
+            started_servers.remove(a1)
+            log("A1.done", counts=scenarios["A1_patched_endpoint_unset"]["singleton_counts"])
 
-        if not args.skip_base:
+        if not args.skip_base and want("A0"):
             port = free_port(PORT_BASE + 1)
             a0 = BootedServer("A0-base", base_tree, scratch, port, admission_endpoint=None)
             started_servers.append(a0)
@@ -1193,56 +1273,66 @@ def main() -> int:
             log("A0.done", counts=scenarios["A0_base_unpatched"]["singleton_counts"])
 
         # -- scenario B -----------------------------------------------------
-        port = free_port(PORT_BASE + 2)
-        b1 = BootedServer("B1-admit", patched_tree, scratch, port, admission_endpoint=fake_url)
-        started_servers.append(b1)
-        b1.start()
-        receipt["knobs"]["ports_used"].append(port)
-        log("boot.B1.ok", port=port, endpoint=fake_url)
-        scenarios["B1_endpoint_admit"] = scenario_b_admit(b1, fake)
-        b1.stop()
-        started_servers.remove(b1)
-        log("B1.done", counts=scenarios["B1_endpoint_admit"]["singleton_counts"])
+        if want("B1"):
+            port = free_port(PORT_BASE + 2)
+            b1 = BootedServer("B1-admit", patched_tree, scratch, port, admission_endpoint=fake_url)
+            started_servers.append(b1)
+            b1.start()
+            receipt["knobs"]["ports_used"].append(port)
+            log("boot.B1.ok", port=port, endpoint=fake_url)
+            scenarios["B1_endpoint_admit"] = scenario_b_admit(b1, fake)
+            b1.stop()
+            started_servers.remove(b1)
+            log("B1.done", counts=scenarios["B1_endpoint_admit"]["singleton_counts"])
 
-        port = free_port(PORT_BASE + 3)
-        b2 = BootedServer("B2-refuse", patched_tree, scratch, port, admission_endpoint=fake_url)
-        started_servers.append(b2)
-        b2.start()
-        receipt["knobs"]["ports_used"].append(port)
-        fake.set_script([("refuse", "a5 stale lease: proof refusal")])
-        scenarios["B2_endpoint_refuse"] = scenario_b_refuse(b2, fake)
-        b2.stop()
-        started_servers.remove(b2)
-        log("B2.done", counts=scenarios["B2_endpoint_refuse"]["singleton_counts"])
+        if want("B2"):
+            port = free_port(PORT_BASE + 3)
+            b2 = BootedServer("B2-refuse", patched_tree, scratch, port, admission_endpoint=fake_url)
+            started_servers.append(b2)
+            b2.start()
+            receipt["knobs"]["ports_used"].append(port)
+            fake.set_script([("refuse", "a5 stale lease: proof refusal")])
+            scenarios["B2_endpoint_refuse"] = scenario_b_refuse(b2, fake)
+            b2.stop()
+            started_servers.remove(b2)
+            log("B2.done", counts=scenarios["B2_endpoint_refuse"]["singleton_counts"])
 
         unreachable_port = free_port(PORT_BASE + 10)
         # a bound-but-never-listening socket refuses connections for the whole
         # proof -> guaranteed ECONNREFUSED without a listener race
         dead_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         dead_socket.bind(("127.0.0.1", unreachable_port))
-        port = free_port(PORT_BASE + 4)
-        b3 = BootedServer(
-            "B3-unreachable", patched_tree, scratch, port,
-            admission_endpoint=f"http://127.0.0.1:{unreachable_port}",
-        )
-        started_servers.append(b3)
-        b3.start()
-        receipt["knobs"]["ports_used"].append(port)
-        scenarios["B3_endpoint_unreachable"] = scenario_b_unreachable(b3)
-        b3.stop()
-        started_servers.remove(b3)
-        log("B3.done", counts=scenarios["B3_endpoint_unreachable"]["singleton_counts"])
+        if want("B3"):
+            port = free_port(PORT_BASE + 4)
+            b3 = BootedServer(
+                "B3-unreachable", patched_tree, scratch, port,
+                admission_endpoint=f"http://127.0.0.1:{unreachable_port}",
+            )
+            started_servers.append(b3)
+            b3.start()
+            receipt["knobs"]["ports_used"].append(port)
+            scenarios["B3_endpoint_unreachable"] = scenario_b_unreachable(b3)
+            b3.stop()
+            started_servers.remove(b3)
+            log("B3.done", counts=scenarios["B3_endpoint_unreachable"]["singleton_counts"])
 
-        port = free_port(PORT_BASE + 5)
-        b4 = BootedServer("B4-hang", patched_tree, scratch, port, admission_endpoint=fake_url)
-        started_servers.append(b4)
-        b4.start()
-        receipt["knobs"]["ports_used"].append(port)
-        scenarios["B4_endpoint_hang"] = scenario_b_hang(b4, fake, args.hang_window)
-        b4.stop()
-        started_servers.remove(b4)
-        dead_socket.close()
-        log("B4.done", verdict=scenarios["B4_endpoint_hang"].get("verdict"))
+        if want("B4"):
+            port = free_port(PORT_BASE + 5)
+            b4 = BootedServer(
+                "B4-hang", patched_tree, scratch, port,
+                admission_endpoint=fake_url,
+                admission_timeout_ms=args.admission_timeout_ms,
+            )
+            started_servers.append(b4)
+            b4.start()
+            receipt["knobs"]["ports_used"].append(port)
+            scenarios["B4_endpoint_hang"] = scenario_b_hang(
+                b4, fake, args.hang_window, consult_bound_ms=args.admission_timeout_ms
+            )
+            b4.stop()
+            started_servers.remove(b4)
+            dead_socket.close()
+            log("B4.done", verdict=scenarios["B4_endpoint_hang"].get("verdict"))
 
         # -- verdicts --------------------------------------------------------
         evaluate(receipt)
@@ -1274,10 +1364,16 @@ def main() -> int:
         return 3
 
 
-def write_receipt(receipt: dict) -> None:
+#: Set by main() when --receipt-out overrides the default r1 path (A6 r2 runs
+#: write a NEW receipt file; the A5 r1 receipt is never overwritten).
+_RECEIPT_TARGET: list[Path] = []
+
+
+def write_receipt(receipt: dict, out_path: Path | None = None) -> None:
+    target = out_path if out_path is not None else (_RECEIPT_TARGET[0] if _RECEIPT_TARGET else RECEIPT_OUT)
     text = json.dumps(receipt, indent=2)
-    RECEIPT_OUT.write_text(redact(text) + "\n")
-    log("receipt.written", path=str(RECEIPT_OUT))
+    target.write_text(redact(text) + "\n")
+    log("receipt.written", path=str(target))
 
 
 SINGLETONS = ["ProjectionStore", "CommandOutputHub", "Orchestrator", "TextGeneration"]
@@ -1329,21 +1425,24 @@ def evaluate(receipt: dict) -> None:
         a1_ev["matches_unpatched_counts"] = same_counts
 
     b1 = s.get("B1_endpoint_admit", {})
-    b1_runs_terminal = bool(
-        b1.get("run_statuses_observed")
-        and b1["run_statuses_observed"][0] in {"completed", "failed", "interrupted"}
-    )
-    b1_ok = (
-        not b1.get("launch", {}).get("isError")
-        and b1_runs_terminal
-        and b1.get("revalidate_carries_binding") is True
-        and b1.get("interrupt_consults_delta") == 0
-        and not b1.get("interrupt_is_admission_block")
-        and counts_pass("B1", b1)
-    )
-    verdicts["B1_endpoint_admit"] = "PASS" if b1_ok else "FAIL"
+    if b1:
+        b1_runs_terminal = bool(
+            b1.get("run_statuses_observed")
+            and b1["run_statuses_observed"][0] in {"completed", "failed", "interrupted"}
+        )
+        b1_ok = (
+            not b1.get("launch", {}).get("isError")
+            and b1_runs_terminal
+            and b1.get("revalidate_carries_binding") is True
+            and b1.get("interrupt_consults_delta") == 0
+            and not b1.get("interrupt_is_admission_block")
+            and counts_pass("B1", b1)
+        )
+        verdicts["B1_endpoint_admit"] = "PASS" if b1_ok else "FAIL"
 
     b2 = s.get("B2_endpoint_refuse", {})
+    if not b2:
+        b2 = {"launch_is_error": None}  # skipped scenario: no verdict below
     b2_ok = (
         b2.get("launch_is_error")
         and b2.get("refusal_consult_reply_was_blocked") is True
@@ -1357,7 +1456,8 @@ def evaluate(receipt: dict) -> None:
         and not b2.get("interrupt_is_admission_block")
         and counts_pass("B2", b2)
     )
-    verdicts["B2_endpoint_refuse"] = "PASS" if b2_ok else "FAIL"
+    if "B2_endpoint_refuse" in s:
+        verdicts["B2_endpoint_refuse"] = "PASS" if b2_ok else "FAIL"
 
     b3 = s.get("B3_endpoint_unreachable", {})
     b3_ok = (
@@ -1367,20 +1467,33 @@ def evaluate(receipt: dict) -> None:
         and not b3.get("interrupt_is_admission_block")
         and counts_pass("B3", b3)
     )
-    verdicts["B3_endpoint_unreachable"] = "PASS" if b3_ok else "FAIL"
+    if "B3_endpoint_unreachable" in s:
+        verdicts["B3_endpoint_unreachable"] = "PASS" if b3_ok else "FAIL"
 
     b4 = s.get("B4_endpoint_hang", {})
-    verdicts["B4_endpoint_hang"] = b4.get("verdict", "UNKNOWN")
     b4_interrupt_ok = (
         not b4.get("interrupt_is_admission_block")
         and b4.get("interrupt_consults_delta") == 0
         and b4.get("hang_consult_observed_while_pending") is True
     )
+    if b4.get("launch_outcome_at_window") == "REFUSED_WITHIN_WINDOW":
+        # A6 bounded consult: the consult aborted at its bound -> the launch
+        # refused -> NO thread anywhere. PASS needs the full fail-closed chain;
+        # a refusal without it is a FAIL, never a quiet pass.
+        b4_ok = (
+            b4_interrupt_ok
+            and b4.get("refusal_threadId_absent") is True
+            and b4.get("threads_total_after_timeout") == 0
+        )
+        verdicts["B4_endpoint_hang"] = "PASS" if b4_ok else "FAIL"
+    else:
+        verdicts["B4_endpoint_hang"] = b4.get("verdict", "UNKNOWN")
 
     for name, verdict in verdicts.items():
         if name in s:
             s[name]["verdict"] = verdict
-    s["B4_endpoint_hang"]["interrupt_never_blocked"] = b4_interrupt_ok
+    if "B4_endpoint_hang" in s:
+        s["B4_endpoint_hang"]["interrupt_never_blocked"] = b4_interrupt_ok
 
     hard_fail = [n for n, v in verdicts.items() if v == "FAIL"]
     hang_pending = verdicts.get("B4_endpoint_hang") == "UNKNOWN"
@@ -1395,7 +1508,13 @@ def evaluate(receipt: dict) -> None:
             "no client-side timeout observed within the window (patch uses plain fetch); "
             "interrupts during the hang were never blocked and never consulted admission"
             if hang_pending
-            else "resolved within the window"
+            else (
+                "bounded consult (A6): the launch consult aborted at its bound ("
+                f"{s.get('B4_endpoint_hang', {}).get('consult_bound_ms')} ms configured) and the "
+                "launch failed closed (isError, no threadId, t3_thread_list total 0); the "
+                "interrupt probe DURING the pending consult answered immediately with 0 "
+                "admission consults"
+            )
         ),
         "typed_admission_cause_not_surfaced_over_mcp": (
             "LIVE FINDING (donor behavior, not patched around): the admission fences hold "

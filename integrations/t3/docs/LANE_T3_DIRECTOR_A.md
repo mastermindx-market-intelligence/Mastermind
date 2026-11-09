@@ -521,3 +521,98 @@ env -u PYTHONPATH /opt/homebrew/bin/python3.12 integrations/t3/live_proof/t3_adm
 env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
   tests/test_t3_admission_patch_boot_receipt.py tests/test_t3_upstream_patch.py   # 26 passed
 ```
+
+## A6 bounded consult (2026-11-09) — closes A5 live finding #1
+
+The admission consult was a plain `fetch` with no `AbortSignal`: a hung `MASTERMIND_ADMISSION_ENDPOINT`
+hung `t3_thread_launch` indefinitely (A5 B4 = UNKNOWN past a 75 s window). The patch bytes now bound
+every consult. Patch sha `5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f` →
+`999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f`; same 3 files, donor pin
+`0770446…` unchanged; `runtimeLayer.ts` untouched (the bound lives entirely inside the adapter).
+
+**The bound and why.** `AbortSignal.timeout(config.consultTimeoutMs)` on every consult (launch,
+revalidate, steer) — the socket is actually aborted, not just abandoned. Default **10 s**: the
+admission endpoint is an operator-run gate on the interactive launch path, a healthy consult is a
+sub-second local call, and 10 s is a long beat for a degraded-but-alive endpoint before failing
+closed. Knob `MASTERMIND_ADMISSION_TIMEOUT_MS`, clamped to `[1 ms, 60 s]` — the **60 s hard ceiling**
+means no configuration can reintroduce the unbounded hang; unparseable values fall back to the
+default; the knob never flips enforcement on (endpoint unset still disables the adapter entirely).
+Timeout detection maps the fetch abort rejection (`TimeoutError`/`AbortError` DOMException — the
+adapter aborts consults no other way) to the new typed `MastermindAdmissionTimeoutError`.
+
+**Fail-closed mapping** (cause code = `mastermindAdmissionCauseCode`; all failures block NEW
+EXECUTION ONLY — interrupts are never decorated, never consult, in every row):
+
+| Endpoint outcome | Typed cause | launch / start / restart / session-open | steer | interrupt |
+|---|---|---|---|---|
+| `decision: admitted` | — (binding bound to thread) | proceeds | proceeds | never consulted |
+| `decision: blocked_with_reason` | `admission_refused` (`…BlockedError`) | refused before any preparation effect, no thread | proceeds (recorded) | never consulted |
+| unreachable (ECONNREFUSED, fetch failure, HTTP ≥ 400) | `admission_unreachable` (`…EndpointError`, defect = fetch/HTTP error) | refused, fail-closed, no thread | proceeds (swallowed) | never consulted |
+| consult exceeds its bound (default 10 s / env ≤ 60 s) | `admission_timeout` (`…TimeoutError`) | refused, fail-closed, no thread — SAME path as unreachable | proceeds (swallowed) | never consulted |
+| malformed reply (no parsable decision) | `admission_unreachable` (same class; defect = `"malformed admission payload"`) | refused, fail-closed, no thread | proceeds (swallowed) | never consulted |
+
+Over MCP, all four failure rows still surface as the donor-generic `orchestration_error`
+"A5 finding #2" below). Pinned by the colocated suite's "bounded consult" block (7 tests: config
+default/override/ceiling; typed-cause mapping; launch timeout → refused + incumbent never called;
+start timeout → effect fails closed; interrupt during a hung consult → ungated, 0 extra consults;
+steer timeout → proceeds; malformed → `admission_unreachable`).
+
+**A5 finding #2 — NOT done, upstream-PR note (patch stays 3 files).** Surfacing
+`admission_refused` / `admission_timeout` / `admission_unreachable` to MCP clients requires editing
+the donor's launch-handler whitelist at `apps/server/src/mcp/toolkits/project/handlers.ts:253-274`
+(`AttachmentClaimError` / `ThreadManagementProviderInstanceDisabledError` / above-ceiling
+`ThreadLaunchError` causes pass through; everything else → `unavailable()` = generic
+`orchestration_error`). That is a 4th donor file: widening the patch was out of A6 scope, so the
+typed causes remain service-seam-only (proven by the vitest suite; the r2 B4 refusal is still the
+generic error, recorded as `refusal_reply_is_generic_orchestration_error: true`). Upstream PR should
+add the three admission causes to that whitelist, mirroring the ceiling-cause branch.
+
+**Live re-proof (r2 receipt).** `integrations/t3/live_proof/t3_admission_patch_boot_receipt_r2.json`
+(schema `…/v1`, recorded 2026-11-09T16:18:52Z, bytes sha256
+`8b844c1f1106437fa3417e58221a0b5d5705abd7436f22b1d9e7017f080a407c`, pinned by
+`tests/test_t3_admission_patch_boot_receipt_r2.py`). A5's r1 receipt is untouched and still pins the
+A5-era bytes. Driver gains additive knobs: `--receipt-out`, `--scenarios`, `--admission-timeout-ms`.
+5 boots on 3977/3978/3980/3981/3982 (never 3773), isolated data dirs, free `devReplay` instance,
+no paid model, desktop/`~/.t3`/pinned clone untouched (clone clean before and after), outcome **DONE**:
+
+| Scenario | Live evidence | Verdict |
+|---|---|---|
+| A1 endpoint unset (patched, NEW bytes) | launch/read/send/interrupt shapes IDENTICAL to A0 base boot; run terminal | PASS |
+| A0 base unpatched | shapes AND singleton counts equal A1 | PASS |
+| B2 endpoint refuses | consult → blocked → `isError`, no threadId, `t3_thread_list` total 0; smuggle refused; interrupt 0 consults | PASS |
+| B3 endpoint unreachable | fail-closed, `isError`, total 0; interrupt unaffected | PASS |
+| B4 endpoint hangs, `MASTERMIND_ADMISSION_TIMEOUT_MS=3000` | consult observed pending; interrupt DURING the hang answered immediately (0 consults); consult aborted at the bound — refusal at **3.038 s** (the 3 s knob, not the 10 s default ⇒ env override proven live), `isError`, no threadId, `t3_thread_list` total 0 | **PASS** |
+| singletons (all 5 boots, both trees) | ProjectionStore / CommandOutputHub / Orchestrator / TextGeneration each EXACTLY once | PASS |
+
+**Verification counts.** Typecheck gate (`npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit`):
+exit 0, **0 error-level diagnostics**; suggestions 492 patched vs 489 pristine pin — the patch adds
+exactly 3 (one per `Schema.TaggedError` brand: Blocked, Endpoint, Timeout; donor-baseline
+TS377141 style). Colocated + upstream vitest: **2 files / 66 tests passed** (20 admission =
+13 prior + 7 bounded-consult; 46 upstream `ThreadLaunchService`). The driver-captured suggestion
+counts in the r2 receipt (491/271) are an informational capture artifact — its gate metric
+(0 errors both trees) is correct, and canonical same-command re-runs in the kept trees give
+492/489; recorded here rather than editing recorded evidence.
+
+Commands (exact):
+
+```
+# patch work: scratch copy of the pinned clone (the pinned clone itself stays clean, verified)
+git clone --shared ~/.hermes/profiles/engineering/mmos/t3code-src /tmp/a6-t3
+cd /tmp/a6-t3 && git checkout -q 0770446… && git apply <committed patch>
+#   … edits in MastermindAdmissionAdapter{,.test}.ts only; runtimeLayer.ts unchanged …
+cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit    # exit 0; 0 errors; 492 vs 489 baseline
+node "$(ls -d ../../node_modules/.pnpm/vitest@5.0.5*/node_modules/vitest | head -1)/vitest.mjs" \
+    run src/mastermind/MastermindAdmissionAdapter.test.ts src/orchestration-v2/ThreadLaunchService.test.ts
+#   Test Files 2 passed (2)  ·  Tests 66 passed (66)
+git add -N apps/server/src/mastermind && git diff 0770446 -- <the same 3 files> \
+    > integrations/t3/upstream_patches/mastermind_admission_0770446.patch   # sha256 999a1b1e…
+git -C /tmp/a6-check apply --check <that patch>        # clean pin copy: OK
+
+# live r2 (A5 driver, additive knobs; B1 not in the r2 set)
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 integrations/t3/live_proof/t3_admission_patch_boot.py \
+    --scratch /tmp/a6-admission-boot --keep --scenarios A0,A1,B2,B3,B4 --admission-timeout-ms 3000 \
+    --receipt-out integrations/t3/live_proof/t3_admission_patch_boot_receipt_r2.json
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
+    tests/test_t3_upstream_patch.py tests/test_t3_admission_patch_boot_receipt.py \
+    tests/test_t3_admission_patch_boot_receipt_r2.py                          # 42 passed
+```
