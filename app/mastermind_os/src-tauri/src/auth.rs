@@ -24,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 pub mod instruction_admission;
 pub mod primary_account;
+pub mod work_authorization;
 pub mod project_access;
 use url::Url;
 
