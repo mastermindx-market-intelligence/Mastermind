@@ -4,6 +4,7 @@
 
 Exact file and page identities survive renaming. Page order follows the last observed native metadata. Recovery and archive pages are indexed for retrieval, not promoted to build authority.
 
+
 ## 00 · Paper Estate · Start Here
 
 - File ID: `01M6XQ0KYY6ZDDV6F3G85SX6WW`
@@ -15,12 +16,14 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [01 · Product map](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-2-0) — `p-2-0` · previous: 01 - Existing product files - not migration receipts
 - [02 · Build sources & decisions](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0) — `p-6-0` · previous: 05 · Build sources · Implementation & lineage
 - [03 · Lineage & retained requirements](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-8-0) — `p-8-0`
-— Page-group divider `p-7-0`
+
+Page-group divider `p-7-0`.
 
 - [10 · Family index · Foundations & markets](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-3-0) — `p-3-0` · previous: 02 - Migrated file locations - 1 of 3
 - [11 · Family index · Evidence & tools](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-4-0) — `p-4-0` · previous: 03 - Migrated file locations - 2 of 3
 - [12 · Family index · Products & history](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-5-0) — `p-5-0` · previous: 04 - Migrated file locations - 3 of 3
-— Page-group divider `p-A-0`
+
+Page-group divider `p-A-0`.
 
 - [90 · Recovery & cleanup](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-9-0) — `p-9-0`
 
@@ -79,13 +82,13 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [Live Site Baselines · Wave 1 · 2026-09-21](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-8-1) — `p-8-1`
 - [Intelligence Hub · Unified US + China · R4 · 2026-09-27](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-T-0) — `p-T-0`
 - [Crypto Intelligence · R4 · Design References](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-10-0) — `p-10-0`
-- [Commodities · R1 Study · 2026-09-26](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-L-0) — `p-L-0`
+- [Legacy link · Commodities · Journeys & studies](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-L-0) — `p-L-0` · previous: Commodities · R1 Study · 2026-09-26
 - [Legacy link · Sector R2 · 2026-09-27](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-Y-0) — `p-Y-0` · previous: Sector Intelligence · R2 · Current Build · 2026-09-27
 - [Gov Revenue · Signal Desk · R5 · 2026-09-26](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-S-1) — `p-S-1`
 - [BioCatalyst · North Star + Build Blueprint · 2026-09-26](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-K-0) — `p-K-0`
 - [ARCHIVE · Sector Intelligence · Legacy Studies · Not for Build](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-Z-0) — `p-Z-0`
 - [ARCHIVE · Company Intelligence · Not for Build](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-V-0) — `p-V-0`
-- [ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-11-0) — `p-11-0`
+- [Legacy link · Crypto R1–R3 archive](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-11-0) — `p-11-0` · previous: ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build
 - [ARCHIVE · Intelligence Hub · R1–R3 · Not for Build](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-X-0) — `p-X-0`
 - [ARCHIVE · International Markets · R9 · Not for Build](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-W-0) — `p-W-0`
 - [Sector Intelligence · vNext Study · 2026-09-24](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-E-1) — `p-E-1`
@@ -127,7 +130,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [03 · Search, Aliases + Recovery](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0) — `p-4-0`
 - [04 · Risk Radar Full Guide · Themes + Locales](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-6-0) — `p-6-0`
 - [Proposed · Guide return clarity](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-8-0) — `p-8-0`
-— Page-group divider `p-7-0`
+
+Page-group divider `p-7-0`.
 
 - [REF · Guide Baseline · Themes + Locales](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-5-0) — `p-5-0`
 
@@ -135,7 +139,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M312VSDSZFVT45674GDVJVZN`
 - Role: Working design entry · scope qualified
-- Earlier names: Mastermind Product Design System — Canonical
 - Entry: [open exact page](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0)
 
 - [00 · Start here · Build contract](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0) — `p-9-0`
@@ -147,7 +150,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [Build · Clarity & product contracts](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-B-0) — `p-B-0`
 - [05 · Reference Screens](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-6-0) — `p-6-0`
 - [06 · Utilities](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0) — `p-7-0`
-— Page-group divider `p-A-0`
+
+Page-group divider `p-A-0`.
 
 - [07 · Source Imports + Assets · Pending Review](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-8-1) — `p-8-1`
 
@@ -247,7 +251,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M2VWK62FA5S4VVF6G7SBPE5J`
 - Role: Working design entry · scope qualified
-- Earlier names: Intelligence Hub · R4 Workspace
 - Entry: [open exact page](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0)
 
 - [00 · Start here · Hub design map](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) — `p-1-0`
@@ -258,7 +261,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [Build · Clarity preservation](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-C-0) — `p-C-0`
 - [Archive · Original product geometry](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-B-0) — `p-B-0`
 - [04 · Hub · Loading, Filters + Locale Coverage](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0) — `p-6-0`
-— Page-group divider `p-9-0`
+
+Page-group divider `p-9-0`.
 
 - [98 · SOURCE ONLY · Intelligence Hub Alt Data Baseline](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-8-0) — `p-8-0`
 - [98 · Adapter QA · Retained canaries](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-A-0) — `p-A-0`
@@ -293,7 +297,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [00 · Start here · WTI journey + Scope](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) — `p-1-0`
 - [01 · Answers, Context + Evidence](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-2-0) — `p-2-0`
 - [02 · Thesis Changes + Receipts](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-3-0) — `p-3-0`
-— Page-group divider `p-7-0`
+
+Page-group divider `p-7-0`.
 
 - [03 · Retained Shared Shell · Company Comparison + Evidence](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-4-0) — `p-4-0`
 - [Build · Clarity & receipt contracts](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-8-0) — `p-8-0`
@@ -353,7 +358,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [03 · R4 native suite · M1](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0) — `p-2-0` · previous: R4 · M1
 - [04 · Comparison context](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-8-0) — `p-8-0` · previous: 02 · Comparison context
 - [05 · Build · Models & interaction](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-5-0) — `p-5-0` · previous: Build · Clarity, models & interaction
-— Page-group divider `p-A-0`
+
+Page-group divider `p-A-0`.
 
 - [Proposed · Comparison return](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-6-0) — `p-6-0`
 - [Reference · Terminal breadth rotation card](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-1-0) — `p-1-0`
@@ -385,7 +391,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M5EX8RTPR7YEZD2A144XED2S`
 - Role: Working design entry · scope qualified
-- Earlier names: Expectation Surface · R1 · 2026-10-21
 - Entry: [open exact page](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0)
 
 - [00 · Start · Estimate revisions](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) — `p-1-0`
@@ -416,7 +421,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M6PXFEP1E1T59M2B3N673PMG`
 - Role: Working design entry · scope qualified
-- Earlier names: Market Memory · Revision evidence · R1 · 2026-11-05
 - Entry: [open exact page](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0)
 
 - [01 · Revision evidence · Screens & states](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0) — `p-1-0`
@@ -437,7 +441,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M5EXPMQTSBFBAM8KKG83FTZH`
 - Role: Working design entry · scope qualified
-- Earlier names: News Intelligence · R3 Ledger + R2 States
 - Entry: [open exact page](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0) · board `3HH-0`
 
 - [00 · Product · Activity & returns](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0) — `p-5-0` · previous: Product · Activity & returns
@@ -468,7 +471,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M5J3GC90GAKHK8B6SAPRV3JQ`
 - Role: Legacy redirect + retained Round2
-- Earlier names: Archived · GMI Round 2 · merged into Product system
 - Entry: [open exact page](https://app.paper.design/file/01M5J3GC90GAKHK8B6SAPRV3JQ/p-1-0)
 
 - [Moved · Open canonical GMI Explorer](https://app.paper.design/file/01M5J3GC90GAKHK8B6SAPRV3JQ/p-1-0) — `p-1-0`
@@ -487,7 +489,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M5H6EARN9YHQV17JC6ZG9BRY`
 - Role: Working design entry · scope qualified
-- Earlier names: GMI Explorer · Product system
 - Entry: [open exact page](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-1-0)
 
 - [01 · Current product · Start here](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-1-0) — `p-1-0`
@@ -502,7 +503,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3P1TW5Y3XWQC37ADDS8K5AG`
 - Role: Working design entry · scope qualified
-- Earlier names: International Markets · Core + Global Surveillance
 - Entry: [open exact page](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-1-0)
 
 - [00 · Start · Core + Global Surveillance](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-1-0) — `p-1-0`
@@ -584,7 +584,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [01B · Risk Radar · Pullback Underway · US + China](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-6-0) — `p-6-0`
 - [China Intelligence · R2 · Progressive Disclosure](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-3-0) — `p-3-0`
 - [Events & News · R2 · Briefing to Evidence · 2026-09-29](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-4-0) — `p-4-0`
-— Page-group divider `p-7-0`
+
+Page-group divider `p-7-0`.
 
 - [Reference · Historical program handoff](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-2-0) — `p-2-0`
 
@@ -621,7 +622,7 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M6Y3GS3GDTC3Q1J64QCGZHJ8`
 - Role: Recorded R2 build reference + later studies
-- Earlier names: Mastermind - Commodities - R1 Source and Legacy Archive / Commodities · R1 Source and Legacy Archive
+- Earlier names: Mastermind - Commodities - R1 Source and Legacy Archive · Commodities · R1 Source and Legacy Archive
 - Entry: [open exact page](https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0) · board `B9-0`
 
 - [00 · Start here · Journeys, studies & build contracts](https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0) — `p-2-0` · previous: Commodities · R1 Study · 2026-09-26
@@ -630,7 +631,7 @@ Exact file and page identities survive renaming. Page order follows the last obs
 ## Crypto Intelligence · R4 References and Archive
 
 - File ID: `01M6Y3F0NXNDPAKJMJGCAD759Z`
-- Role: Retained history / reference mix
+- Role: R4 design reference + proposed amendments + archive
 - Earlier names: Mastermind - Crypto Intelligence - R4 References and Archive
 - Entry: [open exact page](https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0) · board `QI-0`
 
@@ -723,24 +724,26 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3NSZGE8JWN2EZCSF0DT05RM`
 - Role: Working design entry · scope qualified
-- Earlier names: Terminal
 - Entry: [open exact page](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0)
 
 - [00 · TERMINAL · Start Here · Product Directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0) — `p-R-0`
-— Page-group divider `p-1G-0`
+
+Page-group divider `p-1G-0`.
 
 - [Terminal Portfolio · Builder + Acceptance References](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) — `p-X-0`
 - [Terminal · Portfolio · Personal Desk · 2026-10-11](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0) — `p-Y-0`
 - [Proposed · Portfolio objects & comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1F-0) — `p-1F-0`
 - [Returns Calendar · Terminal + Stock Dossier](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Q-0) — `p-Q-0`
-— Page-group divider `p-1H-0`
+
+Page-group divider `p-1H-0`.
 
 - [D06 · Terminal workspace · R2 design](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-17-0) — `p-17-0` · previous: D06 · Terminal · Production workspace · R2
 - [D06 · Build · Script interaction contracts](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-19-0) — `p-19-0`
 - [Terminal · Chart Context · R1 · 2026-10-18](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-W-0) — `p-W-0`
 - [Terminal · Intelligence Workspace · 2026-10](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-I-1) — `p-I-1`
 - [Proposed · Chart reader recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1E-0) — `p-1E-0`
-— Page-group divider `p-1I-0`
+
+Page-group divider `p-1I-0`.
 
 - [00 · Read me & Build contract · D07 Company](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0) — `p-11-0`
 - [Company · R3 design suite](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-S-0) — `p-S-0` · previous: Company · Production Suite · R3
@@ -754,7 +757,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [Company R2 · Mobile + Narrow-Screen Variants](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-J-1) — `p-J-1`
 - [Company R2 · Tablet Brief + Evidence Variants](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-K-1) — `p-K-1`
 - [Company R2 · Chinese Mobile + 320px Variants](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-M-1) — `p-M-1`
-— Page-group divider `p-1J-0`
+
+Page-group divider `p-1J-0`.
 
 - [D08A · Options Overview & Flow · Candidate R1](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0) — `p-16-0`
 - [00 · Read me & Build contract · D08B](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-14-0) — `p-14-0`
@@ -764,7 +768,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [09 · Options · Volatility Lab](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-D-0) — `p-D-0`
 - [13 · Options · 3D Research Lab](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-H-0) — `p-H-0`
 - [Options · Exposure Intelligence · TerraShade study · 2026-10-20](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-T-0) — `p-T-0`
-— Page-group divider `p-1K-0`
+
+Page-group divider `p-1K-0`.
 
 - [00 · D08C · Read me & Build contract](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) — `p-15-0`
 - [10 · D08C · Plan, Compare & Review · Candidate R2](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0) — `p-13-0`
@@ -775,14 +780,16 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [05 · Options · Compare](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-7-1) — `p-7-1`
 - [Terminal · Options Structure Intelligence · R1 · 2026-09-27](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-2-0) — `p-2-0`
 - [Options · Build Contracts + Source Proof · Reference](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-P-1) — `p-P-1`
-— Page-group divider `p-1L-0`
+
+Page-group divider `p-1L-0`.
 
 - [Market Heatmaps · Unified Workspace · 2026-09-29](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-8-1) — `p-8-1`
 - [Market Heatmaps · Mobile Atlas + Comparison · R6](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-N-1) — `p-N-1`
 - [Market Heatmaps · Saved Views + Recovery · R7–R8](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-O-1) — `p-O-1`
 - [Proposed · Heatmap inspector refresh](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1D-0) — `p-1D-0`
 - [Proposed · Historical benchmarks](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1C-0) — `p-1C-0`
-— Page-group divider `p-1M-0`
+
+Page-group divider `p-1M-0`.
 
 - [Terminal · Account & settings · 2026-10-11](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-10-0) — `p-10-0`
 - [12 · SOURCE ONLY · Terminal Live Baselines](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-G-0) — `p-G-0`
@@ -790,7 +797,8 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [Terminal · R3 Refraction · Top-edge only](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Z-0) — `p-Z-0`
 - [Archive · Original product geometry](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1A-0) — `p-1A-0`
 - [ARCHIVE · Company Intelligence · Superseded](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-C-0) — `p-C-0`
-— Page-group divider `p-1N-0`
+
+Page-group divider `p-1N-0`.
 
 - [D06 · Macro · Stages & S&P allocation](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-18-0) — `p-18-0` · previous: D06 · Macro completion · Stages & S&P allocation
 
@@ -832,7 +840,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3NT5Y3G5HTJHVR0K5W2MDJM`
 - Role: Working design entry · scope qualified
-- Earlier names: PROPHET
 - Entry: [open exact page](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0)
 
 - [00 · Start here · D03 build contract · DRAFT](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0) — `p-D-0`
@@ -854,14 +861,14 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3P1QEHS5XXQY85BJT6QR2E1`
 - Role: Working design entry · scope qualified
-- Earlier names: Mastermind AI
 - Entry: [open exact page](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0)
 
 - [00 · R10 · Chat workbench · Start here](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0) — `p-1-0`
 - [Proposed · Draft mention context](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-B-0) — `p-B-0`
 - [R10 · Save + Resume · Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0) — `p-8-0`
 - [R10 · Build + Implementation Boundaries](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-9-0) — `p-9-0`
-— Page-group divider `p-A-0`
+
+Page-group divider `p-A-0`.
 
 - [01 · Interaction + Recovery · R2 References](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-2-0) — `p-2-0`
 - [02 · Answer Craft · R7–R8 References](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-3-0) — `p-3-0`
@@ -874,7 +881,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3NRCX55B452A12819WNE1RH`
 - Role: Working design entry · scope qualified
-- Earlier names: Mastermind OS
 - Entry: [open exact page](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0)
 
 - [00 · Start here · OS design map](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0) — `p-1-0`
@@ -891,12 +897,14 @@ Exact file and page identities survive renaming. Page order follows the last obs
 - [16A · Team conversations · States](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-S-0) — `p-S-0`
 - [13 · Daily Experience · Flow + Builder Notes](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0) — `p-E-0`
 - [UX08 · Source availability](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-N-0) — `p-N-0`
-— Page-group divider `p-L-0`
+
+Page-group divider `p-L-0`.
 
 - [11 · Chat Atelier · Interaction references](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-C-0) — `p-C-0`
 - [14 · Market design redirects · Reference](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-F-0) — `p-F-0`
 - [ARCHIVE · Market Shell References · Not for OS Build](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-G-0) — `p-G-0`
-— Page-group divider `p-M-0`
+
+Page-group divider `p-M-0`.
 
 - [REF · Noir experience + Build history](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-2-0) — `p-2-0`
 - [REF · Conversations + Message states](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-3-0) — `p-3-0`
@@ -913,7 +921,6 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M6JNN71ZN4867VJZ83PPXQZ0`
 - Role: Working design entry · scope qualified
-- Earlier names: AERLOR — Hospitality Website & Design System
 - Entry: [open exact page](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0)
 
 - [Start here / Design & build map](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0) — `p-A-0`
@@ -1230,23 +1237,22 @@ Exact file and page identities survive renaming. Page order follows the last obs
 
 - File ID: `01M3NSWX6SGTY4Z5DKBN4YP60M`
 - Role: Container metadata conflict
-- Earlier names: Others
 
 Listed as file but exact-file read fails and parent listing exposes Design System, Dashboard and archived collection. Container metadata conflict remains unresolved.
+
 
 ## Projects
 
 - File ID: `01M2VVZT0YA4WK46WT5VD72YTQ`
 - Role: Root container
-- Earlier names: Projects
 
 Existing root container; no move or new folder hierarchy introduced.
+
 
 ## Untitled project
 
 - File ID: `01M3NSTSZ248TQSMQQR62DC06J`
 - Role: Archived empty container
-- Earlier names: Untitled project
 
 Already archived folder. Fresh includeArchived child listing returned zero resources; physical disposal remains blocked.
 

@@ -20,7 +20,7 @@ This extends the existing migration and design-clarity work. It is not a new pro
 - Mastermind protected master: `a9f0b4e1fc7f419e2cf377d3132061169c986a21`; Sol Skillpack schema mastermind.sol_skillpack.v1, version 1.0.1, minimum bootstrap major 1.
 - Macro design source: `071ed19f5ce87927f078f94f3e126c24d8a0307e`; DESIGN_DOCTRINE and MASTER_PRODUCT_DESIGN_SYSTEM_V1.
 - Reuse [migration recovery](../MASTERMIND_PAGES_RECOVERY_2026-11-08.md), [routing](../MASTERMIND_PAGES_ROUTING_2026-11-08.md), and [architecture/clarity audit](../../../research/paper_architecture_clarity_2026-11-08/AUDIT_AND_DELIVERY.md).
-- Later evidence under open PRs [#2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337), [#2352](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2352), [#2333](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2333) must be reconciled with older protected migration claims before changing lineage.
+- Later delivery evidence under PRs [#2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337), [#2352](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2352), [#2333](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2333) must be reconciled with older protected migration claims before changing lineage.
 - Paper carrier for all design mutations: the existing Mastermind Paper connector. Catalog `f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb`. Qualified metadata/page-order/text/HTML writes remain available. Resource archive/move, standalone deletion, exports and several style/create-artboard operations are blocked or schema-held; no bypass is authorized.
 
 ## Completion ruler
@@ -32,10 +32,10 @@ Inventory coverage is separate from retention coverage. A migrated copy is not p
 ## Phase ladder
 
 1. **Estate census — complete at the recorded observation.** All 83 listed resources are classified: 80 readable design files, 544 pages and 19 dividers. One Others resource behaves as a container despite its listed type. Baseline names and page aliases remain searchable.
-2. **Navigation and status — applied.** The existing directory now has eight navigation pages; 66 distinct file names are clarified. Product map, exact page links, three family indexes, lineage, recovery and local Sector guidance are in place. Old-link verification continues.
+2. **Navigation and status — applied.** The existing directory now has eight navigation pages; 66 distinct file names are clarified. Product map, exact page links, three family indexes, lineage, recovery and local Sector guidance are in place. All 62 original legacy signposts now route to the exact estate entry while preserving every prior design/recovery destination.
 3. **Retention — explicit by scope.** Targeted comparisons cover Sector, News, Memory, Policy, Options, Crypto and Commodities; prior accepted evidence covers additional families. RETENTION.md separates exact selections, complementary designs and unresolved comparisons. No exhaustive historical parity or production acceptance is claimed.
 4. **Cleanup — qualified candidates isolated.** All 15 pages of 12 tooling/empty files were inspected. Seven files are empty; five contain genuine tool specimens. Labels separate them from design work. Physical archive/delete/resource-move remains blocked by the current Paper catalog.
-5. **Acceptance and continuity — in progress.** Finish legacy-link proof, index and representative layout checks, clear only this session's working indicators, then deliver the source record through actual repository controls. A checkpoint never substitutes for continuing a safe next action.
+5. **Acceptance and continuity — Paper verification complete; source delivery next.** All legacy links, index targets and representative layouts passed. This session's 78 edited-board indicators were finished with exact targets. Deliver the source record through actual repository controls. A checkpoint never substitutes for continuing a safe next action.
 
 ## Naming and authority model
 
@@ -67,6 +67,6 @@ Before disposal, verify every page, unique content, incoming links and recoverab
 
 ## Recovery checkpoint
 
-MISSION_COMPLETE: false. The initial plan and inventory were saved before Paper edits. See [CHECKPOINT.md](CHECKPOINT.md) for the latest verified changes, exact effects, protected boundaries and next actions. The mission continues after each milestone.
+The organization changes are applied and verified. Physical disposal remains blocked by current Paper capabilities; Terminal transfer and unresolved product adoption questions retain their own scope and controls. The initial plan and inventory were saved before Paper edits. See [CHECKPOINT.md](CHECKPOINT.md) for the latest verified changes, exact effects, protected boundaries and next actions. The mission continues after each milestone.
 
 The baseline inventory remains [INVENTORY.json](INVENTORY.json); it is not a claim that all historical requirements are preserved.

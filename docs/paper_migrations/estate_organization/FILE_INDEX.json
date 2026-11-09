@@ -510,7 +510,7 @@
         {
           "type": "page",
           "id": "p-L-0",
-          "name": "Commodities · R1 Study · 2026-09-26",
+          "name": "Legacy link · Commodities · Journeys & studies",
           "icon": null,
           "url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-L-0",
           "baseline_name": "Commodities · R1 Study · 2026-09-26"
@@ -558,7 +558,7 @@
         {
           "type": "page",
           "id": "p-11-0",
-          "name": "ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build",
+          "name": "Legacy link · Crypto R1–R3 archive",
           "icon": null,
           "url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-11-0",
           "baseline_name": "ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build"
@@ -2999,7 +2999,7 @@
           "baseline_name": "ARCHIVE · Commodities Legacy 90–94 · Not for Build"
         }
       ],
-      "retention_note": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy90–94 source/recovery/negative-price/roll requirements on p-1-0.",
+      "retention_note": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0.",
       "coverage": "live targeted guide/state comparison and fresh metadata",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "B9-0",
@@ -3017,7 +3017,7 @@
       "parent_id": "01M2VVZT0YA4WK46WT5VD72YTQ",
       "already_archived": false,
       "family": "Asset research",
-      "role": "Retained history / reference mix",
+      "role": "R4 design reference + proposed amendments + archive",
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
@@ -6393,5 +6393,6 @@
       "aliases": []
     }
   ],
-  "observed_at": "2026-11-09 05:20:58 UTC"
+  "observed_at": "2026-11-09 05:20:58 UTC",
+  "organization_verified_at": "2026-11-09 06:03:42 UTC"
 }

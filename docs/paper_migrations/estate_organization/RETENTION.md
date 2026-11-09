@@ -192,7 +192,7 @@ During this organization pass, the separate transfer mission advanced. The live 
 - Sign-in gate resolved; the current transfer boundary is a Chrome extension UI interlock. Do not bypass that control through another browser or carrier.
 - No uncertain paste or background copy worker remains in that record. The next copy belongs to the original transfer lane and requires fresh source/clipboard verification.
 
-The earlier #2352 zero-transfer checkpoint is historical. Its baseline inventory remains useful. This organization pass did not perform or claim those native copies.
+The earlier #2352 zero-transfer checkpoint is historical; PR #2352 is now merged at `ecc7668ec33bea6e8f814fc9ca27d49d9f8af4d6`. Its baseline inventory remains useful. This organization pass did not perform or claim those native copies.
 
 ## Preservation and retirement rules for this estate
 

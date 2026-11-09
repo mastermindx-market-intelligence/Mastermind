@@ -2,7 +2,7 @@
   "schema": "paper.estate.effects.v2",
   "operation": "paper-estate-organization-20261108-c1",
   "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
-  "count": 138,
+  "count": 148,
   "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay.",
   "operations": [
     {
@@ -2070,6 +2070,96 @@
       "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
       "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
       "receipt_path": "effects/operations-121-138.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-signposts-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "after_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-asset-page-labels-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "888a73ed69ddf9ff55e759fb157685ef43b0328f3d630e0f616e9121c963a9f4",
+      "after_snapshot": "61a20abc80988abb8bba931c024451d42a01d4b82f47d494c0f8371f3f19515c",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-legacy-hub-url-wrap-01",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "61a20abc80988abb8bba931c024451d42a01d4b82f47d494c0f8371f3f19515c",
+      "after_snapshot": "61a20abc80988abb8bba931c024451d42a01d4b82f47d494c0f8371f3f19515c",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-family-eyebrows-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "after_snapshot": "2b18fec1f49ea96c6d9198434f3ea923f02d8567edbe0bad7cae42500ebd52bb",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-02",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "after_snapshot": "7922f8607a6327101907a04335ef688639bfece534d7fbe5801250d7970ecc41",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-03",
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "95d7ee79480b16a406bd4dea65e41595a9397265b0fff06a36b37b38beaf0775",
+      "after_snapshot": "95d7ee79480b16a406bd4dea65e41595a9397265b0fff06a36b37b38beaf0775",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-04",
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "8c365680fcde8c63031c49862c56de04eb7140eca8a79cdcda7d5ef40e2c1131",
+      "after_snapshot": "8c365680fcde8c63031c49862c56de04eb7140eca8a79cdcda7d5ef40e2c1131",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-05",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "61a20abc80988abb8bba931c024451d42a01d4b82f47d494c0f8371f3f19515c",
+      "after_snapshot": "61a20abc80988abb8bba931c024451d42a01d4b82f47d494c0f8371f3f19515c",
+      "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-06",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
+      "after_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
+      "receipt_path": "effects/operations-139-148.json"
     }
   ]
 }

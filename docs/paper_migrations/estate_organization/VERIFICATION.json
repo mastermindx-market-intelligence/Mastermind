@@ -1,0 +1,324 @@
+{
+  "schema": "paper.estate.verification.v1",
+  "verified_at": "2026-11-09 06:03:42 UTC",
+  "counts": {
+    "resources": 83,
+    "files": 80,
+    "pages": 544,
+    "dividers": 19,
+    "owned_file_renames": 66,
+    "owned_existing_page_renames": 38,
+    "owned_new_guide_pages": 3,
+    "verified_legacy_signposts": 62,
+    "edited_board_indicators_finished": 78
+  },
+  "index": {
+    "files": 80,
+    "pages": 544,
+    "issues": [],
+    "familyChecks": [
+      {
+        "node": "24-0",
+        "urls": [
+          "https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0",
+          "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0",
+          "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0",
+          "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0",
+          "https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-1-0",
+          "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0",
+          "https://app.paper.design/file/01M6Y2T8WVHR3AS82TSSCNN6YS/p-1-0",
+          "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0",
+          "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0",
+          "https://app.paper.design/file/01M6Y4HE5S5YRCQSSWKS5QDBDY/p-1-0",
+          "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0",
+          "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
+          "https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0",
+          "https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0"
+        ],
+        "invalid": []
+      },
+      {
+        "node": "48-0",
+        "urls": [
+          "https://app.paper.design/file/01M6Y3VVGX4K4MXZ8JK2A1YG28/p-1-0",
+          "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0",
+          "https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-1-0",
+          "https://app.paper.design/file/01M6Y3NE9G4K5625JQS7GDVZ2Z/p-1-0",
+          "https://app.paper.design/file/01M6Y2X53ABR4MME4ATS15B8SH/p-2-0",
+          "https://app.paper.design/file/01M6Y2Z642VN20X8WDSWV07M0M/p-1-0",
+          "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0",
+          "https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-1-0",
+          "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0",
+          "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
+          "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0",
+          "https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0",
+          "https://app.paper.design/file/01M6Y37BWE719DWW5Z0DQS6DS9/p-1-0",
+          "https://app.paper.design/file/01M6Y384WPAGQ6BXMHTCZT0WYK/p-1-0"
+        ],
+        "invalid": []
+      },
+      {
+        "node": "6C-0",
+        "urls": [
+          "https://app.paper.design/file/01M6Y486E4X85MVP1AWS8H6E53/p-1-0",
+          "https://app.paper.design/file/01M6Y3X59BVYPETH1DRC4YSVAW/p-1-0",
+          "https://app.paper.design/file/01M6Y396T7MXR7VQXSRKMYS3RM/p-1-0",
+          "https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-1-0",
+          "https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0",
+          "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0",
+          "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0",
+          "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0",
+          "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0",
+          "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0",
+          "https://app.paper.design/file/01M6Y4G3644Y8918FCX2NS9M68/p-1-0",
+          "https://app.paper.design/file/01M6Y3HE0HWCX4H3K3HKXCWSE0/p-1-0",
+          "https://app.paper.design/file/01M6Y3J4X0V4E4J5H2GMAKJVMQ/p-1-0",
+          "https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0"
+        ],
+        "invalid": []
+      }
+    ]
+  },
+  "legacy": {
+    "schema": "paper.estate.legacy_signpost_validation.v1",
+    "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+    "pages_checked": 62,
+    "edits": 179,
+    "exact_text_match": true,
+    "all_prior_destinations_preserved": true,
+    "all_estate_entries": true,
+    "all_destinations_known": true,
+    "final_url_wrap_refinement": true,
+    "unique_text_nodes_changed": 179,
+    "text_update_applications": 180,
+    "verified_at": "2026-11-09 06:03:42 UTC"
+  },
+  "visual_observations": [
+    {
+      "target": "EA-0",
+      "file": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "observation": "Full seven-card lineage board visible with complete text and URLs; no clipping or overlap."
+    },
+    {
+      "target": "24-0",
+      "file": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "observation": "All fourteen family rows visible. Descriptions and exact URLs fit. Historical completed-directory eyebrow will be renamed to Family index."
+    },
+    {
+      "target": "2TMP-0",
+      "file": "01M2WGNCX9475G79JRKJTCM08P",
+      "observation": "Scoped R2/historical cards and three-line estate footer fit without clipping."
+    },
+    {
+      "target": "61O3-0",
+      "file": "01M2WGNCX9475G79JRKJTCM08P",
+      "observation": "Original product link and three-line historical/archive/estate footer visible inside fixed-height signpost."
+    },
+    {
+      "target": "J-0",
+      "file": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "observation": "All twenty product/scope cards, including the final Memory and all-family row, fit with full URLs."
+    },
+    {
+      "target": "1-0",
+      "file": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "observation": "Six navigation cards and build guidance fit with readable full URLs. Source URL currently uses the existing branch; switch to protected master after merge."
+    },
+    {
+      "target": "61OD-0",
+      "file": "01M2WGNCX9475G79JRKJTCM08P",
+      "observation": "Earnings route, archive URL and estate URL all fit in the original fixed-height signpost."
+    },
+    {
+      "target": "2RBB-0",
+      "file": "01M2WGNCX9475G79JRKJTCM08P",
+      "observation": "Full historical Hub layout inspected; explicit line break added before estate URL to keep it within the narrow card. Final child readback/screenshot follows."
+    },
+    {
+      "target": "2RCU-0",
+      "file": "01M2WGNCX9475G79JRKJTCM08P",
+      "observation": "Final 2x child screenshot confirms the full exact estate URL is visible on its own line; no clipping."
+    }
+  ],
+  "working_indicators": {
+    "targets": [
+      {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "nodeIds": [
+          "1-0",
+          "J-0",
+          "24-0",
+          "48-0",
+          "6C-0",
+          "8L-0",
+          "EA-0",
+          "DX-0"
+        ]
+      },
+      {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "nodeIds": [
+          "HBU-0"
+        ]
+      },
+      {
+        "fileId": "01M5EXPMQTSBFBAM8KKG83FTZH",
+        "nodeIds": [
+          "27K-0"
+        ]
+      },
+      {
+        "fileId": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "nodeIds": [
+          "26O-0",
+          "2CO-0",
+          "2IO-0",
+          "2LK-0",
+          "2OG-0"
+        ]
+      },
+      {
+        "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+        "nodeIds": [
+          "758Y-0",
+          "75C9-0",
+          "74XC-0",
+          "758F-0",
+          "74T4-0",
+          "74NB-0",
+          "759M-0",
+          "755S-0",
+          "74YX-0",
+          "75A5-0",
+          "757D-0",
+          "75CS-0",
+          "74OD-0",
+          "74WA-0",
+          "75ED-0",
+          "74S2-0",
+          "74YE-0",
+          "751K-0",
+          "74PY-0",
+          "756B-0",
+          "75B7-0",
+          "75AO-0",
+          "7523-0",
+          "74ZZ-0",
+          "7535-0",
+          "75BQ-0",
+          "74VR-0",
+          "74RJ-0",
+          "74U6-0",
+          "757W-0",
+          "74MS-0",
+          "75DB-0",
+          "756U-0",
+          "75DU-0",
+          "752M-0",
+          "74XV-0",
+          "61OD-0",
+          "74R0-0",
+          "74WT-0",
+          "7511-0",
+          "7547-0",
+          "750I-0",
+          "74PF-0",
+          "74L7-0",
+          "753O-0",
+          "74M9-0",
+          "61O3-0",
+          "7559-0",
+          "74NU-0",
+          "74QH-0",
+          "74OW-0",
+          "74V8-0",
+          "74LQ-0",
+          "74ZG-0",
+          "74SL-0",
+          "74UP-0",
+          "74TN-0",
+          "2TMP-0",
+          "28BA-0",
+          "2RBB-0",
+          "27YL-0",
+          "754Q-0"
+        ]
+      },
+      {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "nodeIds": [
+          "1-0"
+        ]
+      }
+    ],
+    "observed_successes": 6
+  },
+  "limits": [
+    "No native hyperlink-click behavior claimed",
+    "No full historical feature-parity or migration-fidelity certification",
+    "No physical disposal",
+    "No product/runtime release acceptance"
+  ],
+  "source_delivery": {
+    "base": "ecc7668ec33bea6e8f814fc9ca27d49d9f8af4d6",
+    "governing_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+    "procedure_change_count": 5,
+    "codeowners": "All three standard paths return 404",
+    "administrative_protection_read": "403 Resource not accessible by integration; original denied read not retried",
+    "ruleset": {
+      "id": 22852988,
+      "name": "Mastermind Default Branch Merge Queue",
+      "target": "branch",
+      "source_type": "Repository",
+      "source": "mastermindx-market-intelligence/Mastermind",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "~DEFAULT_BRANCH"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "merge_queue",
+          "parameters": {
+            "merge_method": "SQUASH",
+            "max_entries_to_build": 8,
+            "min_entries_to_merge": 1,
+            "max_entries_to_merge": 4,
+            "min_entries_to_merge_wait_minutes": 0,
+            "grouping_strategy": "ALLGREEN",
+            "check_response_timeout_minutes": 180
+          }
+        },
+        {
+          "type": "code_scanning",
+          "parameters": {
+            "code_scanning_tools": [
+              {
+                "tool": "CodeQL",
+                "security_alerts_threshold": "all",
+                "alerts_threshold": "all"
+              }
+            ]
+          }
+        }
+      ],
+      "node_id": "RRS_lACqUmVwb3NpdG9yec5Oi3PdzgFctXw",
+      "created_at": "2026-09-10T20:20:57.133-05:00",
+      "updated_at": "2026-11-08T08:23:34.316-06:00",
+      "bypass_actors": [],
+      "current_user_can_bypass": "never",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/rulesets/22852988"
+        },
+        "html": {
+          "href": "https://github.com/mastermindx-market-intelligence/Mastermind/rules/22852988"
+        }
+      }
+    }
+  }
+}
