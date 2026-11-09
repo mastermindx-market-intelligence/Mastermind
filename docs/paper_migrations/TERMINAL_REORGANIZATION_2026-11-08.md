@@ -12,7 +12,7 @@ DONE_WHEN: a verified feature-family organization exists in Paper; each source p
 - Exact Terminal source: [Terminal / Start Here](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0).
 - Existing estate map: [MASTERMIND Migration Directory](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0). This is the estate entry, not a new registry.
 - Existing accepted clarity audit: [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). Existing F03 source and release holds remain distinct from this new Terminal organization task.
-- Paper content/metadata edits use this session's Studio Direct Paper actions on the observed M2 Studio. Native selection attempts remained on that carrier and dispatched no copy/paste/delete. A separate isolated Chrome view was read through the Browser connector; it is signed out. No design content edit was dispatched there. Each future logical content mutation must retain its selected carrier until reconciled; the Google authentication denial described below must not be bypassed.
+- Paper metadata/navigation edits use guarded Studio Direct exact-file operations. Design copies use the signed-in Chrome Browser session's native Paper Theme and canvas copy/paste. Each logical mutation stays on its original carrier until reconciled. The Chairman resolved the former sign-in gate; the separate current Chrome extension-UI interlock is recorded below.
 - Direct work rationale: PRINCIPAL_JUDGMENT for family boundaries and preservation; UNIQUE_APPROVED_ACCESS for attended Paper operations; LOWER_TOTAL_OVERHEAD for the bounded navigation/source edits. A read-only reasoning helper challenged the split and official capacity evidence. No Fabric execution or background worker is claimed.
 
 ## Verified baseline
@@ -33,7 +33,7 @@ The earlier oversized MASTERMIND PAGES file is now labeled MOVED / Navigation on
 | Terminal · Options Flow, Exposure & Volatility | 8 | 77 | 13074 | PLANNED — no content transfer yet |
 | Terminal · Options Planning & Review | 9 | 126 | 14890 | PLANNED — no content transfer yet |
 | Terminal · Heatmaps & Comparison | 5 | 40 | 6846 | PLANNED — no content transfer yet |
-| Terminal · Portfolio & Returns | 4 | 24 | 3079 | Staging file verified empty; no transfer yet |
+| Terminal · Portfolio & Returns | 4 | 24 | 3079 | 2/4 pages and 12/24 artboards verified in staging; family ownership not switched |
 | Existing Macro · Market Structure, Stages & Allocation | 1 | 3 | 259 | Existing Macro target requires reconciliation |
 
 Company responsive/localization/evidence states remain with their feature. Options separates market observation/exposure from planning/save/watch/review. The misplaced D06 Macro completion page has an existing potential home, [Market Structure, Stages & Allocation](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2), and must be reconciled before transfer. Mixed build notes remain fully preserved and cross-linked, not silently divided or discarded.
@@ -41,7 +41,7 @@ Company responsive/localization/evidence states remain with their feature. Optio
 ## Task tree
 
 - P1 — Census and architecture: baseline complete; exact page list below. Official vendor limit and live quota remain separately qualified.
-- P2 — Safe pilot: prove a supported native copy or transfer on a bounded coherent family; compare source/destination native structure, text, tokens, assets, layout, comments and relevant references. Source remains canonical until accepted.
+- P2 — Safe native page pilot: VERIFIED for Builder and Personal Desk. Theme-first native copying preserves tokens. Full Portfolio family and its current-navigation cutover remain P3/P4 work; original source remains canonical.
 - P3 — Family migration: only after P2, migrate each family and preserve old-to-new page/artboard identities; retain all actual held/refused targets. Do not recreate designs from JSX and describe that as lossless.
 - P4 — Navigation and growth: update existing Terminal Start Here and the existing estate directory, keep revision/implementation status explicit, route new work to one verified owner per family.
 - P5 — Verification and durability: reopen/read destination files, reconcile counts and mapping, inspect representative actual Paper screenshots, save exact receipts and remaining exceptions to this same source record.
@@ -59,14 +59,14 @@ Company responsive/localization/evidence states remain with their feature. Optio
 
 ## Implemented organization and proof
 
-- Original Terminal sidebar: **51 page IDs preserved, eight feature separators added**. Guarded operation `terminal-paper-reorg-20261108-c4-arrange-01` and a separate exact-file readback agree. Page grouping is implemented; content was not transferred or retired.
+- Original Terminal sidebar: **51 page IDs preserved, eight feature separators added**. Guarded operation `terminal-paper-reorg-20261108-c4-arrange-01` and a separate exact-file readback agree. Page grouping is implemented. Subsequent staged native copies are recorded below; original design content has not been retired.
 - Existing Start Here page `p-R-0`: subtitle `1BD2-0` routes readers to the transfer status. Existing reference index `1NDQ-0` now contains family routing, exact source page IDs, baseline counts, preservation rules and this record in new section `28T8-0`.
 - Existing estate directory: section `C9-0` on `01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0` identifies Terminal as a **separate, incomplete transfer**, so the completed MASTERMIND PAGES migration is not mistaken for Terminal completion.
-- Pilot file: [STAGING ONLY · Terminal Portfolio transfer · EMPTY](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0). It has one page named “00 · No designs copied · See Terminal Start Here”, **one root node and zero artboards**. Reuse this exact file; do not create a duplicate. The rename initially returned EFFECT_UNKNOWN because its immediate readback retained the old name. A later read on the original Studio carrier confirmed the exact requested name; **no rename replay** occurred.
+- Pilot file: [STAGING · Terminal · Portfolio & Returns](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0). Reuse this exact file. Builder `p-1-0` and Personal Desk `p-2-0` contain verified native copies; Objects `p-3-0` and Returns `p-4-0` are empty and explicitly labeled Pending copy. The four pages are ordered Builder, Personal Desk, Objects, Returns. Both observed rename readback delays were reconciled on their original Studio carrier, without replay.
 - Meaningful checks passed: all 51 baseline page IDs occur in exactly one proposed family, family membership exactly covers the census, and sums equal 521 artboards / 84,529 nodes. The full artboard inventory is [TERMINAL_BASELINE_2026-11-08.json](TERMINAL_BASELINE_2026-11-08.json).
 - Separate live reads: Start Here is now 188 nodes / two artboards (41 navigation nodes added); Portfolio builder remains 249 nodes / four artboards; Returns remains 756 nodes / 11 artboards. File token hash remains `55dd37b7`. These focused checks are not a new whole-file byte measurement.
 - Actual Paper screenshots of the new routing section, original Start Here composition and new estate status were visually inspected: readable text, complete URLs and no clipping. Working indicators were released only for the edited artboards.
-- No Paper design copy, paste, cut or deletion was dispatched. No physical capacity reduction is claimed. Known Returns, F03 and other held source statuses remain unchanged.
+- Two native page copies are verified. An earlier theme-empty four-board paste was rejected and fully undone before the corrected attempt. No original source was cut or deleted, and no source capacity reduction is claimed. Known Returns, F03 and other held source statuses remain unchanged.
 
 ## Capacity interpretation
 
@@ -132,21 +132,46 @@ All links below are the pre-migration source and remain valid until an explicit 
 | [p-2-0](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-2-0) | Terminal · Options Structure Intelligence · R1 · 2026-09-27 | Terminal · Options Planning & Review | 24 | 4971 |
 | [p-8-1](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-8-1) | Market Heatmaps · Unified Workspace · 2026-09-29 | Terminal · Heatmaps & Comparison | 16 | 4746 |
 
+## Native transfer proof — 9 November continuation
+
+The Chairman completed Paper sign-in. The signed-in MastermindX Chrome view was observed before native transfers. Existing staging file `01M6Z6PYK9BAV3ECXFC575JYT7` was reused.
+
+| Source page | Destination page | Native nodes, including root | Artboards | Transfer status |
+| --- | --- | ---: | ---: | --- |
+| `p-X-0` Builder | [`p-1-0`](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-1-0) | 249 | 4 | Verified; family cutover pending |
+| `p-Y-0` Personal Desk | [`p-2-0`](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-2-0) | 1615 | 8 | Verified; family cutover pending |
+| `p-1F-0` Objects | [`p-3-0`](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-3-0) | 1 empty root | 0 | Created, explicitly Pending copy |
+| `p-Q-0` Returns | [`p-4-0`](https://app.paper.design/file/01M6Z6PYK9BAV3ECXFC575JYT7/p-4-0) | 1 empty root | 0 | Created, explicitly Pending copy |
+
+The complete machine-readable map and proof are in [TERMINAL_TRANSFER_RECEIPT_2026-11-09.json](TERMINAL_TRANSFER_RECEIPT_2026-11-09.json). It includes all 51 source pages with actual destination IDs only where created, all 12 copied artboard IDs, verification findings and the exact next action. Baseline inventory remains immutable.
+
+**Qualified native method:** copy all 83 tokens from the source Theme tab into the empty destination before copying designs. All token names, types, values and descriptions match. Source token hash `55dd37b7` and destination `42ded32c` differ because native identities differ; this is not a value mismatch. The source has zero comment threads in the current all-status read.
+
+**Rejected trial and reconciliation:** the first four-board paste into a theme-empty destination detached token references into literal values. It was not accepted. The single owned paste was undone, and the destination was separately verified as one root / zero artboards before the corrected theme-first attempt. No duplicate paste or uncertain content effect remains.
+
+**Builder proof:** 249 nodes / four artboards. Every exported artboard JSX is identical after native node-ID normalization. Native Fit layout was verified in source and destination. Only uniform canvas translation (-1520, +4) differs.
+
+**Personal Desk proof:** 1,615 nodes / eight artboards. All 1,614 design nodes are reached by native-tree comparison; hierarchy, order, style metadata, visibility/lock fields as serialized, vector structures, used token definitions and image payloads have no unexplained differences. Paper upgraded 642 legacy plain-text representations to exactly equivalent single-string native text blocks, and three explicit root fit-content declarations to native default Fit. These narrow equivalences are recorded, not treated as byte-identical. Representative exported JSX and actual rendered overview/recovery views were checked. Uniform canvas translation is (-1520, +1). Design proposals and FUTURE PREVIEW labels remain intact.
+
 ## Current continuation — EXACT_HUMAN_GATE
 
-**Parent mission incomplete:** assessment, grouping and routing are verified; the physical split is not complete. P1 is complete. P4's interim navigation and P5's verification of applied organization are complete. P2/P3 remain pending.
+**Parent mission incomplete:** two of 51 source pages (12 of 521 artboards) have verified native staging copies. No complete family has switched its working location. The original remains the working source for every family. The seven-family architecture, baseline and existing directory sections remain accepted and must not be rebuilt.
 
-**Actual gate:** the isolated Chrome Paper view loads the exact Portfolio builder page but is signed out. Its normal Log in flow offers email or Google. Attempting the observed “Continue with Google” link was rejected by the Browser tool's **automatic approval review**, not a manual rejection: authority to observe `https://accounts.google.com` was not granted because the task did not specify Google authentication or the Google account. Do not retry that denied step through another browser, tool, account, raw endpoint or carrier. The Chairman can complete Paper sign-in in the retained Chrome tab, or provide explicit account-specific authorization subject to the actual approval control. No credentials were read or exposed.
+**Actual current gate:** Chrome page-control calls report that another extension's UI is open and block automation. Bounded read-only diagnosis confirmed the interlock; tab metadata remains readable. This is a browser-control/user-presence boundary, not another Paper sign-in problem, a blanket Paper outage, or a failed paste. The required user action is to dismiss the other extension popup/side panel in Chrome and return control to Paper. Do not bypass the interlock with another browser or control mechanism.
 
-**Native fallback boundary:** bounded Studio native selection attempts did not establish a stable exact page. Background input lacked a pressable accessibility target; foreground attempts showed window-postcondition/expired-receipt failures and a delayed selection with target drift. Visible content also changed between observations. The cause is not proven. No copy/paste/delete was attempted, and no live writer was displaced. Do not turn these observations into an invented blanket Paper outage or permanent security denial. Resume native work only with a currently qualified, stable exact target and protected live writers.
+**Reconciled effects:** Objects destination `p-3-0` and Returns `p-4-0` are empty. Builder and Personal Desk remain verified. No native paste was dispatched to those empty pages, no original design was removed, and no unresolved Paper content effect or background copy worker remains. The source browser tab may currently show Returns while its session clipboard contains an earlier Objects selection; re-copy the intended page freshly on resume rather than trusting tab or clipboard history.
 
-**Next action once the control is available:**
-1. Verify Paper is authenticated to the intended MastermindX team in the isolated view. Re-read the existing source page and the exact empty staging file above. Choose the original carrier for one new native-copy operation.
-2. Pilot source `p-X-0` (249 nodes / four artboards). Preserve the source. Verify editable structure/text, artboard mapping, tokens, assets, visual fidelity, comments and reopen readback. A successful file creation or visually similar reconstruction is insufficient.
-3. Complete Portfolio pages `p-Y-0,p-1F-0,p-Q-0` using the qualified method. Preserve the held Returns board's design/release status independently of migration acceptance.
-4. Continue the other families in the same healthy session after each verified batch. Update this record and the existing directories with actual destination IDs. A smaller working-file handover can retain the original as clearly labeled recovery/reference; retirement of original content requires its own admitted operation and preservation proof. Do not claim that retained source bytes have shrunk.
-5. Reuse exact accepted checks and existing files. Never re-census or rebuild accepted work without relevant drift.
+**Next action after control returns:**
+1. Verify the selected signed-in Chrome Paper view is controllable. Read exact Portfolio destination `p-3-0` as empty.
+2. Navigate the source to `p-1F-0`, native-select all, and verify the clipboard identifies source file `01M3NSZGE8JWN2EZCSF0DT05RM`, source artboard `261Q-0`, and 458 design nodes (459 including root). Paste once into `01M6Z6PYK9BAV3ECXFC575JYT7/p-3-0`.
+3. Compare every native node, tree order, token binding, image/vector data and artboard geometry, then inspect the rendered destination. Any unrecognized normalization blocks acceptance.
+4. Continue Returns `p-Q-0 -> p-4-0`. Preserve the original `1B5H-0` design/release hold separately from migration proof.
+5. After all four Portfolio pages pass, repair current-navigation references to the actual destinations while retaining historical source links and held-operation evidence. Only then rename the staging file as the current family and switch existing directory ownership for Portfolio.
+6. Continue the other families, reconciling the Macro supplement with its existing file. Preserve every old page URL and declare one current location per page. Keep mixed contracts in their declared home with cross-links.
+7. Update this same record and receipt after each meaningful family milestone. Retain the original as recovery/reference unless a separate admitted retirement operation is proven. Do not claim retained source capacity was freed.
 
-**DO_NOT_REDO:** the 51-page census and 521-artboard inventory; eight sidebar dividers; existing `28T8-0` and `C9-0` navigation sections; pilot file creation or reconciled rename. No unresolved Paper content-edit effect or active/background copy worker remains.
+**DO_NOT_REDO:** 51-page/521-artboard census; original eight sidebar dividers; directory sections `28T8-0` and `C9-0`; Portfolio file creation; 83 verified theme tokens; the two accepted copies; all four destination-page creations; reconciled renames. Inspect only affected drift before continuing.
 
-Source branch: `sol/terminal-paper-reorganization-20261108-c4`. This record is durable task evidence, not protected procedural law, runtime admission, a new registry, a design approval or a release authorization.
+**Source continuity:** PR #2352 at `b116c6fb22091c989f80f420a013f5c81111c84f` entered the merge queue before this continuation. A receipt-file addition there received a known 409 queue conflict and created no file. Its queued head was left intact. This continuation branch `sol/terminal-paper-transfer-20261109-c4` starts at that exact immutable head and carries only the subsequent transfer evidence and updated current state. Preserve queue/release controls; do not self-review or bypass them.
+
+This record is durable task evidence, not protected procedural law, runtime admission, a new registry, design approval or release authorization.
