@@ -39,6 +39,10 @@ RECEIPT = LIVE / "t3_admission_patch_boot_receipt.json"
 PATCH = REPO / "integrations" / "t3" / "upstream_patches" / "mastermind_admission_0770446.patch"
 
 PIN = "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
+#: The patch sha THIS receipt recorded — the A5-era bytes. The committed patch
+#: evolved after A5 (A6 bounded consult, sha 999a1b1e…, live-pinned by
+#: tests/test_t3_admission_patch_boot_receipt_r2.py); this immutable receipt
+#: still names the bytes it was produced against.
 PATCH_SHA256 = "5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f"
 #: The committed receipt is immutable live evidence: pin its own bytes.
 RECEIPT_SHA256 = "a72abb5263f62235422951af9dc9b62d605e5c10367d8f525dad215811de850c"
@@ -64,9 +68,9 @@ class ReceiptStructureTests(unittest.TestCase):
         receipt = _receipt()
         self.assertEqual(receipt["schema"], "mastermind.t3_admission_patch_boot_receipt/v1")
         self.assertEqual(receipt["donor_pin"], PIN)
+        # the receipt names the patch bytes it was produced against (A5-era);
+        # the CURRENT committed bytes are the A6 rework, pinned by the r2 test
         self.assertEqual(receipt["patch_sha256"], PATCH_SHA256)
-        # the receipt's patch digest IS the committed patch bytes
-        self.assertEqual(hashlib.sha256(PATCH.read_bytes()).hexdigest(), PATCH_SHA256)
         self.assertIn(receipt["outcome"], {"DONE", "DONE_WITH_FINDINGS"})
         self.assertIsNone(receipt["blocked"])
 

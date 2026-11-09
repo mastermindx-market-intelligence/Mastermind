@@ -13,6 +13,10 @@ Covers:
   6. Audit finding #2 (A3 rework): no decorator runs ``Layer.build`` (a nested
      build forks the effect 4.1.2 memo map and rebuilds shared singletons), and
      the colocated vitest suite pins the built-exactly-once composition.
+  7. A6 bounded consult: every admission consult carries
+     ``AbortSignal.timeout`` (default 10 s, env ``MASTERMIND_ADMISSION_TIMEOUT_MS``,
+     hard 60 s ceiling) and the typed ``MastermindAdmissionTimeoutError`` fails
+     closed — closes A5 live finding #1 (unbounded consult hung launches).
 """
 
 import hashlib
@@ -29,9 +33,13 @@ PATCH_PATH = PATCH_DIR / "mastermind_admission_0770446.patch"
 MANIFEST_PATH = PATCH_DIR / "MANIFEST.md"
 
 PIN = "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
-#: sha256 of the A3-reworked patch bytes (audit finding #2 fix).  The
-#: pre-rework bytes were f78413fb5364be4b7a382276d9207fc429cf235e9c3c477b2e627a82aa5caa87.
-PATCH_SHA256 = "5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f"
+#: sha256 of the current patch bytes (A6 bounded consult).  History:
+#: f78413fb5364be4b7a382276d9207fc429cf235e9c3c477b2e627a82aa5caa87 (original)
+#: -> 5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f (A3 rework,
+#: audit finding #2: no nested Layer.build)
+#: -> 999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f (A6 bounded
+#: consult: AbortSignal.timeout on every consult + typed timeout cause).
+PATCH_SHA256 = "999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f"
 ADAPTER_FILE = "apps/server/src/mastermind/MastermindAdmissionAdapter.ts"
 ADAPTER_TEST_FILE = "apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts"
 DEFAULT_PINNED_SOURCE = "/Users/chriswong/.hermes/profiles/engineering/mmos/t3code-src"
@@ -212,9 +220,26 @@ def _code_only(lines: list[str]) -> list[str]:
     return code
 
 
-def test_patch_bytes_are_the_pinned_a3_rework() -> None:
+def test_patch_bytes_are_the_pinned_current_rework() -> None:
     assert hashlib.sha256(_patch_bytes()).hexdigest() == PATCH_SHA256
     assert PATCH_SHA256 in _manifest_text()
+
+
+def test_patch_bytes_carry_the_a6_bounded_consult() -> None:
+    """A5 live finding #1: an unbounded consult hung t3_thread_launch forever.
+    The A6 bytes must bound every consult and fail closed with a typed cause."""
+    code = "\n".join(_code_only(_added_file_lines(_patch_bytes().decode(), ADAPTER_FILE)))
+    assert "AbortSignal.timeout(config.consultTimeoutMs)" in code
+    assert "MASTERMIND_ADMISSION_TIMEOUT_MS" in code
+    assert "DEFAULT_ADMISSION_TIMEOUT_MS = 10_000" in code
+    assert "MAX_ADMISSION_TIMEOUT_MS = 60_000" in code
+    assert "MastermindAdmissionTimeoutError" in code
+    assert "admission_timeout" in code
+    # and the colocated suite pins the bound behavior
+    test_lines = "\n".join(_added_file_lines(_patch_bytes().decode(), ADAPTER_TEST_FILE))
+    assert "bounded consult" in test_lines
+    assert "exceeds its bound fails closed" in test_lines
+    assert "interrupt during a hung consult is never gated" in test_lines
 
 
 def test_decorators_never_nest_layer_build() -> None:

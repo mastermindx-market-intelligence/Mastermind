@@ -3,10 +3,10 @@
 - **Repo (donor):** https://github.com/pingdotgg/t3code
 - **Pinned SHA:** `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` (verified: shared clone HEAD, clean tree)
 - **Patch file:** `mastermind_admission_0770446.patch`
-- **Patch sha256:** `5785ac9525a852d0c19c3668f2ae4e9cb3fcd779a62b2a084affa2004f4e922f`
-- **Diff stat:** 3 files changed, 1167 insertions(+), 6 deletions(-)
-  - `apps/server/src/mastermind/MastermindAdmissionAdapter.ts` — new, 704 lines
-  - `apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts` — new, 434 lines (colocated vitest suite)
+- **Patch sha256:** `999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f`
+- **Diff stat:** 3 files changed, 1528 insertions(+), 6 deletions(-)
+  - `apps/server/src/mastermind/MastermindAdmissionAdapter.ts` — new, 810 lines
+  - `apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts` — new, 689 lines (colocated vitest suite)
   - `apps/server/src/orchestration-v2/runtimeLayer.ts` — modified, +29/−6
 - **Attribution (also carried in the module docstring):** Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4 — adapt existing seams, never rebuild.
 
@@ -44,6 +44,54 @@ $ node <vitest@5.0.5>/vitest.mjs run src/orchestration-v2/ThreadLaunchService.te
 Test Files  2 passed (2)
      Tests  59 passed (59)   # 13 admission (9 prior + 4 composition) + 46 upstream
 ```
+
+## A6 bounded consult (2026-11-09) — closes A5 live finding #1
+
+A5's live boot (`integrations/t3/live_proof/t3_admission_patch_boot_receipt.json`, scenario B4)
+proved the previous bytes (`5785ac95…`) hung `t3_thread_launch` indefinitely when the admission
+endpoint accepts but never answers: the consult was a plain `fetch` with no `AbortSignal`.
+
+Fix (this sha `999a1b1e…`, same 3 files, donor pin unchanged):
+
+- **The bound.** Every consult (`launch`, `revalidate`, `steer`) carries
+  `signal: AbortSignal.timeout(config.consultTimeoutMs)` — default **10 s**
+  (`DEFAULT_ADMISSION_TIMEOUT_MS`), overridable via `MASTERMIND_ADMISSION_TIMEOUT_MS`,
+  clamped to `[1 ms, 60 s]` (`MAX_ADMISSION_TIMEOUT_MS` hard ceiling, so no configuration can
+  reintroduce the unbounded hang); unparseable values fall back to the default. The knob never
+  flips enforcement on by itself.
+- **Fail-closed mapping.** A consult that exceeds its bound rejects with the typed
+  `MastermindAdmissionTimeoutError` and follows the SAME fail-closed path as an unreachable
+  endpoint: launch refused (`ThreadLaunchError.cause`), provider-turn start/restart and
+  session-open refused, no thread minted, incumbent never runs. Interrupts are never
+  decorated and remain ungated. Steer consults carry the same bound; a timed-out steer consult
+  is swallowed (`Effect.ignore`) — steer still never blocks.
+- **Typed cause codes.** `mastermindAdmissionCauseCode` maps the three failure shapes to the
+  stable labels an MCP surface should emit (A5 finding #2):
+  `admission_refused` (`MastermindAdmissionBlockedError`), `admission_timeout`
+  (`MastermindAdmissionTimeoutError`), `admission_unreachable`
+  (`MastermindAdmissionEndpointError` — its defect distinguishes unreachable vs malformed).
+- **Colocated suite grows 13 → 20** (new "bounded consult" block: default/override/ceiling
+  config; typed-cause mapping; launch timeout → refused, incumbent never called;
+  provider-turn.start timeout → effect fails closed; interrupt during a hung consult → not
+  gated, 0 extra consults; steer timeout → proceeds; malformed reply → fail-closed
+  `admission_unreachable`, defect distinguishes).
+
+Verification of THIS sha (scratch clone `/tmp/a6-t3` at the pin, patch applied):
+
+```
+$ npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit ; echo exit=$?
+exit=0        # 0 errors; 492 suggestions (pristine pin: 489 — the patch adds exactly 3,
+              # one per Schema.TaggedError class: Blocked, Endpoint, Timeout)
+$ node <vitest@5.0.5>/vitest.mjs run src/mastermind/MastermindAdmissionAdapter.test.ts \
+    src/orchestration-v2/ThreadLaunchService.test.ts
+Test Files  2 passed (2)
+     Tests  66 passed (66)   # 20 admission (13 prior + 7 bounded-consult) + 46 upstream
+$ git apply --check mastermind_admission_0770446.patch   # clean shared pin clone: OK
+```
+
+Live re-proof: `integrations/t3/live_proof/t3_admission_patch_boot_receipt_r2.json` (A0/A1/B2/B3/B4
+against a real isolated server; B4 now ends `REFUSED_WITHIN_WINDOW` — see
+`LANE_T3_DIRECTOR_A.md` § "A6 bounded consult").
 
 ## Inert upstream default
 
@@ -124,5 +172,5 @@ No server was started, no port 3773 bound, and the patched tree was never run as
 ## Honest limitations
 
 - Admission-block failures surface through each service's existing typed error channel, wrapping `MastermindAdmissionBlockedError` as the cause exactly once (the six error channels are closed unions upstream; adding members would have required touching the service modules, which the patch forbids). The `ThreadLaunchError.operation` label for launch admission blocks is approximated as `"resolve-project"` (the first launch operation) since the literals list is closed; the structured cause carries the real admission reason and phase.
-- The endpoint wire protocol (`POST {endpoint}/v1/admit`) is the minimal contract implied by the env config; it is implemented with plain `fetch` and an explicit payload parser rather than schema validation to avoid adding new platform dependencies to upstream's layer graph. An unreachable endpoint or malformed payload fails closed (blocks new execution only) — covered by the service-level parse path; the full fetch-failure matrix is exercised only through the fetch double, not a live endpoint.
+- The endpoint wire protocol (`POST {endpoint}/v1/admit`) is the minimal contract implied by the env config; it is implemented with plain `fetch` and an explicit payload parser rather than schema validation to avoid adding new platform dependencies to upstream's layer graph. An unreachable endpoint or malformed payload fails closed (blocks new execution only), and since A6 every consult is bounded (`AbortSignal.timeout`, see above) — a hung endpoint can no longer stall the launch funnel. The timeout and unreachable paths are proven both by the fetch doubles and live (r2 receipt scenarios B4/B3); the malformed-payload path is exercised through the fetch double only, not a live endpoint.
 - Verification covered `apps/server` typecheck + the colocated admission suite + the upstream ThreadLaunchService suite. The desktop/e2e suites and the full repo-wide vitest run were NOT executed (out of assigned scope; heavy).
