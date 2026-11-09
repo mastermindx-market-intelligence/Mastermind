@@ -176,6 +176,58 @@ class InboundAdmissionSafetyTests(unittest.TestCase):
 
 
 
+class ExactSlackEventDedupTests(unittest.TestCase):
+    def test_dual_slack_delivery_is_one_dispatch_and_one_capacity_hit(self):
+        import copy
+        import threading
+        config = copy.deepcopy(gateway.DEFAULT_CONF)
+        config["allowed_users"] = ["U0BRET6191C"]
+        config["max_dispatches_per_minute"] = 1
+        fleet = gateway.Fleet.__new__(gateway.Fleet)
+        fleet.conf = config
+        fleet.state = {"seen": {}, "recent": {}, "bindings": {}, "outbound": {}}
+        fleet.lock = threading.Lock()
+        fleet.bot_user_id = "U0BT71H4FQE"
+        fleet.our_bot_users = {"U0BT71H4FQE"}
+        sent = []
+        fleet.work = lambda *args: sent.append(args)
+
+        class InlineThread:
+            def __init__(self, *, target, args, daemon):
+                self.target, self.args = target, args
+            def start(self):
+                self.target(*self.args)
+
+        event = {
+            "type": "message", "channel_type": "channel",
+            "channel": "C0CBC6AEAQZ", "ts": "1794180011.111111",
+            "user": "U0BRET6191C",
+            "text": "<@U0BT71H4FQE> engineering: check",
+        }
+        payload = lambda e: {"event": e, "authorizations": []}
+        with patch.object(gateway, "save_state", return_value=None), \
+             patch.object(gateway, "log", return_value=None), \
+             patch.object(gateway.threading, "Thread", InlineThread):
+            # An app_mention and a message.channels notification are the same
+            # logical Slack message, even though Slack delivers two envelopes.
+            fleet.handle(payload(event))
+            fleet.handle(payload({**event, "type": "app_mention"}))
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(len(fleet.state["seen"]), 1)
+            self.assertEqual(len(fleet.state["recent"][event["channel"]]), 1)
+
+            # An independently addressed message is rate-limited at one/min.
+            fleet.handle(payload({**event, "ts": "1794180012.111111"}))
+            self.assertEqual(len(sent), 1)
+
+            # Once the existing window expires, new legitimate work is free.
+            advanced = gateway.time.time() + 61
+            with patch.object(gateway.time, "time", return_value=advanced):
+                fleet.handle(payload({**event, "ts": "1794180013.111111"}))
+            self.assertEqual(len(sent), 2)
+            self.assertEqual(len(fleet.state["recent"][event["channel"]]), 1)
+
+
 class PerThreadTurnSerializationTests(unittest.TestCase):
     """No two native replies to the same thread may overlap."""
 
