@@ -571,9 +571,79 @@ All19 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish relea
 
 Candidate #10734 remains governed by its existing Draft/unarmed, release, security, full-proof and F01/F02 boundaries. No source code, production deployment, runtime reader or approval was changed by this Paper parity work.
 
+
+## Returns Calendar — current clock, evidence states and historical fixture clarity
+
+The migrated Returns file remains SOURCE / PARTIAL REHOME and explicitly directs current design work to [Terminal / Returns Calendar](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Q-0). Root followed that authority. No promotion of migrated R3 studies occurred. Held Terminal `1B5H-0`, original `613W-0` and migrated source `AD-0` remain untouched.
+
+### Exact candidate binding
+
+[Terminal PR #814](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/814) was observed open, non-draft and unmerged. Root used its actual metadata head `32182ed3e5da89020a52c52fef920cab1178d96c`, not an older head embedded in its body.
+
+| Candidate file | Root-read blob |
+| --- | --- |
+| `docs/RETURNS_CALENDAR_DATA_CONTRACT_2026-10-04.md` | `b981455764f100fa1dcdbaf52a95ba7256256ba6` |
+| `terminal/lib/returnsCalendar.ts` | `cbcd8e2196a0a15ff0d3a1da3c954073e47195b6` |
+| `terminal/lib/returnsCalendarStudy.ts` | `ffdfd2efecea20e76a5ce147e493b695732939ab` |
+| `terminal/components/ReturnsCalendar.tsx` | `1cb66a106acf3323dea3ec01f232b11c6f96cd80` |
+
+The contract expressly supersedes the historical early-close20:00 specimen. The server supplies `regular_session_window {start_minute,end_minute,post_end_minute}`; the current early-close post-session boundary is17:00. Session membership and displayed hours use the same supplied bounds. A missing/invalid window means unavailable hours, not a known closure.
+
+The existing selected-date request owns the preceding evening as well as the selected day. Source does not implement a separate morning fetch, same-date retry action, or session expansion control. It renders four session cards. Obsolete requests are aborted and result display requires the current symbol/date key. Calendar focus alone does not request evidence; activation changes the selection.
+
+The helper withholds the full overnight return even when qualified observed prices/counts exist. Pending and partial daytime responses can retain observed OHLC/counts while withholding new percentages. Confirmed closure, client loading, returned acquisition pending, and unavailable calendar authority remain distinct. Request/JSON/identity failures map to the current unavailable outcome; no distinct transport-cause UI was invented.
+
+### Three source-bound design companions
+
+| Board | Design content | Native bounds and position |
+| --- | --- | --- |
+| `28BZ-0` /07 | Early-close desktop clock: overnight20:00–04:00, premarket04:00–09:30, regular09:30–13:00, after-hours13:00–17:00 | 900×620, x470/y2950 |
+| `28FS-0` /08 | 390px phone with the same four visible sessions, observed price/count fields and source qualification | 390×1290, x0/y3620 |
+| `28LZ-0` /09 | Four source outcomes: client loading, returned acquisition pending, confirmed closure, exchange-hours unavailable | 900×620, x1450/y2950 |
+
+The selected27Nov2026 date is explicitly illustrative. No qualified price/bar fixture was supplied for the corrected interval. New returns, observed prices and counts remain neutral dashes; the old +0.42% overnight and −0.31% after-hours figures were not transplanted to the new candidate semantics.
+
+The companions explicitly identify **unknown count as unavailable** as a design clarification. The current component has a `session?.barCount ?? 0` rendering fallback; the new unknown-count dash is therefore not claimed as literal implemented UI parity. Zero should be reserved for an actually qualified observed count. Source session boundaries, return withholding and outcome distinctions are pinned; implementation/browser acceptance remains separate.
+
+The outcomes reference does not add a retry button, new route, request owner or provider. Existing daily data and independently qualified observations remain separate from unavailable session percentages. All three new boards use the current Terminal token family `55dd37b7`; no tokens were edited.
+
+### Existing references now identify their scope
+
+- Historical early-close `1B3F-0` is visibly labeled as the superseded20:00 fixture, with a reference to current07. All original dates, hours, returns and high/low values remain attached to the historical scenario.
+- Recovery board `1BAE-0` is labeled historical. It now describes illustrative evening observations and unverified coverage/price basis, without claiming a separate failed morning request. Its old button reads **Retry concept · not implemented**. Its source note states one selected-date load and matching symbol/date evidence.
+- Dossier desktop `1AVD-0` and phone `1AZW-0` now explain unavailable versus withheld values and the permanently withheld full overnight percentage. New disclosure nodes `28ON-0` and `28OA-0` use12px/18px text; the phone disclosure was previously8px.
+- Mobile study `1B5I-0` now identifies the historical fixture and expansion concept. Its valid Not configured overnight state and all numeric examples remain.
+- START `1BBQ-0` routes to07–09 and identifies older fixture/concept references. Its original six-moved-designs migration proof and held-desktop explanation remain intact. The three added companions are not represented as additional migrated originals.
+
+### Verification and release
+
+Root inspected complete native screenshots of all three companions and every changed original board. The source outcome grid, phone sessions, disclosure footers and entry map fit without clipping. New horizontal/vertical sibling gaps are80px. The original historical recovery/expansion examples remain visually usable.
+
+An exact native JSX comparison checked every original text leaf outside the authorized changed captions:18 early-close,24 recovery,93 mobile-study,81 phone-dossier and103 desktop-dossier leaves. **All319 unchanged leaves matched; zero mismatches.** This preserves the financial fixtures, rather than merely asserting no numerical changes.
+
+All14 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released the three new boards and six changed originals only.
+
+- `paper-returns-current-clock-copy-20261109-c4-sd`
+- `paper-returns-current-clock-body-20261109-c4-sd`
+- `paper-returns-clock-reference-names-20261109-c4-sd`
+- `paper-returns-current-clock-phone-copy-20261109-c4-sd`
+- `paper-returns-current-clock-phone-body-20261109-c4-sd`
+- `paper-returns-legacy-contract-qualifiers-20261109-c4-sd`
+- `paper-returns-current-and-historical-names-20261109-c4-sd`
+- `paper-returns-current-state-reference-copy-20261109-c4-sd`
+- `paper-returns-current-state-reference-body-20261109-c4-sd`
+- `paper-returns-current-source-entry-map-20261109-c4-sd`
+- `paper-returns-current-state-reference-name-20261109-c4-sd`
+- `paper-returns-phone-disclosure-legibility-20261109-c4-sd`
+- `paper-returns-desktop-disclosure-legibility-20261109-c4-sd`
+- `paper-returns-current-source-finish-20261109-c4-sd`
+
+No source implementation, live data request, browser interaction, provider configuration, deployment, PR approval or held import was changed by this phase.
+
 ## Active continuation
 
-The eight-file successor now also includes the D06 first-reading and exact-values source parity companions. Preserve accepted designs and current holds. The next bounded finding is the canonical Terminal Returns early-close specimen: its historical20:00 after-hours end is superseded by candidate#814's server-supplied17:00 boundary. Inspect current source and exact Paper targets before adding a clearly qualified companion; preserve the held desktop import and historical values, and do not relabel old aggregates as readings for the shortened interval.
+The successor now covers nine design files, including current Terminal Returns. Preserve all accepted work and existing holds. The next bounded design gap is T47's existing draft Clear contract: the drawings show search opening ranks21–50, but do not visually show restoration of the exact pre-search open/closed choice. Inspect its native contract and add a qualified paired return-state companion, preserving the synthetic50-row assumption, source/approval limits and Draft status. The Shared Market Tools and Research Launcher remains Reference; no current-build promotion was justified by the bounded authority inspection.
+
 
 ## Acceptance boundary
 
