@@ -182,3 +182,16 @@ record that gap.
 8. Only after the canary: flip the row to the hermes shape, add the
    `_ADAPTER_EXECUTION_SURFACES` entry and a `worker_eligible` alias
    (separate reviewed changes).
+
+
+## Amendment after distinct review #4 (F6, integrator)
+
+"No env-passing seam exists" is literally true of the `t3_thread_launch` tool arguments but operationally incomplete:
+the donor's provider-instance `environment` (`packages/contracts/src/providerInstance.ts:79`), selected through
+`modelSelection.instanceId` (which `_launch` already sends from `spec.model`), is merged into the Claude process env by
+`apps/server/src/provider/Drivers/ClaudeHome.ts:82` and inherited by hooks; the cwd is selectable through
+`projectId`/`workspaceStrategy` (`existing_worktree.worktreePath`). Preferred deployment therefore: ONE dedicated
+t3-native provider instance on the children-hosting machine whose environment carries `MASTERMIND_SCOPE_ROOTS` plus the
+armed binding env (`POOL_EXECUTION_BINDING`, `MASTERMIND_SHARED_PLACEMENT`, `MASTERMIND_PLACEMENT_RECEIPT*`), with
+`workspaceStrategy` placing the child inside a scope root — no upstream T3 patch required. Not verified live; the installed
+T3 version's parity with the donor pin is UNKNOWN. Canary precondition unchanged in substance.

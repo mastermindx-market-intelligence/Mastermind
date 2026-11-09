@@ -202,6 +202,21 @@ def test_malformed_token_file_is_a_typed_broken_enrollment_not_a_crash(tmp_path)
         assert malformed not in composition.reason  # no token material echoed
 
 
+def test_non_utf8_token_file_is_a_typed_broken_enrollment_not_a_crash(tmp_path):
+    # Review #4 F2: the read path caught only OSError, so bytes that are not
+    # UTF-8 raised UnicodeDecodeError straight into the service seam.
+    token_file = tmp_path / "binary-token"
+    token_file.write_bytes(b"\xff\xfe garbage")
+    composition = compose_t3_native_adapter(
+        Runtime.at(tmp_path), inspector=FakeInspector(),
+        token_file=token_file, environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert not composition.composed and composition.adapter is None
+    assert "UnicodeDecodeError" in composition.reason
+    assert "garbage" not in composition.reason
+
+
 def test_service_seam_surfaces_a_broken_enrollment_and_never_raises(tmp_path, caplog):
     runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
     primary = _primary_owner(runtime, tmp_path)

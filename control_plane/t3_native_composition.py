@@ -185,7 +185,9 @@ def _read_access_token(token_file: Path) -> str:
     """Read the bearer token from its file.  The value is never logged."""
     try:
         raw = token_file.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        # Review #4 F2: a non-UTF-8 token file must be a typed broken
+        # enrollment like any other unreadable file, never a service crash.
         raise T3NativeCompositionError(
             f"t3 access token file {token_file} is unreadable: "
             f"{type(exc).__name__}"
