@@ -2,8 +2,8 @@
   "schema": "paper.estate.effects.v2",
   "operation": "paper-estate-organization-20261108-c1",
   "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
-  "count": 148,
-  "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay.",
+  "count": 168,
+  "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay. Five post-head follow-through records are preserved by exact PR comment references. AI-worker continuation receipts use separate bounded chunks in the same evidence store.",
   "operations": [
     {
       "operation_id": "peo-20261108-c1-directory-name-01",
@@ -2160,6 +2160,177 @@
       "before_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
       "after_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
       "receipt_path": "effects/operations-139-148.json"
+    },
+    {
+      "operation_id": "peo-20261108-c1-archive-discovery-note-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6733770654"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-archive-note-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6733770654"
+    },
+    {
+      "operation_id": "peo-20261108-c1-pin-source-links-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "PAPER_RICH_TEXT_SCHEMA_REQUIRED",
+      "receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6734003919",
+      "reconciliation": "Schema rejected; exact original targets unchanged; corrected HTML payload separately applied, no replay."
+    },
+    {
+      "operation_id": "peo-20261108-c1-pin-source-links-html-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6734003919"
+    },
+    {
+      "operation_id": "peo-20261108-c1-finish-pinned-source-links-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6734003919"
+    },
+    {
+      "operation_id": "peo-20261109-c1-agent-protocol-page-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "create_page",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "5de70a0d083e575d4f2554aa0e98caa1a53a9f032da49673ccabf0f7973b90b9",
+      "after_snapshot": "48818e9d0cc50f9362d242191e85043a15dbc959a04cc2510e0b6ef5b1fd73ed",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-agent-protocol-header-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "48818e9d0cc50f9362d242191e85043a15dbc959a04cc2510e0b6ef5b1fd73ed",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-authority-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-learn-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-design-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-build-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-history-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-reader-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-roles-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-export-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-return-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-ai-cover-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-ai-start-page-label-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "update_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+      "after_snapshot": "256ca1abda085f26222255d57ad251359b0079d85cdd18a681a4fabd3be0ca65",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-page-order-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "arrange_pages",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "256ca1abda085f26222255d57ad251359b0079d85cdd18a681a4fabd3be0ca65",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "receipt_path": "effects/agent-navigation-001-015.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-finish-agent-protocol-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "receipt_path": "effects/agent-navigation-001-015.json"
     }
   ]
 }

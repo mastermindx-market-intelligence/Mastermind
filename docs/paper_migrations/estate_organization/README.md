@@ -8,6 +8,10 @@ Current Chairman assignment, 8 November 2026 (America/Vancouver): take Meta-CEO 
 
 This extends the existing migration and design-clarity work. It is not a new product, runtime, workstream registry, design system, or authority store. Source evidence lives here in the existing Mastermind repository; Paper contains the usable navigation. Organizational linkage is PLAN_NOT_ORG_LINKED until an existing matching Agent OS owner is identified. That does not block this assigned source/design work.
 
+## Current continuation · AI workers are the primary audience
+
+The central [Agent README](AGENT_README.md) and native [AI-worker protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0) are applied and visually verified. The current index includes 556 observed pages, including recent GMI, Prophet and Mastermind OS additions. File-local orientation is in progress; see [CHECKPOINT.md](CHECKPOINT.md). The earlier completed pass below remains its dated evidence, not the current source-delivery frontier.
+
 ## Start here
 
 - [Open the Paper estate guide](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0).
@@ -31,11 +35,11 @@ Inventory coverage is separate from retention coverage. A migrated copy is not p
 
 ## Phase ladder
 
-1. **Estate census — complete at the recorded observation.** All 83 listed resources are classified: 80 readable design files, 544 pages and 19 dividers. One Others resource behaves as a container despite its listed type. Baseline names and page aliases remain searchable.
+1. **Estate census — complete at the recorded observation.** The initial recorded pass classified 83 resources: 80 readable design files, 544 pages and 19 dividers. The current metadata snapshot is in FILE_INDEX.json. One Others resource behaves as a container despite its listed type. Baseline names and page aliases remain searchable.
 2. **Navigation and status — applied.** The existing directory now has eight navigation pages; 66 distinct file names are clarified. Product map, exact page links, three family indexes, lineage, recovery and local Sector guidance are in place. All 62 original legacy signposts now route to the exact estate entry while preserving every prior design/recovery destination.
 3. **Retention — explicit by scope.** Targeted comparisons cover Sector, News, Memory, Policy, Options, Crypto and Commodities; prior accepted evidence covers additional families. RETENTION.md separates exact selections, complementary designs and unresolved comparisons. No exhaustive historical parity or production acceptance is claimed.
 4. **Cleanup — qualified candidates isolated.** All 15 pages of 12 tooling/empty files were inspected. Seven files are empty; five contain genuine tool specimens. Labels separate them from design work. Physical archive/delete/resource-move remains blocked by the current Paper catalog.
-5. **Acceptance and continuity — Paper verification complete; source delivery next.** All legacy links, index targets and representative layouts passed. This session's 78 edited-board indicators were finished with exact targets. Deliver the source record through actual repository controls. A checkpoint never substitutes for continuing a safe next action.
+5. **Acceptance and continuity — initial pass verified; AI-worker continuation active.** All legacy links, index targets and representative layouts passed. This session's 78 edited-board indicators were finished with exact targets. Deliver the source record through actual repository controls. A checkpoint never substitutes for continuing a safe next action.
 
 ## Naming and authority model
 
