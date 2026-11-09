@@ -141,6 +141,26 @@ class InstalledGatewayRoutingTests(unittest.TestCase):
             ("secretary", "thread-binding"),
         )
 
+    def test_each_role_is_addressable_by_exact_hyphenated_name(self):
+        # The true registered Slack slash alias must also route as
+        # <@sharedbot> role-name: ..., including chief-of-staff.
+        conf = self.conf
+        test_fleet = gateway.Fleet.__new__(gateway.Fleet)
+        test_fleet.conf = conf
+        for role in gateway.routable(conf):
+            with self.subTest(role=role):
+                self.assertEqual(test_fleet.slash_agent("/mx-" + role), role)
+                self.assertEqual(
+                    gateway.route(conf,
+                                  text="<@U0BT71H4FQE> " + role + ": test",
+                                  channel="C0C5FCK1F45", user="U0BRET6191C",
+                                  is_dm=False)[0], role)
+                self.assertEqual(
+                    gateway.route(conf,
+                                  text="<@U0BT71H4FQE> " + role + ": test",
+                                  channel="C0C5FCK1F45", user="U0BRET6191C",
+                                  is_dm=False, binding="engineering")[0], role)
+
     def test_nine_routable_profiles_with_one_app(self):
         self.assertEqual(len(gateway.routable(self.conf)), 9)
         self.assertEqual(len(self.conf["apps"]), 1)
