@@ -1,6 +1,6 @@
 {
   "schema": "PAPER_ACCENT_BEFORE_AFTER_MANIFEST_V1",
-  "changeCount": 2263,
+  "changeCount": 2268,
   "parts": [
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0001.json",
@@ -170,6 +170,14 @@
       "commit": "a70fb82ef25e2b88c96144752067f65d725c265f",
       "method": "EXACT_CONTENT_READBACK",
       "changeCount": 1
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0024.json",
+      "sha": "8730d05a9135231e9adfddb062c384a31bb74cd3",
+      "bytes": 139122,
+      "commit": "0c57c72537da32c4e388b4b3795e95a49b7bddc0",
+      "method": "EXACT_CONTENT_READBACK",
+      "changeCount": 5
     }
   ],
   "previousFullSnapshot": {
