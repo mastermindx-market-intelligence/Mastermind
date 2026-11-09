@@ -33,3 +33,28 @@ Base pin: \`Mastermind@06ef56a39c085af72bcbf0866db8e43f99cd6034\`.
 - Roll back through the incumbent owner using the saved original exact file with the same launchd service; do not destroy \`relay-state.json\`, native Hermes databases or pending jobs. Reconcile any ambiguous Slack posts rather than reposting after an unknown effect.
 
 **Do not call this deployment complete on CI alone.**
+
+## Native profile isolation — required in accepted release
+
+The older M2 Socket Mode launcher set `HERMES_PROFILE=role` but did not
+select a Hermes home; installed Hermes `get_hermes_home()` selects
+`HERMES_HOME` or the pre-parser `hermes --profile <real-name>` flag.
+Without the flag a Slack role can silently reuse the machine's default profile,
+memory, and model credentials even if the message is labeled differently.
+**The candidate now passes the actual role as a native `--profile` selector
+before `chat`**, while keeping `HERMES_PROFILE` as the task attribution label.
+
+The installed 0600 M2 roster uses a legacy `meta-ceo.profile=hermes` value
+and the native profile `hermes` does **not** exist; the authentic Meta-CEO
+charter is in the enrolled `meta-ceo-uncensored` profile's `SOUL.md`.
+Only `meta-ceo:hermes` is normalized **in memory** to that valid native home
+for compatibility; other role mappings are not silently rewritten and the
+original roster remains unchanged. Candidate defaults now directly name
+`meta-ceo-uncensored`. Verify `hermes --profile secretary profile show
+secretary`, `--profile engineering`, and `--profile meta-ceo-uncensored`
+on the intended host without model execution before cutover.
+
+**Hard acceptance:** same-thread continuity is not sufficient if all personas
+share the same native home. Read the exact distinct native session bindings,
+profile/homes, and same-thread role switch across Secretary and Engineering.
+A virtual Slack persona is not a separate native Slack `@user` identity.
