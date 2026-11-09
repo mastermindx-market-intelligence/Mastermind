@@ -254,9 +254,44 @@ All33 phase operations returned APPLIED_RESPONSE_OBSERVED (16 Mastermind Paper;1
 - `paper-forex-prepare-rule-current-scope-20261108-c4-sd`
 - `paper-forex-review-gallery-finish-20261108-c4-sd`
 
+## Forex My watches foreground integration — verified
+
+The same exact source pin and owner contract above now inform current main screens `4Z4-0` (1440×1050) and `97H-0` (390×844). The prior phone put its local-only explanation below both rows and outside the initial viewport, while exposing unsupported32px Pause/Resume controls. This phase corrects that foreground journey in place; no extra main-screen or state-store surface was created.
+
+### Final behavior represented by the design
+
+- Account inventory and local preparations are visibly separate. Compact account-status components `B5T-0` and `B5Y-0` precede the draft heading/list. Their layer names explicitly identify a signed-in, inventory-unavailable fixture. Reload watches is a read action; unavailable is not rendered as zero saved conditions and does not reconcile a pending write.
+- Draft headings `B5H-0` and `B5N-0` say “Prepared in this tab”, “2 in this tab”, and that the conditions are not saved/active. The phone shows this qualification before its first draft.
+- Desktop list `B63-0` and phone list `B6H-0` retain the two original illustrative price-close conditions: USD/JPY below145.60 and EUR/USD above1.0960, each for two consecutive completed4H closes. Both rows now have current-source Review condition, Save to account and Remove draft controls, each at least44px high. Unsupported foreground Paused, Pause and Resume states were removed; the explicitly future lifecycle references remain unchanged elsewhere.
+- The original23Oct2026,16:00UTC rule values are explicitly labeled sample EXPIRY. The16Oct2026,16:00UTC footer is labeled context sample. No price, threshold, date, source event, market observation or account-owned count was changed. The top preview retained its compact existing date text after a longer replacement wrapped poorly.
+- Source-dependent variants remain in `AZ5-0`: signed-out uses Sign in/Sign in to save, account checking/unavailable disables saving, pending write preserves its original-operation state, and confirmed inventory shows owned saved-inactive records. The present main-screen fixture assumes auth is ready with inventory read unavailable; it does not represent a live user/account or promise successful persistence.
+
+### Verification
+
+Root inspected full desktop and390px first-viewport screenshots after the changes. The phone now exposes account status, local draft qualification, and all three first-draft controls before its bottom navigation. A final width correction keeps Reload watches on one line without reducing its44px target. The second row and existing Changes/Data & sources content remain in the existing scroll-content structure.
+
+Native tree checks confirm the desktop list is1168×224 within the existing1232×879 main frame. The phone list is354×368 within the existing390×1155 scroll-content frame. Existing pagehead, Changes section and source footer remain. The phone viewport continues to clip scroll content by design; a whole-scroll-child screenshot respects that ancestor clip, so it is not claimed as full scrolled-browser proof. Native structure and dimensions were checked, and real scrolling, keyboard/focus, authenticated saving and runtime delivery remain separate acceptance work.
+
+Explicit finish released only `4Z4-0` and `97H-0`. All14 phase operations returned APPLIED_RESPONSE_OBSERVED through Studio Direct:
+
+- `paper-forex-main-desktopintro-20261108-c4-sd`
+- `paper-forex-main-mobileintro-20261108-c4-sd`
+- `paper-forex-main-desktopaccount-20261108-c4-sd`
+- `paper-forex-main-mobileaccount-20261108-c4-sd`
+- `paper-forex-main-account-before-drafts-20261108-c4-sd`
+- `paper-forex-main-desktoplist-first-20261108-c4-sd`
+- `paper-forex-main-mobilelist-first-20261108-c4-sd`
+- `paper-forex-main-desktoplist-second-20261108-c4-sd`
+- `paper-forex-main-mobilelist-second-20261108-c4-sd`
+- `paper-forex-main-context-clock-labels-20261108-c4-sd`
+- `paper-forex-main-source-state-names-20261108-c4-sd`
+- `paper-forex-main-header-clock-fit-20261108-c4-sd`
+- `paper-forex-main-mobile-reload-fit-20261108-c4-sd`
+- `paper-forex-main-finish-20261108-c4-sd`
+
 ## Active continuation
 
-Portfolio mobile, Bonds source recovery, Government Revenue320px return controls, and Forex review/current-account gallery are verified. Continue Forex main My watches desktop/mobile integration, then reconcile the protected Breadth overlap. The main screens still need current source controls and foreground local/account separation; no completion is claimed for those lanes.
+Portfolio mobile, Bonds source recovery, Government Revenue320px returns, Forex review/account gallery and current My watches desktop/mobile integration are verified. Continue exact-target Breadth reconciliation and the bounded completion of its root-created unfinished constituents/receipts views only where current effects/custody permit. Preserve the improved Summary, external header/tab changes, source limits and original fixtures. No Breadth completion is yet claimed.
 
 ## Acceptance boundary
 
