@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the 19 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the 20 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -33,6 +33,7 @@ Direct entry points for the 19 files amended in this successor. Each file retain
 | [Expectation Surface](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | Added proposed EN/ZH finder-loading and unavailable states that preserve the query and chart, with a source-bound retry and no-match contract. |
 | [Intelligence Hub](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | Updated the entry map for later current/reference work, added exact Build and Archive destinations, and distinguished provisional research-list returns. |
 | [Bonds decision workspace](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0) | Aligned the retained market read across desktop, phone and tablet duration review; preserved all scenario calculations, inputs and inspector controls. |
+| [Tools and Research Launcher](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0) | Qualified the three displayed search matches as examples in dark/light phone references, preserving the global search scope and all destinations. |
 
 ## Verified mobile meaning corrections
 
@@ -1184,9 +1185,43 @@ All eight phase operations returned APPLIED_RESPONSE_OBSERVED: context-copy, des
 
 This proves static state-family consistency. It does not establish executed origin → review → return behavior, a live market interpretation, scenario-calculation implementation, or deployment acceptance.
 
+## Tools and Research Launcher — qualify example search results
+
+[File/page](https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0), **Shared Market · All Tools + Research Launcher · Reference**. Root verified the current sixteen-board inventory and the dark/light phone search specimens `ZZ-0` / `16H-0`.
+
+### Internal contradiction
+
+The query is **market**. Both phone specimens said **3 destinations**, while their own visible contract says search covers every category and matches workspace names, descriptions and category labels. Their displayed results are Market Dashboard, News Feed and Market Structure.
+
+The same file's Research directory `2K1-0` visibly contains **Market Memory** at `2O4-0` and **Market Reference** at `2OE-0`. These literal name matches are within the declared global scope. The three displayed rows therefore cannot be presented as a proven exhaustive result count.
+
+This finding is grounded in the native file's own contract and directory entries. A current implementation-owner binding was not established in the bounded audit, so no application search behavior or new owner is inferred.
+
+### Four precise copy changes
+
+| Native leaves | Before | After |
+| --- | --- | --- |
+| `15L-0`, `1C3-0` | 3 destinations | **3 example matches** |
+| `15N-0`, `1C5-0` | Search includes every category, not just the selected market. | **Search covers every category. These three results are examples.** |
+
+The query, category labels, three destination rows, matching-field rule, Close/Clear controls and surrounding Research directory remain unchanged. The correction does not narrow global search merely to fit the fixture, invent a replacement total, add hypothetical result rows or promote Reference status.
+
+### Native verification
+
+Root inspected both complete **390×844** native phone captures. The clarified note wraps to two lines, the three-row result list flows below it, and the matching rule remains visible with clear bottom space. Both count labels fit in their existing header rows.
+
+Exact readback preserves73 unaffected leaves in each phone specimen and all71 leaves in the Research directory: **217 unchanged text leaves**. Only the four intended leaves changed.
+
+Both operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-tools-search-example-scope-20261109-c4-sd`
+- `paper-tools-search-example-finish-20261109-c4-sd`
+
+Explicit finish released only `ZZ-0` and `16H-0`. No implementation, route, permissions, account or release mutation occurred.
+
 ## Active continuation
 
-The successor covers19 design files. Bonds duration-review context now matches the current R10 origins, with its foreground inspectors preserved exactly. Continue with the confirmed shared tool-search fixture-completeness correction, then reassess remaining safe gaps without duplicating later current work.
+The successor covers20 design files. The shared tool-search references now distinguish examples from an exhaustive result set. Remaining bounded audits are checking changed authority pointers in migrated foundations and contextual consistency in the retained Returns dossier; preserve reference status and existing fixtures.
 
 ## Acceptance boundary
 
