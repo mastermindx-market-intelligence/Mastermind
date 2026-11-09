@@ -171,17 +171,21 @@ def test_native_assets_precede_locked_rust_checks_and_tests():
         assert assets < runs.index(command)
 
 
-def test_opt_in_native_rotation_executes_in_ci_and_package_stays_default_off():
+def test_native_rotation_executes_in_ci_and_package_builds_enabled():
     job = native_job()
     runs = commands(job)
     standard = "cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml"
     enabled_check = "MM_NATIVE_REFRESH_ENABLED=1 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml"
     enabled_test = "MM_NATIVE_REFRESH_ENABLED=1 cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml"
-    package = "./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked"
+    package = ("MM_NATIVE_REFRESH_ENABLED=1 ./node_modules/.bin/tauri build "
+               "--ci --no-sign --bundles app -- --locked")
     assert runs.count(standard) == 1
     assert runs.count(enabled_check) == 1
     assert runs.count(enabled_test) == 1
+    assert runs.count(package) == 1
     assert runs.index(standard) < runs.index(enabled_check) < runs.index(enabled_test) < runs.index(package)
+    # The flag enables only the source path per-step; no registered client or
+    # tenant credential may enter the CI environment.
     assert "MM_NATIVE_REFRESH_ENABLED" not in job["env"]
     assert "MM_NATIVE_CLIENT_ID" not in job["env"]
 
@@ -189,8 +193,9 @@ def test_opt_in_native_rotation_executes_in_ci_and_package_stays_default_off():
 def test_package_is_unsigned_locked_verified_and_not_published():
     job = native_job()
     runs = commands(job)
-    package = next(run for run in runs if run.startswith("./node_modules/.bin/tauri build "))
+    package = next(run for run in runs if "./node_modules/.bin/tauri build" in run)
     assert shlex.split(package) == [
+        "MM_NATIVE_REFRESH_ENABLED=1",
         "./node_modules/.bin/tauri", "build", "--ci", "--no-sign", "--bundles", "app", "--", "--locked"
     ]
     assert runs.index(package) > next(i for i, run in enumerate(runs) if run.startswith("cargo test "))
