@@ -35,7 +35,7 @@ from integrations.executive_mcp.e1_http import BoundedE1App, MAX_RESPONSE_BYTES
 from integrations.hermes_delegate.executive import (
     ExecutiveSelectedChildTarget, SELECTED_CHILD_FRAME_SCHEMA,
     selected_child_response, validate_selected_child_ingress_envelope,
-    validate_selected_child_frame,
+    validate_selected_child_frame, validate_child_request_admit_frame,
 )
 from integrations.hermes_delegate.schema import SubmissionError
 from integrations.mastermind_executive_app.app import AppSettings, _authenticate, _outcome_response, _read_body_arguments
@@ -125,6 +125,49 @@ def _receipt_shape(receipt):
 async def _owner_call(provider, *args):
     value = await asyncio.to_thread(provider, *args)
     return await value if inspect.isawaitable(value) else value
+
+
+#: The child-request admission answer schema (WO-13).  The same literal is
+#: held by ``control_plane/executive_service.py`` (:CHILD_REQUEST_ADMISSION_SCHEMA)
+#: and by the Hermes plugin's transport; the core never imports this
+#: package, so the literals are kept byte-identical by test
+#: (``tests/test_hermes_child_request_host_forwarding.py``).
+CHILD_REQUEST_ADMISSION_SCHEMA = "mastermind.child_request_admission/v1"
+CHILD_REQUEST_ADMISSION_STATES = frozenset({"ADMITTED", "REPLAY", "WAIT"})
+_CHILD_REQUEST_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _child_request_admission_result(raw: Any, *, command_id: str) -> dict[str, Any]:
+    """Validate one closed child-request admission projection (WO-13).
+
+    The projection is finite and closed: the state is canonical, the
+    durable command id echoes the caller's command, an ADMITTED/REPLAY
+    answer always carries the owner's Job handle and a WAIT always carries
+    its precise wait reason.  It names no worker, provider, host or
+    account — admission is not placement (OQ-9).
+    """
+
+    if type(raw) is not dict:
+        raise ValueError("child request admission result is not an object")
+    if raw.get("schema") != CHILD_REQUEST_ADMISSION_SCHEMA:
+        raise ValueError("child request admission result has a foreign schema")
+    state = raw.get("state")
+    if state not in CHILD_REQUEST_ADMISSION_STATES:
+        raise ValueError("child request admission state is not canonical")
+    if raw.get("command_id") != command_id:
+        raise ValueError("child request admission command does not echo the caller")
+    if state in ("ADMITTED", "REPLAY"):
+        if not isinstance(raw.get("job_id"), str) or not raw["job_id"]:
+            raise ValueError("child request admission carries no job id")
+    if state == "WAIT":
+        if not isinstance(raw.get("wait_reason"), str) or not raw["wait_reason"]:
+            raise ValueError("child request WAIT carries no wait reason")
+    for key in ("request_digest",):
+        value = raw.get(key)
+        if value is not None and (not isinstance(value, str)
+                                  or _CHILD_REQUEST_DIGEST_RE.fullmatch(value) is None):
+            raise ValueError(f"child request admission {key} is invalid")
+    return dict(raw)
 
 
 class CooApp:
@@ -612,6 +655,142 @@ class CooApp:
         if len(body) > MAX_RESPONSE_BYTES:
             return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
         return JSONResponse(envelope, status_code=200)
+
+    async def child_request_admit(self, request: Request, authenticated,
+                                  validated: Mapping[str, Any]) -> JSONResponse:
+        """App-side forwarding of one host-frozen child-request admission.
+
+        This is the WO-12 Hermes seam: the ``mastermind`` delegation backend
+        is an EXTERNAL trusted-host caller, not a model, so it never touches
+        the model-facing ``mmx_delegate`` catalogue (whose pinned digest
+        refuses the admit action by design — PR #2317 assigns this App-side
+        forwarding to WO-12).  The caller names the exact admission command
+        the trusted host already froze into the Control's
+        ``child_request_material``; every authority field in the private
+        frame comes from this App's own authenticated providers — the
+        caller supplies none of them, and the ``ChildExecutionRequest.v1``
+        envelope itself never travels through the caller.
+
+        The frame is sent ONCE.  A digest conflict is a durable, precise
+        answer (never a second Job); an uncertain transport keeps the
+        original command for reconciliation — there is no retry, no fresh
+        key and no replacement thread here.
+        """
+
+        principal, stamp = authenticated
+        command = validated["command"]
+        work_ref = validated["work_ref"]
+
+        def answer(ok: bool, kind: str = "", message: str = "",
+                   result: Mapping[str, Any] | None = None,
+                   status: int = 200) -> JSONResponse:
+            payload: dict[str, Any] = {"ok": ok}
+            if ok:
+                payload["result"] = dict(result or {})
+            else:
+                payload["error"] = {"kind": kind, "message": message}
+            return JSONResponse(payload, status_code=status)
+
+        def refused(reason: str, status: int = 200) -> JSONResponse:
+            return answer(False, "refused", reason, status=status)
+
+        def unknown(reason: str) -> JSONResponse:
+            # A possible admission stays unknown; recover by the SAME
+            # command (the owner replays the first Job, never a second).
+            return answer(False, "unknown", reason)
+
+        target = self.settings.selected_child_target
+        if type(target) is not ExecutiveSelectedChildTarget:
+            return refused("EXECUTIVE_CHILD_REQUEST_TARGET_NOT_BOUND")
+        try:
+            target.require_current()
+        except Exception:
+            return refused("EXECUTIVE_CHILD_REQUEST_TARGET_UNAVAILABLE")
+        try:
+            authority, context = await self._authority(principal, work_ref, stamp)
+        except Exception:
+            return refused("EXECUTIVE_CHILD_REQUEST_AUTHORITY_REFUSED")
+        try:
+            target.require_current()
+        except Exception:
+            return refused("EXECUTIVE_CHILD_REQUEST_TARGET_UNAVAILABLE")
+        if not await self._same_auth(request, authenticated):
+            return refused("EXECUTIVE_CHILD_REQUEST_AUTHORITY_REFUSED")
+        target_digest = target.material_digest()
+        if self.settings.selected_child_target is not target:
+            return refused("EXECUTIVE_CHILD_REQUEST_TARGET_UNAVAILABLE")
+        frame = {
+            "schema": SELECTED_CHILD_FRAME_SCHEMA,
+            "request": {"action": "selected_child_admit", "command": command},
+            "target_digest": target_digest,
+            "principal": principal_frame(principal),
+            "principal_context": dataclasses.asdict(context),
+            "capability_profile_digest": authority.capability_profile_digest,
+        }
+        try:
+            validate_child_request_admit_frame(frame)
+        except SubmissionError:
+            return refused("EXECUTIVE_CHILD_REQUEST_FRAME_INVALID")
+        try:
+            response = await self._client.send_frame(
+                self.settings.executive.ceo_ingress_socket_path, frame)
+        except Exception:
+            # The frame may already have reached the Control. Never prove a
+            # no-effect outcome from an unrecognized post-send failure.
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        if type(response) is not CeoIngressResponse:
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        if response.transport == TRANSPORT_NOT_SENT:
+            # Provably never delivered: a preflight refusal, not an effect.
+            return refused("EXECUTIVE_CHILD_REQUEST_NOT_SENT")
+        if response.transport != TRANSPORT_SENT_OK:
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        if response.ok is not True:
+            error = response.error if isinstance(response.error, Mapping) else {}
+            code = error.get("code")
+            if code == "conflict":
+                # The same (root, immediate_parent, logical_child_key) was
+                # admitted with a DIFFERENT request digest: durable, finite,
+                # never a second execution and never a silent re-admission.
+                return answer(False, "conflict",
+                              "the child request conflicts with its admitted digest")
+            if code == "invalid_input":
+                # The command was not frozen / the envelope was invalid:
+                # a precise pre-effect refusal; nothing was admitted.
+                return refused("EXECUTIVE_CHILD_REQUEST_COMMAND_NOT_FROZEN")
+            # A post-admission observation failure may follow a committed
+            # admission (the Control refuses to claim no-effect): unknown.
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        try:
+            projection = _child_request_admission_result(
+                response.result, command_id=command)
+        except (TypeError, ValueError):
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        # Recheck this same principal's facts and held target after the
+        # transport await, exactly like the selected-child lane.
+        try:
+            current_authority, current_context = await self._authority(
+                principal, work_ref, stamp)
+            if (current_context != context
+                    or current_authority.capability_profile_digest
+                    != authority.capability_profile_digest
+                    or not await self._same_auth(request, authenticated)):
+                raise ValueError("child request principal changed")
+            target.require_current()
+            if (self.settings.selected_child_target is not target
+                    or target.material_digest() != target_digest):
+                raise ValueError("child request target changed")
+        except Exception:
+            # The admission may have committed; the projection is withheld
+            # and the caller reconciles by the original command.
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        try:
+            body = canonical_json({"ok": True, "result": projection})
+        except (TypeError, ValueError):
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        if len(body) > MAX_RESPONSE_BYTES:
+            return unknown("EXECUTIVE_CHILD_REQUEST_EFFECT_UNKNOWN")
+        return answer(True, result=projection)
 
     async def call(self, request: Request):
         name = request.path_params["tool"]
