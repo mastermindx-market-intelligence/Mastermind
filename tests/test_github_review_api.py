@@ -75,9 +75,16 @@ class Ledger:
     def published_command_ids(self):
         return frozenset(self.done)
 
+    def has_publication_claim(self, *, publication_command_id, repository,
+                              pull_number, head_sha, event, body):
+        prior = self.claims.get(publication_command_id)
+        if prior is not None and prior != (repository, pull_number, head_sha, event, body):
+            raise ReviewVerificationRefused("publication claim identity mismatch")
+        return prior is not None
+
     def reserve_publication(
         self, *, publication_command_id, repository, pull_number,
-        head_sha, event, body,
+        head_sha, event, body, preflight_deadline=None,
     ):
         identity = (repository, pull_number, head_sha, event, body)
         prior = self.claims.get(publication_command_id)
@@ -281,7 +288,8 @@ def test_missing_review_id_on_success_is_effect_unknown_not_definite_refusal():
             event="COMMENT", body="Published but no id",
         )
 
-def test_preflight_read_unavailable_is_typed_effect_unknown_without_post():
+def test_preflight_read_unavailable_is_distinct_from_an_unknown_post():
+    from control_plane.github_review_intent_ingress import PublicationPreflightUnavailable
     posts = []
     def outage(req):
         if req.method == "POST":
@@ -290,7 +298,7 @@ def test_preflight_read_unavailable_is_typed_effect_unknown_without_post():
         return httpx.Response(503, json={"message": "temporarily unavailable"})
     api, _ = source(outage)
     publisher = armed(api)
-    with pytest.raises(PublicationEffectUnknown):
+    with pytest.raises(PublicationPreflightUnavailable):
         publisher.publish_review(
             publication_command_id="gh-review-publish:" + "a" * 32,
             repository=REPO, pull_number=42, head_sha=SHA,

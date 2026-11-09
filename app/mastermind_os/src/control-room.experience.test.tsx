@@ -56,10 +56,10 @@ function mount() {
 async function enter() {
   const user = userEvent.setup();
   const navigation = screen.getByRole("navigation", {
-    name: "Company operations",
+    name: "Mission navigation",
   });
   await user.click(
-    within(navigation).getByRole("button", { name: "Control Room" }),
+    within(navigation).getByRole("button", { name: "Control Room workspace" }),
   );
   return user;
 }

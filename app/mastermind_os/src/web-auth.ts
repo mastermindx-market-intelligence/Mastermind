@@ -1,3 +1,21 @@
+import {hostObservationWebMethods} from "./resources/host-observation-web";
+import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
+import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
+import {projectAccessPublicSelection} from "./access/project-access-host";
+import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
+import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
+import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
+import { knowledgeReadSelection } from "./knowledge/library/knowledge-read-port";
+import { validSourceOperationContextSelection } from './source-operations/context';
+import {createSourceOperationTransport,SOURCE_OPERATION_CAP} from './source-operations/transport';
+import { normalizeProjectAssociationSelection } from "./conversations/project-association";
+import { projectHistoryArguments } from "./orchestration/project-history-arguments";
+import {projectConversationArguments,PROJECT_CONVERSATION_READ_PATHS} from './conversations/project-conversation-transport';
+import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
+import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
+import { validJournalSelection } from "./project-journal";
+import { validDirectionSelection } from "./direction/accepted-direction";
+import { validProjectPlanSelection } from "./planning/project-plan";
 import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
   RESEARCH_SCOPE,
@@ -25,8 +43,16 @@ import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection 
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
+import { planningArguments, type PlanningOperation } from "./planning/project-planning-transport";
+import { projectExecutionArguments, projectExecutionResult, type ProjectExecutionOperation } from "./planning/project-execution-transport";
 import { attendedSelection } from "./fabric/attended-status";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+  type ExecutiveSessionTransport,
+} from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import type { AuthState, RawClient } from "./host";
 import {
   CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
@@ -402,6 +428,38 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", abort);
     }
   }
+  // Keep a prior interactive workspace grant usable while its replacement is
+  // obtained silently. Auth0 access-token expiry is not a user logout.
+  // Tokens stay private and memory-only; no bearer or refresh secret is persisted.
+  function scheduleTokenLifetime(resource: Resource, token: Token, ticket: number, restored: boolean) {
+    const owns = () => ticket === generation && tokens[resource] === token;
+    const remaining = Math.max(0, token.expires - now());
+    if (resource === "acquisition" || resource === "content") {
+      // Refresh ahead of common 5-minute Auth0 lifetimes, before the signed-in
+      // UI can flicker to the sign-in screen. A rejected silent attempt does
+      // not invalidate a still-live token or initiate a redirect.
+      const headroom = Math.min(60_000, Math.floor(remaining / 5));
+      if (headroom > 0) later(() => {
+        if (owns() && !flow && !explicitlySignedOut && !loggedOutElsewhere()) {
+          void restore(true).catch(() => {});
+        }
+      }, Math.max(0, remaining - headroom));
+    }
+    later(() => {
+      if (!owns()) return;
+      tokens[resource] = null;
+      if (resource === "executive") advanceExecutive();
+      if (resource === "research") invalidateResearch();
+      emit();
+      // Browser sleep/blocked iframes may delay pre-expiry renewal. Recover
+      // once again on expiry, with the existing one-attempt navigation guard.
+      // Research is an explicitly user-granted scope, never auto-restored.
+      if (resource === "acquisition" || resource === "content" ||
+          (restored && resource === "executive")) {
+        void restore(true).catch(() => {});
+      }
+    }, Math.max(0, token.expires - now()));
+  }
   async function transaction(
     resource: Resource,
     current: NonNullable<typeof flow>,
@@ -519,17 +577,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       check(ticket);
       tokens[resource] = token;
       if (resource === "executive") advanceExecutive();
-      later(
-        () => {
-          if (ticket === generation && tokens[resource] === token) {
-            tokens[resource] = null;
-            if (resource === "executive") advanceExecutive();
-            if (resource === "research") invalidateResearch();
-            emit();
-          }
-        },
-        Math.max(0, token.expires - now()),
-      );
+      scheduleTokenLifetime(resource, token, ticket, false);
       emit();
     } finally {
       remove("message", listener);
@@ -593,14 +641,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       tokens[resource] = token;
       if (resource === "acquisition") rememberSignedIn();
       if (resource === "executive") advanceExecutive();
-      later(() => {
-        if (ticket === generation && tokens[resource] === token) {
-          tokens[resource] = null;
-          if (resource === "executive") advanceExecutive();
-          emit();
-          void restore(true);
-        }
-      }, Math.max(0, token.expires - now()));
+      scheduleTokenLifetime(resource, token, ticket, true);
       emit();
     };
     const restoreOne = async (resource: "acquisition" | "content" | "executive") => {
@@ -883,6 +924,101 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       researchRequests.delete(controller);
     }
   }
+  /** One fixed mutation on the original command; failures never trigger retry. */
+  async function projectAdmissionAction(mode:"pause"|"resume",request:ProjectAdmissionPauseRequest|ProjectAdmissionResumeRequest):Promise<unknown>{
+    const payload=projectAdmissionPublicRequest(mode,request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("PROJECT_ADMISSION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/project-admission/${mode}`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("PROJECT_ADMISSION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("PROJECT_ADMISSION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
+  async function sourcePost(
+    path: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ) {
+    const ticket = generation,
+      token = tokens.acquisition;
+    if (!token || !valid("acquisition")) throw new Error("TOKEN_REQUIRED");
+    const controller = new AbortController(),
+      onAbort = () => controller.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    const timer = later(() => controller.abort(), READ_TIMEOUT_MS);
+    try {
+      if (controller.signal.aborted) throw new Error("READ_CANCELLED");
+      const response = await fetchFn(ORIGIN + path, {
+        method: "POST",
+        redirect: "error",
+        credentials: "omit",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.value}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("SOURCE_OPERATION_FAILED");
+      const result = await boundedJson(response, SOURCE_OPERATION_CAP);
+      if (
+        signal.aborted ||
+        controller.signal.aborted ||
+        ticket !== generation ||
+        !valid("acquisition")
+      )
+        throw new Error("READ_CANCELLED");
+      return result;
+    } finally {
+      clear(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+  /** One explicit original instruction pause; no replay or alternate destination. */
+  async function instructionAdmissionAction(request:InstructionPauseRequest):Promise<unknown>{
+    const payload=instructionPublicRequest("pause",request),ticket=generation,token=tokens.acquisition;
+    if(!payload || !token || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+    const signal=request.signal,controller=new AbortController();let timeout:ReturnType<typeof setTimeout>|undefined;
+    let fail!:(reason:Error)=>void;
+    const interrupted=new Promise<never>((_,reject)=>{fail=reject;});
+    void interrupted.catch(()=>{});
+    const cancel=()=>{controller.abort();fail(new Error("INSTRUCTION_OUTCOME_UNCONFIRMED"));};
+    try {
+      signal.addEventListener("abort",cancel,{once:true});
+      timeout=later(cancel,60_000);if(signal.aborted)cancel();
+      const body=JSON.stringify(payload);if(new TextEncoder().encode(body).length>16_384)throw new Error("INSTRUCTION_REQUEST_INVALID");
+      const exchange=async()=>{
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || !valid("acquisition"))throw new Error("INSTRUCTION_UNAUTHORIZED");
+        const response=await fetchFn(`${ORIGIN}/workspace/instruction-admission/pause`,{method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+          headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${token.value}`},body,signal:controller.signal});
+        if(!response.ok)throw new Error("INSTRUCTION_REQUEST_FAILED");
+        const result=await boundedJson(response,32_768);
+        if(signal.aborted || controller.signal.aborted || ticket!==generation || tokens.acquisition!==token || !valid("acquisition"))throw new Error("INSTRUCTION_OUTCOME_UNCONFIRMED");
+        return result;
+      };
+      return await Promise.race([exchange(),interrupted]);
+    } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
+  }
+
   /**
    * One acquisition-authenticated attempt at a fixed Control Room route.
    * The server owns each action grant. A post-dispatch auth change cannot
@@ -1006,28 +1142,39 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume",
+    route: "company-priorities" | "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
+    const planning=route.startsWith("project-planning/"), execution=route.startsWith("project-execution/"), fresh=route.startsWith("conversation/");
+    const dual=planning || execution || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
+    const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
+    if (dual && (!workspace || !valid("acquisition"))) throw new Error("WORKSPACE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((route === "submit" || route === "session/send" || route === "direct-native/consume") &&
+    if ((planning || execution || fresh || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
-    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
+    const body = JSON.stringify((route === "context" || route === "company-priorities") ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
-    const timer = later(abort, READ_TIMEOUT_MS);
+    // This one effect may first prepare its source (at most 120s), then owns
+    // the existing finite 300s foreground call. Reads and direct-native H2
+    // keep their incumbent deadline. No timeout can authorize a retry.
+    const foregroundResearch = route === "submit" && arguments_ !== null &&
+      typeof arguments_ === "object" && !Array.isArray(arguments_) &&
+      Reflect.get(arguments_, "execution_profile") === "research_only";
+    const timer = later(abort, (planning || execution || fresh) ? Math.max(0,Math.min(300_000,token.expires-now(),dual ? workspace!.expires-now() : Infinity)) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
-      tokens.executive === token && valid("executive");
+      tokens.executive === token && valid("executive") && (!dual ||
+        (generation===workspaceGeneration && tokens.acquisition===workspace && valid("acquisition")));
     let rejectAbort!: (error: Error) => void;
     const cancelled = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
     const rejectCancelled = () => rejectAbort(new Error("EXECUTIVE_REQUEST_CANCELLED"));
@@ -1038,14 +1185,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         const response = await fetchFn(`${ORIGIN}/os/executive/${route}`, {
           method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
           headers: { Accept: "application/json", "Content-Type": "application/json",
-            Authorization: `Bearer ${token.value}` },
+            Authorization: `Bearer ${token.value}`, ...(dual ? {"X-Mastermind-Workspace-Authorization":`Bearer ${workspace!.value}`} : {}) },
           body, signal: controller.signal,
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
-        if (!response.ok && !direct) throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok && !direct && !execution) throw new Error("EXECUTIVE_REQUEST_FAILED");
         const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
-        if (!response.ok && (![401,403,409,503].includes(response.status) || decodeDirectNativeResult(decoded)?.availability!=="UNAVAILABLE"))
-          throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok) {
+          const errorStatuses = execution ? [400, 401, 403, 409, 503] : [401, 403, 409, 503];
+          if (!errorStatuses.includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
+          if (execution) {
+            if (projectExecutionResult(decoded, route.slice("project-execution/".length) as ProjectExecutionOperation).ok !== false)
+              throw new Error("EXECUTIVE_REQUEST_FAILED");
+          } else if (decodeDirectNativeResult(decoded)?.availability !== "UNAVAILABLE") throw new Error("EXECUTIVE_REQUEST_FAILED");
+        }
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
         return decoded;
       })();
@@ -1059,6 +1212,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   return {
+    ...hostObservationWebMethods(read),
     research: {
       authGeneration: () => generation,
       available: () => configured && researchResource !== null && valid("research"),
@@ -1075,9 +1229,17 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
       context: (signal) => executivePost("context", null, signal),
+      companyPriorities: (signal) => executivePost("company-priorities", null, signal),
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
+      projectPlanning: { request: (operation,arguments_,signal) =>
+        executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
+      projectExecution: { request: (operation,arguments_,signal) =>
+        executivePost(`project-execution/${operation}`,projectExecutionArguments(operation,arguments_),signal) },
+      freshConversation: {request:(operation,arguments_,signal)=>
+        executivePost(FRESH_CONVERSATION_PATHS[operation],freshConversationArguments(operation,arguments_),signal)},
       directNative: {
+        correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {
           const normalized=normalizeDirectSelection(selection);
           if(!normalized)return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
@@ -1100,22 +1262,37 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
      * token this reports unavailable and executivePost sends no request.
      */
     executiveSession: {
+      projectConversations: {request: (operation,arguments_,signal) => {
+        const closed=projectConversationArguments(operation,arguments_);
+        return closed ? executivePost(PROJECT_CONVERSATION_READ_PATHS[operation],closed,signal)
+          : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+      }},
       authGeneration: () => executiveGeneration,
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      historyContext: (selection, signal) => {
+        const closed = projectHistorySelection(selection);
+        return closed ? executivePost("session/history-context", {selection: {work_ref: closed.workRef}}, signal)
+          : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+      },
       context: (selection, signal) => {
-        const normalized = normalizeSelection(selection);
+        const normalized = normalizeExecutiveSessionSelection(selection);
         if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
         return executivePost(
           "session/context",
-          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          { selection: sessionSelectionWire(normalized) },
           signal,
         );
       },
       send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
       references: (arguments_, signal) => executivePost("session/references", arguments_, signal),
-    } satisfies ExecutiveSessionTransport,
+      projectReferences: (arguments_, signal) => {
+        const closed = projectHistoryArguments(arguments_);
+        return closed ? executivePost("session/references", closed, signal)
+          : Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
+      },
+    } satisfies ProjectConversationHistoryTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.
     invalidationGeneration: () => generation,
@@ -1131,6 +1308,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readByokRoles: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/byok/roles/current`, signal, { cap: BYOK_ROLES_RESPONSE_CAP, typedUnavailableSchema: null }),
     readControlRoomState: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
     readControlRoomDiscovery: ({ signal }) =>
@@ -1159,11 +1338,131 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
     },
+    readProjectAccess: request => {
+      const selection=projectAccessPublicSelection(request);
+      if(!selection)return Promise.reject(Error("PROJECT_ACCESS_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-access/current?${new URLSearchParams({work_ref:selection.work_ref})}`,request.signal,
+        {cap:16_384,typedUnavailableSchema:"mastermind.workspace_project_access.v1"});
+    },
+    readProjectInstructions: request => {
+      const payload=instructionPublicRequest("content",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-instructions/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_instructions.v2"});
+    },
+    readInstructionAdmissionControl: request => {
+      const payload=instructionPublicRequest("current",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/current?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_instruction_admission_control.v1"});
+    },
+    pauseInstructionAdmission: request => instructionAdmissionAction(request),
+    readInstructionAdmissionOperation: request => {
+      const payload=instructionPublicRequest("status",request);
+      if(!payload)return Promise.reject(Error("INSTRUCTION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/instruction-admission/operation?${instructionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
+    },
+    readProjectAdmissionControl: request => {
+      const payload=projectAdmissionPublicRequest("current",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/current?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:"mastermind.workspace_project_admission_control.v1"});
+    },
+    pauseProjectAdmission: request => projectAdmissionAction("pause",request),
+    resumeProjectAdmission: request => projectAdmissionAction("resume",request),
+    readProjectAdmissionOperation: request => {
+      const payload=projectAdmissionPublicRequest("status",request);
+      if(!payload)return Promise.reject(new Error("PROJECT_ADMISSION_REQUEST_INVALID"));
+      return read("acquisition",`${ORIGIN}/workspace/project-admission/operation?${projectAdmissionQuery(payload)}`,request.signal,
+        {cap:32_768,typedUnavailableSchema:null});
+    },
+    readAutonomyPolicy: (request) => {
+      const { signal, ...selected } = request;
+      if (!isAutonomySelection(selected))
+        return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/autonomy/current?${new URLSearchParams({
+        work_ref: selected.work_ref, root_job_id: selected.root_job_id,
+      })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
+    },
+    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>(method==='read'||method==='options')
+      ?read('acquisition',ORIGIN+path,signal,{cap:SOURCE_OPERATION_CAP,typedUnavailableSchema:null})
+      :sourcePost(path,body,signal)),
+    readSourceOperationContext: (request) => {
+      const { signal, ...selected } = request;
+      if (!validSourceOperationContextSelection(selected)) return Promise.reject(new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID"));
+      const query = new URLSearchParams({ action: selected.action });
+      if (selected.workRef !== null) query.set('work_ref', selected.workRef);
+      return read("acquisition", `${ORIGIN}/workspace/source-operation/context?${query}`, signal, { cap: 4096, typedUnavailableSchema: null });
+    },
+    readProjectPlan: (request) => {
+      const { signal, ...selected } = request;
+      if (!validProjectPlanSelection(selected))
+        return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-plan/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_plan.v1" });
+    },
+    readProjectSessionAssociation: (request) => {
+      const { signal, ...value } = request;
+      const selected = normalizeProjectAssociationSelection(value);
+      if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
+    },
+    readProjectArchivePage: (request) => {
+      const { signal, ...cursor } = request;
+      if (!validArchiveCursor(cursor)) return Promise.reject(new Error("PROJECT_ARCHIVE_REQUEST_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/projects/archive/current?${new URLSearchParams({ after_work_ref: cursor.after_work_ref, catalogue_digest: cursor.catalogue_digest })}`,
+        signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" });
+    },
+    readProjectArchive: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/projects/archive/current`,
+      signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_project_archive.v1" }),
+    readProjectDirection: (request) => {
+      const { signal, ...selected } = request;
+      if (!validDirectionSelection(selected))
+        return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-direction/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 65_536, typedUnavailableSchema: "mastermind.workspace_project_direction.v1" });
+    },
+    readProjectKnowledgeCatalogue: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"catalogue");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-knowledge/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_knowledge.v1"});
+    },
+    readProjectKnowledgeMemory: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"memory");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-memory/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_preference.v1"});
+    },
+    readProjectKnowledgeSource: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"source");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-source/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_source.v1"});
+    },
+    readProjectJournal: (request) => {
+      const { signal, ...selected } = request;
+      if (!validJournalSelection(selected))
+        return Promise.reject(new Error("PROJECT_JOURNAL_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-journal/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 131_072, typedUnavailableSchema: "mastermind.workspace_project_journal.v1" });
+    },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readModelConfiguration: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/models/current`,
+      signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),
+    readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selected = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validResourceCapacitySelection(selected))
+        return Promise.reject(new Error("RESOURCE_CAPACITY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/resources/capacity/current?${new URLSearchParams(selected)}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_resource_capacity_result.v1" });
     },
     readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };
@@ -1255,6 +1554,29 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         {
           cap: RESULT_HTTP_BODY_BYTES,
           typedUnavailableSchema: "mastermind.workspace_role_result.v1",
+        },
+      );
+    },
+    readMissionResult: (request) => {
+      const { signal, ...input } = request;
+      const normalized = normalizeResultSelection(input);
+      if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
+      // Fixed acquisition GET. The compound cap is the incumbent 2_000_000
+      // stream ceiling; the nested 16KiB ceiling stays in the result decoder.
+      // Typed 503 is the closed compound body, not a nested Result document.
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/mission-result/current?${new URLSearchParams({
+          work_ref: normalized.workRef,
+          root_job_id: normalized.rootJobId,
+          job_id: normalized.jobId,
+          attempt_id: normalized.attemptId,
+          result_envelope_digest: normalized.resultEnvelopeDigest,
+        })}`,
+        signal,
+        {
+          cap: MAX_RESPONSE_BYTES,
+          typedUnavailableSchema: "mastermind.workspace_mission_result.v1",
         },
       );
     },

@@ -2144,10 +2144,11 @@ def test_installed_collector_refuses_without_child_when_proof_branch_fails(
     assert child_seen is False
 
 
+@pytest.mark.parametrize("mutation_kind", ["worktree", "temporary_pack"])
 def test_installed_collector_refuses_live_macro_mutation_made_during_child(
-    tmp_path: Path,
+    tmp_path: Path, mutation_kind: str,
 ):
-    """A real byte mutation during the child fails the final generation check."""
+    """Changed consumed bytes or temporary-pack metadata invalidate the read."""
     import json
     from integrations.executive_mcp.installed import (
         InstalledBootPacketCollector,
@@ -2165,6 +2166,10 @@ def test_installed_collector_refuses_live_macro_mutation_made_during_child(
     python.write_text("fixture", encoding="utf-8")
     source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
     consumed = macro / "agentos/workstreams/WS-SPARSE.md"
+    if mutation_kind == "temporary_pack":
+        consumed = macro / ".git/objects/pack/tmp_pack_Aa09zZ"
+        consumed.write_text("unfinished private pack\n", encoding="utf-8")
+        consumed.chmod(0o600)
     materialized_roots: list[Path] = []
     child_seen = False
 
@@ -2336,3 +2341,213 @@ def test_scoped_macro_seal_refuses_symlink_parent_before_descendant(
         )
 
     assert descendant not in observed
+def test_installed_collector_pair_finishes_peer_before_classifying_missing_direct_git(
+    tmp_path: Path, monkeypatch,
+):
+    """An error-first Git observer cannot outrun its peer's .git deletion."""
+    import concurrent.futures
+    import shutil
+    import threading
+    import time
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, _source, macro, source_sha, _macro_sha = _direct_pair_collector(tmp_path)
+    started = threading.Event()
+    let_peer_delete = threading.Event()
+    finished = threading.Event()
+    original_wait = concurrent.futures.wait
+    wait_modes = []
+
+    def observe_wait(futures, *, timeout=None, return_when=concurrent.futures.ALL_COMPLETED):
+        wait_modes.append(return_when)
+        # The FIRST_EXCEPTION wait must return the Macro worker failure first.
+        # Only the repair's second wait may release the source worker to remove
+        # direct Git metadata. Before the repair, no second wait occurs.
+        if return_when != concurrent.futures.FIRST_EXCEPTION:
+            let_peer_delete.set()
+        return original_wait(futures, timeout=timeout, return_when=return_when)
+
+    def source_observer():
+        started.set()
+        try:
+            if not let_peer_delete.wait(timeout=1.0):
+                raise AssertionError("peer failure was not reconciled")
+            shutil.rmtree(macro / ".git")
+            return source_sha, "source-seal"
+        finally:
+            finished.set()
+
+    def macro_observer():
+        assert started.wait(timeout=1.0)
+        raise GatewayError("backend_unavailable", "installed Macro source observation failed")
+
+    monkeypatch.setattr(installed.concurrent.futures, "wait", observe_wait)
+    try:
+        with pytest.raises(GatewayError, match="repository topology is unsafe"):
+            collector._repository_observation_pair(
+                source_observer, macro_observer,
+                deadline=time.monotonic() + 2.0, label="snapshot",
+            )
+        assert not (macro / ".git").exists()
+        assert wait_modes == [
+            concurrent.futures.FIRST_EXCEPTION,
+            concurrent.futures.ALL_COMPLETED,
+        ]
+    finally:
+        let_peer_delete.set()
+        assert finished.wait(timeout=1.0)
+
+
+def test_installed_collector_pair_error_first_never_waits_past_cumulative_deadline(
+    tmp_path: Path,
+):
+    """A peer that outlives the deadline cannot hold a failed observation open."""
+    import threading
+    import time
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, _source, _macro, source_sha, _macro_sha = _direct_pair_collector(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def source_observer():
+        started.set()
+        try:
+            assert release.wait(timeout=2.0)
+            return source_sha, "source-seal"
+        finally:
+            finished.set()
+
+    def macro_observer():
+        assert started.wait(timeout=1.0)
+        raise GatewayError("backend_unavailable", "installed Macro source observation failed")
+
+    begin = time.monotonic()
+    try:
+        with pytest.raises(GatewayError, match="installed Macro source observation failed"):
+            collector._repository_observation_pair(
+                source_observer, macro_observer,
+                deadline=begin + 0.30, label="snapshot",
+            )
+        # Retain a cushion for contended CI, but refuse an unbounded peer join.
+        assert time.monotonic() - begin < 1.25
+    finally:
+        release.set()
+        assert finished.wait(timeout=1.0)
+
+
+
+def test_git_materialization_omits_only_unpublished_temporary_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A private unfinished pack cannot break reads of the published objects."""
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    _git(repo, "repack", "-ad")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    temporary = repo / ".git/objects/pack/tmp_pack_Aa09zZ"
+    temporary.write_bytes(b"unfinished private pack")
+    temporary.chmod(0o600)
+    original_clone = installed._clone_regular_file
+    copied = []
+
+    def clone(source, destination):
+        if source == temporary:
+            raise PermissionError(13, "private temporary pack", str(source))
+        copied.append(source)
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    materialized = tmp_path / "materialized"
+    materialized.mkdir()
+    installed._clone_git_read_database(
+        repo / ".git", materialized / ".git", deadline=time.monotonic() + 10,
+    )
+    assert not (materialized / ".git/objects/pack" / temporary.name).exists()
+    assert temporary not in copied
+    assert temporary.read_bytes() == b"unfinished private pack"
+    assert _git(materialized, "rev-parse", "HEAD").stdout.strip() == head
+    assert _git(materialized, "show", "HEAD:tracked.txt").stdout == "original\n"
+
+
+@pytest.mark.parametrize("suffix", ["pack", "idx"])
+def test_git_materialization_still_refuses_unreadable_published_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+):
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    _git(repo, "repack", "-ad")
+    required = next((repo / ".git/objects/pack").glob(f"pack-*.{suffix}"))
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == required:
+            raise PermissionError(13, "required published object", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="required published object"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )
+
+
+@pytest.mark.parametrize("relative", [
+    "objects/pack/tmp_pack_Aa09zZ.pack",
+    "objects/pack/tmp_pack_short",
+    "objects/info/tmp_pack_Aa09zZ",
+    "refs/heads/tmp_pack_Aa09zZ",
+])
+def test_git_materialization_does_not_skip_other_unreadable_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str,
+):
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    required = repo / ".git" / relative
+    required.parent.mkdir(parents=True, exist_ok=True)
+    required.write_bytes(b"must not be silently omitted")
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == required:
+            raise PermissionError(13, "unclassified entry", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="unclassified entry"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )
+
+
+def test_git_materialization_does_not_skip_linked_temporary_pack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import os
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    temporary = repo / ".git/objects/pack/tmp_pack_Aa09zZ"
+    temporary.write_bytes(b"linked preimage")
+    os.link(temporary, tmp_path / "retained-link")
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == temporary:
+            raise PermissionError(13, "linked entry", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="linked entry"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )

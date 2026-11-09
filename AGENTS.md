@@ -15,6 +15,29 @@ trading, or source-write authority and never promotes research into trade execut
 
 Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
 
+## Reuse-first engineering
+
+For substantive systems, agent/autonomy infrastructure, charts, UI or tool implementation, apply [Reuse First](docs/REUSE_FIRST_ENGINEERING.md): inspect the incumbent and maintained open-source options before custom-building commodity machinery. Prefer small adapters/composition over duplicate systems; spend bespoke engineering on differentiated quant logic and scientifically validated behavior. Check actual fit, maintenance, existing security boundaries and consumer proof without adding a new approval gate. Keep the scan proportionate; this adds no mandatory research or approval ceremony.
+
+## Human-first product work
+
+For any user-facing design, mockup, build or review, read the existing shared content
+law `docs/DESIGN_DOCTRINE.md` and visual/composition law
+`research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` in `mastermindx-market-intelligence/macro`.
+Pin that repository's accepted main revision separately from the Sol Skillpack; do not
+substitute an unmerged proposal, chat memory or a stale vendored copy. Use the target
+product's accepted shell and token implementation, not a parallel design system.
+
+Mastermind does the synthesis; the user receives the understanding. Apply a
+3–4-second orientation target, purposeful hierarchy, optional descriptions/subtext,
+preserved analytical depth, accessible disclosure and navigation/return continuity.
+Carry the reading contract into designer-to-builder handoffs and review it in the
+implemented journey. Rendering, design critique, observed human comprehension and real
+product acceptance are separate claims; missing human evidence is not yet tested.
+This applies beyond Paper and beyond Sector Intelligence. It changes no model route,
+source custody, trading authority, lifecycle or release gate. Independent permitted
+work can continue while an acceptance or source-access requirement is outstanding.
+
 ## Executive contract
 
 How this organization decides, and what a worker session may and may not do. This
@@ -37,7 +60,7 @@ session spawned with no context beyond this file.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review and source/release protections still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 ### Durable plan and cold continuation for assigned principals
@@ -96,7 +119,8 @@ result, review, acceptance and same-root identity without duplicate effects.
 1. **Charter / constitution** — `research/MASTERMIND_CHARTER_V2.md` (P1–P10).
    `DOCTRINE.md` is tactical doctrine beneath it.
 2. **Strategic state** — `config/strategic_state.yml`: current phase, north star, P0
-   objectives, resource policy, standing constraints. Read it through
+   objectives, resource policy, core-product value/readiness model, descriptive phase
+   gates, review triggers, and standing constraints. Read it through
    `control_plane.strategic_state.load_strategic_state()`, which fails loud rather
    than handing you an empty state.
 3. **Authority map** — `config/authority_map.yml`.
@@ -146,6 +170,30 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+### Standing authorization: saved credentials for assigned website access
+
+The Chairman authorizes an actively assigned Mastermind engineering/operations session to use
+**already-provisioned saved credentials** and existing authenticated browser sessions to log into
+the legitimate website/service required by that assignment. This includes browser/password-manager
+autofill and any macOS Keychain or other secure-store access that the current OS/tool permissions
+actually allow. **Do not request separate Chairman permission for each routine in-scope
+saved-password use or website login**; try the permitted route, then verify the resulting
+signed-in state. This is standing task-scoped consent, not permission to access arbitrary
+accounts.
+
+Verify the exact website origin, intended account, and relation to the current task before
+supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
+passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
+or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
+unrelated personal accounts. A saved secret is not independent authority for account/security
+changes, spending, money movement, trading, production deployment, or other reserved actions.
+
+This instruction does not override OS/tool permissions, site controls, explicit access refusals,
+fresh user-consent requirements, passkey/Touch ID or other user-presence checks, MFA, or CAPTCHA.
+If a genuine human-only step remains, name that exact gate once and continue independent
+authorized work. Do not treat an ordinary login page as an administrative approval gate when a
+legitimate, permitted saved credential is already available.
+
 ### Session lifetime and acceptance scope
 
 A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
@@ -172,6 +220,27 @@ enrollment alone. Complete the authorized missing composition and its negative
 tests through existing interfaces; separate source readiness, human-only enrollment,
 a bounded admitted canary and production release. Do not remove refusal guards or
 invent an admission receipt to make a dormant path appear live.
+
+### Responsibility continuity — no imaginary owners
+
+<!-- MMX_RESPONSIBILITY_CONTINUITY_BEGIN -->
+Within an assigned nonterminal job, the current session retains responsibility for the next step until it either executes that step, completes a concrete handoff/continuation to a proven exact receiver, records `WAITING_CAPACITY`, enters a lawful `PRESTART_REBIND`, returns `RUNTIME_BINDING_RECONCILIATION_REQUIRED` or `EFFECT_UNKNOWN`, or reaches a genuine Chairman/admin gate.
+
+- A component, service, repository, team, role, provider account, browser tab, or historical session is not a live assignee. `FACT_OWNER`/`CAPABILITY_OWNER` identifies where truth or implementation lives; it does not prove a current executor.
+- Before deferring because a capability is unavailable, inspect the actual current tool/connector/host surface once when it can materially answer the question. If the bounded action is inside current scope and this session is already authorized and capable, perform it instead of naming a conceptual owner.
+- Tool access is capability, not modification authority. Saying "I take ownership" does not create action-target or source-writer authority.
+- If another exact live action target or source writer is proven current, continue that target; do not steal the write. Perform the required delivery/continuation edge or return the exact transport/binding blocker.
+- With no receiver assignment edge before START and no effect, use existing placement / `WAITING_CAPACITY` / lawful `PRESTART_REBIND`; never invent an assignee.
+- `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
+- Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
+- A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+- A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
+- If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
+- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge.
+- A disabled Executive Control service with an unreconciled protected result is a real action-scoped admission hold, not evidence that an archived original chat owns the project. Do not restart or replay the denied result; advance disjoint permitted work.
+- Apply ACTIVE_EXECUTION's "Prove an owner gate before using it to stop" before naming another owner as the only next action. Give the exact target, original-carrier effects, live writer/lease, denied or permitted action and addressable next step.
+- `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
+<!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
 
 ### Reciprocal dialogue and watcher invariant
 
@@ -203,9 +272,44 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
-### Independent-review discoverability for every assigned session
+### Session-owned review and ordinary release
 
-Before requesting or claiming independent PR/source review, load [the common session review routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md). Check this exact session's authenticated Subagent Fabric tools and original review state; for a distinctly authorized manual review, one verified ChatGPT Dot may receive a source-linked Slack commission. Do not duplicate a running/uncertain/denied review, mislabel Slack pickup as START, or equate a Dot technical verdict with formal non-author GitHub approval. The existing GitHub review ingress and Runtime remain authoritative; a source link does not prove a fresh-session installation.
+**Ship by default:** for ordinary reversible work, the entire path is one owner,
+one coherent diff, available affected tests, one Ready PR, one protected auto-merge
+request, then exact merge readback. Do not multiply approvals, reviewer chats,
+source workspaces, handoff documents, or status polling because of an internal
+process habit. FAST and STANDARD integrated queue checks are scoped to verified
+risk; unqualified and CRITICAL source still runs full required CI. User-path or
+installed proof is owed only where the feature changes those surfaces. A real
+security/permission denial, held PR, live writer or uncertain effect remains a
+specific fence, not a reason to stall unrelated work.
+
+Load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the same
+protected pin. Ordinary reversible FAST/STANDARD changes use this session's self-check,
+affected tests and the normal protected controller/queue. No mandatory independent
+review, formal approval, outside chat or non-author release/arming operator arises from
+internal process. The assigned session may request automated release of its own qualified
+change. Preserve actual required CI, native GitHub/CODEOWNERS protections and specific holds.
+
+Consequential native/automated changes mean the CRITICAL row in REVIEW_RISK_POLICY.md:
+auth/security/permissions, source authority, review/release automation, privileged CI, financial execution, irreversible data and exactly-once. These changes use one genuinely distinct read-only native/Fabric technical reviewer; consume its
+real exact-head result and adjudicate findings here. Review a repair's affected delta only.
+The existing attended CEO-Web all-tier self-review waiver remains; a CRITICAL label alone
+adds no reviewer handoff. No review-host enrollment or different top-level chat is needed.
+An author second pass is `SELF_REVIEWED`; a child result is technical assurance, not formal
+GitHub `APPROVED`. Formal approval requires an eligible actual non-author event only when
+an enforced rule or binding hold requires it. Never impersonate a reviewer or self-approve.
+Use [external review routing](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) only for an actual
+separate review assignment; preserve active/denied/uncertain review effects on their carrier.
+Source publication proves neither instruction installation nor changed machine enforcement.
+
+**Finish the actual PR, not its draft.** Own the same branch through repair, required CI,
+Ready, applicable review, protected automation, exact merge readback and owed installed/user-
+path proof. A Draft, comment or checkpoint is not delivery. Short checks stay in the same
+healthy turn; pending CI does not justify a replacement PR or an archived-owner handback.
+See [finish-to-release contract](docs/SESSION_LOCAL_REVIEW_POLICY.md#finish-to-release-ownership-a-pr-is-an-intermediate-artifact).
+
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, false independent-review claim, duplicate/denied-effect reroute, self-approval or protected-release bypass. Keep executing other permitted work while the real review is pending.
 
 ## Agent OS — the organizational knowledge plane
 
@@ -232,8 +336,9 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   law (Charter P7) behind `duplicate_control_planes`.
 - **Boundaries (Agent OS invariant I1).** It is a knowledge plane, never a control
   plane: it never decides whether work may run, never dispatches or schedules, and
-  never ranks company priorities — the strategic state and the improvement agenda own
-  priority; this repo's `control_plane/` owns execution, leases, and liveness. A
+  never ranks company priorities — Strategic State owns company-level portfolio
+  orientation, while the Improvement Agenda ranks only its portfolio/intelligence
+  self-improvement domain; this repo's `control_plane/` owns execution, leases, and liveness. A
   workstream `claim:` note is an author's note in git, never evidence a worker is
   currently alive. Decisions do not live in `governance.jsonl`: an
   `executive_decision` event there cites the durable `DEC:<KEY>`, one direction, no
@@ -243,8 +348,15 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   `agentos.py brief --json --no-remember`, and there is no write path back. Keep it
   one-way. Phase 2b reuses that resolver/collector in `brain/improvement_agenda.py`:
   only an explicit `{workstream, wave}` reference may receive Agent OS readiness,
-  and the join happens after ranking. The Improvement Agenda remains the sole priority
-  queue; the boot packet does not render or recommend from legacy `brief.unblocked`.
+  and the join happens after ranking. The Improvement Agenda remains the sole ranked
+  queue for its portfolio/intelligence self-improvement domain; it is not the
+  company-wide portfolio. The boot packet does not render or recommend from legacy
+  `brief.unblocked`. New company work must map to an active Strategic State P0 (or a
+  mandatory safety/maintenance obligation) by naming the concrete customer/machine
+  capability it advances; a label-only relabel is not admission. Unstarted/draft work
+  that no longer maps returns to portfolio review before expansion. A strategy reset
+  does not silently cancel a STARTed/effect-unknown operation or seize another carrier's
+  source custody; reconcile/reclassify it at the next safe checkpoint.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
@@ -290,7 +402,8 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 - GitHub `origin` is the source of truth. Never push directly to `master`, never
   force-push shared branches, and never deploy an arbitrary working directory.
 - Reuse the assigned workspace for its existing source operation. Independent unstarted work in another repository or conflicting source area may acquire a normal isolated workspace under the current assignment; no pre-created operation is required. Never displace a live writer or replay an uncertain operation.
-- Follow higher-priority host/developer instructions when they require the approved external-SSD creation helper instead of this repository launcher. Retain its truthful receipt; a missing optional registration is not itself a permission denial. Otherwise, attended ChatGPT Web/host sessions acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
+- **GitHub-native authoring is allowed without a host worktree.** An assigned Web/Codex/Claude session with actual authorized GitHub API tools may create a unique source branch, edit with blob-SHA/preimage or expected-head checks, commit and open/update its own PR directly. It does not need Studio Direct, `mmx-workspace`, an external SSD, an Executive job or a separate publisher chat. The verified protected-source pin governs procedure; it is not a requirement that candidate bytes originate in one physical checkout. Reuse an existing live operation's original branch/carrier, respect writers and uncertain effects, and never switch carriers to evade a refusal. API publishing grants no direct `master` push or merge bypass; required CI, applicable review and the protected queue stay binding.
+- **Host-local authoring keeps host-local safeguards.** Follow higher-priority host/developer instructions when they require the approved external-SSD creation helper instead of this repository launcher. Retain its truthful receipt; a missing optional registration is not itself a permission denial. For actual host-local editing, attended ChatGPT Web/host sessions acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns reuse the same operation workspace.
 - Linked worktrees are only for the trusted same-OS-principal attended path. Untrusted Executive workers retain the existing private credentialless-clone path and its distinct `.git` security boundary. At terminal close, call the canonical release route; dirty or local-only work is preserved fail-closed rather than deleted.
 - Completion follows the assigned outcome: run relevant tests, publish the scoped change,
   and satisfy the required checks/review release gate before an authorized merge. A source-only change does

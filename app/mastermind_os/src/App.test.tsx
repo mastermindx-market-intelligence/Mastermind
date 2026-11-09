@@ -2,6 +2,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -46,6 +47,7 @@ const invoke = vi.fn().mockResolvedValue({
   state: "BUILT_NOT_PROVEN",
 });
 vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 const deferred = <T,>() => {
@@ -91,7 +93,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: () => pending.promise, readMission };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(header.getByText("SOURCE READ PENDING")).toBeTruthy();
     const raw = controlRoomFixture();
@@ -112,7 +114,7 @@ describe("React read lifecycle fences", () => {
     raw.autonomy.responsibilities = [];
     window.MastermindMissionHost = { readPrograms: async () => raw };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(await header.findByText("AVAILABLE")).toBeTruthy();
     expect(header.getByText("0 Programs from the bounded source observation.")).toBeTruthy();
@@ -122,7 +124,7 @@ describe("React read lifecycle fences", () => {
     history.replaceState(null, "", "/os/");
     window.MastermindMissionHost = { readPrograms: async () => { throw new Error("private producer detail"); } };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(await header.findByText("Program source unavailable; current company movement is not inferred.")).toBeTruthy();
     expect(header.getByText("UNAVAILABLE")).toBeTruthy();
@@ -135,7 +137,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: async () => raw, readMission };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText(/Next action withheld/)).toBeTruthy();
     expect(document.body.innerHTML).not.toContain(unsafe);
     await user.click(screen.getByRole("button", { name: /Beta program/ }));
@@ -192,7 +194,7 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -252,7 +254,7 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(document.body.textContent).not.toContain("private detail");
   });
@@ -291,7 +293,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: () => pending.promise };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(
       screen.getByText(/Reading the bounded Control Room projection/),
     ).toBeTruthy();
@@ -310,7 +312,7 @@ describe("React read lifecycle fences", () => {
     const failed = deferred<unknown>();
     window.MastermindMissionHost = { readPrograms: () => failed.promise };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     await act(async () => failed.reject(new Error("private detail")));
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(
@@ -493,9 +495,9 @@ describe("Executive OS convergence surfaces", () => {
 
     await navigateCompanyOperation(user, "Fleet & Capacity");
     expect(
-      screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
+      screen.getByRole("heading", { name: "Resources & systems", level: 1 }),
     ).toBeTruthy();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
   });
 
@@ -518,24 +520,25 @@ describe("Executive OS convergence surfaces", () => {
       screen.getByRole("heading", { name: "Activity", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("heading", { name: "Live work", level: 2 }),
+      screen.getByRole("heading", { name: "Recorded work", level: 2 }),
     ).toBeTruthy();
     expect(screen.getByText("JOB-A-CHILD")).toBeTruthy();
     expect(readMission).toHaveBeenCalledTimes(readsBeforeActivity);
   });
 
-  it("does not turn the absent Chairman-decision feed into an all-clear", () => {
+  it("does not turn the absent Chairman-decision feed into an all-clear", async () => {
     render(<App />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
     const attention = screen
       .getByRole("heading", {
-        name: "Chairman attention is not established.",
+        name: "Decisions not yet known.",
         level: 2,
       })
       .closest("section");
     expect(attention).toBeTruthy();
     expect(
       within(attention!).getByText(
-        "Missing attention data does not mean there are no decisions.",
+        "This view does not establish whether a decision needs you.",
         { exact: false },
       ),
     ).toBeTruthy();
@@ -544,17 +547,17 @@ describe("Executive OS convergence surfaces", () => {
 });
 
 describe("native and interaction contracts", () => {
-  it("keeps exactly five Company destinations and contextual operational routes", async () => {
+  it("keeps five Company destinations and readable advanced operational routes", async () => {
     render(<App />);
     const company = screen.getByRole("navigation", { name: "Company navigation" });
     expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
       "Today", "Projects", "Inbox", "Conversations", "Knowledge",
     ]);
-    const operations = screen.getByRole("navigation", { name: "Company operations" });
-    expect(within(operations).getByRole("button", { name: "Work" })).toBeTruthy();
-    expect(within(operations).getByRole("button", { name: "Open Programs" })).toBeTruthy();
-    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity" }));
-    expect(screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 })).toBeTruthy();
+    const operations = screen.getByRole("navigation", { name: "Mission navigation" });
+    expect(within(operations).getByRole("button", { name: "Work queue" })).toBeTruthy();
+    expect(within(operations).getByRole("button", { name: "Programs workspace" })).toBeTruthy();
+    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity workspace" }));
+    expect(screen.getByRole("heading", { name: "Resources & systems", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
   });
   it("skip to workspace retains Today and the original URL while focusing main", async () => {
@@ -565,12 +568,12 @@ describe("native and interaction contracts", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
     const originalUrl = location.href;
     await user.click(screen.getByRole("link", { name: "Skip to workspace" }));
     expect(document.activeElement).toBe(screen.getByRole("main"));
     expect(location.href).toBe(originalUrl);
-    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
   });
   it("native mode invokes readiness only and never fetches", async () => {
     const fetchSpy = vi
@@ -585,7 +588,7 @@ describe("native and interaction contracts", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("heading", { name: "Today", level: 1 }),
+      screen.getByRole("heading", { name: "What would you like done?", level: 1 }),
     ).toBeTruthy();
     expect(
       screen.getByText(
@@ -637,7 +640,7 @@ describe("native and interaction contracts", () => {
   it("distinguishes an absent Programs source from a malformed source", async () => {
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(
       screen.getByRole("heading", { name: "Programs", level: 1 }),
     ).toBeTruthy();
@@ -650,7 +653,7 @@ describe("native and interaction contracts", () => {
       readPrograms: async () => ({ invalid: true }),
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText("SCHEMA_INVALID")).toBeTruthy();
   });
   it("graph and list share identities and restore keyboard focus", async () => {
@@ -799,7 +802,11 @@ describe("installed authentication and permitted content", () => {
       content: false,
     });
     render(<App />);
-    expect(screen.getByText("Sign-in setup pending")).toBeTruthy();
+    // The accepted private-entry composition names the unconfigured host with
+    // the canonical entry copy and disables its sign-in control.
+    expect(
+      screen.getByText("Sign-in is not configured for this app."),
+    ).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement)
         .disabled,
@@ -887,8 +894,9 @@ describe("installed authentication and permitted content", () => {
     ).toBeNull();
   });
 
-  it("consumes the fixed content callback and clears visible text on sign-out", async () => {
+  it.each([null, "USER_SIGNED_OUT"])("consumes the fixed content callback and clears visible text on sign-out (%s)", async reason => {
     let listener!: (state: import("./host").AuthState) => void;
+    const signIn = vi.fn(async () => {});
     const h = "a".repeat(64),
       readCurrentWindow = vi.fn(async () => ({
         schema: "mastermind.workspace.window_read_candidate.v1" as const,
@@ -939,11 +947,11 @@ describe("installed authentication and permitted content", () => {
           listener = fn;
           return () => {};
         },
-        signIn: async () => {},
+        signIn,
         signOut: async () => {
           listener({
             status: "signed_out",
-            reason: null,
+            reason,
             acquisition: false,
             content: false,
           });
@@ -959,6 +967,23 @@ describe("installed authentication and permitted content", () => {
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(screen.queryByText("Permitted fixture response")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Welcome back." })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText("Sign-in could not complete. Please try again.")).toBeNull();
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("retains real entry errors after a failed native sign-out", async () => {
+    window.MastermindMissionHost = {
+      auth: {
+        getState: () => ({ status: "error", reason: "KEYCHAIN_DELETE_FAILED", acquisition: false, content: false }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Sign-in could not complete. Please try again.");
   });
 
   it("associates a v2 window with a qualifying current plan child and stays unbound for v1", async () => {
@@ -1274,6 +1299,7 @@ describe("route focus handoff", () => {
     const user = userEvent.setup();
     render(<App />);
     expect(document.activeElement).toBe(document.body);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     screen.getByRole("button", { name: "Open Programs" }).focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(
@@ -1305,6 +1331,7 @@ describe("route focus handoff", () => {
     };
     const user = userEvent.setup();
     render(<App />);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     screen.getByRole("button", { name: "Open Programs" }).focus();
     await user.keyboard("{Enter}");
     (await screen.findByRole("button", { name: /Beta program/ })).focus();
@@ -1327,6 +1354,7 @@ describe("route focus handoff", () => {
     };
     render(<App />);
     expect(document.activeElement).toBe(document.body);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
     const action = screen.getByRole("button", { name: "Open Programs" });
     action.focus();
     await act(async () => pending.resolve(controlRoomFixture()));
@@ -1435,6 +1463,7 @@ describe("result card and same-observation Mission lifecycle", () => {
     render(<App />);
     await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
     expect(h.detail).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.click(screen.getByText("Subagent Fabric · inspect execution"));
     const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
     await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
@@ -1468,7 +1497,8 @@ describe("result card and same-observation Mission lifecycle", () => {
       const user = userEvent.setup();
       render(<App />);
       await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByText("Subagent Fabric · inspect execution"));
+      await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
+    await user.click(screen.getByText("Subagent Fabric · inspect execution"));
       const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
       await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
       const button = inside.getByRole("button", { name: "Inspect indexed result" });
@@ -1530,7 +1560,7 @@ describe("result card and same-observation Mission lifecycle", () => {
     expect(
       (await screen.findAllByText(/SOURCE_CHANGED/)).length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("keeps oversize content unavailable while preserving reject and counts", async () => {
     const value = structuredClone(resultContentOverBudget);
@@ -1545,9 +1575,9 @@ describe("result card and same-observation Mission lifecycle", () => {
     resultHost(value);
     render(<App />);
     await openResult();
-    expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
+    expect(await screen.findByText(/The source did not supply the result text/)).toBeTruthy();
     expect(screen.getByText(/verdict: reject/)).toBeTruthy();
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("ignores an abort-ignoring detail reply after changing the selected Mission", async () => {
     const pending = deferred<unknown>();
@@ -1560,7 +1590,7 @@ describe("result card and same-observation Mission lifecycle", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await act(async () => pending.resolve(resultAvailable));
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
     expect(screen.queryByText("Result detail")).toBeNull();
   });
 });
@@ -1582,7 +1612,7 @@ describe("result permission and detached-read fences", () => {
     );
     await act(async () => pending.resolve(resultAvailable));
     expect(screen.queryByText("Result detail")).toBeNull();
-    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Structured result")).toBeNull();
   });
   it("aborts pending detail when the component unmounts", async () => {
     const pending = deferred<unknown>();
@@ -1621,12 +1651,17 @@ describe("actual unconfigured web owner lifecycle", () => {
     expect(
       screen.getByRole("button", { name: "Sign in" }).hasAttribute("disabled"),
     ).toBe(true);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Open Programs" }));
-    expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "Programs", level: 1 }),
-    );
+    // The unconfigured owner lands on private entry: the workspace navigation
+    // (and its Programs workspace control) is not mounted, so no read can start.
+    expect(
+      screen.getByText("Sign-in is not configured for this app."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Programs workspace" }),
+    ).toBeNull();
+    await act(async () => {
+      for (let i = 0; i < 16; i++) await Promise.resolve();
+    });
     expect(calls).toBe(0);
   });
 });
@@ -1831,7 +1866,7 @@ describe("App command composition", () => {
       .toBe("Unsent launch goal must survive expiry.");
     expect(screen.queryByRole("button", {name:"Launch"})).toBeNull();
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    await user.click(screen.getByRole("button", {name:"Discard launch goal"}));
+    await user.click(screen.getByRole("button", {name:"Discard goal"}));
     expect(canNavigateForAutomaticSignIn()).toBe(true);
     expect(made.submit).not.toHaveBeenCalled();
   });
@@ -1988,6 +2023,7 @@ describe("App command composition", () => {
     render(<App />);
     await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Keep this draft while choices are unavailable");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {target:{value:"Keep the original proof requirements"}});
     await user.selectOptions(screen.getByLabelText("Project"), "proj-b");
     await user.selectOptions(screen.getByLabelText("Profile"), "prof-b");
     act(() => made.setView({ ...original, [field]: [] }));
@@ -1996,6 +2032,7 @@ describe("App command composition", () => {
     expect(made.submit).not.toHaveBeenCalled();
     act(() => made.setView({ ...original, [field]: [original[field][0]] }));
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Keep this draft while choices are unavailable");
+    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Keep the original proof requirements");
     expect((screen.getByLabelText(field === "projects" ? "Project" : "Profile") as HTMLSelectElement).value)
       .toBe(field === "projects" ? "proj-b" : "prof-b");
     expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
@@ -2018,7 +2055,7 @@ describe("App command composition", () => {
     const pointer = await store.read("owner-a");
     if (state === "lost-response") await act(async () => response.reject(new Error("lost response")));
     act(() => made.setView({ projects: [], profiles: [], session: null }));
-    expect(screen.getByText("Launch choices are unavailable. Your draft is retained.")).toBeTruthy();
+    expect(screen.getByText("Work options are unavailable. Your draft is kept.")).toBeTruthy();
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(await store.read("owner-a")).toEqual(pointer);
     if (state === "lost-response") expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
@@ -2038,6 +2075,47 @@ describe("App command composition", () => {
     }
   });
 
+  it("pins an ordinary criteria-only draft to its original default workstream through catalogue changes and return", async () => {
+    const projects = [{ref:"proj-a",label:"Project A"}];
+    const profiles = [{ref:"prof-a",label:"Profile A"}];
+    const workstreams = [
+      {ref:"WS:ORIGINAL",label:"Original workstream",projects,profiles},
+      {ref:"WS:OTHER",label:"Other workstream",projects,profiles},
+    ];
+    const original = {projects,profiles,workstreams,defaultWorkstream:"WS:ORIGINAL",session:defaultSession};
+    const made = makeCommandBinding({view:original});
+    installCommandHost(made.binding);
+    const user = userEvent.setup();render(<App/>);
+    await navigateCompanyOperation(user,"Work");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:"Proof for the original workstream"}});
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    act(()=>made.setView({...original,defaultWorkstream:"WS:OTHER"}));
+    await user.click(screen.getByRole("button",{name:"Meta-CEO"}));
+    await navigateCompanyOperation(user,"Work");
+    expect((screen.getByLabelText("Workstream") as HTMLSelectElement).value).toBe("WS:ORIGINAL");
+    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Proof for the original workstream");
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("retains ordinary criteria through passive expiry and removes an emptied criteria-only draft", async () => {
+    const made=makeCommandBinding();
+    const auth=installCommandHost(made.binding);
+    const user=userEvent.setup();render(<App/>);
+    await navigateCompanyOperation(user,"Work");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:"Unsent original criteria"}});
+    act(()=>auth.notify({status:"signed_out",reason:"TOKEN_EXPIRED",acquisition:false,content:false}));
+    const retained=await screen.findByLabelText(/Acceptance criteria/);
+    expect((retained as HTMLTextAreaElement).value).toBe("Unsent original criteria");
+    expect(screen.queryByRole("button",{name:"Launch"})).toBeNull();
+    fireEvent.change(retained,{target:{value:""}});
+    expect(screen.queryByLabelText(/Acceptance criteria/)).toBeNull();
+    expect(screen.queryByRole("button",{name:"Discard goal"})).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
   it.each(["principal", "generation", "sign-out"])("does not restore a retained launch draft across %s changes", async (change) => {
     const made = makeCommandBinding(), original = made.binding.getView();
     const auth = installCommandHost(made.binding);
@@ -2045,6 +2123,7 @@ describe("App command composition", () => {
     render(<App />);
     await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Draft of the original owner epoch");
+    fireEvent.change(screen.getByLabelText(/Acceptance criteria/), {target:{value:"Requirements of the original owner epoch"}});
     act(() => made.setView({ projects: [], profiles: [], session: null }));
     if (change === "sign-out") {
       act(() => auth.notify({ status: "signed_out", reason: null, acquisition: false, content: false }));
@@ -2054,6 +2133,7 @@ describe("App command composition", () => {
     }
     act(() => made.setView(original));
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("");
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();
   });
@@ -2163,7 +2243,7 @@ describe("App command composition", () => {
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Work", level: 1 }));
     expect(window.location.href).toBe(location);
-    await user.click(screen.getByRole("button", { name: "New launch" }));
+    await user.click(screen.getByRole("button", { name: "Write a new goal" }));
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
     expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-a");
     expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-a");
@@ -2190,7 +2270,7 @@ describe("App command composition", () => {
     const cancel = screen.getByRole("button", { name: "Cancel" });
     expect(cancel.hasAttribute("disabled")).toBe(true);
     await user.click(cancel);
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
     expect(await store.read("owner-a")).toEqual(pointer);
     expect(made.prepare).toHaveBeenCalledTimes(1);
@@ -2214,7 +2294,7 @@ describe("App command composition", () => {
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     cleanup();
 
     window.MastermindMissionHost = {
@@ -2247,7 +2327,7 @@ describe("App command composition", () => {
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     cleanup();
 
     const signedOut = makeCommandBinding();
@@ -2258,13 +2338,14 @@ describe("App command composition", () => {
       content: false,
     });
     render(<App />);
-    await navigateCompanyOperation(user, "Work");
-    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    // Private entry owns the signed-out shell: no workspace route (and no
+    // command surface) is mounted, so nothing can dispatch.
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(signedOut.prepare).not.toHaveBeenCalled();
     expect(signedOut.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
   });
 
   it("selects the exact returned mission after an accepted launch", async () => {
@@ -2281,7 +2362,7 @@ describe("App command composition", () => {
       screen.getByRole("heading", { name: "Projects", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected"),
     ).toBe("true");
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);
@@ -2638,7 +2719,7 @@ describe("host-composition repair regressions (R2)", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    expect(screen.getByText("Session Workspace")).toBeTruthy();
+    expect(screen.getByRole("heading",{name:"Session controls"})).toBeTruthy();
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     // No fabricated session, connection, or dispatch surface.
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();

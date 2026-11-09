@@ -63,6 +63,16 @@ class ExecutiveSlackReviewThreads:
             raise TypeError("existing Executive Runtime is required")
         self._runtime = runtime
 
+    def _require_original_decision(self, decision: ReviewIntentDecision, job_id: str) -> None:
+        event = self._runtime.store.get_event_by_command_id(decision.command_id or "")
+        provenance = event.payload.get("provenance") if event is not None else None
+        stored = provenance.get("decision") if isinstance(provenance, dict) else None
+        if (stored is not None and (event.event_type != "JOB_CREATED"
+                                    or event.job_id != job_id or stored != decision.to_dict())):
+            raise SlackReviewThreadUnavailable("SLACK_PARENT_SOURCE_IDENTITY_MISMATCH")
+        if decision.policy_authority is not None and stored is None:
+            raise SlackReviewThreadUnavailable("SLACK_PARENT_SOURCE_IDENTITY_MISMATCH")
+
     @staticmethod
     def _parent_command(decision: ReviewIntentDecision) -> str:
         if (
@@ -87,6 +97,7 @@ class ExecutiveSlackReviewThreads:
         if type(job_id) is not str or _ID_RE.fullmatch(job_id) is None:
             raise SlackReviewThreadUnavailable("SLACK_PARENT_JOB_INVALID")
         parent_key = self._parent_command(decision)
+        self._require_original_decision(decision, job_id)
         send_key = self._parent_send_command(decision)
         material = {
             "schema": _SCHEMA, "job_id": job_id,
@@ -130,6 +141,7 @@ class ExecutiveSlackReviewThreads:
         ):
             raise SlackReviewThreadUnavailable("SLACK_PARENT_NOT_VERIFIED")
         command_id = self._parent_command(decision)
+        self._require_original_decision(decision, job_id)
         material = {
             "schema": _SCHEMA, "job_id": job_id,
             "review_command_id": decision.command_id,
@@ -168,6 +180,7 @@ class ExecutiveSlackReviewThreads:
     def parent_thread(
         self, *, decision: ReviewIntentDecision, job_id: str
     ) -> str | None:
+        self._require_original_decision(decision, job_id)
         found = self._runtime.store.get_event_by_command_id(
             self._parent_command(decision)
         )

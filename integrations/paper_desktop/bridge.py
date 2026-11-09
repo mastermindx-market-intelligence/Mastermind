@@ -60,10 +60,10 @@ EDIT_TOOLS = frozenset({
 })
 FILE_MANAGE_TOOLS = frozenset({"create_file", "rename_resource"})
 
-# Version-independent tool capability contract. Every reviewed reference below
-# is derived from existing accepted full-catalog fixtures, but admission tests
-# each current tool *independently*. Presentation strings and unrelated vendor
-# tools never disable a usable tool. The actual shapes and safety annotations
+# Version-independent tool capability contract. Reviewed references come from
+# accepted full catalogs or exact observed tool descriptors retained in fixtures.
+# Admission tests each current tool *independently*. Presentation strings and
+# unrelated vendor tools never disable a usable tool. The shapes and safety annotations
 # remain source-reviewed. Do not turn this into a trust-all version fallback.
 REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint': True},
                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -498,6 +498,8 @@ REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint':
                                                               'type': 'array'}},
                                    'required': ['fileId', 'updates'],
                                    'type': 'object'}}],
+ # The second style profile is the exact f200 tool-only descriptor fixture;
+ # primitive-union equivalence is not generalized to other tools or schemas.
  'update_styles': [{'annotations': {'destructiveHint': True},
                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
                                     'additionalProperties': False,
@@ -507,6 +509,21 @@ REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint':
                                                                                                     'type': 'array'},
                                                                                         'styles': {'additionalProperties': {'anyOf': [{'type': 'string'},
                                                                                                                                       {'type': 'number'}]},
+                                                                                                   'propertyNames': {'type': 'string'},
+                                                                                                   'type': 'object'}},
+                                                                         'required': ['nodeIds', 'styles'],
+                                                                         'type': 'object'},
+                                                               'type': 'array'}},
+                                    'required': ['fileId', 'updates'],
+                                    'type': 'object'}},
+                   {'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'updates': {'items': {'additionalProperties': False,
+                                                                         'properties': {'nodeIds': {'items': {'type': 'string'},
+                                                                                                    'type': 'array'},
+                                                                                        'styles': {'additionalProperties': {'type': ['string', 'number']},
                                                                                                    'propertyNames': {'type': 'string'},
                                                                                                    'type': 'object'}},
                                                                          'required': ['nodeIds', 'styles'],
@@ -1026,6 +1043,37 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
 
 
 
+def qualify_call_arguments(tool, arguments, catalog, *, action, custom_exact_pin):
+    """Validate one requested call against its current reviewed tool profile."""
+    if tool not in catalog:
+        raise Refusal("TOOL_NOT_AVAILABLE")
+    if custom_exact_pin:
+        return
+    qualified = compatible_tool_contract(tool, catalog[tool])
+    if qualified is None:
+        raise Refusal("TOOL_SCHEMA_CHANGED",
+                      "Only this tool is unavailable; other compatible Paper operations remain active.")
+    # Benign optional vendor extensions remain unusable by bridge callers.
+    known_inputs = set(qualified["profile"]["inputSchema"].get("properties", {}))
+    upstream_keys = set(arguments) - ({"sourceFileId"} if action == "file_manage" else set())
+    if upstream_keys - known_inputs:
+        raise Refusal("UNREVIEWED_TOOL_ARGUMENTS")
+    if action in {"edit", "file_manage"} and tool == "set_text_content":
+        # Both text formats are reviewed; use the profile for this exact call.
+        fields = qualified["profile"]["inputSchema"]["properties"]["updates"]["items"]["properties"]
+        item_key = "html" if "html" in fields else "textContent"
+        updates = arguments.get("updates")
+        if not isinstance(updates, list) or not updates or any(
+            not isinstance(item, dict)
+            or set(item) != {"nodeId", item_key}
+            or not isinstance(item["nodeId"], str) or not item["nodeId"]
+            or not isinstance(item[item_key], str)
+            for item in updates
+        ):
+            raise Refusal("PAPER_RICH_TEXT_SCHEMA_REQUIRED"
+                          if item_key == "html" else "PAPER_LEGACY_TEXT_SCHEMA_REQUIRED")
+
+
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
             expected_snapshot: str | None = None, operation_id: str | None = None,
             allow_write=False, client=None, lock_root=None, execution_binding=None,
@@ -1066,16 +1114,17 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             # annotations/input schema *before* any Paper tool is dispatched.
             # A private exact-pin unit fixture retains its historical seam;
             # MCP/CLI callers cannot override the default production pin.
+            status_catalog = client.catalog()
+            status_schema = schema_receipt(
+                client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
             if _catalog_pin == SUPPORTED_CATALOG_SHA256:
-                status_catalog = client.catalog()
-                status_schema = schema_receipt(
-                    client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
                 if (not status_schema["server_name_compatible"]
                         or not status_schema["server_version_compatible"]
                         or not status_schema["snapshot_tool_compatible"]):
                     raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
                     "document": snapshot(client, execution_binding=execution_binding),
+                    "write_schema": status_schema,
                     "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
@@ -1091,8 +1140,6 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         if editing and not schema["accepted_for_write"]:
             raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED",
                           "Paper identity, critical snapshot schema, or requested full-catalog pin is incompatible.")
-        if tool not in catalog:
-            raise Refusal("TOOL_NOT_AVAILABLE")
         # Explicit non-default exact pin remains a private test seam. Normal
         # callers cannot select it and always use the tool-scoped contracts.
         custom_exact_pin = (_catalog_pin != SUPPORTED_CATALOG_SHA256
@@ -1106,34 +1153,8 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                     or (expected_snapshot is not None
                         and not schema["snapshot_tool_compatible"])):
                 raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
-        qualified = (compatible_tool_contract(tool, catalog[tool])
-                     if (editing or action == "read") and not custom_exact_pin else None)
-        if (editing or action == "read") and not custom_exact_pin:
-            if qualified is None:
-                raise Refusal("TOOL_SCHEMA_CHANGED",
-                              "Only this tool is unavailable; other compatible Paper operations remain active.")
-            # The read-only MCP wrapper is not sufficient protection against
-            # vendor drift. For reads *and* writes, dispatch only the reviewed
-            # root input keys; benign optional vendor extensions stay unusable.
-            # We can keep using the unchanged approved arguments.
-            known_inputs = set(qualified["profile"]["inputSchema"].get("properties", {}))
-            upstream_keys = set(arguments) - ({"sourceFileId"} if action == "file_manage" else set())
-            if upstream_keys - known_inputs:
-                raise Refusal("UNREVIEWED_TOOL_ARGUMENTS")
-            if editing and tool == "set_text_content":
-                # Legacy Paper uses textContent; 0.5.16+ uses html.
-                fields = qualified["profile"]["inputSchema"]["properties"]["updates"]["items"]["properties"]
-                item_key = "html" if "html" in fields else "textContent"
-                updates = arguments.get("updates")
-                if not isinstance(updates, list) or not updates or any(
-                    not isinstance(item, dict)
-                    or set(item) != {"nodeId", item_key}
-                    or not isinstance(item["nodeId"], str) or not item["nodeId"]
-                    or not isinstance(item[item_key], str)
-                    for item in updates
-                ):
-                    raise Refusal("PAPER_RICH_TEXT_SCHEMA_REQUIRED"
-                                  if item_key == "html" else "PAPER_LEGACY_TEXT_SCHEMA_REQUIRED")
+        qualify_call_arguments(tool, arguments, catalog, action=action,
+                               custom_exact_pin=custom_exact_pin)
         if action == "file_manage":
             if tool == "create_file":
                 supplied_file = arguments.get("cloneFileId") or arguments.get("sourceFileId")
@@ -1170,6 +1191,20 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             updates = arguments.get("tokens")
             if isinstance(updates, list) and any(isinstance(item, dict) and item.get("delete") is True for item in updates):
                 raise Refusal("TOKEN_DELETE_NOT_ALLOWED", "Delete tokens only through an explicitly reviewed destructive workflow.")
+        if before is not None and not custom_exact_pin:
+            # The guard getter is itself a vendor RPC. Requalify after it so
+            # material mid-operation drift cannot dispatch an obsolete call.
+            # This is pre-dispatch: refusal must not claim EFFECT_UNKNOWN.
+            catalog = client.catalog()
+            schema = schema_receipt(client, catalog, server_pin=_server_pin,
+                                    catalog_pin=_catalog_pin)
+            if (not schema["server_name_compatible"]
+                    or not schema["server_version_compatible"]
+                    or not schema["snapshot_tool_compatible"]
+                    or (editing and not schema["accepted_for_write"])):
+                raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
+            qualify_call_arguments(tool, arguments, catalog, action=action,
+                                   custom_exact_pin=False)
         # Paper validates its current input schema. A dispatched tool error may be partial.
         try:
             upstream_arguments = dict(arguments)
@@ -1297,3 +1332,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

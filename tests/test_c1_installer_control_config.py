@@ -53,6 +53,7 @@ def _run_default_control_config(
     *,
     release_root: Path = ROOT,
     source: Path | None = None,
+    install_arm: str = "0",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     destination = tmp_path / "control.json"
     expected_sha = "a" * 40
@@ -80,8 +81,9 @@ def _run_default_control_config(
             "501",
             "b" * 64,
             "0.147.0",
-            "0",
+            install_arm,
             _projected_digest(),
+            "",  # no attended APPLICATION configuration selected by default
         ],
         cwd=ROOT,
         check=False,
@@ -200,6 +202,7 @@ def test_installer_refuses_partial_dialogue_bridge_release_schema(
 
 SAFE_OPTIONAL_DEFAULTS = {
     "ceo_submit_armed": False,
+    "coo_foreground_only": False,
     "exact_worker_claim_target": {"mode": "disabled"},
     "terminal_return_armed": False,
     "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
@@ -321,3 +324,164 @@ def test_older_schema_does_not_receive_new_optional_fields(tmp_path: Path) -> No
     schema.write_text(text)
     value = _render_default_control_config(tmp_path, release_root=release)
     assert set(SAFE_OPTIONAL_DEFAULTS).isdisjoint(value)
+
+
+@pytest.mark.parametrize("field,member,replacement", [
+    ("control_uid", None, 450.0),
+    ("worker_uid", None, 451.0),
+    ("ceo_ingress_peer_uid", None, 452.0),
+    ("dialogue_observation_peer_uid", None, 457.0),
+    ("allowed_peer_uids", None, [450.0, 501]),
+    ("dialogue_bridge_armed", None, 0),
+    ("dialogue_wake_retry_policy", "reenable_on_binding_rotation", 1),
+    ("dialogue_wake_retry_policy", "armed", 0),
+])
+def test_installer_refuses_type_coercion_before_replacing_control(
+    tmp_path: Path, field: str, member: str | None, replacement: object,
+) -> None:
+    """Exercise the actual embedded generator, never the privileged installer.
+
+    These values compare equal in Python but violate the incumbent Control
+    loader's integer/boolean contract. Neither source nor prior target may move.
+    """
+    import copy
+
+    valid = _render_default_control_config(tmp_path)
+    changed = copy.deepcopy(valid)
+    if member is None:
+        changed[field] = replacement
+    else:
+        changed[field][member] = replacement
+    assert changed == valid
+    assert json.dumps(changed, sort_keys=True) != json.dumps(valid, sort_keys=True)
+    source = tmp_path / "wrong-type-control.json"
+    source.write_text(json.dumps(changed), encoding="utf-8")
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    completed, actual_destination = _run_default_control_config(tmp_path, source=source)
+
+    assert completed.returncode != 0
+    assert f"control config {field} differs from the reviewed host policy" in completed.stderr
+    assert actual_destination == destination and destination.read_bytes() == before
+    assert source.read_bytes() == source_before
+    assert list(tmp_path.glob(".control.json.*.tmp")) == []
+
+
+@pytest.mark.parametrize("fault", [
+    "duplicate_arm", "duplicate_nested", "nan", "positive_infinity",
+    "negative_infinity", "positive_overflow", "negative_overflow",
+    "unpaired_surrogate",
+])
+def test_installer_refuses_ambiguous_or_nonfinite_source_before_any_replacement(
+    tmp_path: Path, fault: str,
+) -> None:
+    """Actual generator refusal preserves the prior file, mode and inode."""
+    import stat
+
+    value = _render_default_control_config(tmp_path)
+    if fault == "unpaired_surrogate":
+        value["model"] = "\ud800"
+    raw = json.dumps(value, sort_keys=True)
+    if fault == "duplicate_arm":
+        original = '"ceo_submit_armed": false'
+        assert raw.count(original) == 1
+        raw = raw.replace(original, original + ', "ceo_submit_armed": true')
+    elif fault == "duplicate_nested":
+        original = '"exact_worker_claim_target": {"mode": "disabled"}'
+        assert raw.count(original) == 1
+        raw = raw.replace(original,
+            '"exact_worker_claim_target": {"mode": "fixed", "mode": "disabled"}')
+    elif fault != "unpaired_surrogate":
+        token = {
+            "nan": "NaN", "positive_infinity": "Infinity",
+            "negative_infinity": "-Infinity", "positive_overflow": "1e999",
+            "negative_overflow": "-1e999",
+        }[fault]
+        original = '"broker_timeout_seconds": 30.0'
+        assert raw.count(original) == 1
+        raw = raw.replace(original, '"broker_timeout_seconds": ' + token)
+
+    source = tmp_path / "ambiguous-control.json"
+    source.write_text(raw, encoding="utf-8")
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    identity = destination.stat()
+
+    completed, actual_destination = _run_default_control_config(tmp_path, source=source)
+
+    assert completed.returncode != 0
+    assert "control config source must contain unambiguous finite UTF-8 JSON" in completed.stderr
+    assert actual_destination == destination and destination.read_bytes() == before
+    after = destination.stat()
+    assert (after.st_ino, after.st_mtime_ns, stat.S_IMODE(after.st_mode)) == (
+        identity.st_ino, identity.st_mtime_ns, stat.S_IMODE(identity.st_mode))
+    assert source.read_bytes() == source_before
+    assert list(tmp_path.glob(".control.json.*.tmp")) == []
+
+
+@pytest.mark.parametrize("prior_arm", [False, True])
+@pytest.mark.parametrize("install_arm", ["0", "1"])
+def test_preserved_broker_readiness_requires_the_same_explicit_install_arm(
+    tmp_path: Path, prior_arm: bool, install_arm: str,
+) -> None:
+    """Execute only the existing embedded generator, never the installer shell."""
+    value = _render_default_control_config(tmp_path)
+    value["privileged_readiness_armed"] = prior_arm
+    value["privileged_broker_socket_path"] = (
+        "/var/run/mastermind-executive/privileged.sock" if prior_arm else None
+    )
+    source = tmp_path / "preserved-control.json"
+    source.write_text(json.dumps(value))
+    before_source = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before_destination = destination.read_bytes()
+    completed, _ = _run_default_control_config(
+        tmp_path, source=source, install_arm=install_arm,
+    )
+    assert source.read_bytes() == before_source
+    if prior_arm == (install_arm == "1"):
+        assert completed.returncode == 0, completed.stderr
+        assert json.loads(destination.read_bytes()) == value
+    else:
+        assert completed.returncode != 0
+        assert "conflicts with privileged broker installation arm" in completed.stderr
+        assert destination.read_bytes() == before_destination
+
+
+def test_existing_closed_memory_stanzas_roundtrip_without_minting_authority(tmp_path: Path) -> None:
+    # Reuse the accepted explicit v3 fixture, not live/private configuration.
+    # This proves lossless installer serialization only; actual Control loader,
+    # current root/receiver/Linux/economic permission remain distinct owners.
+    from tests.test_memory_v3_wire_configuration import stanzas
+    value = _render_default_control_config(tmp_path)
+    value.update(stanzas())
+    source = tmp_path / "preserved-memory-control.json"
+    source.write_text(json.dumps(value))
+    before = source.read_bytes()
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(destination.read_bytes()) == value
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("field,old_value", [
+    ("proof_base_sha", "9" * 40),
+    ("proof_source_repository", "/private/old-admin-checkout"),
+])
+def test_preserved_source_must_already_name_the_qualified_target_coordinates(
+    tmp_path: Path, field: str, old_value: str,
+) -> None:
+    value = _render_default_control_config(tmp_path)
+    value[field] = old_value
+    source = tmp_path / "old-generation-control.json"
+    source.write_text(json.dumps(value))
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    completed, _ = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode != 0
+    assert f"control config {field} differs from the reviewed host policy" in completed.stderr
+    assert source.read_bytes() == source_before
+    assert destination.read_bytes() == before

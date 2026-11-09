@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { bindMissionHost, type RawClient } from "../src/host";
 import { navigateCompanyOperation } from "../src/test-operational-navigation";
-import { controlRoomFixture, missionFixture } from "../src/test-fixtures";
+import { controlRoomFixture, realControlRoomFixture, missionFixture } from "../src/test-fixtures";
 import { decodeBrowserScopedFabricCatalog } from "../src/fabric/catalog-contract";
 import { decodeAttendedStatus, type AttendedSelection } from "../src/fabric/attended-status";
 
@@ -26,23 +26,41 @@ function connectedHost() {
     expect({ rootId: selected.rootId, runId: selected.runId }).toEqual(produced.selection);
     return structuredClone(produced.status);
   });
+  // A separate, explicit offline Control Room observation supplies only an
+  // inventory row. It is not the Programs read or evidence of host capacity.
+  const controlRead = vi.fn(async () => ({
+    control_room: realControlRoomFixture(),
+    capabilities: { codex: { installed: false, version: null, state: "NOT_INSTALLED", detail: "" } },
+    composed_at: null, refresh_in_flight: false, live_builds_active: false,
+    state_refresh_error: null, source_validity: {},
+  }));
   const raw: RawClient = {
     getState: () => state, invalidationGeneration: () => generation,
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     signIn: async () => {}, signOut: async () => {},
     readPrograms: async () => controlRoomFixture(),
+    readControlRoomState: controlRead,
     readWork: async () => { throw new Error("UNUSED_FIXTURE_ROUTE"); },
     readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
     readCurrentWindow: async () => { throw new Error("UNUSED_FIXTURE_ROUTE"); },
     readAttendedFabric: statusRead, readAttendedFabricCatalog: catalogRead,
   };
-  return { host: bindMissionHost(raw), catalogRead, statusRead,
+  return { host: bindMissionHost(raw), catalogRead, statusRead, controlRead,
     revoke: () => {
       generation++;
       state = { status: "signed_out", acquisition: false, content: false, reason: null };
       listeners.forEach(listener => listener(state));
     },
   };
+}
+
+function expectCapacityUnknown() {
+  const resource = within(screen.getByRole("region", { name: "Selected resource" }));
+  for (const label of ["Host readiness", "Serviceability / task preflight", "Queue pressure"])
+    expect(resource.getByText(label).nextElementSibling?.textContent).toBe("Not supplied");
+  const telemetry = within(screen.getByRole("region", { name: "Host telemetry observation" }));
+  expect(telemetry.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
+  expect(telemetry.queryByText("Not evaluated; cannot place work")).toBeNull();
 }
 
 beforeEach(async () => {
@@ -81,7 +99,14 @@ describe(`actual native producer → browser/App (${produced.case})`, () => {
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    // Follow the current resource drilldown and evidence disclosures. These
+    // presentation actions must not read the Fabric catalog or a run status.
+    const resourceRow = await screen.findByRole("button", { name: /Codex/ });
+    await user.click(resourceRow);
+    expect(owner.controlRead).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByText("Additional resource evidence", { selector: "summary" }));
+    await user.click(screen.getByText("Original capacity receipts and run records", { selector: "summary" }));
+    expectCapacityUnknown();
     expect(owner.catalogRead).not.toHaveBeenCalled();
     expect(owner.statusRead).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Load runs" }));
@@ -125,11 +150,12 @@ describe(`actual native producer → browser/App (${produced.case})`, () => {
       expect(inspector.getByText(/Exit 0: result not accepted/)).toBeTruthy();
     if (produced.case === "accepted")
       expect(inspector.queryByText(/Exit 0: result not accepted/)).toBeNull();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expectCapacityUnknown();
     expect(document.body.textContent).not.toContain("Private retained answer");
     act(() => owner.revoke());
     await waitFor(() => expect(screen.queryByRole("button", { name: rowName })).toBeNull());
-    expect(screen.getByRole("button", { name: "Load runs" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load runs" })).toBeNull();
     // Auth invalidation can unmount this entire App branch. Query the live
     // document rather than the detached pre-revocation inspector element.
     expect(screen.queryByText(expected.acceptance_reason)).toBeNull();

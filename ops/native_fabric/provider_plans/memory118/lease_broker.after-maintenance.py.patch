@@ -1,0 +1,102 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -23,6 +23,9 @@
+ import json
+ import math
+ import os
++from pathlib import Path
++import stat
++
+ import re
+ import socket
+ import sqlite3
+@@ -986,10 +989,11 @@
+         return super().commit()
+ 
+ 
+-def _connect(path):
++def _connect(path, *, existing_only=False):
+     deadline = _ACQUIRE_DEADLINE_NS.get()
+     timeout = 30 if deadline is None else min(30, require_remaining(deadline))
+-    return sqlite3.connect(path, timeout=timeout,
++    target=Path(path).absolute().as_uri()+'?mode=rw' if existing_only else path
++    return sqlite3.connect(target, timeout=timeout, uri=existing_only,
+                            factory=sqlite3.Connection if deadline is None else _DeadlineConnection)
+ 
+ HERE = os.path.dirname(os.path.abspath(__file__))
+@@ -1293,8 +1297,15 @@
+         this_host: Optional[str] = None,
+         status_json: Optional[str] = None,
+         hosts_path: Optional[str] = None,
++        host_state_dir: Optional[str] = None,
++        host_validator_path: Optional[str] = None,
++        existing_only: bool = False,
+     ) -> None:
+         self.hosts_path = hosts_path or HOSTS_JSON
++        self.host_state_dir = host_state_dir
++        self.host_validator_path = host_validator_path
++        if type(existing_only) is not bool:raise ValueError('existing broker mode invalid')
++        self._existing_only=existing_only
+         self.db_path = db_path
+         self.lock_path = lock_path
+         self.accounts_path = accounts_path
+@@ -1304,11 +1315,17 @@
+         self.grok_marker = grok_marker or GROK_EXHAUSTED
+         self.this_host = this_host or _this_host()
+         self.status_json = status_json or STATUS_JSON
+-        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+-        os.makedirs(os.path.dirname(self.lock_path) or ".", exist_ok=True)
++        if existing_only:
++            for path in (self.db_path,self.lock_path):
++                info=os.lstat(path)
++                if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o022:
++                    raise ValueError('existing broker custody invalid')
++        else:
++            os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
++            os.makedirs(os.path.dirname(self.lock_path) or ".", exist_ok=True)
+         self._accounts_cache: Optional[Dict[str, Any]] = None
+         self._accounts_mtime: Optional[float] = None
+-        self._init_db()
++        if not existing_only:self._init_db()
+ 
+     def _init_db(self) -> None:
+         conn = _connect(self.db_path)
+@@ -1352,7 +1369,14 @@
+             conn.close()
+ 
+     def _lock(self):
+-        fh = open(self.lock_path, "a+")
++        if self._existing_only:
++            fd=os.open(self.lock_path,os.O_RDWR|os.O_NOFOLLOW)
++            info=os.fstat(fd)
++            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o022:
++                os.close(fd);raise ValueError('existing broker lock custody invalid')
++            fh=os.fdopen(fd,'r+')
++        else:
++            fh = open(self.lock_path, "a+")
+         deadline = _ACQUIRE_DEADLINE_NS.get()
+         try:
+             if deadline is None:
+@@ -1371,7 +1395,7 @@
+             raise
+ 
+     def _conn(self) -> sqlite3.Connection:
+-        conn = _connect(self.db_path)
++        conn = _connect(self.db_path,existing_only=self._existing_only)
+         conn.row_factory = sqlite3.Row
+         return conn
+ 
+@@ -2370,9 +2394,12 @@
+             # Pairing precedes capacity demand; no new waiter for an unavailable
+             # host/account configuration. Model/held room stays inside selection.
+             from glm_host_account_source import filter_observed_accounts
++            source_paths = {}
++            if self.host_state_dir is not None: source_paths['state_dir'] = self.host_state_dir
++            if self.host_validator_path is not None: source_paths['validator_path'] = self.host_validator_path
+             compatible_accounts, _ = filter_observed_accounts(self.grantable_accounts(pool),
+                 host=host, model=model, now=self.now(), preferred=account,
+-                hosts_path=self.hosts_path, mode="glm" if pool == "glm" else "qwen")
++                hosts_path=self.hosts_path, mode="glm" if pool == "glm" else "qwen", **source_paths)
+             if not compatible_accounts:
+                 return (AcquireResult(ok=False, reason="host_account_unavailable", pool=pool,
+                                       orchestrator_id=orch), waiter_id, "host_account_unavailable")

@@ -62,10 +62,10 @@ describe("authenticated incumbent Control Room read presentation", () => {
     const read = vi.fn(async () => decodeControlRoomRead(payload()));
     window.MastermindMissionHost = { auth: a.auth, readControlRoomState: read };
     render(<App />);
-    const nav = screen.getByRole("navigation", { name: "Company operations" });
+    const nav = screen.getByRole("navigation", { name: "Mission navigation" });
     await userEvent
       .setup()
-      .click(within(nav).getByRole("button", { name: "Control Room" }));
+      .click(within(nav).getByRole("button", { name: "Control Room workspace" }));
     expect(
       await screen.findByRole("heading", { name: "Company overview" }),
     ).toBeTruthy();
@@ -85,7 +85,7 @@ describe("authenticated incumbent Control Room read presentation", () => {
     render(<App />);
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Control Room" }));
+      .click(screen.getByRole("button", { name: "Control Room workspace" }));
     expect(
       screen.getByText(/signed Control Room read is unavailable/i),
     ).toBeTruthy();
@@ -113,7 +113,7 @@ describe("authenticated incumbent Control Room read presentation", () => {
     window.MastermindMissionHost = { auth: a.auth, readControlRoomState: read };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Control Room" }));
+    await user.click(screen.getByRole("button", { name: "Control Room workspace" }));
     await screen.findByText(/source-qualified Programs/);
     await user.click(
       screen.getByRole("button", { name: "Refresh Control Room" }),
@@ -129,16 +129,9 @@ describe("authenticated incumbent Control Room read presentation", () => {
     );
     await act(async () => settle(decodeControlRoomRead(payload())));
     expect(screen.queryByText(/source-qualified Programs/)).toBeNull();
-    expect(
-      screen.getByText(/signed Control Room read is unavailable/i),
-    ).toBeTruthy();
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Refresh Control Room",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh Control Room" })).toBeNull();
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });
 

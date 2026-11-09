@@ -1,0 +1,276 @@
+"""Candidate completion/recovery regressions; all charter writes are disposable.
+
+The export unit tests stub the validator process to isolate content semantics.
+The retained test_mmtask_existing.py suite separately exercises the real validator.
+"""
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest import mock
+
+import yaml
+
+HERE = Path(__file__).resolve().parent
+MMTASK = Path(os.environ.get('MMTASK_UNDER_TEST', HERE / 'mmtask'))
+CHARTERLIB = Path(os.environ.get('CHARTERLIB_UNDER_TEST', HERE / 'charterlib.py'))
+GOAL = 'Deliver the original authenticated investor Save/reopen journey.'
+CRITERIA = 'DISTINCT_ACCEPTANCE_REQUIRED: Save, reload, reopen the exact revision on desktop and phone.'
+
+
+def tree_bytes(directory):
+    return {str(p.relative_to(directory)): p.read_bytes() for p in Path(directory).rglob('*') if p.is_file()}
+
+
+class CompletionSemantics(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = runpy.run_path(str(MMTASK), run_name='completion_candidate')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='completion-regression-')
+        self.root = Path(self.tmp.name)
+        self.d = self.root / 'fixture'
+        self.d.mkdir()
+        (self.d / 'NORTH_STAR.md').write_text(f'# North star\n## Goal\n{GOAL}\n## Success criteria\n{CRITERIA}\n')
+        (self.d / 'STATE.md').write_text('current task: P1.T1\n')
+        (self.d / 'HANDOFF.md').write_text('Source adapter accepted; original authenticated journey unproved.\n')
+        (self.d / 'PLAN.md').write_text('# Plan\n')
+        self.wave = dict(p='P1', id='product', workstream='WS:FIXTURE', title='Original product journey',
+                         status='in_progress', source='agentos', next_action='Finish authenticated Save/reopen')
+        self.db = dict(schema='mm.harness.tasks', schema_version='2.0.0', project='fixture',
+                       workstream='WS:FIXTURE', waves=[self.wave], tasks=[],
+                       agentos={'objective': 'Separate imported system objective', 'source_sha': 'a' * 40})
+        self.mirror = self.root / 'mirror'
+        (self.mirror / 'agentos' / 'workstreams').mkdir(parents=True)
+        (self.mirror / 'agentos' / 'handoffs').mkdir()
+        self.db['agentos']['mirror'] = str(self.mirror)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def task(self, status, tid='P1.T1', **fields):
+        return dict(id=tid, status=status, wave='product', workstream='WS:FIXTURE', title='Build source adapter',
+                    depends_on=[], acceptance=['Source checks pass'], evidence='source tests PASS',
+                    history=[dict(event='accept', note='original artifact scope')], **fields)
+
+    def save(self):
+        (self.d / 'TASKS.json').write_text(json.dumps(self.db))
+
+    def cli(self, *args):
+        self.save()
+        before = tree_bytes(self.d)
+        r = subprocess.run([sys.executable, str(MMTASK), '--dir', str(self.d), 'next', *args],
+                           capture_output=True, text=True, timeout=15)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(tree_bytes(self.d), before)
+        return r.stdout
+
+    def prompt(self):
+        self.save()
+        c = runpy.run_path(str(CHARTERLIB), run_name='completion_prompt')
+        c['build_prompt'].__globals__['ROOT'] = str(self.root)
+        before = tree_bytes(self.d)
+        result = c['build_prompt']('fixture', str(self.d), resume=True)
+        self.assertEqual(tree_bytes(self.d), before)
+        return result
+
+    def export(self, missing=False):
+        if not missing:
+            record = f'---\nkey: FIXTURE\nwaves:\n  - id: product\n    title: Original product journey\n    status: {self.wave["status"]}\n---\n'
+            (self.mirror / 'agentos' / 'workstreams' / 'WS-FIXTURE.md').write_text(record)
+        before = copy.deepcopy(self.db)
+        args = types.SimpleNamespace(dry_run=True, session='test', mission=None, ended_because='ci_handoff')
+        runner = self.module['do_export'].__globals__['subprocess']
+        with mock.patch.object(runner, 'run', return_value=types.SimpleNamespace(returncode=0, stdout='unit validator stub', stderr='')):
+            hf, patch, _, _, _, _ = self.module['do_export'](str(self.d), self.db, args)
+        self.assertEqual(self.db, before)
+        raw = Path(hf).read_text()
+        data = yaml.safe_load(raw.split('---', 2)[1])
+        patch_text = Path(patch).read_text()
+        # do_export's dry-run artifact directory is intentionally outside the charter.
+        import shutil
+        shutil.rmtree(Path(hf).parent)
+        return data, patch_text, raw
+
+    def test_accepted_source_subset_cannot_close_canonical_product_wave(self):
+        self.db['tasks'] = [self.task('accepted')]
+        data, patch, raw = self.export()
+        self.assertEqual(patch, '# no wave changes\n')
+        self.assertIsNone(self.module['derived_wave_status'](self.db, self.wave))
+        self.assertIn('buffer closed; wave verdict separate', self.module['local_task_progress'](self.db, self.wave))
+        self.assertIn('Finish authenticated Save/reopen', '\n'.join(data['next_actions']))
+        self.assertIn(CRITERIA, raw)
+        self.assertEqual(self.db['tasks'][0]['status'], 'accepted')
+
+    def test_superseded_subset_cannot_drop_wave(self):
+        self.db['tasks'] = [self.task('superseded', superseded_by=[], reason='DROPPED: narrow source experiment')]
+        _, patch, _ = self.export()
+        self.assertEqual(patch, '# no wave changes\n')
+        self.assertIsNone(self.module['derived_wave_status'](self.db, self.wave))
+
+    def test_terminal_canonical_wave_is_never_reopened_by_local_rows(self):
+        for status in ('done', 'dropped'):
+            with self.subTest(status=status):
+                self.wave['status'] = status
+                self.db['tasks'] = [self.task('ready')]
+                data, patch, _ = self.export()
+                self.assertEqual(patch, '# no wave changes\n')
+                self.assertIn(f'remains {status}', '\n'.join(data['next_actions']))
+
+    def test_real_source_only_wave_completion_is_preserved(self):
+        self.wave.update(status='done', title='Source-only adapter boundary')
+        self.db['tasks'] = [self.task('accepted')]
+        data, patch, _ = self.export()
+        self.assertEqual(patch, '# no wave changes\n')
+        self.assertNotIn('UNMAPPED_WAVE', '\n'.join(data['next_actions']))
+        self.assertEqual(self.wave['status'], 'done')
+        self.assertNotIn('production proof required', '\n'.join(data['next_actions']))
+
+    def test_local_proposal_with_closed_tasks_exports_as_todo(self):
+        self.wave['source'] = 'local-proposed'
+        self.wave['id'] = 'new-product'
+        self.db['tasks'] = [self.task('accepted')]
+        self.db['tasks'][0]['wave'] = 'new-product'
+        _, patch, _ = self.export()
+        self.assertIn('+    status: todo', patch)
+        self.assertNotIn('+    status: done', patch)
+        self.assertNotIn('+    status: dropped', patch)
+
+    def test_missing_record_does_not_promote_imported_task_subset(self):
+        self.db['tasks'] = [self.task('accepted')]
+        _, patch, _ = self.export(missing=True)
+        self.assertNotIn('status: done', patch)
+        self.assertNotIn('status: dropped', patch)
+
+    def test_original_five_status_cases_retain_actual_remainder(self):
+        for status in ('implementation_complete', 'reviewed', 'blocked', 'accepted', 'superseded'):
+            with self.subTest(status=status):
+                self.db['tasks'] = [self.task(status)]
+                if status == 'blocked':
+                    self.db['tasks'][0]['reason'] = 'EFFECT_UNKNOWN: original saved operation; no replay'
+                data, _, _ = self.export()
+                actions = '\n'.join(data['next_actions'])
+                self.assertNotIn('(no open tasks)', actions)
+                if status in ('implementation_complete', 'reviewed', 'blocked'):
+                    self.assertIn(f'P1.T1 ({status})', actions)
+                else:
+                    self.assertIn('Finish authenticated Save/reopen', actions)
+                if status == 'blocked':
+                    self.assertIn('EFFECT_UNKNOWN', actions)
+                    self.assertIn('preserve', actions)
+
+    def test_original_three_prompt_cases_retain_goal_and_success_criteria(self):
+        for status in ('accepted', 'reviewed', 'EMPTY'):
+            with self.subTest(status=status):
+                self.db['tasks'] = [] if status == 'EMPTY' else [self.task(status)]
+                out = self.prompt()
+                self.assertIn(GOAL, out)
+                self.assertIn(CRITERIA, out)
+                self.assertIn('RECOVERY CANDIDATES', out)
+                if status == 'reviewed':
+                    self.assertIn('P1.T1 (reviewed)', out)
+                elif status == 'EMPTY':
+                    self.assertIn('EMPTY_BUFFER', out)
+                else:
+                    self.assertIn('Finish authenticated Save/reopen', out)
+
+    def test_livebuffer_retains_verification_blocker_and_unbuffered_wave(self):
+        self.db['tasks'] = [self.task('in_progress'), self.task('reviewed', tid='P1.T2'),
+                            self.task('blocked', tid='P1.T3', reason='original consent denied; no replay')]
+        self.db['waves'].append(dict(p='P2', id='investor-reopen', workstream='WS:FIXTURE', status='todo',
+                                     next_action='Finish exact reopened revision', title='Real reopened investor revision'))
+        out = self.cli('--explain')
+        data, _, _ = self.export()
+        prompt = self.prompt()
+        for text in (out, '\n'.join(data['next_actions']), prompt):
+            for expected in ('P1.T1', 'P1.T2 (reviewed)', 'P1.T3 (blocked)', 'original consent denied', 'Finish exact reopened revision'):
+                self.assertIn(expected, text)
+        self.assertIn(CRITERIA, prompt)
+
+    def test_closed_waves_and_buffer_preserve_acceptance_without_completion_claim(self):
+        self.wave['status'] = 'done'
+        self.db['tasks'] = [self.task('accepted')]
+        out = self.cli('--explain')
+        self.assertIn('no unfinished buffered', out)
+        self.assertIn('do not infer full completion or reopen accepted work', out)
+        self.assertIn(CRITERIA, out)
+        self.assertNotIn('P1.T1', out)
+
+    def test_normal_next_remains_prefix_of_explain_and_no_read_mutation(self):
+        self.db['tasks'] = [self.task('in_progress'), self.task('reviewed', tid='P1.T2')]
+        normal = self.cli()
+        explained = self.cli('--explain')
+        self.assertTrue(explained.startswith(normal))
+        self.assertNotIn('P1.T2', normal)
+        self.assertIn('P1.T2 (reviewed)', explained)
+
+    def test_compact_recovery_has_explicit_overflow_pointers(self):
+        self.db['tasks'] = [self.task('in_progress', tid=f'P1.T{i}') for i in range(1, 8)]
+        self.db['tasks'] += [self.task('reviewed', tid=f'P1.T{i}') for i in range(8, 20)]
+        out = self.cli('--explain')
+        self.assertIn('2 more selected tasks', out)
+        self.assertIn('4 more unfinished rows', out)
+        self.assertIn('mmtask list --all --json', out)
+
+    def test_imported_canonical_context_is_separate_from_original_goal(self):
+        self.db['agentos']['next_action'] = 'Existing canonical next phase'
+        out = self.cli('--explain')
+        self.assertIn(GOAL, out)
+        self.assertIn('Imported canonical objective', out)
+        self.assertIn('Separate imported system objective', out)
+        self.assertIn('Existing canonical next phase', out)
+        self.assertIn(str(self.d / 'NORTH_STAR.md'), out)
+
+    def test_full_prompt_preserves_goal_and_criteria_when_selector_fails(self):
+        self.save()
+        c = runpy.run_path(str(CHARTERLIB), run_name='failed_prompt')
+        c['build_prompt'].__globals__['ROOT'] = str(self.root)
+        runner = c['task_frontier'].__globals__['subprocess']
+        before = tree_bytes(self.d)
+        with mock.patch.object(runner, 'run', side_effect=subprocess.TimeoutExpired('mmtask', 10)):
+            out = c['build_prompt']('fixture', str(self.d), resume=True)
+        self.assertEqual(tree_bytes(self.d), before)
+        self.assertIn(GOAL, out)
+        self.assertIn(CRITERIA, out)
+        self.assertIn('Task selection unavailable (TimeoutExpired)', out)
+        self.assertIn('no readiness or completion inferred', out)
+
+
+class PromptFallback(unittest.TestCase):
+    def setUp(self):
+        self.module = runpy.run_path(str(CHARTERLIB), run_name='prompt_fallback')
+
+    def test_nonzero_empty_and_timeout_selector_failures_have_explicit_safe_fallback(self):
+        runner = self.module['task_frontier'].__globals__['subprocess']
+        outcomes = [types.SimpleNamespace(returncode=2, stdout='', stderr='technical failure'),
+                    types.SimpleNamespace(returncode=0, stdout='', stderr=''),
+                    subprocess.TimeoutExpired('mmtask', 10), OSError('missing')]
+        for outcome in outcomes:
+            with self.subTest(outcome=type(outcome).__name__):
+                kwargs = {'side_effect': outcome} if isinstance(outcome, Exception) else {'return_value': outcome}
+                with mock.patch.object(runner, 'run', **kwargs) as process:
+                    out = self.module['task_frontier']('/fixture')
+                self.assertIn('no readiness or completion inferred', out)
+                self.assertIn('NORTH_STAR.md', out)
+                self.assertIn('Do not redo accepted work or retry a held effect', out)
+                self.assertEqual(process.call_args.kwargs['timeout'], 10)
+
+    def test_oversize_sections_use_complete_source_pointer_without_partial_criteria(self):
+        value = 'FIRST_REQUIRED_CLAUSE\n' + 'x' * 6100 + '\nLAST_REQUIRED_CLAUSE'
+        out = self.module['prompt_section'](value, 'Success criteria', '/fixture')
+        self.assertIn('/fixture/NORTH_STAR.md', out)
+        self.assertIn('complete Success criteria', out)
+        self.assertNotIn('FIRST_REQUIRED_CLAUSE', out)
+        self.assertNotIn('LAST_REQUIRED_CLAUSE', out)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

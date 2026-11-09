@@ -30,10 +30,19 @@ from scripts.agent_eval.errors import ContractDefect, ContractError
 # ---------------------------------------------------------------------------
 
 SCENARIO_SCHEMA = "mastermind.agent_evaluation_scenario.v1"
+SCENARIO_SCHEMA_V2 = "mastermind.agent_evaluation_scenario.v2"
+SCENARIO_SCHEMAS = frozenset({SCENARIO_SCHEMA, SCENARIO_SCHEMA_V2})
 CONFIGURATION_SCHEMA = "mastermind.agent_evaluation_configuration.v1"
 EXPERIMENT_SCHEMA = "mastermind.agent_evaluation_experiment.v1"
 RUN_SCHEMA = "mastermind.agent_evaluation_run.v1"
 RUN_DRAFT_SCHEMA = "mastermind.agent_evaluation_run_draft.v1"
+RUN_SCHEMA_V2 = "mastermind.agent_evaluation_run.v2"
+RUN_DRAFT_SCHEMA_V2 = "mastermind.agent_evaluation_run_draft.v2"
+RUN_SCHEMA_V3 = "mastermind.agent_evaluation_run.v3"
+RUN_DRAFT_SCHEMA_V3 = "mastermind.agent_evaluation_run_draft.v3"
+RUN_SCHEMAS = frozenset({RUN_SCHEMA, RUN_SCHEMA_V2, RUN_SCHEMA_V3})
+RUN_DRAFT_SCHEMAS = frozenset({RUN_DRAFT_SCHEMA, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
+RUN_AVAILABILITY_SCHEMAS = frozenset({RUN_SCHEMA_V2, RUN_SCHEMA_V3, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
 
 Validator = Callable[[Any, str], Any]
 
@@ -222,6 +231,24 @@ def v_artifact_list(value: Any, path: str) -> list[dict]:
     return items
 
 
+def v_source_artifact_list(value: Any, path: str) -> list[dict]:
+    """Versioned source identity: distinct immutable refs may have equal bytes.
+
+    This is deliberately separate from historical artifact-list semantics.
+    An authorized digest cannot erase an unauthorized alias of those bytes.
+    """
+    items = v_list_of(v_artifact_pair)(value, path)
+    refs = [item["artifact_ref"] for item in items]
+    defects: list[ContractDefect] = []
+    if refs != sorted(refs):
+        defects.append(ContractDefect(path, "LIST_NOT_SORTED", "source list must be sorted by artifact_ref"))
+    if len(set(refs)) != len(refs):
+        defects.append(ContractDefect(path, "DUPLICATE_ARTIFACT_REF", "source list has duplicate artifact_ref"))
+    if defects:
+        raise ContractError(defects)
+    return items
+
+
 # ---------------------------------------------------------------------------
 # ID grammar
 # ---------------------------------------------------------------------------
@@ -325,12 +352,12 @@ def _v_temporal(value: Any, path: str) -> dict:
     )
 
 
-def _v_source_policy(value: Any, path: str) -> dict:
+def _v_source_policy(value: Any, path: str, *, sources: Validator = v_artifact_list) -> dict:
     return validate_closed_object(
         value,
         path,
         {
-            "allowlist_artifacts": v_artifact_list,
+            "allowlist_artifacts": sources,
             "denylist_refs": v_sorted_unique_str_list,
             "solution_refs_hidden": v_sorted_unique_str_list,
         },
@@ -425,6 +452,11 @@ _SCENARIO_FIELDS: dict[str, Validator] = {
     "authorship": _v_authorship,
     "supersedes": v_optional(v_scenario_id),
     "scenario_digest": v_digest,
+}
+
+_SCENARIO_V2_FIELDS = {**_SCENARIO_FIELDS,
+    "schema": v_enum(frozenset({SCENARIO_SCHEMA_V2})),
+    "source_policy": lambda value, path: _v_source_policy(value, path, sources=v_source_artifact_list),
 }
 
 
@@ -563,7 +595,9 @@ def _scenario_cross_field_defects(document: dict) -> list[ContractDefect]:
 
 def _check_scenario_fields(document: Any, *, require_digest: bool) -> dict:
     optional = frozenset({"scenario_digest"}) if not require_digest else frozenset()
-    validated = validate_closed_object(document, "$", _SCENARIO_FIELDS, optional=optional)
+    fields = (_SCENARIO_V2_FIELDS if isinstance(document, dict)
+              and document.get("schema") == SCENARIO_SCHEMA_V2 else _SCENARIO_FIELDS)
+    validated = validate_closed_object(document, "$", fields, optional=optional)
     cross_defects = _scenario_cross_field_defects(document if isinstance(document, dict) else {})
     if cross_defects:
         raise ContractError(cross_defects)
@@ -578,7 +612,7 @@ def validate_scenario_shape(document: Any) -> str:
     return "SHAPE_VALID"
 
 
-def build_scenario(fields: dict) -> dict:
+def build_scenario(fields: dict, *, schema: str = SCENARIO_SCHEMA) -> dict:
     """Assemble, validate, and digest a scenario document from field values.
 
     ``fields`` must NOT include ``schema`` or ``scenario_digest``.
@@ -587,7 +621,8 @@ def build_scenario(fields: dict) -> dict:
         raise ContractError(
             [ContractDefect("$", "BUILD_FIELDS_MUST_EXCLUDE_SCHEMA_AND_DIGEST", "fields must omit schema and scenario_digest")]
         )
-    document = {"schema": SCENARIO_SCHEMA, **fields}
+    # Explicit opt-in; old authored scenarios are never silently upgraded.
+    document = {"schema": schema, **fields}
     _check_scenario_fields(document, require_digest=False)
     return add_document_digest(document, "scenario_digest")
 
@@ -623,18 +658,17 @@ def _v_execution(value: Any, path: str) -> dict:
     )
 
 
+_PROCEDURE_FIELDS = {
+    "protected_source_ref": v_source_ref,
+    "skillpack_source_ref": v_source_ref,
+    "skillpack_version": v_str,
+    "instruction_bundle": v_artifact_pair,
+    "handoff": v_optional(v_artifact_pair),
+}
+
+
 def _v_procedure(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value,
-        path,
-        {
-            "protected_source_ref": v_source_ref,
-            "skillpack_source_ref": v_source_ref,
-            "skillpack_version": v_str,
-            "instruction_bundle": v_artifact_pair,
-            "handoff": v_optional(v_artifact_pair),
-        },
-    )
+    return validate_closed_object(value, path, _PROCEDURE_FIELDS)
 
 
 def _v_context(value: Any, path: str) -> dict:
@@ -664,8 +698,11 @@ def _v_capabilities_config(value: Any, path: str) -> dict:
     )
 
 
+_RANDOMNESS_FIELDS = {"seed": v_int, "sampling_parameters_digest": v_digest}
+
+
 def _v_randomness(value: Any, path: str) -> dict:
-    return validate_closed_object(value, path, {"seed": v_int, "sampling_parameters_digest": v_digest})
+    return validate_closed_object(value, path, _RANDOMNESS_FIELDS)
 
 
 _CONFIGURATION_FIELDS: dict[str, Validator] = {
@@ -1171,50 +1208,48 @@ def _v_comparison(value: Any, path: str) -> dict:
     )
 
 
+_RUN_EXECUTION_FIELDS = {
+    "runner_id": v_str,
+    "runner_code_ref": v_source_ref,
+    "execution_surface": v_str,
+    "execution_surface_version": v_str,
+    "provider": v_str,
+    "model_requested": v_str,
+    "model_served": v_str,
+    "reasoning_effort": v_enum(_REASONING_EFFORTS),
+    "auth_realm_class": v_auth_realm_class,
+    "process_fingerprint": v_digest,
+    "native_session_fingerprint": v_digest,
+    "completion_status": v_enum(_COMPLETION_STATUSES),
+    "termination_reason": v_str,
+    "fresh_process_observed": v_bool,
+    "fresh_workspace_observed": v_bool,
+    "fresh_session_observed": v_bool,
+    "resume_used": v_bool,
+}
+
+
 def _v_run_execution(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value,
-        path,
-        {
-            "runner_id": v_str,
-            "runner_code_ref": v_source_ref,
-            "execution_surface": v_str,
-            "execution_surface_version": v_str,
-            "provider": v_str,
-            "model_requested": v_str,
-            "model_served": v_str,
-            "reasoning_effort": v_enum(_REASONING_EFFORTS),
-            "auth_realm_class": v_auth_realm_class,
-            "process_fingerprint": v_digest,
-            "native_session_fingerprint": v_digest,
-            "completion_status": v_enum(_COMPLETION_STATUSES),
-            "termination_reason": v_str,
-            "fresh_process_observed": v_bool,
-            "fresh_workspace_observed": v_bool,
-            "fresh_session_observed": v_bool,
-            "resume_used": v_bool,
-        },
-    )
+    return validate_closed_object(value, path, _RUN_EXECUTION_FIELDS)
+
+
+_RUN_CONTEXT_FIELDS = {
+    "source_policy_digest": v_digest,
+    "context_packet": v_artifact_pair,
+    "retrieval_configuration": v_optional(v_artifact_pair),
+}
 
 
 def _v_run_context(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, _RUN_CONTEXT_FIELDS)
+
+
+def _v_observations(value: Any, path: str, *, sources: Validator = v_artifact_list) -> dict:
     return validate_closed_object(
         value,
         path,
         {
-            "source_policy_digest": v_digest,
-            "context_packet": v_artifact_pair,
-            "retrieval_configuration": v_optional(v_artifact_pair),
-        },
-    )
-
-
-def _v_observations(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value,
-        path,
-        {
-            "observed_sources": v_artifact_list,
+            "observed_sources": sources,
             "observed_capability_ids": v_sorted_unique_str_list,
             "observed_tool_schema_digests": v_sorted_unique_digest_list,
             "observed_network_destinations": v_list_of(_v_observed_destination),
@@ -1223,19 +1258,18 @@ def _v_observations(value: Any, path: str) -> dict:
     )
 
 
+_RUN_CAPABILITIES_FIELDS = {
+    "profile_id": v_str,
+    "profile_digest": v_digest,
+    "sandbox_digest": v_digest,
+    "network_policy_digest": v_digest,
+    "workspace_digest": v_digest,
+    "environment_digest": v_digest,
+}
+
+
 def _v_run_capabilities(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value,
-        path,
-        {
-            "profile_id": v_str,
-            "profile_digest": v_digest,
-            "sandbox_digest": v_digest,
-            "network_policy_digest": v_digest,
-            "workspace_digest": v_digest,
-            "environment_digest": v_digest,
-        },
-    )
+    return validate_closed_object(value, path, _RUN_CAPABILITIES_FIELDS)
 
 
 def _v_effect(value: Any, path: str) -> dict:
@@ -1254,17 +1288,16 @@ def _v_evidence_artifact(value: Any, path: str) -> dict:
     )
 
 
+_RUN_EVIDENCE_FIELDS = {
+    "output": v_artifact_pair,
+    "tool_events": v_artifact_pair,
+    "trace": v_optional(v_artifact_pair),
+    "artifacts": v_list_of(_v_evidence_artifact),
+}
+
+
 def _v_evidence(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value,
-        path,
-        {
-            "output": v_artifact_pair,
-            "tool_events": v_artifact_pair,
-            "trace": v_optional(v_artifact_pair),
-            "artifacts": v_list_of(_v_evidence_artifact),
-        },
-    )
+    return validate_closed_object(value, path, _RUN_EVIDENCE_FIELDS)
 
 
 def _v_resources(value: Any, path: str) -> dict:
@@ -1283,10 +1316,11 @@ def _v_resources(value: Any, path: str) -> dict:
     )
 
 
+_RUN_TIMING_FIELDS = {"started_at": v_timestamp, "completed_at": v_timestamp, "monotonic_duration_ms": v_nonneg_int}
+
+
 def _v_timing(value: Any, path: str) -> dict:
-    return validate_closed_object(
-        value, path, {"started_at": v_timestamp, "completed_at": v_timestamp, "monotonic_duration_ms": v_nonneg_int}
-    )
+    return validate_closed_object(value, path, _RUN_TIMING_FIELDS)
 
 
 def _v_validity(value: Any, path: str) -> dict:
@@ -1334,6 +1368,113 @@ _RUN_FIELDS: dict[str, Validator] = {
     "created_at": v_timestamp,
     "run_digest": v_digest,
 }
+
+
+# V2 keeps identity and selected input/source bindings mandatory. Only the
+# explicitly named execution observations below may be unavailable. Their
+# absence is data, never a substitute value copied from the configuration.
+RUN_OBSERVATION_NULLABLE_FIELDS = {
+    "execution": frozenset({
+        "provider", "model_requested", "model_served", "reasoning_effort",
+        "auth_realm_class", "process_fingerprint", "native_session_fingerprint",
+        "fresh_process_observed", "fresh_workspace_observed",
+        "fresh_session_observed", "resume_used",
+    }),
+    "capabilities": frozenset({
+        "sandbox_digest", "network_policy_digest", "workspace_digest", "environment_digest",
+    }),
+    "randomness": frozenset({"seed", "sampling_parameters_digest"}),
+    "evidence": frozenset({"output", "tool_events"}),
+    "timing": frozenset({"started_at", "completed_at", "monotonic_duration_ms"}),
+}
+RUN_OBSERVATION_PATHS = frozenset(
+    f"{group}.{name}" for group, names in RUN_OBSERVATION_NULLABLE_FIELDS.items() for name in names
+)
+RUN_OBSERVATION_UNAVAILABLE_REASONS = frozenset({
+    "NOT_EXECUTED", "NOT_OBSERVED", "NOT_RETAINED", "RESULT_EXPIRED",
+    "OBSERVATION_LIMIT", "OBSERVATION_CONFLICT", "SOURCE_UNAVAILABLE",
+})
+RUN_OBSERVATION_COVERAGE_KEYS = frozenset({
+    "observed_sources", "observed_capability_ids", "observed_tool_schema_digests",
+    "observed_network_destinations", "dependency_degradations", "tool_events",
+    "provider_requests", "procedure_delivery", "context_delivery",
+})
+
+
+def _v_unavailable_observations(value: Any, path: str) -> list[dict]:
+    if not isinstance(value, list) or len(value) > len(RUN_OBSERVATION_PATHS):
+        raise ContractError([ContractDefect(path, "OBSERVATION_UNAVAILABLE_SHAPE", "expected a bounded list")])
+    items = v_list_of(lambda item, item_path: validate_closed_object(item, item_path, {
+        "path": v_enum(RUN_OBSERVATION_PATHS),
+        "reason": v_enum(RUN_OBSERVATION_UNAVAILABLE_REASONS),
+    }))(value, path)
+    paths = [item["path"] for item in items]
+    if paths != sorted(set(paths)):
+        raise ContractError([ContractDefect(path, "OBSERVATION_UNAVAILABLE_ORDER", "paths must be sorted and unique")])
+    return items
+
+
+def _v_observation_coverage(value: Any, path: str) -> dict:
+    result = validate_closed_object(value, path, {
+        "status": v_enum(frozenset({"COMPLETE", "PARTIAL", "UNOBSERVED"})),
+        "reason": v_optional(v_enum(RUN_OBSERVATION_UNAVAILABLE_REASONS)),
+    })
+    if (result["status"] == "COMPLETE") != (result["reason"] is None):
+        raise ContractError([ContractDefect(path, "OBSERVATION_COVERAGE_REASON", "incomplete coverage requires its reason")])
+    return result
+
+
+def _v_run_observation_availability(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {
+        "unavailable": _v_unavailable_observations,
+        "coverage": lambda item, item_path: validate_closed_object(item, item_path, {
+            key: _v_observation_coverage for key in sorted(RUN_OBSERVATION_COVERAGE_KEYS)
+        }),
+    })
+
+
+def _nullable_observation_group(group: str, fields: dict[str, Validator]) -> Validator:
+    validators = {name: v_optional(validator) if name in RUN_OBSERVATION_NULLABLE_FIELDS[group] else validator
+                  for name, validator in fields.items()}
+    return lambda value, path: validate_closed_object(value, path, validators)
+
+
+_RUN_V2_COMMON_FIELDS = {
+    **_RUN_COMMON_FIELDS,
+    **{group: _nullable_observation_group(group, fields) for group, fields in {
+        "execution": _RUN_EXECUTION_FIELDS, "capabilities": _RUN_CAPABILITIES_FIELDS,
+        "randomness": _RANDOMNESS_FIELDS, "evidence": _RUN_EVIDENCE_FIELDS, "timing": _RUN_TIMING_FIELDS,
+    }.items()},
+    "observation_availability": _v_run_observation_availability,
+}
+_RUN_V2_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V2})), **_RUN_V2_COMMON_FIELDS}
+_RUN_V2_FIELDS = {**_RUN_FIELDS, **_RUN_V2_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V2}))}
+_RUN_V3_COMMON_FIELDS = {**_RUN_V2_COMMON_FIELDS,
+    "observations": lambda value, path: _v_observations(value, path, sources=v_source_artifact_list),
+}
+_RUN_V3_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V3})), **_RUN_V3_COMMON_FIELDS}
+_RUN_V3_FIELDS = {**_RUN_FIELDS, **_RUN_V3_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V3}))}
+
+
+def _run_v2_observation_defects(document: dict) -> list[ContractDefect]:
+    missing = {path for path in RUN_OBSERVATION_PATHS
+               if document[path.split(".")[0]][path.split(".")[1]] is None}
+    availability = document["observation_availability"]
+    declared = {item["path"] for item in availability["unavailable"]}
+    defects = []
+    if declared != missing:
+        defects.append(ContractDefect("$.observation_availability.unavailable",
+            "OBSERVATION_UNAVAILABLE_MISMATCH", "one typed reason is required for each null observation and only that observation"))
+    for name, coverage in availability["coverage"].items():
+        if (coverage["status"] == "UNOBSERVED" and name in document["observations"]
+                and document["observations"][name]):
+            defects.append(ContractDefect(f"$.observation_availability.coverage.{name}",
+                "UNOBSERVED_COLLECTION_NOT_EMPTY", "retained observations require partial or complete coverage"))
+    if (availability["coverage"]["tool_events"]["status"] == "UNOBSERVED"
+            and document["evidence"]["tool_events"] is not None):
+        defects.append(ContractDefect("$.observation_availability.coverage.tool_events",
+            "UNOBSERVED_COLLECTION_NOT_EMPTY", "retained tool-event evidence requires partial or complete coverage"))
+    return defects
 
 
 def _run_cross_field_defects(document: dict) -> list[ContractDefect]:
@@ -1411,18 +1552,20 @@ def _run_cross_field_defects(document: dict) -> list[ContractDefect]:
     created_at = document.get("created_at")
     if isinstance(validity, dict) and isinstance(created_at, str) and isinstance(timing, dict):
         try:
-            completed = parse_utc_z(timing["completed_at"])
             validated = parse_utc_z(validity["validated_at"])
             created = parse_utc_z(created_at)
+            started = parse_utc_z(timing["started_at"]) if timing.get("started_at") is not None else None
+            completed = parse_utc_z(timing["completed_at"]) if timing.get("completed_at") is not None else None
         except (ContractError, KeyError):
             pass
         else:
-            if not (completed <= validated <= created):
+            if (validated > created or (started is not None and started > validated)
+                    or (completed is not None and completed > validated)):
                 defects.append(
                     ContractDefect(
                         "$.validity.validated_at",
                         "VALIDITY_TIME_ORDER_VIOLATED",
-                        "must hold: timing.completed_at <= validity.validated_at <= created_at",
+                        "observed start/completion must precede validation, and validation must precede creation",
                     )
                 )
     return defects
@@ -1430,9 +1573,17 @@ def _run_cross_field_defects(document: dict) -> list[ContractDefect]:
 
 def _check_run_fields(document: Any, *, is_draft: bool, require_digest: bool) -> dict:
     field_set = _RUN_DRAFT_FIELDS if is_draft else _RUN_FIELDS
+    schema = document.get("schema") if isinstance(document, dict) else None
+    has_availability = schema in RUN_AVAILABILITY_SCHEMAS
+    if schema == (RUN_DRAFT_SCHEMA_V3 if is_draft else RUN_SCHEMA_V3):
+        field_set = _RUN_V3_DRAFT_FIELDS if is_draft else _RUN_V3_FIELDS
+    elif schema == (RUN_DRAFT_SCHEMA_V2 if is_draft else RUN_SCHEMA_V2):
+        field_set = _RUN_V2_DRAFT_FIELDS if is_draft else _RUN_V2_FIELDS
     optional = frozenset({"run_digest"}) if (not is_draft and not require_digest) else frozenset()
     validated = validate_closed_object(document, "$", field_set, optional=optional)
     cross_defects = _run_cross_field_defects(document if isinstance(document, dict) else {})
+    if has_availability:
+        cross_defects.extend(_run_v2_observation_defects(document))
     if cross_defects:
         raise ContractError(cross_defects)
     if not is_draft and require_digest:
@@ -1458,9 +1609,12 @@ def validate_run_shape(document: Any) -> str:
 
 _SHAPE_VALIDATORS: dict[str, Callable[[Any], str]] = {
     SCENARIO_SCHEMA: validate_scenario_shape,
+    SCENARIO_SCHEMA_V2: validate_scenario_shape,
     CONFIGURATION_SCHEMA: validate_configuration_shape,
     EXPERIMENT_SCHEMA: validate_experiment_shape,
     RUN_SCHEMA: validate_run_shape,
+    RUN_SCHEMA_V2: validate_run_shape,
+    RUN_SCHEMA_V3: validate_run_shape,
 }
 
 
@@ -1477,7 +1631,7 @@ def validate_document_shape(document: Any) -> str:
     if not isinstance(document, dict) or "schema" not in document:
         raise ContractError([ContractDefect("$", "SCHEMA_MISSING", "document has no schema field")])
     schema = document["schema"]
-    if schema == RUN_DRAFT_SCHEMA:
+    if schema in RUN_DRAFT_SCHEMAS:
         raise ContractError(
             [ContractDefect("$.schema", "DRAFT_SCHEMA_REJECTED", "draft schema is not a persisted artifact")]
         )

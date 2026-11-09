@@ -64,8 +64,10 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import re
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
@@ -74,6 +76,7 @@ from control_plane.github_review_intent import (
     SUPPORTED_EVENTS,
     CurrentPermission,
     IntentSignal,
+    IntentSource,
     PullRequestFacts,
     ReviewIntentDecision,
     ReviewIntentError,
@@ -81,9 +84,13 @@ from control_plane.github_review_intent import (
     ReviewIntentRefusal,
     ReviewIntentSignatureError,
     build_review_objective,
+    build_review_job_objective,
     contains_secret_shaped_text,
     current_permission_is_valid,
     decide_review_intent,
+    decide_reconciled_review,
+    AutomaticReviewOrigin,
+    RepositoryPolicyAuthority,
     delivery_command_id,
     review_command_id,
     review_intent_id,
@@ -92,6 +99,11 @@ from control_plane.github_review_intent import (
     parse_webhook_envelope,
     verify_frozen_head,
     verify_webhook_signature,
+)
+
+
+from control_plane.github_review_risk_dispatch import (
+    PR_LOCAL_RISK_HOLD_REASONS, ReviewDispatch, RiskDispatchAdvice,
 )
 
 
@@ -119,6 +131,7 @@ MAX_REVIEW_SUMMARY_CHARS = 16_000
 # The installed GitHub review create API used by this host rejects bodies
 # above 16_000 characters. Refuse at that ceiling before any reservation.
 MAX_REVIEW_BODY_CHARS = 16_000
+PUBLICATION_PREFLIGHT_SECONDS = 3.0
 _REVIEW_ID_RE = r"^[0-9A-Za-z:._-]{1,128}$"
 
 
@@ -128,6 +141,62 @@ class ReviewIngressError(RuntimeError):
 
 class ReviewIngressUnavailable(ReviewIngressError):
     """A required port is not bound on this host.  Fails closed."""
+
+
+class ReviewSourceReadDeferred(ReviewIngressUnavailable):
+    """A source-wide limit/auth failure: stop a scan, not just one PR read.
+
+    The delay is advisory evidence for the incumbent owner, never a retry grant.
+    """
+
+    def __init__(self, code: str, *, retry_after_seconds: int | None = None) -> None:
+        if code not in {"REVIEW_SOURCE_RATE_LIMITED", "REVIEW_SOURCE_AUTH_UNAVAILABLE",
+                        "REVIEW_SOURCE_SERVER_DEFERRED"}:
+            raise ValueError("unrecognized source deferral")
+        if retry_after_seconds is not None and (
+            type(retry_after_seconds) is not int or retry_after_seconds < 0
+        ):
+            raise ValueError("invalid source deferral delay")
+        super().__init__(code)
+        self.code = code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ReviewAdmissionPreflightExpired(ReviewIngressUnavailable):
+    """This invocation expired before it called the admission effect port."""
+
+
+class ReviewRiskSourceUnqualified(ReviewIngressUnavailable):
+    """Automatic review risk facts failed closed before any admission effect."""
+
+    def __init__(self, message: str, *, source_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.pr_local = (
+            type(source_reason) is str and source_reason in PR_LOCAL_RISK_HOLD_REASONS
+        )
+
+
+class ExistingReviewDecisionUnavailable(ReviewIngressUnavailable):
+    """A verified existing Job lacks a recorded full original decision.
+
+    This is definite existence, not an uncertain create or permission to retry.
+    The bounded identity lets a reconciliation pass continue other PRs.
+    """
+
+    def __init__(self, *, job_id: str, command_id: str, repository: str,
+                 pull_number: int, frozen_head_sha: str) -> None:
+        super().__init__("REVIEW_LEGACY_DECISION_UNAVAILABLE")
+        self.job_id = job_id
+        self.command_id = command_id
+        self.repository = repository
+        self.pull_number = pull_number
+        self.frozen_head_sha = frozen_head_sha
+
+    def matches(self, decision: ReviewIntentDecision) -> bool:
+        return (type(self.job_id) is str and re.fullmatch(r"JOB-[0-9]+", self.job_id) is not None
+                and type(self.pull_number) is int
+                and self.command_id == decision.command_id and self.repository == decision.repository
+                and self.pull_number == decision.pull_number and self.frozen_head_sha == decision.frozen_head_sha)
 
 
 class ReviewVerificationRefused(ReviewIngressError):
@@ -151,10 +220,15 @@ class PublicationEffectUnknown(ReviewIngressError):
     """
 
 
+class PublicationPreflightUnavailable(ReviewIngressUnavailable):
+    """This invocation has not attempted POST; prior claims still need readback."""
+
+
 class AdmissionState(str, Enum):
     ADMITTED = "ADMITTED"
     ALREADY_ADMITTED = "ALREADY_ADMITTED"
     REFUSED = "REFUSED"
+    SKIPPED = "SKIPPED"
 
 
 class PublishState(str, Enum):
@@ -183,6 +257,27 @@ class PullRequestReadPort(Protocol):
 
     def read_pull_request(self, *, repository: str, pull_number: int) -> PullRequestFacts:
         """Return the exact current PR facts, or raise."""
+
+
+@dataclasses.dataclass(frozen=True)
+class OpenPullRequestPage:
+    numbers: tuple[int, ...]
+    has_more: bool
+
+    def __post_init__(self) -> None:
+        if (type(self.numbers) is not tuple or len(self.numbers) > 100
+                or any(type(n) is not int or n <= 0 for n in self.numbers)
+                or len(set(self.numbers)) != len(self.numbers)
+                or type(self.has_more) is not bool):
+            raise ReviewIngressError("open pull-request page is not exact")
+
+
+@runtime_checkable
+class OpenPullRequestReadPort(PullRequestReadPort, Protocol):
+    def list_open_pull_request_numbers(
+        self, *, repository: str, page: int, per_page: int,
+    ) -> OpenPullRequestPage:
+        ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -302,8 +397,24 @@ class AdmittedJobFacts:
     repository: str
     pull_number: int
     frozen_head_sha: str
-    actor: str
+    actor: str | None
     intent_id: str
+    decision: ReviewIntentDecision | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReviewAdmissionReceipt:
+    """A created Job or an identity join retaining the immutable first decision."""
+
+    job_id: str
+    decision: ReviewIntentDecision
+    created: bool
+
+    def __post_init__(self) -> None:
+        if (type(self.job_id) is not str or not self.job_id
+                or type(self.decision) is not ReviewIntentDecision or not self.decision.admitted
+                or type(self.created) is not bool):
+            raise ReviewIngressError("admission receipt is not exact")
 
 
 @runtime_checkable
@@ -447,6 +558,7 @@ def reconcile_publication(
 
     if not isinstance(expected_publisher, ExpectedReviewPublisher):
         raise ReviewVerificationRefused("GITHUB_PUBLISHER_IDENTITY_UNAVAILABLE")
+    matches = []
     for review in reviews:
         if not published_review_is_valid(review):
             continue
@@ -454,8 +566,10 @@ def reconcile_publication(
                 or review.author_login.casefold() != expected_publisher.login.casefold()):
             continue
         if review.commit_id == commit_id and review.event == event and review.body == body:
-            return review.review_id
-    return None
+            matches.append(review.review_id)
+    if len(matches) > 1:
+        raise PublicationEffectUnknown("GITHUB_REVIEW_READBACK_AMBIGUOUS")
+    return matches[0] if matches else None
 
 
 
@@ -596,9 +710,17 @@ class PublishedCommandIndex(Protocol):
         """Only confirmed original publication commands, not bare claims."""
         ...
 
+    def has_publication_claim(
+        self, *, publication_command_id: str, repository: str,
+        pull_number: int, head_sha: str, event: str, body: str,
+    ) -> bool:
+        """Exact indexed observation; conflicts raise, absence grants no POST."""
+        ...
+
     def reserve_publication(
         self, *, publication_command_id: str, repository: str,
         pull_number: int, head_sha: str, event: str, body: str,
+        preflight_deadline: float,
     ) -> bool:
         """True ONLY if the incumbent UNIQUE ledger committed the new claim.
 
@@ -626,6 +748,7 @@ class ReconcilingReviewPublication:
     def __init__(
         self, *, transport: ReviewTransportPort, published: PublishedCommandIndex,
         expected_publisher: ExpectedReviewPublisher, before_post: FinalPullRequestCheck,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not isinstance(transport, ReviewTransportPort):
             raise ReviewIngressError("ReviewTransportPort is not bound on this host")
@@ -639,6 +762,7 @@ class ReconcilingReviewPublication:
         self._published = published
         self._expected_publisher = expected_publisher
         self._before_post = before_post
+        self._clock = clock
 
     def publishing_principal(self) -> ExpectedReviewPublisher:
         return self._expected_publisher
@@ -686,23 +810,53 @@ class ReconcilingReviewPublication:
             repository=repository, pull_number=pull_number,
             head_sha=head_sha, event=event, body=body,
         )
-        # The canonical UNIQUE claim is the one-shot gate for ALL instances,
-        # even simultaneous instances in different processes.
         try:
-            first_writer = self._published.reserve_publication(**fields)
+            previously_claimed = self._published.has_publication_claim(**fields)
         except ReviewVerificationRefused:
+            raise
+        except Exception:
+            raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
+        if type(previously_claimed) is not bool:
+            raise ReviewVerificationRefused("publication claim observation is invalid")
+        # Finish fallible read-only preflight before claiming a new POST.
+        # A failed GET must not strand a publication that has never been sent.
+        # This does not release or replace any older reservation.
+        try:
+            existing = self._readback(
+                repository=repository, pull_number=pull_number, head_sha=head_sha,
+                event=event, body=body,
+            )
+        except PublicationEffectUnknown:
+            if previously_claimed:
+                raise
+            raise PublicationPreflightUnavailable("PUBLICATION_PREFLIGHT_UNAVAILABLE") from None
+        deadline = self._clock() + PUBLICATION_PREFLIGHT_SECONDS
+        if existing is None:
+            if previously_claimed:
+                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
+            self._before_post()
+
+        # The owner checks this monotonic budget after acquiring its database
+        # transaction, before inserting a claim. No network I/O holds that lock.
+        # The UNIQUE claim remains the sole cross-process permission to POST.
+        try:
+            first_writer = self._published.reserve_publication(
+                **fields, preflight_deadline=deadline,
+            )
+        except (ReviewVerificationRefused, PublicationPreflightUnavailable):
             raise
         except Exception:
             raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
         if type(first_writer) is not bool:
             raise ReviewVerificationRefused("publication reservation is not authoritative")
 
-        # Readback may find a successful older effect; it is never itself the
-        # one-shot gate, and an unavailable read retains the reserved unknown.
-        existing = self._readback(
-            repository=repository, pull_number=pull_number, head_sha=head_sha,
-            event=event, body=body,
-        )
+        if not first_writer and existing is None:
+            # A concurrent winner may have posted since our first read. This
+            # is positive reconciliation only; absence never authorizes POST.
+            existing = self._readback(
+                repository=repository, pull_number=pull_number, head_sha=head_sha,
+                event=event, body=body,
+            )
         if existing is not None:
             try:
                 self._published.confirm_publication(**fields, review_id=existing)
@@ -713,9 +867,10 @@ class ReconcilingReviewPublication:
             # Prior first writer could still be POSTing or have lost its reply.
             raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
 
-        # Readback is a network window: recheck head/draft/fork/open after it.
-        # The prior atomic claim remains sticky even if this check refuses.
-        self._before_post()
+        if self._clock() >= deadline:
+            # Commit/return can itself stall after insertion. Keep that claim
+            # sticky rather than POST against expired preflight facts.
+            raise PublicationEffectUnknown("GITHUB_REVIEW_PREFLIGHT_EXPIRED_AFTER_CLAIM")
         try:
             review_id = self._transport.submit_review(
                 repository=repository, pull_number=pull_number,
@@ -837,6 +992,17 @@ def _notify(
     return None
 
 
+def notify_review_outcome(visibility: VisibilityPort | None,
+                          outcome: ReviewIngressOutcome) -> str | None:
+    """Best-effort projection of a completed admission, independent of HTTP ACK.
+
+    Joining an existing Job never starts another notice or send attempt.
+    """
+    if outcome.state is AdmissionState.ALREADY_ADMITTED:
+        return None
+    return _notify(visibility, outcome.decision, job_id=outcome.job_id)
+
+
 def _simple_refusal(
     *,
     refusal: ReviewIntentRefusal,
@@ -926,6 +1092,8 @@ def admit_review_intent(
     fabric: FabricJobAdmissionPort,
     actors: ActorPermissionPort | None = None,
     visibility: VisibilityPort | None = None,
+    before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
 ) -> ReviewIngressOutcome:
     """Walk one signed delivery to at most one admitted review run.
 
@@ -991,6 +1159,24 @@ def admit_review_intent(
             visibility_error=_notify(visibility, decision, job_id=None),
         )
 
+    # A disabled lifecycle channel and an un-enrolled installation earn no
+    # authenticated reads or ledger inspection, even for a valid signature.
+    preflight_refusal = None
+    if envelope.installation_id not in policy.installation_ids:
+        preflight_refusal = ReviewIntentRefusal.INSTALLATION_NOT_ALLOWLISTED
+    elif (intent_channel_for(envelope.event, envelope.action) is IntentSource.PR_LIFECYCLE
+            and not policy.allow_lifecycle_review):
+        preflight_refusal = ReviewIntentRefusal.AUTOMATIC_REVIEW_DISABLED
+    if preflight_refusal is not None:
+        decision = _simple_refusal(
+            refusal=preflight_refusal, delivery_id=delivery_id,
+            repository=envelope.repository, pull_number=envelope.pull_number,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED, decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
+
     if envelope.pull_number is None:
         # A supported channel whose signed payload identifies no pull request —
         # a slash command on a plain issue.  Refused before any read, ledger
@@ -1010,7 +1196,11 @@ def admit_review_intent(
     # A login that is not on the allowlist can never be authorized, and that
     # check is static — so it is made before the pull request, and an
     # unauthorized actor earns no authenticated PR read at all.
-    if not policy.actor_is_listed(login=signal.actor_login):
+    standing_policy = (
+        intent_channel_for(envelope.event, envelope.action) is IntentSource.PR_LIFECYCLE
+        and policy.allow_repository_policy_review
+    )
+    if not standing_policy and not policy.actor_is_listed(login=signal.actor_login):
         decision = _simple_refusal(
             refusal=ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED,
             delivery_id=delivery_id,
@@ -1025,9 +1215,22 @@ def admit_review_intent(
 
     # The actor's current permission is read before the pull request, so a
     # stale or under-privileged actor costs no authenticated PR read either.
-    current_permission = _current_permission(
+    current_permission = None if standing_policy else _current_permission(
         actors, repository=envelope.repository, login=signal.actor_login
     )
+
+    if (not standing_policy
+            and intent_channel_for(envelope.event, envelope.action) is IntentSource.PR_LIFECYCLE
+            and current_permission is None):
+        decision = _simple_refusal(
+            refusal=ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED,
+            delivery_id=delivery_id, repository=envelope.repository,
+            pull_number=envelope.pull_number,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED, decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
 
     pull_request = pull_read.read_pull_request(
         repository=envelope.repository, pull_number=envelope.pull_number
@@ -1040,7 +1243,12 @@ def admit_review_intent(
     # The optional scalar lookup is an optimization only: the canonical UNIQUE
     # index inside create_job still arbitrates all concurrent admissions.
     has_command = getattr(fabric_port, "has_admitted_command", None)
-    if callable(has_command):
+    if callable(getattr(fabric_port, "admit_or_join_review_intent", None)):
+        # A canonical port returns the first admitted decision even when a
+        # previous trigger won before this request arrived. Do not turn that
+        # into a new refused decision with lost job/provenance here.
+        admitted_commands = frozenset()
+    elif callable(has_command):
         candidate_command = review_command_id(review_intent_id(
             repository=envelope.repository,
             pull_number=envelope.pull_number,
@@ -1074,10 +1282,131 @@ def admit_review_intent(
             visibility_error=_notify(visibility, decision, job_id=None),
         )
 
-    objective = build_review_objective(
+    return admit_decided_review(
+        decision=decision, pull_request=pull_request, fabric=fabric_port, visibility=visibility,
+        before_admission=before_admission, review_risk_gate=review_risk_gate,
+    )
+
+
+def _preflight_review_risk(
+    *, decision: ReviewIntentDecision, pull_request: PullRequestFacts,
+    fabric: FabricJobAdmissionPort,
+    before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
+) -> ReviewIngressOutcome | None:
+    """Read risk and existing command status without invoking admission.
+
+    A backlog scan may isolate a proven PR-local source failure only around
+    this preflight. The same exception after an admission call stays uncertain.
+    """
+    if not decision.admitted:
+        return None
+    if review_risk_gate is not None:
+        if not callable(review_risk_gate):
+            raise ReviewIngressUnavailable("REVIEW_RISK_CONSUMER_UNBOUND")
+        if before_admission is not None:
+            if not callable(before_admission) or before_admission() is not None:
+                raise ReviewIngressUnavailable("REVIEW_ADMISSION_PREFLIGHT_UNAVAILABLE")
+        advice = review_risk_gate(decision=decision, pull_request=pull_request)
+        if type(advice) is not RiskDispatchAdvice:
+            raise ReviewIngressUnavailable("REVIEW_RISK_ADVICE_INVALID")
+        automatic = decision.intent_source in {
+            IntentSource.PR_LIFECYCLE, IntentSource.OPEN_PR_RECONCILIATION,
+        }
+        if automatic:
+            if advice.action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE:
+                raise ReviewRiskSourceUnqualified(
+                    "REVIEW_RISK_SOURCE_UNQUALIFIED", source_reason=advice.reason,
+                )
+            if (advice.repository != decision.repository
+                    or advice.pull_number != decision.pull_number
+                    or advice.head_sha != decision.frozen_head_sha):
+                raise ReviewIngressUnavailable("REVIEW_RISK_EXACT_HEAD_MISMATCH")
+            if advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED:
+                # Never mask a canonical already-admitted Job as a new skip.
+                # The incumbent ledger has the only command status identity.
+                existing = getattr(fabric, "has_admitted_command", None)
+                if not callable(existing):
+                    raise ReviewIngressUnavailable("REVIEW_RISK_COMMAND_STATUS_UNAVAILABLE")
+                already = existing(decision.command_id)
+                if type(already) is not bool:
+                    raise ReviewIngressUnavailable("REVIEW_RISK_COMMAND_STATUS_INVALID")
+                if not already:
+                    skipped = dataclasses.replace(
+                        decision, admitted=False,
+                        refusal=ReviewIntentRefusal.REVIEW_NOT_REQUIRED,
+                        intent_source=None, actor=None,
+                        delivery_command_id=None, policy_authority=None,
+                    )
+                    return ReviewIngressOutcome(
+                        state=AdmissionState.SKIPPED, decision=skipped,
+                    )
+                # Existing work is reconciled by the original canonical join.
+            elif advice.action is not ReviewDispatch.AUTO_REVIEW_ELIGIBLE:
+                raise ReviewIngressUnavailable("REVIEW_RISK_ADVICE_INVALID")
+        elif advice.action is not ReviewDispatch.USE_EXISTING_MANUAL_INGRESS:
+            raise ReviewIngressUnavailable("REVIEW_MANUAL_INTENT_RISK_ROUTE_MISMATCH")
+    return None
+
+
+def admit_decided_review(
+    *, decision: ReviewIntentDecision, pull_request: PullRequestFacts,
+    fabric: FabricJobAdmissionPort, visibility: VisibilityPort | None = None,
+    before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
+) -> ReviewIngressOutcome:
+    """Common commit boundary for authenticated origins, with first-winner joins."""
+    if not decision.admitted:
+        return ReviewIngressOutcome(
+            state=(AdmissionState.ALREADY_ADMITTED if decision.already_admitted else AdmissionState.REFUSED),
+            decision=decision,
+        )
+    preflight = _preflight_review_risk(
+        decision=decision, pull_request=pull_request, fabric=fabric,
+        before_admission=before_admission, review_risk_gate=review_risk_gate,
+    )
+    if preflight is not None:
+        return preflight
+    objective = build_review_job_objective(
         pull_request=pull_request, intent_source=decision.intent_source
     )
-    job_id = fabric_port.admit_review_intent(decision=decision, objective=objective)
+    join = getattr(fabric, "admit_or_join_review_intent", None)
+    if before_admission is not None:
+        if not callable(before_admission) or before_admission() is not None:
+            raise ReviewIngressUnavailable("REVIEW_ADMISSION_PREFLIGHT_UNAVAILABLE")
+    if callable(join):
+        try:
+            receipt = join(decision=decision, objective=objective)
+        except ExistingReviewDecisionUnavailable as existing:
+            if not existing.matches(decision):
+                raise ReviewIngressUnavailable("REVIEW_ADMISSION_RECEIPT_INVALID") from None
+            incomplete = dataclasses.replace(
+                decision, admitted=False, refusal=ReviewIntentRefusal.ADMITTED_DECISION_UNAVAILABLE,
+                intent_source=None, actor=None, delivery_command_id=None, policy_authority=None,
+                already_admitted=True,
+            )
+            return ReviewIngressOutcome(
+                state=AdmissionState.ALREADY_ADMITTED, decision=incomplete, job_id=existing.job_id,
+            )
+        if (type(receipt) is not ReviewAdmissionReceipt
+                or receipt.decision.command_id != decision.command_id
+                or receipt.decision.repository != decision.repository
+                or receipt.decision.pull_number != decision.pull_number
+                or receipt.decision.frozen_head_sha != decision.frozen_head_sha
+                or (receipt.created and receipt.decision != decision)):
+            raise ReviewIngressUnavailable("REVIEW_ADMISSION_RECEIPT_INVALID")
+        if not receipt.created:
+            # No second Slack send. Return the original decision for downstream
+            # return/publication joins, never the losing trigger's identity.
+            return ReviewIngressOutcome(
+                state=AdmissionState.ALREADY_ADMITTED, decision=receipt.decision,
+                job_id=receipt.job_id,
+            )
+        decision, job_id = receipt.decision, receipt.job_id
+    else:
+        if decision.policy_authority is not None:
+            raise ReviewIngressUnavailable("REVIEW_POLICY_ADMISSION_PORT_UNBOUND")
+        job_id = fabric.admit_review_intent(decision=decision, objective=objective)
     return ReviewIngressOutcome(
         state=AdmissionState.ADMITTED,
         decision=decision,
@@ -1089,6 +1418,248 @@ def admit_review_intent(
 # ---------------------------------------------------------------------------
 # publication
 # ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class ReviewReconciliationReadFailure:
+    """One read-only source failure; never a claim that a review was attempted."""
+
+    page: int
+    pull_number: int
+    code: str = "REVIEW_RECONCILIATION_SOURCE_UNAVAILABLE"
+
+
+@dataclasses.dataclass(frozen=True)
+class ReviewReconciliationOutcome:
+    """Bounded scan receipt. Complete describes enumeration, never worker START."""
+
+    repository: str
+    owner_execution_ref: str
+    outcomes: tuple[ReviewIngressOutcome, ...]
+    pages_read: int
+    complete: bool
+    next_page: int | None
+    interruption: str | None = None
+    interrupted_pull_number: int | None = None
+    interrupted_command_id: str | None = None
+    read_failures: tuple[ReviewReconciliationReadFailure, ...] = ()
+    elapsed_seconds: float = 0.0
+    resume_pull_number: int | None = None
+    retry_after_seconds: int | None = None
+    start_page: int = 1
+    start_pull_number: int | None = None
+
+    @property
+    def all_sources_observed(self) -> bool:
+        return (self.complete and not self.read_failures
+                and self.start_page == 1 and self.start_pull_number is None)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": "mastermind.github_review_reconciliation.v2",
+            "repository": self.repository, "owner_execution_ref": self.owner_execution_ref,
+            "outcomes": [outcome.to_dict() for outcome in self.outcomes],
+            "pages_read": self.pages_read, "complete": self.complete,
+            "next_page": self.next_page, "interruption": self.interruption,
+            "interrupted_pull_number": self.interrupted_pull_number,
+            "interrupted_command_id": self.interrupted_command_id,
+            "read_failures": [dataclasses.asdict(failure) for failure in self.read_failures],
+            "retry_read_pages": sorted({failure.page for failure in self.read_failures}),
+            "all_sources_observed": self.all_sources_observed,
+            "elapsed_seconds": self.elapsed_seconds,
+            "resume_pull_number": self.resume_pull_number,
+            "retry_after_seconds": self.retry_after_seconds,
+            "start_page": self.start_page,
+            "start_pull_number": self.start_pull_number,
+        }
+
+
+def reconcile_open_pull_requests(
+    *, policy: ReviewIntentPolicy, repository: str, installation_id: int,
+    owner_execution_ref: str, authorize: Callable[[str], None],
+    pull_requests: OpenPullRequestReadPort, fabric: FabricJobAdmissionPort,
+    visibility: VisibilityPort | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
+    start_page: int = 1, max_pages: int = 2, per_page: int = 25,
+    resume_pull_number: int | None = None,
+    time_budget_seconds: float = 30.0,
+    clock: Callable[[], float] = time.monotonic,
+) -> ReviewReconciliationOutcome:
+    """One authenticated incumbent-owner pass; no daemon, fake delivery or cursor store.
+
+    Page numbers are continuity hints, not a stable snapshot of a changing
+    GitHub list. The existing owner records this receipt and starts a later
+    pass from page one to catch shifts. An uncertain admission stops this pass
+    with its exact command identity; it is never replayed here.
+    A budget receipt can resume within its first page by PR identity. If that
+    PR is no longer in the fresh page, examine the whole page. This hint is
+    not a snapshot or an uncertain-admission retry permission.
+    """
+    if (not policy.allow_lifecycle_review or not policy.allow_repository_policy_review):
+        raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_DISABLED")
+    # Validate the host binding and execution reference before any authenticated read.
+    RepositoryPolicyAuthority(
+        origin=AutomaticReviewOrigin.AUTHENTICATED_RECONCILIATION,
+        installation_id=installation_id, owner_execution_ref=owner_execution_ref,
+        policy_digest=policy.repository_policy_digest(
+            repository=repository, installation_id=installation_id),
+    )
+    if (type(start_page) is not int or not 1 <= start_page <= 10000
+            or type(max_pages) is not int or not 1 <= max_pages <= 10
+            or type(per_page) is not int or not 1 <= per_page <= 100
+            or max_pages * per_page > 100):
+        raise ReviewIngressError("reconciliation must be bounded to at most 100 PRs")
+    if resume_pull_number is not None and (
+        type(resume_pull_number) is not int or resume_pull_number <= 0
+    ):
+        raise ReviewIngressError("invalid reconciliation continuation")
+    if (type(time_budget_seconds) not in {int, float}
+            or not math.isfinite(time_budget_seconds)
+            or not 0 < time_budget_seconds <= 60 or not callable(clock)):
+        raise ReviewIngressError("reconciliation time budget must be in (0, 60]")
+    started = clock()
+    deadline = started + time_budget_seconds
+
+    def check_owner() -> None:
+        try:
+            if not callable(authorize) or authorize(owner_execution_ref) is not None:
+                raise ValueError("owner not armed")
+        except Exception:
+            raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_OWNER_UNARMED") from None
+
+    check_owner()
+    if not isinstance(pull_requests, OpenPullRequestReadPort) or not isinstance(fabric, FabricJobAdmissionPort):
+        raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_PORT_UNBOUND")
+    outcomes: list[ReviewIngressOutcome] = []
+    pages_read = 0
+    seen: set[int] = set()
+    failures: list[ReviewReconciliationReadFailure] = []
+
+    def receipt(*, page: int | None, complete: bool = False, code: str | None = None,
+                number: int | None = None, command: str | None = None,
+                retry_after: int | None = None) -> ReviewReconciliationOutcome:
+        return ReviewReconciliationOutcome(
+            repository=repository, owner_execution_ref=owner_execution_ref,
+            outcomes=tuple(outcomes), pages_read=pages_read, complete=complete,
+            next_page=page, interruption=code,
+            interrupted_pull_number=number, interrupted_command_id=command,
+            read_failures=tuple(failures), elapsed_seconds=max(0.0, clock() - started),
+            resume_pull_number=(
+                number if number is not None else (resume_pull_number if page == start_page else None)
+            ) if code in {"REVIEW_RECONCILIATION_BUDGET_EXHAUSTED", "REVIEW_SOURCE_RATE_LIMITED",
+                          "REVIEW_SOURCE_AUTH_UNAVAILABLE", "REVIEW_SOURCE_SERVER_DEFERRED"} else None,
+            retry_after_seconds=retry_after,
+            start_page=start_page, start_pull_number=resume_pull_number,
+        )
+
+    for page in range(start_page, start_page + max_pages):
+        if clock() >= deadline:
+            return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED")
+        try:
+            check_owner()
+        except ReviewIngressUnavailable:
+            return receipt(page=page, code="REVIEW_RECONCILIATION_OWNER_UNARMED")
+        if clock() >= deadline:
+            return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED")
+        try:
+            listed = pull_requests.list_open_pull_request_numbers(
+                repository=repository, page=page, per_page=per_page,
+            )
+            if type(listed) is not OpenPullRequestPage or len(listed.numbers) > per_page:
+                raise ValueError("page shape invalid")
+        except ReviewSourceReadDeferred as exc:
+            return receipt(page=page, code=exc.code, retry_after=exc.retry_after_seconds)
+        except Exception:
+            return receipt(page=page, code="REVIEW_RECONCILIATION_LIST_UNAVAILABLE")
+        pages_read += 1
+        numbers = listed.numbers
+        if page == start_page and resume_pull_number in numbers:
+            numbers = numbers[numbers.index(resume_pull_number):]
+        for number in numbers:
+            if number in seen:
+                continue
+            seen.add(number)
+            if clock() >= deadline:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED", number=number)
+            try:
+                check_owner()
+            except ReviewIngressUnavailable:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_OWNER_UNARMED", number=number)
+            if clock() >= deadline:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED", number=number)
+            try:
+                current = pull_requests.read_pull_request(repository=repository, pull_number=number)
+                if type(current) is not PullRequestFacts:
+                    raise ValueError("PR shape invalid")
+                decision = decide_reconciled_review(
+                    policy=policy, repository=repository, installation_id=installation_id,
+                    pull_number=number, owner_execution_ref=owner_execution_ref, pull_request=current,
+                )
+            except ReviewSourceReadDeferred as exc:
+                return receipt(page=page, code=exc.code, number=number,
+                               retry_after=exc.retry_after_seconds)
+            except Exception:
+                # No admission has been attempted for this PR. Preserve the
+                # missing source explicitly and continue unrelated PR reads.
+                failures.append(ReviewReconciliationReadFailure(page=page, pull_number=number))
+                continue
+            if clock() >= deadline:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
+            try:
+                check_owner()
+            except ReviewIngressUnavailable:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_OWNER_UNARMED", number=number)
+            if clock() >= deadline:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
+            def scan_admission_guard() -> None:
+                check_owner()
+                if clock() >= deadline:
+                    raise ReviewAdmissionPreflightExpired(
+                        "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
+                    )
+            try:
+                preflight = _preflight_review_risk(
+                    decision=decision, pull_request=current, fabric=fabric,
+                    review_risk_gate=review_risk_gate, before_admission=scan_admission_guard,
+                )
+            except ReviewRiskSourceUnqualified as exc:
+                if type(exc) is ReviewRiskSourceUnqualified and exc.pr_local:
+                    # Only this read-only boundary proves no admission effect
+                    # was attempted. Retain the gap without starving other PRs.
+                    failures.append(ReviewReconciliationReadFailure(
+                        page=page, pull_number=number,
+                        code="REVIEW_RECONCILIATION_RISK_HOLD",
+                    ))
+                    continue
+                return receipt(page=page, code="REVIEW_RECONCILIATION_RISK_HOLD",
+                               number=number, command=decision.command_id)
+            except ReviewAdmissionPreflightExpired:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
+            except Exception:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED",
+                               number=number, command=decision.command_id)
+            if preflight is not None:
+                outcomes.append(preflight)
+                continue
+            try:
+                outcome = admit_decided_review(
+                    decision=decision, pull_request=current, fabric=fabric, visibility=visibility,
+                    before_admission=scan_admission_guard,
+                )
+            except ReviewAdmissionPreflightExpired:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
+            except Exception:
+                # No exception from the effect port is a PR-local source gap.
+                return receipt(page=page, code="REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED",
+                               number=number, command=decision.command_id)
+            outcomes.append(outcome)
+        if not listed.has_more:
+            return receipt(page=None, complete=True)
+    return receipt(page=start_page + max_pages)
 
 
 def publication_command_id(
@@ -1190,7 +1761,13 @@ def publish_verified_review(
         raise ReviewVerificationRefused("admitted decision is missing its pull identity")
     if not isinstance(job_id, str) or not job_id:
         raise ReviewVerificationRefused("publication requires the admitted job id")
-    if not decision.command_id or not decision.intent_id or not decision.actor:
+    reconciled_origin = (
+        decision.policy_authority is not None
+        and decision.policy_authority.origin is AutomaticReviewOrigin.AUTHENTICATED_RECONCILIATION
+        and decision.intent_source is IntentSource.OPEN_PR_RECONCILIATION
+        and decision.actor is None and decision.delivery_command_id is None
+    )
+    if not decision.command_id or not decision.intent_id or (not decision.actor and not reconciled_origin):
         raise ReviewVerificationRefused("admission identity is incomplete")
 
     command = publication_command_id(
@@ -1216,6 +1793,8 @@ def publish_verified_review(
         or bound.frozen_head_sha != decision.frozen_head_sha
         or bound.actor != decision.actor
         or bound.intent_id != decision.intent_id
+        or (bound.decision is not None and bound.decision != decision)
+        or (decision.policy_authority is not None and bound.decision is None)
     ):
         return ReviewPublishOutcome(
             state=PublishState.REFUSED,
@@ -1223,7 +1802,28 @@ def publish_verified_review(
             refusal="ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH",
         )
 
-    if command in publication_port.published_command_ids():
+    reconcile_existing = getattr(publication_port, "reconcile_existing_publication", None)
+    if callable(reconcile_existing):
+        try:
+            existing_review = reconcile_existing(
+                publication_command_id=command, repository=decision.repository,
+                pull_number=decision.pull_number, head_sha=decision.frozen_head_sha,
+                job_id=job_id,
+            )
+        except PublicationEffectUnknown:
+            return ReviewPublishOutcome(
+                state=PublishState.REFUSED, publication_command_id=command,
+                refusal="PUBLICATION_EFFECT_UNKNOWN",
+            )
+        if existing_review is not None:
+            if (not isinstance(existing_review, str)
+                    or re.fullmatch(_REVIEW_ID_RE, existing_review) is None):
+                raise ReviewVerificationRefused("GITHUB_REVIEW_RECEIPT_INVALID")
+            return ReviewPublishOutcome(
+                state=PublishState.ALREADY_PUBLISHED, publication_command_id=command,
+                review_id=existing_review,
+            )
+    elif command in publication_port.published_command_ids():
         # Nothing is posted, so there is nothing that a moved head could stale.
         return ReviewPublishOutcome(
             state=PublishState.ALREADY_PUBLISHED, publication_command_id=command
@@ -1438,6 +2038,11 @@ def publish_verified_review(
         return ReviewPublishOutcome(
             state=PublishState.REFUSED, publication_command_id=command, refusal=exc.code
         )
+    except PublicationPreflightUnavailable:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED, publication_command_id=command,
+            refusal="PUBLICATION_PREFLIGHT_UNAVAILABLE",
+        )
     except PublicationEffectUnknown:
         # The POST may or may not have landed.  Reconcile it by readback at the
         # exact commit and body before anything is retried; a positive match
@@ -1505,6 +2110,8 @@ __all__ = [
     "MAX_REVIEW_SUMMARY_CHARS",
     "MAX_VISIBILITY_SUMMARY_CHARS",
     "PublicationEffectUnknown",
+    "PublicationPreflightUnavailable",
+    "PUBLICATION_PREFLIGHT_SECONDS",
     "PublishState",
     "PublishedCommandIndex",
     "PublishedReviewFacts",
@@ -1513,6 +2120,10 @@ __all__ = [
     "ReviewIngressError",
     "ReviewIngressOutcome",
     "ReviewIngressUnavailable",
+    "ReviewSourceReadDeferred",
+    "ReviewAdmissionPreflightExpired",
+    "ReviewReconciliationReadFailure",
+    "ReviewReconciliationOutcome",
     "ReviewPublicationPort",
     "ReviewPublishOutcome",
     "ReviewResultPort",
@@ -1524,9 +2135,11 @@ __all__ = [
     "VisibilityPort",
     "PullRequestReadPort",
     "admit_review_intent",
+    "notify_review_outcome",
     "publication_command_id",
     "publish_verified_review",
     "published_review_is_valid",
     "reconcile_publication",
+    "reconcile_open_pull_requests",
     "render_review_body",
 ]

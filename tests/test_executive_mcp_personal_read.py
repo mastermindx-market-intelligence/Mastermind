@@ -333,6 +333,7 @@ def test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route(tmp_p
                         },
                     )
                     assert called.status_code == 200, called.text
+                    assert "structuredContent" not in called.json()["result"]
                     envelope = json.loads(called.json()["result"]["content"][0]["text"])
                     assert envelope["ok"] is True
                     assert envelope["tool"] == name

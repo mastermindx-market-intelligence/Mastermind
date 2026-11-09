@@ -461,6 +461,54 @@ class CoreTests(unittest.TestCase):
                         initialize.assert_not_called()
                     self.assertEqual(client.dispatched, [])
 
+    def test_inspect_exposes_current_tool_scoped_write_readiness(self):
+        client = ReviewedCatalogFake()
+        result = b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertEqual(result["write_schema"], b.schema_receipt(client, client.value))
+        self.assertTrue(result["write_schema"]["accepted_for_write"])
+        self.assertEqual(result["write_schema"]["catalog_policy"], "TOOL_SCOPED_CONTRACT_V1")
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_reports_one_incompatible_writer_without_blocking_other_tools(self):
+        client = ReviewedCatalogFake()
+        client.value["write_html"]["inputSchema"]["required"].append("unreviewed_constraint")
+        result = b.execute("status", client=client, lock_root=self.root)
+        schema = result["write_schema"]
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertTrue(schema["accepted_for_write"])
+        self.assertNotIn("write_html", schema["compatible_write_tools"])
+        self.assertIn("write_html", schema["incompatible_write_tools"])
+        self.assertIn("create_artboard", schema["compatible_write_tools"])
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_can_be_connected_without_any_compatible_writer(self):
+        client = ReviewedCatalogFake()
+        for name in b.EDIT_TOOLS | b.FILE_MANAGE_TOOLS:
+            client.value.pop(name, None)
+        result = b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertFalse(result["write_schema"]["accepted_for_write"])
+        self.assertEqual(result["write_schema"]["compatible_write_tools"], [])
+        self.assertTrue(result["write_schema"]["snapshot_tool_compatible"])
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_never_dispatches_an_unsafe_snapshot_getter_to_report_readiness(self):
+        client = ReviewedCatalogFake()
+        client.value["get_basic_info"]["annotations"]["readOnlyHint"] = False
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(client.calls, [])
+
+    def test_inspect_catalog_failure_is_not_converted_to_connected(self):
+        client = ReviewedCatalogFake()
+        def unavailable():
+            raise b.Refusal("CATALOG_UNAVAILABLE")
+        client.catalog = unavailable
+        with self.assertRaisesRegex(b.Refusal, "CATALOG_UNAVAILABLE"):
+            b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(client.calls, [])
+
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
         with self.assertRaisesRegex(b.Refusal, "TOKEN_DELETE_NOT_ALLOWED"):

@@ -21,6 +21,9 @@ FILES = ["1b9aff_full_catalog.json", "f3483_full_catalog.json",
          "955e92_full_catalog.json", "16e6b_full_catalog.json"]
 CATALOGS = [json.loads((FIXTURES / name).read_text()) for name in FILES]
 M2 = CATALOGS[-1]
+# This is one observed descriptor, not a reconstructed full f200 catalog.
+NATIVE_STYLE = json.loads(
+    (FIXTURES / "f200eaf_update_styles_descriptor.json").read_text())["tool"]
 READ_ONLY_4 = {"archive_resources", "create_folder", "move_resources",
                "unarchive_resources"}
 FILE_ID = "01M2VWK62FA5S4VVF6G7SBPE5J"
@@ -49,6 +52,288 @@ class Client:
 
 
 class ContractResilienceTests(unittest.TestCase):
+
+    @staticmethod
+    def _native_style_catalog():
+        """Synthetic catalog: historical M2 plus the exact observed style tool."""
+        cat = copy.deepcopy(M2)
+        cat["update_styles"] = copy.deepcopy(NATIVE_STYLE)
+        return cat
+
+    def _assert_style_descriptor_held(self, cat):
+        self.assertIsNone(
+            b.compatible_tool_contract("update_styles", cat["update_styles"]))
+        receipt = b.schema_receipt(Client(cat), cat)
+        self.assertNotIn("update_styles", receipt["compatible_write_tools"])
+        self.assertIn("write_html", receipt["compatible_write_tools"])
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="update_styles",
+                          arguments={"fileId": FILE_ID, "updates": [{
+                              "nodeIds": ["node-1"], "styles": {"opacity": 1}}]},
+                          expected_snapshot="a" * 64,
+                          operation_id="unreviewed-style-descriptor",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+            self.assertEqual(c.calls, [])
+
+    def test_observed_style_primitive_union_dispatches_once(self):
+        cat = self._native_style_catalog()
+        receipt = b.schema_receipt(Client(cat), cat)
+        self.assertIn("update_styles", receipt["compatible_write_tools"])
+        self.assertFalse(receipt["full_catalog_known"])
+        self.assertNotIn(b.digest(cat), b.REVIEWED_CATALOG_SHA256_ALTERNATES)
+        args = {"fileId": FILE_ID, "updates": [{
+            "nodeIds": ["node-1", "node-2"],
+            "styles": {"boxShadow": "none", "zIndex": 110,
+                       "backgroundColor": "var(--mx-dark-panel)", "opacity": 0}}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+            c.calls.clear()
+            result = b.execute("edit", tool="update_styles", arguments=args,
+                               expected_snapshot=guard,
+                               operation_id="observed-style-union",
+                               allow_write=True, client=c, lock_root=Path(tmp))
+            self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+            self.assertEqual([call for call in c.calls
+                              if call[0] == "update_styles"],
+                             [("update_styles", args)])
+
+    def test_observed_style_union_type_and_value_constraints_stay_held(self):
+        variants = [
+            {"type": ["string", "number", "null"]},
+            {"type": ["string", "number", "boolean"]},
+            {"type": ["string", "integer"]},
+            {"type": ["string"]},
+            {"type": ["number"]},
+            {"type": ["number", "string"]},  # No general union normalization.
+            {"type": ["string", "number"], "minimum": 0},
+            {"type": ["string", "number"], "maxLength": 4},
+            {"type": ["string", "number"], "default": 0},
+        ]
+        for values in variants:
+            with self.subTest(values=values):
+                cat = self._native_style_catalog()
+                styles = cat["update_styles"]["inputSchema"]["properties"][
+                    "updates"]["items"]["properties"]["styles"]
+                styles["additionalProperties"] = values
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_nested_shape_and_dialect_stay_held(self):
+        for change in ("node_type", "file_type", "missing_styles",
+                       "relaxed_item", "relaxed_top", "nested_optional",
+                       "property_names", "schema_dialect"):
+            with self.subTest(change=change):
+                cat = self._native_style_catalog()
+                schema = cat["update_styles"]["inputSchema"]
+                item = schema["properties"]["updates"]["items"]
+                if change == "node_type":
+                    item["properties"]["nodeIds"]["items"]["type"] = "number"
+                elif change == "file_type":
+                    schema["properties"]["fileId"]["type"] = "number"
+                elif change == "missing_styles":
+                    item["required"] = ["nodeIds"]
+                elif change == "relaxed_item":
+                    item["additionalProperties"] = True
+                elif change == "relaxed_top":
+                    schema["additionalProperties"] = True
+                elif change == "nested_optional":
+                    item["properties"]["futureFlag"] = {"type": "boolean"}
+                elif change == "property_names":
+                    item["properties"]["styles"]["propertyNames"]["minLength"] = 1
+                else:
+                    schema["$schema"] = "https://json-schema.org/draft-07/schema"
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_safety_annotation_types_stay_exact(self):
+        for annotations in ({}, {"destructiveHint": False},
+                            {"destructiveHint": 1},
+                            {"destructiveHint": True, "readOnlyHint": False}):
+            with self.subTest(annotations=annotations):
+                cat = self._native_style_catalog()
+                cat["update_styles"]["annotations"] = annotations
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_descriptor_drift_after_guard_refuses(self):
+        class ChangedAfterGuard(Client):
+            armed = False
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.value["update_styles"]["inputSchema"]["properties"][
+                        "updates"]["items"]["properties"]["styles"][
+                            "additionalProperties"]["type"].append("boolean")
+                return response
+
+        c = ChangedAfterGuard(self._native_style_catalog())
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="update_styles",
+                          arguments={"fileId": FILE_ID, "updates": [{
+                              "nodeIds": ["node-1"], "styles": {"zIndex": 110}}]},
+                          expected_snapshot=guard, operation_id="style-guard-drift",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_requested_tool_drift_during_guard_refuses_before_dispatch(self):
+        cases = [
+            ("edit", "write_html", {"fileId": FILE_ID, "targetNodeId": "artboard-1",
+                                     "mode": "insert-children", "html": "<div>QA</div>"}),
+            ("edit", "create_file", {"sourceFileId": FILE_ID, "name": "QA fixture"}),
+            ("read", "get_jsx", {"fileId": FILE_ID, "nodeId": "artboard-1"}),
+        ]
+        for action, tool, arguments in cases:
+            with self.subTest(tool=tool):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, args):
+                        response = super().call(name, args)
+                        if self.armed and name == "get_basic_info":
+                            key = "readOnlyHint" if action == "read" else "destructiveHint"
+                            self.value[tool]["annotations"][key] = False
+                        return response
+
+                c = ChangedAfterGuard()
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                        b.execute(action, tool=tool, arguments=arguments,
+                                  expected_snapshot=guard, operation_id="guard-tool-drift",
+                                  allow_write=True, client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_material_schema_drift_during_guard_refuses_before_dispatch(self):
+        class ChangedAfterGuard(Client):
+            armed = False
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.value["write_html"]["inputSchema"]["properties"]["mode"]["enum"] = ["new-mode"]
+                return response
+
+        c = ChangedAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID,
+                          "targetNodeId": "artboard-1", "mode": "insert-children",
+                          "html": "<div>QA</div>"}, expected_snapshot=guard,
+                          operation_id="guard-schema-drift", allow_write=True,
+                          client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_reviewed_text_profile_switch_revalidates_payload_after_guard(self):
+        for before_catalog, after_catalog, field, refusal in [
+            (M2, CATALOGS[0], "html", "PAPER_LEGACY_TEXT_SCHEMA_REQUIRED"),
+            (CATALOGS[0], M2, "textContent", "PAPER_RICH_TEXT_SCHEMA_REQUIRED"),
+        ]:
+            with self.subTest(field=field):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, arguments):
+                        response = super().call(name, arguments)
+                        if self.armed and name == "get_basic_info":
+                            self.value["set_text_content"] = copy.deepcopy(after_catalog["set_text_content"])
+                        return response
+
+                c = ChangedAfterGuard(before_catalog)
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, refusal):
+                        b.execute("edit", tool="set_text_content", allow_write=True,
+                                  arguments={"fileId": FILE_ID,
+                                             "updates": [{"nodeId": "text-1", field: "QA"}]},
+                                  expected_snapshot=guard, operation_id="guard-text-switch",
+                                  client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_getter_or_identity_drift_during_guard_blocks_requested_call(self):
+        for change in ("getter", "identity"):
+            with self.subTest(change=change):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, arguments):
+                        response = super().call(name, arguments)
+                        if self.armed and name == "get_basic_info":
+                            if change == "getter":
+                                self.value[name]["annotations"]["readOnlyHint"] = False
+                            else:
+                                self.server["name"] = "different-server"
+                        return response
+
+                c = ChangedAfterGuard()
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                        b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID},
+                                  expected_snapshot=guard, operation_id="guard-critical-drift",
+                                  allow_write=True, client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_benign_guard_drift_keeps_file_creation_single_and_strips_source_id(self):
+        class ChangedAfterGuard(Client):
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if name == "get_basic_info":
+                    self.value["create_file"]["description"] += " Vendor explanation."
+                    self.value["archive_resources"]["description"] += " Unrelated change."
+                return response
+
+        c = ChangedAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = b.execute("edit", tool="create_file",
+                               arguments={"sourceFileId": FILE_ID, "name": "QA fixture"},
+                               expected_snapshot=guard, operation_id="benign-guard-drift",
+                               allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual(result["state"], "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION")
+        self.assertEqual([args for name, args in c.calls if name == "create_file"],
+                         [{"name": "QA fixture"}])
+
+    def test_catalog_failure_after_guard_refuses_before_mutation(self):
+        class CatalogFailsAfterGuard(Client):
+            armed = False
+            catalog_unavailable = False
+
+            def catalog(self):
+                if self.catalog_unavailable:
+                    raise b.Refusal("UPSTREAM_UNAVAILABLE")
+                return super().catalog()
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.catalog_unavailable = True
+                return response
+
+        c = CatalogFailsAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "UPSTREAM_UNAVAILABLE"):
+                b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID},
+                          expected_snapshot=guard, operation_id="guard-catalog-failure",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
 
     def test_post_edit_getter_drift_returns_effect_unknown_before_unsafe_verification(self):
         class ChangedAfterEdit(Client):
@@ -440,3 +725,4 @@ class ContractResilienceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,0 +1,226 @@
+{
+  "schema": "mastermind.claude_fabric_acceptance_cases.v1",
+  "status": "SPEC_ONLY",
+  "is_runtime_configuration": false,
+  "is_live_usage": false,
+  "parent_program": "WS:EXECUTIVE-CAPACITY-FABRIC",
+  "purpose": "Proposed discriminating cases for existing owners; expected outcomes are prose, not new runtime enums.",
+  "cases": [
+    {
+      "case_id": "Q01",
+      "owner": "Provider Control / quota economics",
+      "setup": "Fable and Opus reference the same weekly resource; Fable additionally references its family sublimit.",
+      "pass_condition": "Both candidates share the exact native total resource identity; no independent Opus wallet is created."
+    },
+    {
+      "case_id": "Q02",
+      "owner": "Quota economics",
+      "setup": "Synthetic total=100, Fable cap=50, Fable used=20, other used=15; other constraints nonbinding.",
+      "pass_condition": "Shared remaining=65 and Fable remaining=30; constraints intersect, they are not summed."
+    },
+    {
+      "case_id": "Q03",
+      "owner": "Quota economics",
+      "setup": "Fable family sublimit exhausted, shared remaining positive, new unstarted Opus-eligible task.",
+      "pass_condition": "Fable is refused; Opus may be ranked only after every other gate passes."
+    },
+    {
+      "case_id": "Q04",
+      "owner": "Quota economics",
+      "setup": "Shared weekly resource exhausted, Fable sublimit remaining positive.",
+      "pass_condition": "Both candidates are refused; remaining family capacity cannot replenish the shared pool."
+    },
+    {
+      "case_id": "Q05",
+      "owner": "Provider Control / quota economics",
+      "setup": "Shared weekly capacity positive; applicable short-window capacity exhausted.",
+      "pass_condition": "Candidate remains blocked until fresh owner evidence clears that constraint."
+    },
+    {
+      "case_id": "Q06",
+      "owner": "Provider Control",
+      "setup": "Fable usage field reports percent of its own cap, with a different denominator from total usage.",
+      "pass_condition": "Native denominator and conversion evidence are retained; percentages are not added as equal units."
+    },
+    {
+      "case_id": "Q07",
+      "owner": "Provider Control",
+      "setup": "Unknown plan tier, stale observation, unrecognized usage unit or missing reset identity.",
+      "pass_condition": "No inferred unlimited capacity or catalog-derived live balance; explicit current owner gate."
+    },
+    {
+      "case_id": "Q08",
+      "owner": "Executive / Capacity claim",
+      "setup": "Two distinct eligible unstarted jobs compete for the last shared allowance.",
+      "pass_condition": "Atomic existing-owner reservation admits only the affordable set; neither oversubscribes the common resource."
+    },
+    {
+      "case_id": "Q09",
+      "owner": "Provider Control / reservation reconciliation",
+      "setup": "A later provider observation includes some held task usage but not other holds.",
+      "pass_condition": "Known consumed holds reconcile once; unobserved holds remain; shared usage is not subtracted twice."
+    },
+    {
+      "case_id": "Q10",
+      "owner": "Provider Control",
+      "setup": "A confirmed fixed-window reset differs from a predicted rolling-window release.",
+      "pass_condition": "Window semantics stay distinct; no full refill merely because a local clock passed a guessed reset."
+    },
+    {
+      "case_id": "Q11",
+      "owner": "Policy / native launcher",
+      "setup": "A paid API auth source is present while the requested approved route is subscription-only.",
+      "pass_condition": "Effective auth mismatch refuses before provider spend; no silent API or credit fallback."
+    },
+    {
+      "case_id": "Q12",
+      "owner": "Quota economics / lifecycle",
+      "setup": "An operation is STARTED or EFFECT_UNKNOWN when its capacity is exhausted.",
+      "pass_condition": "Same-operation reconciliation; no cross-account/model resend disguised as capacity balancing."
+    },
+    {
+      "case_id": "Q13",
+      "owner": "Provider Control / family-capacity consumer",
+      "setup": "Shared seven-day observation is fresh, but the applicable Fable-family sublimit is absent, expired or unknown; the plan catalog advertises a 50% family ceiling.",
+      "pass_condition": "shared-window telemetry alone MUST NOT establish Fable capacity; refuse the Fable candidate until a qualified current family observation exists. Static plan text and another model's capacity do not fill the missing resource."
+    },
+    {
+      "case_id": "Q14",
+      "owner": "Capacity / provider-domain claim owner",
+      "setup": "Two enrolled host replicas expose the same provider account/entitlement and simultaneously request the remaining allowance; each also has its own local concurrency limit.",
+      "pass_condition": "host replicas MUST share the same provider-domain resource identity and atomic reservation boundary; enforce host-local concurrency separately. Neither replica creates or refills a provider balance."
+    },
+    {
+      "case_id": "Q15",
+      "owner": "Model Router / Capacity economics",
+      "setup": "Within one lawful suitability tier, candidate A strictly dominates B on all known admitted dimensions; C trades lower quota debit for longer wait, and two otherwise equal options differ only by provider name.",
+      "pass_condition": "MUST preserve strict dominance and the frozen lexicographic ordering; eliminate B, resolve incomparable A/C only through declared stages, and use provider identity only as a deterministic final tie-break. A universal weighted score cannot reverse prior stages."
+    },
+    {
+      "case_id": "E01",
+      "owner": "Profile compiler / launch owner",
+      "setup": "Approved exact profile with required instructions, hooks, scoped tools and native version.",
+      "pass_condition": "Positive control initializes under the qualified harness and records exact profile/tool identity."
+    },
+    {
+      "case_id": "E02",
+      "owner": "Profile compiler / launch owner",
+      "setup": "Required routing hook, skill, approved package or profile hash is missing or altered.",
+      "pass_condition": "Refused before child effects; user-friendly failure identifies the missing owner prerequisite."
+    },
+    {
+      "case_id": "E03",
+      "owner": "Profile compiler / SDK adapter",
+      "setup": "Parent-directory settings or auto memory would add unapproved instructions/tools.",
+      "pass_condition": "Explicit source selection and isolation prevent unapproved inheritance; managed policy remains respected."
+    },
+    {
+      "case_id": "E04",
+      "owner": "MCP / OAuth owner",
+      "setup": "An expected MCP name exists but its authorized harmless read fails.",
+      "pass_condition": "Capability is unavailable, not proven from configuration presence; no secret copied to compensate."
+    },
+    {
+      "case_id": "E05",
+      "owner": "Native adapter / RuntimeBinding",
+      "setup": "Requested model differs from actual served model, or a family alias is unresolved.",
+      "pass_condition": "No qualification or quota claim under the requested name; stop before consequential effects."
+    },
+    {
+      "case_id": "E06",
+      "owner": "Role compiler / source owner",
+      "setup": "Legacy instruction forbids Cursor orchestration while another clause appoints it operator.",
+      "pass_condition": "One current source resolves role precedence; contradictory runtime bundle cannot be enrolled."
+    },
+    {
+      "case_id": "E07",
+      "owner": "Capacity / host lease owner",
+      "setup": "Two tasks require control of the same physical desktop.",
+      "pass_condition": "Exclusive approved desktop lease permits at most one; the other queues without hijacking the user session."
+    },
+    {
+      "case_id": "E08",
+      "owner": "Existing pool / root budget",
+      "setup": "One orchestrator delegates multiple children and grandchildren.",
+      "pass_condition": "All inherit the same root accounting identity; neither fanout nor host changes create new quota."
+    },
+    {
+      "case_id": "E09",
+      "owner": "Provider realm / Capacity owner composition",
+      "setup": "Request carries a caller-selected generation, an older signed generation, or another realm's current generation; positive control carries the current exact-realm owner-issued state.",
+      "pass_condition": "MUST reject caller-selected, stale or wrong-realm generation before effects; only the positive current owner-issued exact-realm state may pass the other admission gates. Fixture-only v1 minting is not production evidence."
+    },
+    {
+      "case_id": "E10",
+      "owner": "Usage-policy / native launch admission",
+      "setup": "An attended parent starts a headless claude -p or equivalent SDK child against an interactive-only entitlement, with no current policy receipt admitting that actual noninteractive execution mode.",
+      "pass_condition": "MUST refuse unattended execution without an exact current usage-policy receipt; bind usage_policy_mode and provider_policy_receipt_ref at admission. Billing debit or an interactive canary never flips unattended/autonomous permission flags."
+    },
+    {
+      "case_id": "E11",
+      "owner": "PF1 native Claude / provider binding owner",
+      "setup": "A GLM, Alibaba or MiniMax profile runs inside Claude Code, or is given an opus/Fable alias, while the request requires native Anthropic subscription authentication and its shared/Fable quota resources.",
+      "pass_condition": "MUST NOT treat a third-party Claude-compatible profile as native Anthropic capacity. Require the separately qualified existing PF1 claude-code binding, actual provider/model identity and native entitlement/auth evidence; a shared executable or alias cannot substitute."
+    },
+    {
+      "case_id": "O01",
+      "owner": "COO / task-intent interface",
+      "setup": "Fresh Opus orchestrator receives a complete bounded mission.",
+      "pass_condition": "Makes a correct task-intent request without requiring account numbers, raw endpoints or spawn commands."
+    },
+    {
+      "case_id": "O02",
+      "owner": "COO / independent review",
+      "setup": "Worker returns a plausible summary but a seeded artifact defect remains.",
+      "pass_condition": "COO inspects evidence, obtains independent review and requests repair; summary alone cannot pass."
+    },
+    {
+      "case_id": "O03",
+      "owner": "COO / parent consumption",
+      "setup": "Worker fixes the defect and the independent reviewer accepts the exact artifact.",
+      "pass_condition": "Original parent consumes the accepted result; delivered and consumed states remain distinguishable."
+    },
+    {
+      "case_id": "O04",
+      "owner": "Executive / broker",
+      "setup": "Same operation and semantic payload are submitted twice; then the same key with changed payload.",
+      "pass_condition": "Identical request reconciles to one effect; changed payload refuses rather than creates a second job."
+    },
+    {
+      "case_id": "O05",
+      "owner": "RuntimeBinding / Wake",
+      "setup": "Slack notification reaches the seat but not the exact bound native session.",
+      "pass_condition": "No consumed/started claim from delivery alone; expose exact wake or binding limitation."
+    },
+    {
+      "case_id": "O06",
+      "owner": "Continuity / source ownership",
+      "setup": "Parent or worker loses context with an outstanding child or dirty workspace.",
+      "pass_condition": "Recover from canonical checkpoint and preserve incumbent effect/source custody; no replacement by title."
+    },
+    {
+      "case_id": "O07",
+      "owner": "Dialogue / cancellation",
+      "setup": "A child finishes and receives terminal STOP while sibling/principal watchers remain valid.",
+      "pass_condition": "Remove only the exact child source and preserve aggregate continuation resources."
+    },
+    {
+      "case_id": "O08",
+      "owner": "Capacity / COO",
+      "setup": "No eligible capacity exists but an independent source-only task is admissible.",
+      "pass_condition": "No unauthorized spawn; record capacity gate and advance only the disjoint admissible work."
+    },
+    {
+      "case_id": "O09",
+      "owner": "Qualification / role compiler",
+      "setup": "Grok 4.6 or exact GLM 5.3 receives the same scoped role and representative mission.",
+      "pass_condition": "Evaluate observed outputs and control compliance; do not grant Fable-level authority by model name."
+    },
+    {
+      "case_id": "O10",
+      "owner": "Acceptance / operator projection",
+      "setup": "Fixture transport or source CI succeeds without a real admitted provider task.",
+      "pass_condition": "Projection remains source-only/built-not-proven; no production or COO-qualification completion claim."
+    }
+  ]
+}

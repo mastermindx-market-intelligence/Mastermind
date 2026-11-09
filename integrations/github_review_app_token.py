@@ -9,13 +9,20 @@ from __future__ import annotations
 import datetime
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from threading import RLock
 
 import httpx
 
+from integrations.github_review_http import bounded_json
+
 _REPO_RE = re.compile(r"\A[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 _MAX_ISSUER_RESPONSE = 65536
+# Exact transport profiles, not model-chosen permission sets. Existing reviewers
+# retain their original grants; the separately enrolled authoring App uses the
+# second profile only under its host-owned key/installation binding.
+_REVIEW_PERMISSIONS = {"contents": "read", "pull_requests": "write"}
+AUTHORING_PERMISSIONS = {"contents": "write", "issues": "write", "pull_requests": "write"}
 
 
 class GitHubAppTokenUnavailable(RuntimeError):
@@ -34,6 +41,8 @@ class GitHubAppInstallationTokens:
         private_key_source: Callable[[], bytes],
         client: httpx.Client | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
+        permissions: Mapping[str, str] | None = None,
     ) -> None:
         if type(app_id) is not int or app_id <= 0:
             raise GitHubAppTokenUnavailable("GITHUB_APP_ID_INVALID")
@@ -43,6 +52,12 @@ class GitHubAppInstallationTokens:
             raise GitHubAppTokenUnavailable("GITHUB_REPOSITORY_INVALID")
         if not callable(private_key_source):
             raise GitHubAppTokenUnavailable("GITHUB_APP_KEY_SOURCE_UNBOUND")
+        selected = _REVIEW_PERMISSIONS if permissions is None else permissions
+        if not isinstance(selected, Mapping) or dict(selected) not in (
+            _REVIEW_PERMISSIONS, AUTHORING_PERMISSIONS,
+        ):
+            raise GitHubAppTokenUnavailable("GITHUB_APP_PERMISSION_PROFILE_INVALID")
+        self._permissions = dict(selected)
         self._app_id = app_id
         self._installation_id = installation_id
         self._repository = repository
@@ -51,6 +66,7 @@ class GitHubAppInstallationTokens:
             timeout=httpx.Timeout(4.0), follow_redirects=False
         )
         self._clock = clock
+        self._monotonic = monotonic
         self._lock = RLock()
         self._cached_token: str | None = None
         self._cached_until = 0.0
@@ -72,27 +88,28 @@ class GitHubAppInstallationTokens:
                      "iss": str(self._app_id)},
                     key, algorithm="RS256",
                 )
-                response = self._client.post(
+                deadline = self._monotonic() + 4.0
+                with self._client.stream(
+                    "POST",
                     "https://api.github.com/app/installations/"
                     + str(self._installation_id) + "/access_tokens",
                     headers={
                         "Authorization": "Bearer " + signed,
                         "Accept": "application/vnd.github+json",
+                        "Accept-Encoding": "identity",
                         "X-GitHub-Api-Version": "2026-03-10",
                     },
                     json={
                         "repositories": [self._repository.split("/", 1)[1]],
-                        "permissions": {
-                            "contents": "read",
-                            "pull_requests": "write",
-                        },
+                        "permissions": self._permissions,
                     },
                     follow_redirects=False,
                     timeout=4.0,
-                )
-                if response.status_code != 201 or len(response.content) > _MAX_ISSUER_RESPONSE:
-                    raise ValueError("installation token request refused")
-                result = response.json()
+                ) as response:
+                    if response.status_code != 201:
+                        raise ValueError("installation token request refused")
+                    result = bounded_json(response, max_bytes=_MAX_ISSUER_RESPONSE,
+                                          deadline=deadline, clock=self._monotonic)
                 if not isinstance(result, dict):
                     raise ValueError("invalid installation token response")
                 token = result.get("token")
@@ -103,9 +120,8 @@ class GitHubAppInstallationTokens:
                     raise ValueError("missing installation token")
                 if (not isinstance(permissions, dict)
                         or permissions not in (
-                            {"contents": "read", "pull_requests": "write"},
-                            {"contents": "read", "pull_requests": "write",
-                             "metadata": "read"},
+                            self._permissions,
+                            {**self._permissions, "metadata": "read"},
                         )):
                     raise ValueError("installation permission drift")
                 if (

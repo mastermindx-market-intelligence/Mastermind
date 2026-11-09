@@ -58,8 +58,6 @@ def test_actual_waterfall_does_not_replay_terminal_error_on_another_credential(
     monkeypatch, tmp_path, with_tool,
 ):
     from brain import provider_waterfall as pw
-    import bot  # noqa: F401
-    from engine import llm_auth
 
     h = RunBindingHarness(monkeypatch, tmp_path)
     effects = []
@@ -72,13 +70,13 @@ def test_actual_waterfall_does_not_replay_terminal_error_on_another_credential(
     rows.append(terminal(is_error=True, text="401 429 usage limit reached"))
     h.plans = [rows]
 
-    class Pool:
-        def mark_cooling(self, *args, **kwargs):
-            raise AssertionError("terminal error cannot cool a provider")
-        def record_session(self, *args, **kwargs):
-            raise AssertionError("terminal error is not a successful session")
+    shared_lookups = []
 
-    monkeypatch.setattr(pw, "_shared_modules", lambda: (llm_auth, Pool()))
+    def unexpected_shared_modules():
+        shared_lookups.append(True)
+        raise AssertionError("owned SDK terminal cannot consult shared auth")
+
+    monkeypatch.setattr(pw, "_shared_modules", unexpected_shared_modules)
     monkeypatch.setattr(pw, "provider_rungs", lambda _role: [
         {"provider": "oauth", "key_id": "fixture-a", "env_name": "SYNTHETIC_UNUSED_A", "cooling": False},
         {"provider": "oauth", "key_id": "fixture-b", "env_name": "SYNTHETIC_UNUSED_B", "cooling": False},
@@ -91,6 +89,7 @@ def test_actual_waterfall_does_not_replay_terminal_error_on_another_credential(
     assert result["ok"] is False and result["error"] == "sdk_terminal_error"
     assert len(result["provider_attempts"]) == len(h.providers) == 1
     assert result["provider_attempts"][0]["ok"] is False
+    assert shared_lookups == [], "owned terminal consulted shared auth"
     assert effects == (["accepted-target-evidence"] if with_tool else [])
     assert result["tools_used"] == (["mcp__desk__submit_book"] if with_tool else [])
     assert h.classifications == [] and h.cooling == [] and h.sessions == []

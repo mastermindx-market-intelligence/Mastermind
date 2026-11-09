@@ -2087,6 +2087,8 @@ class RetainedV5ToV7Evidence:
         backup_root: Path,
         pre_census_qualification: dict[str, Any] | None = None,
         prepared_reader_record: dict[str, str] | None = None,
+        source_v5_database_identity: dict[str, Any] | None = None,
+        source_v5_preflight_created_at: str | None = None,
     ) -> None:
         self.phase = phase
         self._prepared_reader_record = dict(prepared_reader_record) if prepared_reader_record is not None else None
@@ -2095,6 +2097,11 @@ class RetainedV5ToV7Evidence:
         self.material = material
         self.source_v5_database = source_v5_database
         self.source_v5_content_digest = source_v5_content_digest
+        # Authenticated P56 DATA, distinct from the temporary source copy.
+        # Kept outside material: existing receipt wires and hashes do not change.
+        self._source_v5_database_identity = (dict(source_v5_database_identity)
+            if source_v5_database_identity is not None else None)
+        self._source_v5_preflight_created_at = source_v5_preflight_created_at
         self.target_v7_database = target_v7_database
         self.target_v7_database_identity = target_v7_database_identity
         self.control_config_bytes = control_config_bytes
@@ -2104,6 +2111,20 @@ class RetainedV5ToV7Evidence:
         )
         self._guard = guard
         self._backup_root = backup_root
+
+    @property
+    def source_v5_database_identity(self) -> dict[str, Any]:
+        """Detached authoritative P56 identity; never the verification-copy inode."""
+        if self._source_v5_database_identity is None:
+            raise RetainedChainInvalid("qualified P56 source identity is unavailable")
+        return dict(self._source_v5_database_identity)
+
+    @property
+    def source_v5_preflight_created_at(self) -> str:
+        """Authenticated retained value; consumers own any chronology comparison."""
+        if not isinstance(self._source_v5_preflight_created_at, str):
+            raise RetainedChainInvalid("qualified P56 preflight time is unavailable")
+        return self._source_v5_preflight_created_at
 
     def check(self) -> dict[str, Any]:
         """Revalidate every retained FD, name, namespace, and hash identity."""
@@ -2565,6 +2586,8 @@ def _open_chain_evidence(
             material=material,
             source_v5_database=pairs["P56"]["copy"],
             source_v5_content_digest=chain["original_full_v5_content_digest"],
+            source_v5_database_identity=receipts["P56"][0]["database"],
+            source_v5_preflight_created_at=receipts["P56"][0]["created_at"],
             target_v7_database=target_copy,
             target_v7_database_identity=target_identity,
             control_config_bytes=config_raw,

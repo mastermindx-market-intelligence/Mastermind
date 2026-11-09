@@ -74,18 +74,32 @@ class StartReceipt:
 
     def principal_deadline(self):
         self._source._require_live()
-        return self._source._principal.expires_at
+        workspace=getattr(self._source,'_project_workspace_principal',None)
+        return min(self._source._principal.expires_at,workspace.expires_at) if workspace is not None else self._source._principal.expires_at
 
 
 class ForegroundOperation:
-    def __init__(self, *, mint, runtime, host_current, principal, arguments):
+    def __init__(self, *, mint, runtime, host_current, principal, arguments, project_planning_operation=None, project_execution_operation=None):
         if mint is not _MINT:
             raise ForegroundOperationClosed("operation is composed by the private handler only")
         self._runtime, self._host_current, self._principal = runtime, host_current, principal
         self._arguments_sha256 = _digest(arguments)
         self._operation_key = arguments["operation_key"]
-        self._command = ceo_intent.command_id_for(ceo_request.automated_intent_id(
-            ceo_request.app_request_ref(self._operation_key)))
+        if project_planning_operation is not None and project_execution_operation is not None:
+            raise ForegroundOperationClosed("ambiguous project operation")
+        self._project_execution_operation=project_execution_operation
+        self._project_execution_work_ref=arguments.get('work_ref') if project_execution_operation is not None else None
+        self._project_planning_operation=project_planning_operation
+        self._project_planning_work_ref=arguments.get('work_ref') if project_planning_operation is not None else None
+        if project_planning_operation is None:
+            self._command = ceo_intent.command_id_for(ceo_request.automated_intent_id(
+                ceo_request.app_request_ref(self._operation_key)))
+        else:
+            from control_plane.project_planning_admission import operation_intent_id
+            from common.executive_principal_namespace import principal_scope_from_identity
+            scope=principal_scope_from_identity(issuer_digest=principal.issuer_digest,subject_digest=principal.subject_digest,
+                client_ref=principal.client_ref,resource=principal.resource)
+            self._command=ceo_intent.command_id_for(operation_intent_id(dict(principal_scope=scope,operation_key=self._operation_key)))
         # Presence at entry is never fresh admission, including equal timestamps.
         self._preexisting = runtime.store.find_event_by_command_id(self._command)
         self._root, self._root_event_sha256, self._closed = None, None, False
@@ -109,6 +123,10 @@ class ForegroundOperation:
             raise ForegroundOperationRefusal("principal_not_live", "principal window is not live")
         if not _SCOPES <= set(p.scopes):
             raise ForegroundOperationRefusal("scope_denied", "Executive READ and SUBMIT scopes are required")
+        workspace=getattr(self,'_project_workspace_principal',None)
+        if workspace is not None and (type(workspace.issued_at) is not int or type(workspace.expires_at) is not int
+                or not workspace.issued_at<=now<workspace.expires_at):
+            raise ForegroundOperationRefusal('principal_not_live','original Workspace principal window is not live')
         try:
             if self._host_current() is not None:
                 raise ValueError("invalid trusted host guard result")
@@ -119,11 +137,20 @@ class ForegroundOperation:
             raise ForegroundOperationClosed("the originating invocation is no longer current")
         if not p.issued_at <= time.time() < p.expires_at:
             raise ForegroundOperationRefusal("principal_not_live", "principal window is not live")
+        if workspace is not None and not workspace.issued_at<=time.time()<workspace.expires_at:
+            raise ForegroundOperationRefusal('principal_not_live','original Workspace principal window is not live')
 
     def require_arguments(self, arguments):
         self._require_live()
         try:
-            normalized = ceo_request.normalize_high_level_request(arguments)
+            if self._project_execution_operation is not None:
+                from common.project_execution_private_contract import arguments as normalize
+                normalized=normalize(arguments,self._project_execution_operation)
+            elif self._project_planning_operation is None:
+                normalized = ceo_request.normalize_app_request(arguments)
+            else:
+                from common.project_planning_private_contract import arguments as normalize
+                normalized=normalize(arguments,self._project_planning_operation)
         except (TypeError, ValueError, ceo_request.CeoRequestError):
             raise ForegroundOperationRefusal("arguments_changed", "invocation arguments changed") from None
         if _digest(normalized) != self._arguments_sha256:
@@ -155,17 +182,36 @@ class ForegroundOperation:
         root = self._runtime.jobs.get_job(root_id)
         event = self._runtime.store.find_event_by_command_id(command_id)
         if (root is None or root.root_job_id != root_id or root.parent_job_id is not None
-                or root.orchestration_role != "aggregation" or event is None
+                or (root.orchestration_role != "aggregation" if self._project_planning_operation is None else root.orchestration_role is not None)
+                or event is None
                 or event.get("event_type") != "JOB_CREATED" or event.get("job_id") != root_id
-                or not isinstance(root.orchestration_provenance, dict)
-                or root.orchestration_provenance.get("command_id") != command_id):
+                or (self._project_planning_operation is None and (not isinstance(root.orchestration_provenance, dict)
+                    or root.orchestration_provenance.get("command_id") != command_id))):
             raise ForegroundOperationRefusal("root_unavailable", "canonical root creation source differs")
+        if self._project_planning_operation is not None:
+            material=self._runtime.jobs.direct_native_provenance(root_id)
+            if (self._project_planning_operation!='submit' or material.get('project_planning',{}).get('operation_key')!=self._operation_key):
+                raise ForegroundOperationRefusal('root_unavailable','canonical project planning root differs')
+        if self._project_execution_operation is not None:
+            from control_plane.project_execution_admission import read_source
+            material=read_source(self._runtime,root)
+            if (self._project_execution_operation!='submit' or material is None
+                    or material['operation_key']!=self._operation_key
+                    or material['work_ref']!=self._project_execution_work_ref):
+                raise ForegroundOperationRefusal('root_unavailable','canonical project execution root differs')
         self._root = root_id
         self._root_event_sha256 = _digest(event)
         # Return None: the observation is neither a receipt nor execution.
 
     def require_root(self, root_id):
         """Recheck this fresh source before the incumbent canonical claim."""
+        from control_plane.fresh_conversation_admission import _fresh_root_validation_scope
+        # Optional exact private Fresh issuance only. Generic/C2 stays strict;
+        # the scope owns no claim/Event/provider effect and ends before return.
+        with _fresh_root_validation_scope(self):
+            return self._require_root_current(root_id)
+
+    def _require_root_current(self, root_id):
         self._require_live()
         if self._root is None or root_id != self._root:
             raise ForegroundOperationRefusal("root_unbound", "the exact fresh admitted root is required")
@@ -278,7 +324,7 @@ async def _session_bridge_foreground_dispatch(runtime, frame, require_host_curre
         if not isinstance(raw, Mapping) or set(raw) != _PRINCIPAL or type(raw["scopes"]) is not list:
             raise ValueError("principal")
         p = neutral_principal_projection(**{**dict(raw), "scopes": tuple(raw["scopes"])})
-        arguments = ceo_request.normalize_high_level_request(frame["arguments"])
+        arguments = ceo_request.normalize_app_request(frame["arguments"])
         operation = ForegroundOperation(mint=_MINT, runtime=runtime,
             host_current=require_host_current, principal=p, arguments=arguments)
     except (TypeError, ValueError, ceo_request.CeoRequestError):
@@ -294,6 +340,46 @@ async def _session_bridge_foreground_dispatch(runtime, frame, require_host_curre
 
 
 @contextlib.asynccontextmanager
+async def _project_planning_foreground_dispatch(runtime,frame,require_host_current):
+    from common.project_planning_private_contract import frame as validate
+    value=validate(frame)
+    raw=value['principal']
+    principal=neutral_principal_projection(**{**raw,'scopes':tuple(raw['scopes'])})
+    operation=ForegroundOperation(mint=_MINT,runtime=runtime,host_current=require_host_current,
+        principal=principal,arguments=value['arguments'],project_planning_operation=value['operation'])
+    workspace=value['workspace_principal']
+    operation._project_workspace_principal=neutral_principal_projection(**{**workspace,'scopes':tuple(workspace['scopes'])})
+    token=_ACTIVE.set(operation)
+    try:
+        operation._require_live()
+        yield operation
+    finally:
+        operation._mark_source_closed()
+        operation._root,operation._host_current=None,None
+        _ACTIVE.reset(token)
+
+
+@contextlib.asynccontextmanager
+async def _project_execution_foreground_dispatch(runtime,frame,require_host_current):
+    from common.project_execution_private_contract import frame as validate
+    value=validate(frame)
+    raw=value['principal']
+    principal=neutral_principal_projection(**{**raw,'scopes':tuple(raw['scopes'])})
+    operation=ForegroundOperation(mint=_MINT,runtime=runtime,host_current=require_host_current,
+        principal=principal,arguments=value['arguments'],project_execution_operation=value['operation'])
+    workspace=value['workspace_principal']
+    operation._project_workspace_principal=neutral_principal_projection(**{**workspace,'scopes':tuple(workspace['scopes'])})
+    token=_ACTIVE.set(operation)
+    try:
+        operation._require_live()
+        yield operation
+    finally:
+        operation._mark_source_closed()
+        operation._root,operation._host_current=None,None
+        _ACTIVE.reset(token)
+
+
+@contextlib.asynccontextmanager
 async def _observe_private_request_end(operation, reader):
     """One already-framed request's EOF/expiry; no worker/lifecycle control."""
     if type(operation) is not ForegroundOperation or _ACTIVE.get() is not operation:
@@ -301,7 +387,9 @@ async def _observe_private_request_end(operation, reader):
     operation._require_live()
     async def observe():
         try:
-            remaining = max(0.0, operation._principal.expires_at - time.time())
+            workspace=getattr(operation,'_project_workspace_principal',None)
+            expiry=min(operation._principal.expires_at,workspace.expires_at) if workspace is not None else operation._principal.expires_at
+            remaining = max(0.0, expiry - time.time())
             # The one allowed frame is already consumed. EOF or extra bytes
             # end this invocation; no second request is accepted on this socket.
             await asyncio.wait_for(reader.read(1), timeout=remaining)

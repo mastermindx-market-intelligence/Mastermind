@@ -126,6 +126,39 @@ unrelated configuration. After-manifest receipt loss is completed without
 rewriting the pair. Retain any unknown/foreign state on this original transaction;
 no blind retry, new identity, raw config edit or generic upgrade is authorized.
 
+## C1 fleet gateway Git-failure successor
+
+A retained native-pool pin stays independently enforced for the C1 seat. Its
+plan, result, native phase and bridge remain mandatory in `require_start`. The
+gateway-only transition never edits, clears or relabels a retained record, and a
+pending or unknown pin stays pending or unknown.
+
+`private_service_pin.c1_gateway_successor_manifest` derives exactly one
+forward state from the retained record itself: the retained applied manifest
+with one known gateway digest transition, from the pinned predecessor
+`17157fa5…` to the pinned successor `336de8ed…`. It returns nothing for any
+other account, for a retained manifest whose gateway is not the pinned
+predecessor, or for a retained record whose own digests do not match its plan.
+
+For a seat already on its accepted Paper v20 successor, the existing frozen
+cohort planner first derives that exact configuration/manifest pair from the
+original retained pin. The gateway substitution composes with that pair. No
+current manifest is learned as a new predecessor, and unrelated drift refuses.
+The same derivation is used by the formatter preflight, startup and pin status.
+
+`selected_applied_context` reuses the pin owner's closed transaction, intent,
+APPLIED result, selected native phase and actual bridge proof. The formatter's
+preview uses its read-only context. Apply retains the existing native publication
+lock through both gateway writes, inside the existing lifecycle lock. It never
+runs or rewrites the pin operation.
+
+`require_start` accepts that derived successor in addition to the unchanged
+applied state. It accepts nothing else: an altered configuration, an altered
+manifest, an altered plan, an altered receipt or a changed native phase all
+refuse with the existing `FUTURE_PIN_NOT_READY`. The pin's own `status` and
+`reconcile` observations report the successor as the completed applied state,
+because the pin transaction itself did not change the gateway.
+
 ## Global successor and resume
 
 Ten seats are **not atomic**. Retain explicit per-seat results and completion
@@ -144,3 +177,66 @@ bridge before any bootstrap/kickstart. Consume actual outcomes and qualify the
 new C2 tool path before releasing the native return carrier. The source protocol
 and temp-seat tests do not prove host quiescence, service health, provider
 readiness, native OAuth, a canary or product acceptance.
+
+
+## Admin status followed by reviewed Paper v22
+
+The admin-business forward predecessor also recognizes the exact reviewed v22
+Paper selection after its completed enrollment and fleet-status successor. It
+authenticates the original native-pin, enrollment and status transactions through
+the existing historical-pair and status owners, then derives the successor from
+those retained bytes. Only the three existing Paper runtime fields and the
+manifest configHash change. Every other configuration field, module and receipt
+remains binding. The live manifest is never learned as a new predecessor.
+
+The private runtime verifier admits only the reviewed v22 path and bridge SHA
+af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b, already
+accepted by the Paper runtime staging owner. Its ownership, permissions, receipt,
+source identity and executable checks remain in force. The runtime is rechecked
+at each forward qualification and completed-forward startup.
+
+At startup and reconciliation the supplied pair is the retained forward
+preimage. The forward owner separately verifies the installed pair, whose pool
+pin has legitimately advanced. The Paper composition does not rewrite any
+historical transaction, install a runtime, stop or start a service, or add an
+ordinary pre-forward status-start exception. Existing per-seat quiescence,
+protected release, native selection and same-transaction recovery gates apply.
+
+This source edge qualifies an existing exact state from authenticated history
+and reviewed source. It does not manufacture an earlier Paper installation
+receipt or claim when the historical selection occurred.
+
+
+## Exact Tailnet forward consumers
+
+The complete native pool consumer census includes the two original Tailnet seats,
+`fabric-design` and `fabric-read`, alongside the eight original private seats.
+They use the same preserving forward transaction. Their admission retains the
+exact Tailnet V2 manifest, full module map, account, physical runtime and three-argument
+launch shape. The original and original-pin profiles remain accepted; exactly one
+reviewed future canonical manifest is added for each seat:
+
+| Account | Forward config SHA256 | Canonical manifest SHA256 |
+| --- | --- | --- |
+| fabric-design | d8224ad799b9927b43026d07f2716f63b5ecbdb41580f0eb2e15ba7a0ba84750 | a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c |
+| fabric-read | ab8443c18e485cd15107b2d87ac28455ed9754cd08dc5b6c90d24ac38a7e15c7 | 6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c |
+
+These identities are derived from authenticated original native-pin postimages
+and the qualified Go plan f13a4ada7571c3e1f5aeb025dff0f8967efb6d9b671fb3d623d2afdb074c46b9.
+Only the existing fleet launcher digest and dependent manifest config hash change.
+The canonical manifest is not learned from the installed target, and configHash
+is never ignored or normalized during profile qualification.
+
+The expanded forward cohort does not broaden the separate historical private-seat
+native-context exception. Modern standalone C3 and unknown accounts remain outside
+this transition. A target manifest alone cannot authorize startup: original history,
+committed forward completion and the selected Go successor remain required. Keep
+future-pinned seats stopped until the original Go transaction completes; then use
+normal start and real readiness/tool-path readback. Interrupted work stays on its
+original account, bundle and plan.
+
+Source-only previews must run from a complete verified source snapshot beneath
+HOME because the existing frozen Paper source reader enforces that path boundary.
+An external-volume authoring workspace is not a valid source location for those
+historical Paper checks. Preserve the guard and the original authoring/publishing
+operation; no installed controller or service is changed by a qualification snapshot.

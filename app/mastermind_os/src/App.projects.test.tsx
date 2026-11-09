@@ -17,7 +17,7 @@ function deferred<T>() {
 const qualifiedPrograms = () => decodeProgramsObservation({
   ...structuredClone(programs), control_room: controlRoomFixture(),
 });
-const ownerState = () => screen.getByText("OWNER STATE").parentElement!;
+const ownerState = () => (screen.queryByText("Mission source") ?? screen.getByText("OWNER STATE")).parentElement!;
 
 beforeEach(() => { history.replaceState(null, "", "/os/"); delete window.MastermindMissionHost; delete (window as any).__TAURI_INTERNALS__; });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); delete window.MastermindMissionHost; });
@@ -36,7 +36,7 @@ describe("Projects in the actual App", () => {
     expect(new URLSearchParams(location.search).get("root_job_id")).toBe("JOB-B");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     expect(await screen.findByRole("region", { name: "Selected project" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     for (const route of ["Today", "Work", "Open Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
       expect(screen.getByRole("button", { name: route })).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(2); // one original collection plus the new exact selection
@@ -60,22 +60,25 @@ describe("Projects in the actual App", () => {
     await user.click(projects);
     const openAlpha = await screen.findByRole("button", { name: "Open project Alpha program" });
     openAlpha.focus(); await user.keyboard("{Enter}");
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Projects", level: 1 }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Alpha program", level: 1 }));
     await act(async () => alpha.resolve(missionFixture("WS:ALPHA", "JOB-A")));
     await user.click(projects);
     expect(document.activeElement).toBe(projects);
     const openBeta = await screen.findByRole("button", { name: "Open project Beta program" });
     openBeta.focus(); await user.keyboard("{Enter}");
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Projects", level: 1 }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Beta program", level: 1 }));
     await act(async () => beta.reject(new Error("private host detail")));
     expect(location.search).toContain("root_job_id=JOB-B");
     expect(screen.queryByRole("heading", { name: "Alpha program" })).toBeNull();
     await user.click(projects);
     const reopen = await screen.findByRole("button", { name: "Open project Beta program" });
     reopen.focus(); await user.keyboard("{Enter}");
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Projects", level: 1 }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Beta program", level: 1 }));
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     const plan = screen.getByRole("tab", { name: "Plan" });
-    await user.click(plan); expect(document.activeElement).toBe(plan);
+    await user.click(plan); expect(document.activeElement).toBe(screen.getByRole("tab",{name:"Plan"}));
     projects.focus();
     await act(async () => retry.resolve(missionFixture("WS:BETA", "JOB-B")));
     expect(document.activeElement).toBe(projects);
@@ -95,6 +98,9 @@ describe("Projects in the actual App", () => {
     await user.click(projects);
     await user.click(await screen.findByRole("button", { name: "Open project Beta program" }));
     expect(ownerState().textContent).toContain("SOURCE READ PENDING");
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     await user.click(screen.getByRole("tab", { name: "Plan" }));
     await act(async () => first.reject(new Error("private host detail")));
     for (const name of ["Overview", "Plan", "Work", "Evidence", "More"]) {
@@ -128,7 +134,7 @@ describe("Projects in the actual App", () => {
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(await screen.findByRole("button", { name: "Open project Beta program" }));
     await waitFor(() => expect(ownerState().textContent).toContain("UNAVAILABLE"));
-    expect(ownerState().closest("section")?.textContent).toContain("Beta program");
+    expect((ownerState().closest("[data-workspace-root]") ?? ownerState().closest("section"))?.textContent).toContain("Beta program");
     cleanup(); history.replaceState(null, "", "/os/");
     window.MastermindMissionHost = { readProgramsObservation: async () => qualifiedPrograms() };
     render(<App />);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { execFile as execFileCallback } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -112,3 +113,60 @@ test('commission status proves a published same-head digest after a lost push re
     assert.equal(writes,0);
   } finally { await f.cleanup(); }
 });
+
+for (const lostUpdateReturn of [false, true]) {
+  test('commission commit completes index synchronization before immediate cleanup: ' +
+    (lostUpdateReturn ? 'lost update return' : 'ordinary update'), async () => {
+    const f = await fixture();
+    try {
+      const bytes = Buffer.from('commission finalization lifecycle\n');
+      await commission(f, bytes);
+      let updates = 0;
+      let pushes = 0;
+      let cleanups = 0;
+      const publisher = createGitPublisher(f.config, {
+        execFile: async (file, args, options) => {
+          if (file === GIT && args.includes('push')) pushes++;
+          if (file === GIT && args[0] === 'update-ref') {
+            updates++;
+            const result = await execFile(file, args, options);
+            if (lostUpdateReturn && updates === 1) throw new Error('lost update-ref return');
+            return result;
+          }
+          return execFile(file, args, options);
+        },
+        rm: async (scratch, options) => {
+          cleanups++;
+          // Remove before yielding: finalization must already have consumed its index.
+          rmSync(scratch, options);
+        },
+      });
+      const out = await publisher.commitCommission({
+        operation_id: f.operationId,
+        expected_head_sha: f.head,
+        expected_content_sha256: sha(bytes),
+      });
+
+      assert.equal(out.status, 'OK');
+      assert.equal(out.effect_state, 'APPLIED');
+      assert.equal(out.code, lostUpdateReturn ? 'APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN' : 'APPLIED');
+      assert.equal(out.index_synced, true);
+      assert.equal(out.clean, true);
+      assert.equal(updates, 1, 'the original ref update must never be repeated');
+      assert.equal(cleanups, 1, 'the owned scratch directory must be removed once');
+      assert.equal(pushes, 0, 'commission commit does not publish');
+      assert.equal(out.previous_head_sha, f.head);
+      assert.equal(out.local_head_sha, out.commit_head_sha);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), out.commit_head_sha);
+      assert.equal((await git(f.workspace, 'status', '--porcelain=v1')).stdout, '');
+      assert.equal((await git(f.workspace, 'write-tree')).stdout.trim(),
+        (await git(f.workspace, 'rev-parse', 'HEAD^{tree}')).stdout.trim());
+      assert.deepEqual(await readFile(path.join(f.workspace, COMMISSION)), bytes);
+      assert.equal(await readFile(path.join(f.workspace, 'proof.txt'), 'utf8'), 'base\n');
+      assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin',
+        'refs/heads/' + f.branch)).stdout.trim(), '');
+    } finally {
+      await f.cleanup();
+    }
+  });
+}

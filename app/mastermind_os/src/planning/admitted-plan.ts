@@ -89,6 +89,8 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
   if (value.availability !== "AVAILABLE" || value.reason_codes.length !== 0 ||
       obs.state !== "SAME" || !qualifiedSourceReceipts(obs) || !record(value.plan)) return refuse();
   const plan = value.plan;
+  const hierarchicalPlan = plan.plan_schema_version === "mastermind.execution_plan/v5";
+  const maximumSteps = hierarchicalPlan ? 16 : 8;
   if (!keys(plan, ["schema", "plan_schema_version", "admission_schema_version",
       "root_job_id", "plan_attempt_id", "policy_sha", "plan_digest", "reservation_digest",
       "admission_state", "steps"]) ||
@@ -96,13 +98,19 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
       !isId(plan.plan_attempt_id) || !isDigest(plan.policy_sha) ||
       !isDigest(plan.plan_digest) || !isDigest(plan.reservation_digest) ||
       plan.admission_state !== "ADMITTED" ||
+      typeof plan.plan_schema_version !== "string" ||
       !["mastermind.execution_plan/v1", "mastermind.execution_plan/v2",
-        "mastermind.execution_plan/v3", "mastermind.execution_plan/v4"].includes(String(plan.plan_schema_version)) ||
-      !["mastermind.coo_plan_admission/v1", "mastermind.coo_plan_admission/v2"].includes(String(plan.admission_schema_version)) ||
-      !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 8) return refuse();
+        "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+        "mastermind.execution_plan/v5"].includes(plan.plan_schema_version) ||
+      typeof plan.admission_schema_version !== "string" ||
+      !["mastermind.coo_plan_admission/v1", "mastermind.coo_plan_admission/v2",
+        "mastermind.coo_plan_admission/v3"].includes(plan.admission_schema_version) ||
+      !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > maximumSteps) return refuse();
   const dependencyPlan = plan.plan_schema_version === "mastermind.execution_plan/v3" ||
-    plan.plan_schema_version === "mastermind.execution_plan/v4";
-  if (plan.admission_schema_version !== (dependencyPlan ? "mastermind.coo_plan_admission/v2" : "mastermind.coo_plan_admission/v1")) return refuse();
+    plan.plan_schema_version === "mastermind.execution_plan/v4" || hierarchicalPlan;
+  const expectedAdmission = hierarchicalPlan ? "mastermind.coo_plan_admission/v3" :
+    dependencyPlan ? "mastermind.coo_plan_admission/v2" : "mastermind.coo_plan_admission/v1";
+  if (plan.admission_schema_version !== expectedAdmission) return refuse();
   const seen = new Set<string>();
   const steps: AdmittedStep[] = [];
   for (let i = 0; i < plan.steps.length; i++) {
@@ -111,9 +119,10 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
         "review_required", "prerequisite_step_ids"]) ||
         step.ordinal !== i || !isId(step.step_id) || seen.has(step.step_id) ||
         typeof step.objective !== "string" || !step.objective.length || step.objective.length > 4096 ||
-        !["routine", "material", "critical"].includes(String(step.business_impact)) ||
+        typeof step.business_impact !== "string" ||
+        !["routine", "material", "critical"].includes(step.business_impact) ||
         typeof step.review_required !== "boolean" ||
-        !Array.isArray(step.prerequisite_step_ids) || step.prerequisite_step_ids.length > 8 ||
+        !Array.isArray(step.prerequisite_step_ids) || step.prerequisite_step_ids.length > maximumSteps - 1 ||
         !step.prerequisite_step_ids.every((d: unknown) => isId(d) && seen.has(d)) ||
         new Set(step.prerequisite_step_ids).size !== step.prerequisite_step_ids.length ||
         (!dependencyPlan && step.prerequisite_step_ids.length !== 0)) return refuse();

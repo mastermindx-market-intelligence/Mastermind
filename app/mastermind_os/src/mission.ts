@@ -1,5 +1,6 @@
 import {
   decodeOwnerObservation,
+  decodeProgramsEnvelope,
   isOwnerObservationReference,
   type OwnerObservation,
 } from "./workspace-contract";
@@ -816,6 +817,15 @@ export function decodeMission(
       })
     : null;
   if (v2 && !observation) return null;
+  if (observation?.schema === "mastermind.workspace_source_observation.v2") {
+    const basis = observation.project_data;
+    if (!obj(basis) || !obj(basis.data_observation) || typeof s.control_room_generated_at !== "string"
+      || typeof basis.data_observation.canonical_observed_at_ms !== "number"
+      || !Number.isSafeInteger(basis.data_observation.canonical_observed_at_ms)
+      || !Number.isFinite(Date.parse(s.control_room_generated_at))
+      || Math.abs(Date.parse(s.control_room_generated_at) - basis.data_observation.canonical_observed_at_ms) >= 1000)
+      return null;
+  }
   const r = value.read_state;
   if (
     !obj(r) ||
@@ -1430,6 +1440,10 @@ const CCR = [
   "placement_selection",
   "autonomy",
 ];
+// Canonical CCR observation metadata; deliberately not projected into
+// catalogue rows, permission, launch, create or send capability. Retain the
+// exact legacy shape as well as this one explicitly known additive shape.
+const CCR_WITH_RUNTIME_OBSERVATION = [...CCR, "runtime_capability_status"];
 const WORK = [
   "work_ref",
   "agent_os",
@@ -1495,6 +1509,26 @@ export function programsFromControlRoom(value: unknown): {
   state: "AVAILABLE" | "UNAVAILABLE";
   reason: string;
 } {
+  if (obj(value) && value.schema === "mastermind.programs_source_composition.v1") {
+    try {
+      if (!exact(value, ["schema", "control_room", "source_observation", "canonical_projects", "coverage"]))
+        throw new Error("PROGRAM_DATA_INVALID");
+      const composed = decodeProgramsEnvelope({ ...value, schema: "mastermind.workspace_programs.v2",
+        availability: "AVAILABLE", reason_codes: [] }) as { control_room: unknown; canonical_projects: Array<{work_ref:string;control_room:unknown}>; coverage:{state:string} };
+      const base = programsFromControlRoom(composed.control_room);
+      if (base.state !== "AVAILABLE") return base;
+      const programs = [...base.programs];
+      for (const project of composed.canonical_projects) {
+        const selected = programsFromControlRoom(project.control_room);
+        if (selected.state !== "AVAILABLE" || selected.programs.length !== 1 || selected.programs[0].workRef !== project.work_ref)
+          throw new Error("PROGRAM_DATA_INVALID");
+        programs.push(selected.programs[0]);
+      }
+      return { programs, state: "AVAILABLE", reason: composed.coverage.state === "PARTIAL" ? "PARTIAL_PROJECT_COVERAGE" : "QUALIFIED_PROJECT_SOURCES" };
+    } catch {
+      return { programs: [], state: "UNAVAILABLE", reason: "PROJECT_DATA_INVALID" };
+    }
+  }
   if (value === null || value === undefined)
     return {
       programs: [],
@@ -1503,7 +1537,7 @@ export function programsFromControlRoom(value: unknown): {
     };
   if (
     !obj(value) ||
-    !exact(value, CCR) ||
+    !(exact(value, CCR) || exact(value, CCR_WITH_RUNTIME_OBSERVATION)) ||
     value.schema !== "mastermind.chairman_control_room.v1" ||
     !time(value.generated_at) ||
     !Array.isArray(value.work) ||

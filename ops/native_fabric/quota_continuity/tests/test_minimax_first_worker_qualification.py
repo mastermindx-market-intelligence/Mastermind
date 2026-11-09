@@ -34,8 +34,8 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
                    "allowed_modes": ["minimax", "grok", "glm"],
                    "qualification_only_modes": ["minimax", "grok"]},
             "ubuntu4": {"platform": "linux", "local": False, "roles": ["lanes"],
-                        "allowed_modes": ["minimax", "cursor"],
-                        "qualification_only_modes": ["minimax", "cursor"]},
+                        "allowed_modes": ["minimax", "grok", "cursor"],
+                        "qualification_only_modes": ["minimax", "grok", "cursor"]},
             "mb": {"platform": "darwin", "local": False, "roles": ["candidate"],
                    "allowed_modes": [], "qualification_only_modes": ["grok", "minimax"]},
             "ubuntu1": {"platform": "linux", "local": False, "roles": ["lanes"],
@@ -68,7 +68,7 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
         self.assertEqual(kwargs["max_age"], 30)
         self.assertEqual(kwargs["excluded"], {"ubuntu1", "ubuntu4", "mb"})
         self.assertEqual(view["m1"]["qualification_only_modes"], ["grok"])
-        self.assertEqual(view["ubuntu4"]["qualification_only_modes"], ["minimax", "cursor"])
+        self.assertEqual(view["ubuntu4"]["qualification_only_modes"], ["minimax", "grok", "cursor"])
         self.assertEqual(self.registry, original)
         self.assertEqual(picker.call_args.kwargs["pool"], "minimax")
 
@@ -76,7 +76,7 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
         original = deepcopy(self.registry)
         output, seen, _ = self.route("ubuntu4")
         self.assertIn("HOST=ubuntu4 MODE=minimax", output)
-        self.assertEqual(seen[0][0]["ubuntu4"]["qualification_only_modes"], ["cursor"])
+        self.assertEqual(seen[0][0]["ubuntu4"]["qualification_only_modes"], ["grok", "cursor"])
         self.assertEqual(seen[0][0]["m1"]["qualification_only_modes"], ["minimax", "grok"])
         self.assertEqual(self.registry, original)
 
@@ -85,9 +85,43 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
         self.assertIn("HOST=m1 MODE=grok", output)
         self.assertEqual(seen[0][0]["m1"]["qualification_only_modes"], ["minimax"])
 
+
+    def test_ubuntu4_grok_first_worker_clears_only_grok_in_transient_view(self):
+        original = deepcopy(self.registry)
+        output, seen, picker = self.route("ubuntu4", "grok")
+        self.assertIn("POOL=grok ", output)
+        self.assertIn("HOST=ubuntu4 MODE=grok", output)
+        self.assertEqual(len(seen), 1)
+        view, state_dir, mode, options = seen[0]
+        self.assertEqual(state_dir, "fixture-states")
+        self.assertEqual(mode, "grok")
+        self.assertEqual(options["max_age"], 30)
+        self.assertEqual(options["excluded"], {"m1", "mb", "ubuntu1"})
+        self.assertEqual(view["ubuntu4"]["qualification_only_modes"],
+                         ["minimax", "cursor"])
+        self.assertEqual(view["m1"]["qualification_only_modes"], ["minimax", "grok"])
+        self.assertEqual(self.registry, original)
+        self.assertEqual(picker.call_args.kwargs["pool"], "grok")
+
+    def test_ubuntu4_grok_still_respects_platform_parent_and_physical_gates(self):
+        for override in ({"platform": "darwin"}, {"local": True}):
+            with self.subTest(override=override):
+                changed = deepcopy(self.registry)
+                changed["ubuntu4"].update(override)
+                with self.assertRaisesRegex(ValueError, "QUALIFICATION_HOST_REFUSED"):
+                    qualification.qualification_route("ubuntu4", pool="grok",
+                        task_class="fix_build", complexity="C1_ROUTINE_BOUNDED",
+                        reason="read-only", root="original-root",
+                        parent="original-parent", registry=changed)
+        with self.assertRaisesRegex(ValueError, "QUALIFICATION_PREREQUISITE_REFUSED:disk"):
+            self.route("ubuntu4", "grok", gates=[{"gate": "disk", "result": "FAIL"}])
+        with self.assertRaisesRegex(ValueError, "QUALIFICATION_PROVIDER_REFUSED"):
+            self.route("ubuntu4", "grok",
+                       response="POOL=minimax MODEL=some-model REASON=provider-substitution")
+
     def test_no_widening_to_macbook_other_hosts_or_other_pools(self):
         for host, pool in (("mb", "minimax"), ("ubuntu1", "minimax"),
-                           ("ubuntu4", "grok"), ("m1", "cursor"),
+                           ("ubuntu4", "glm"), ("ubuntu4", "cursor"), ("m1", "cursor"),
                            ("arbitrary", "minimax")):
             with self.subTest(host=host, pool=pool):
                 with self.assertRaisesRegex(ValueError, "QUALIFICATION_SCOPE_REFUSED"):

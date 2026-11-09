@@ -177,13 +177,26 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    `service/com.mastermind.paper-direct.business.<seat>.plist`; legacy v2 retains the historical
    unsuffixed label. Do not also launch a manual client for the same seat. Health binds only to
    `127.0.0.1:0`; its assigned address is in `state/health.url`.
-5. In the actual Business workspace, the authorized admin enables developer mode and creates
-   private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
+5. In the actual Business workspace, the authorized admin opens **ChatGPT Plugins**,
+   selects **Add custom MCP server** and creates the private **Mastermind Paper** plugin
+   with Connection **Tunnel** pointing at the existing tunnel ID. **Developer Mode is not
+   required** by the current Plugins setup. If the particular workspace still exposes
+   the legacy Developer Mode / Apps path, use its documented flow for the same app and
+   tunnel; never duplicate the connection.
    A plugin name or successful registration is not proof of any Paper operation. When an accepted
    source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
-   the **same app's** approved action snapshot. If ChatGPT still shows older file-exclusive wording
-   after the runtime is current, record `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not
-   create a duplicate app/tunnel or treat stale transport metadata as a document lease.
+   the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart
+   the reviewed server, open that existing connection in ChatGPT Plugins, select **Refresh**, confirm
+   the advertised tool metadata changed, and then start a new conversation. A published Plugin Directory
+   plugin uses continuous review/rescan. **Business and Enterprise/Edu**
+   admins can **Refresh existing published custom workspace MCP app tools in place**
+   from workspace settings with management permission and a valid connection,
+   then review/publish action updates and start a new chat. Enterprise/Edu Action control also supports
+   per-action Refresh. Keep reusing the existing tunnel/backend; if Refresh
+   is unavailable, hold the exact admin/platform
+   gate instead of creating a parallel duplicate app/tunnel. If
+   ChatGPT still shows older file-exclusive wording after the runtime is current, record
+   `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not treat stale transport metadata as a document lease.
 6. Discover exactly the accepted tools in a fresh ChatGPT session. Use the assigned direct app
    for the approved scratch-file inspect/catalog/read -> one bounded edit -> post-read ->
    screenshot inspection -> JSX journey. Preserve file ID, snapshot and stable operation ID.
@@ -369,3 +382,33 @@ and file -> verified bound bundle -> same-account real MCP inspect/catalog/read
 -> specifically authorized scratch proof where owed -> same-carrier post-read
 and screenshot -> reconnect without duplicate clients. Synthetic protocol tests
 and successful staging do not satisfy these proofs.
+
+## Source readiness and named-seat diagnostics (v22; not installed)
+
+The reconciled #1409 source adds early write-readiness reporting to
+`paper_inspect` while retaining the current `TOOL_SCOPED_CONTRACT_V1` policy.
+Its `write_schema` reports compatible and incompatible write tools separately.
+An incompatible unrelated writer does not disable qualified operations; a
+connected document can also report no compatible writers. The live critical
+`get_basic_info` contract is still checked before its implicit call. Catalog
+failure remains a typed refusal and is never converted into `CONNECTED`.
+
+Named v3/v4 direct-service receipts additionally expose only
+`schema`, `seat_id`, `source_revision` and `bridge_sha256` under
+`transport_diagnostic`. The stdio projection validates the exact key set and
+value formats. Legacy unnamed bundles omit this field. These verified-install
+diagnostics identify source provenance, confer no authority and do not enter
+snapshot hashes, execution bindings, write permission or retry decisions.
+Refusals and unknown-effect receipts retain their original state and operation.
+
+The additive source generation is **v22**, bridge SHA-256
+`af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b`. Every existing generation remains immutable,
+including v12 `82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb`
+and v21 `dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa`.
+The old #1409 proposal to replace the v12 binding or restore whole-catalog-only
+write admission is superseded by the accepted protected implementation.
+
+This is source integration only. It changes no installed selector, service,
+tunnel or design. The historical #1409 staging denial remains unreplayed;
+another generation name is not permission to repeat that action. An authorized
+runtime release and same-carrier real-app acceptance remain separate.

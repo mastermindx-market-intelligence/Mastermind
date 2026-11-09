@@ -3,6 +3,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import sign_webhook_body
@@ -31,7 +32,11 @@ class HostCredentials:
         return "only-test-token"
 
 
-def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
+@pytest.mark.parametrize("action,sender,standing", [
+    ("labeled", "alice", False), ("opened", "alice", False),
+    ("opened", "dependabot[bot]", True),
+])
+def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, action, sender, standing):
     github_requests = []
     def handler(request):
         github_requests.append((request.method, request.url.path))
@@ -74,7 +79,9 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
         client=slack, threads=ExecutiveSlackReviewThreads(runtime=runtime)
     )
     settings = ReviewHostSettings(
-        enabled=True, publication_enabled=True, expected_host="review.example.com",
+        enabled=True, publication_enabled=True, allow_lifecycle_review=True,
+        allow_repository_policy_review=standing,
+        expected_host="review.example.com",
         require_https=True, installation_id=4242,
         installation_ids=frozenset({4242}), repositories=frozenset({REPO}),
         configured_reviewer="reviewer", authorized_actors=frozenset({"alice"}),
@@ -84,10 +91,10 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
         pull_requests=github, actors=github, fabric=fabric, visibility=visibility,
     )
     body = json.dumps({
-        "action": "labeled", "installation": {"id": 4242},
+        "action": action, "installation": {"id": 4242},
         "repository": {"full_name": REPO}, "number": 42,
         "pull_request": {"number": 42, "base": {"repo": {"full_name": REPO}}},
-        "sender": {"login": "alice"}, "label": {"name": "independent-review"},
+        "sender": {"login": sender}, "label": {"name": "independent-review"},
     }).encode()
     headers = [
         (b"host", b"review.example.com"),
@@ -108,7 +115,11 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
             "path": settings.delivery_path, "query_string": b"",
             "headers": headers_override or headers,
         }
-        asyncio.run(ingress(scope, receive, send))
+        async def complete_delivery():
+            await ingress(scope, receive, send)
+            from test_github_review_receiver_capacity import drain
+            await asyncio.wait_for(drain(ingress), timeout=5)
+        asyncio.run(complete_delivery())
         return response[0]["status"], json.loads(response[1]["body"])
 
     status, result = deliver()
@@ -121,8 +132,9 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
     assert messages[0][0] == REVIEW_CHANNEL_ID
     assert "QUEUED" in messages[0][1]
     assert REPO not in messages[0][1]  # No private repo leak to public Slack.
-    assert github_requests == [
+    assert github_requests == ([] if standing else [
         ("GET", "/repos/example/repo/collaborators/alice/permission"),
+    ]) + [
         ("GET", "/repos/example/repo/pulls/42"),
     ]
     status, result = deliver()

@@ -5,15 +5,16 @@ archive, npm runs as the existing non-root operator, and only captured output
 bytes are published. It proves that build, not Auth0 registration or enrollment.
 Import never builds, changes a sealed release, or owns a service lifecycle.
 
-Two explicitly supplied PUBLIC Launch inputs may enable an immutable operator
-Launch binding: the exact qualified Executive resource (the public
-OS_EXECUTIVE_RESOURCE constant) and one bounded canonical closed Launch
-manifest read from an explicit sealed file. Both absent keeps the historical
-read-only default build and its closed v1 receipt; both present produces a
-separate closed schema v2 receipt that binds the exact resource and canonical
-manifest bytes. An enabled recipe is build-input evidence only: it is never
-user permission, Auth0 authority, or live Launch capability. Caller VITE
-environment is never inherited; only the exact paired inputs enter the build.
+An explicitly supplied PUBLIC Executive resource (the exact qualified
+OS_EXECUTIVE_RESOURCE constant) may enable the existing authenticated Executive
+client without a legacy Launch catalogue. That resource-only recipe produces a
+closed v3 receipt. Adding one bounded canonical closed Launch manifest from an
+explicit sealed file retains the historical v2 Launch receipt and binding.
+Omitting both retains the historical read-only build and closed v1 receipt.
+Manifest-only inputs refuse. These receipts are build-input evidence only,
+never user permission, Auth0 authority, or live execution capability. Caller
+VITE environment is never inherited; only explicit qualified inputs enter the
+build.
 """
 from __future__ import annotations
 
@@ -44,6 +45,8 @@ from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 SCHEMA = "mastermind.os_web_build.v1"
 LAUNCH_SCHEMA = "mastermind.os_web_build.launch.v2"
 LAUNCH_MODE = "web+launch"
+EXECUTIVE_SCHEMA = "mastermind.os_web_build.executive.v3"
+EXECUTIVE_MODE = "web+executive"
 LAUNCH_RESOURCE_ENV = "VITE_MM_EXECUTIVE_RESOURCE"
 LAUNCH_CONFIG_ENV = "VITE_MM_LAUNCH_CONFIG"
 # The incumbent TS Launch decoder accepts raw strings up to 16384 UTF-16 code
@@ -218,9 +221,8 @@ def _archive(repo, sha, destination):
 
 def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_uids,
            executive_resource=None, launch_manifest=None):
-    if executive_resource is not None or launch_manifest is not None:
-        if executive_resource is None or launch_manifest is None:
-            raise ValueError("enabled Launch build requires the complete qualified input pair")
+    # Requalify at the actual process boundary, including direct Python calls.
+    executive_resource, launch_manifest = _public_launch_inputs(executive_resource, launch_manifest)
     operator = pwd.getpwnam(build_user)
     if operator.pw_uid <= 0 or operator.pw_uid in reserved_service_uids:
         raise ValueError("build requires an existing non-service operator")
@@ -250,13 +252,14 @@ def _build(app, *, build_user, node, npm_cli, web_client_id, reserved_service_ui
     for path in [workspace, *workspace.rglob("*")]:
         os.chown(path, operator.pw_uid, operator.pw_gid, follow_symlinks=False)
     # The build environment is closed by construction: ambient VITE variables
-    # are never inherited, and the only Launch inputs are the exact qualified
-    # pair already validated before the build was allowed to start.
+    # are never inherited. The optional legacy catalogue is independent of the
+    # exact Executive resource, and neither is supplied from ambient state.
     env = {"PATH": f"{node.parent}:/usr/bin:/bin", "HOME": str(workspace), "LC_ALL": "C",
            "npm_config_cache": str(workspace / ".npm-cache"), "npm_config_userconfig": str(user_config),
            "npm_config_globalconfig": str(global_config), "VITE_MM_WEB_CLIENT_ID": _client(web_client_id)}
     if executive_resource is not None:
         env[LAUNCH_RESOURCE_ENV] = executive_resource
+    if launch_manifest is not None:
         env[LAUNCH_CONFIG_ENV] = launch_manifest.decode("utf-8")
     for args in (("ci", "--ignore-scripts"), ("run", "build")):
         subprocess.run([str(node), str(npm_cli), *args], cwd=app, env=env, check=True,
@@ -424,6 +427,55 @@ def _decode_launch_binding(parsed):
     return parsed
 
 
+def _decode_launch_bindings(parsed):
+    """Validate v1 or the finite v2 enrollment; return v1-shaped bindings.
+
+    Labels/default selection are presentation DATA. The sealed receipt retains
+    the original manifest bytes, and each derived binding keeps optional-field
+    presence exactly. This does not choose a runtime principal or grant.
+    """
+    if type(parsed) is not dict or type(parsed.get("v")) is not int:
+        return None
+    if parsed["v"] == 1:
+        try:
+            return (parsed,) if _decode_launch_binding(parsed) is not None else None
+        except (KeyError, TypeError):
+            return None
+    if parsed["v"] != 2 or set(parsed) != {"v", "defaultWorkstream", "bindings"}:
+        return None
+    bindings = parsed["bindings"]
+    if type(bindings) is not list or not 1 <= len(bindings) <= 16:
+        return None
+    if _launch_string(parsed["defaultWorkstream"], 72) is None:
+        return None
+    allowed = (_LAUNCH_ROOT_KEYS - {"v"}) | {"label"}
+    result, workstreams, templates = [], set(), 0
+    for binding in bindings:
+        if (type(binding) is not dict or not set(binding) <= allowed
+                or _launch_string(binding.get("label"), 120) is None):
+            return None
+        values = {"v": 1, **{key: value for key, value in binding.items() if key != "label"}}
+        try:
+            if _decode_launch_binding(values) is None:
+                return None
+        except (KeyError, TypeError):
+            return None
+        profiles = [profile["ref"] for profile in values["profiles"]]
+        if (len(values["projects"]) != 1 or profiles not in (
+                ["research_only"], ["research_only", "native_research_only"])
+                or values["workstream"] in workstreams):
+            return None
+        # Match the incumbent native-pair publisher without changing legacy v1 decoding.
+        if len(profiles) == 2 and values.get("validation", {}) != {}:
+            return None
+        workstreams.add(values["workstream"])
+        templates += len(profiles)
+        result.append(values)
+    if parsed["defaultWorkstream"] not in workstreams or templates > 16:
+        return None
+    return tuple(result)
+
+
 def _reject_duplicate_keys(pairs):
     seen = {}
     for key, value in pairs:
@@ -469,7 +521,7 @@ def decode_launch_manifest(raw):
     _no_surrogates(parsed)
     if raw != _canonical(parsed):
         raise ValueError("launch manifest bytes are not the canonical JSON encoding")
-    if _decode_launch_binding(parsed) is None:
+    if _decode_launch_bindings(parsed) is None:
         raise ValueError("launch manifest refused by the incumbent Launch decoder law")
     return raw
 
@@ -483,12 +535,13 @@ def _validate_executive_resource(value):
 
 
 def _public_launch_inputs(executive_resource, launch_manifest):
-    """Return the qualified pair, or (None, None) for the default read-only build."""
-    if executive_resource is None and launch_manifest is None:
+    """Qualify an explicit resource and optional manifest, or the read-only default."""
+    if executive_resource is None:
+        if launch_manifest is not None:
+            raise ValueError("a Launch manifest requires the exact qualified Executive resource")
         return None, None
-    if executive_resource is None or launch_manifest is None:
-        raise ValueError("enabled Launch build inputs require both the exact resource and one canonical manifest")
-    return _validate_executive_resource(executive_resource), decode_launch_manifest(launch_manifest)
+    resource = _validate_executive_resource(executive_resource)
+    return resource, None if launch_manifest is None else decode_launch_manifest(launch_manifest)
 
 
 def _receipt_launch_inputs(receipt):
@@ -500,6 +553,8 @@ def _receipt_launch_inputs(receipt):
         # Historical v1 receipts qualify the default read-only view only; they
         # never carry, and can never be promoted to, Launch evidence.
         return None, None
+    if schema == EXECUTIVE_SCHEMA:
+        return _validate_executive_resource(receipt.get("executive_resource")), None
     if schema == LAUNCH_SCHEMA:
         resource = _validate_executive_resource(receipt.get("executive_resource"))
         config = receipt.get("launch_config")
@@ -518,7 +573,7 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
     source_repo, output = Path(source_repo), Path(output)
     _sealed_path(output.parent, directory=True)
     tree = validate_acceptance_source(source_repo=source_repo, expected_sha=expected_sha)
-    # Validate the complete public input pair before any build effect.
+    # Validate explicit public inputs before any build effect.
     executive_resource, launch_manifest = _public_launch_inputs(executive_resource, launch_manifest)
     inputs = _source_inputs(source_repo, expected_sha,
                             names=LAUNCH_INPUTS if executive_resource is not None else INPUTS)
@@ -547,13 +602,12 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
                    "builder": builder,
                    "web_client_id": web_client_id, "asset_manifest_sha256": _hash(_canonical(actual))}
         if executive_resource is not None:
-            receipt = {"schema": LAUNCH_SCHEMA, "source_sha": expected_sha, "source_tree": tree,
-                       "source_inputs": inputs, "mode": LAUNCH_MODE, "recipe": RECIPE,
-                       "builder": builder, "web_client_id": web_client_id,
-                       "asset_manifest_sha256": _hash(_canonical(actual)),
-                       "executive_resource": executive_resource,
-                       "launch_config": launch_manifest.decode("utf-8"),
-                       "launch_config_sha256": _hash(launch_manifest)}
+            receipt.update(schema=EXECUTIVE_SCHEMA, mode=EXECUTIVE_MODE,
+                           executive_resource=executive_resource)
+        if launch_manifest is not None:
+            receipt.update(schema=LAUNCH_SCHEMA, mode=LAUNCH_MODE,
+                           launch_config=launch_manifest.decode("utf-8"),
+                           launch_config_sha256=_hash(launch_manifest))
         receipt_bytes = _canonical(receipt)
         if len(receipt_bytes) > RECEIPT_MAX_BYTES:
             raise ValueError("closed build receipt exceeds the qualified budget")
@@ -562,6 +616,10 @@ def prepare(*, source_repo, expected_sha, web_client_id, output, build_user, nod
             _publish_file(output / DIST / name, data)
         _publish_file(output / DIST / "asset-manifest.json", _canonical(actual))
         _publish_file(output / RECEIPT, receipt_bytes)
+    # The caller's restrictive umask (e.g. the installer-owned 077) can
+    # turn mkdir(mode=0755) into 0700. Publish a readable root-owned
+    # qualified artifact only after every captured byte has been sealed.
+    output.chmod(0o755)
     return _hash(receipt_bytes)
 
 
@@ -578,15 +636,18 @@ def qualify(bundle, *, expected_sha, tree_sha, source_repo, expected_digest=None
     _sealed_path(bundle / RECEIPT)
     receipt_bytes = _read(bundle / RECEIPT, RECEIPT_MAX_BYTES)
     receipt = json.loads(receipt_bytes)
-    launch_resource, _ = _receipt_launch_inputs(receipt)
+    launch_resource, launch_manifest = _receipt_launch_inputs(receipt)
     required = {"schema", "source_sha", "source_tree", "source_inputs", "mode", "recipe", "builder",
                 "web_client_id", "asset_manifest_sha256"}
     if launch_resource is not None:
-        required = required | {"executive_resource", "launch_config", "launch_config_sha256"}
+        required = required | {"executive_resource"}
+    if launch_manifest is not None:
+        required = required | {"launch_config", "launch_config_sha256"}
+    mode = LAUNCH_MODE if launch_manifest is not None else (EXECUTIVE_MODE if launch_resource is not None else "web")
     if (type(receipt) is not dict or set(receipt) != required
-            or receipt["schema"] not in (SCHEMA, LAUNCH_SCHEMA)
+            or receipt["schema"] not in (SCHEMA, LAUNCH_SCHEMA, EXECUTIVE_SCHEMA)
             or receipt["source_sha"] != expected_sha or receipt["source_tree"] != tree_sha
-            or receipt["mode"] != (LAUNCH_MODE if launch_resource is not None else "web")
+            or receipt["mode"] != mode
             or receipt["recipe"] != RECIPE
             or _git(source_repo, "rev-parse", f"{expected_sha}^{{tree}}").stdout.strip() != tree_sha
             or receipt["source_inputs"] != _source_inputs(
@@ -662,8 +723,8 @@ def main():
     if args.command == "prepare":
         if None in (args.output, args.web_client_id, args.build_user, args.node, args.npm_cli):
             raise ValueError("preparation inputs required")
-        if (args.executive_resource is None) != (args.launch_manifest is None):
-            raise ValueError("enabled Launch build inputs require both the exact resource and one canonical manifest")
+        if args.executive_resource is None and args.launch_manifest is not None:
+            raise ValueError("a Launch manifest requires the exact qualified Executive resource")
         launch_manifest = None
         if args.launch_manifest is not None:
             _sealed_path(args.launch_manifest)

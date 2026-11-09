@@ -4,6 +4,29 @@ This is installation guidance for the existing OS → Executive command path.
 Source tests do not establish an installed launch or permission to widen a grant.
 Keep the existing Workspace, Content, Executive, Studio, Git and Runtime owners.
 
+## Current-project entry — 6 November 2026 source candidate
+
+The current project-team path mounts the existing Executive command context and
+pending-operation store without requiring a legacy Launch catalog. Current-project
+Start work, completed-result follow-ups and fresh conversations still require
+their actual Executive authentication and source-qualified admission. See
+[Project team execution](../../app/mastermind_os/docs/project-team-execution.md)
+for the exact composition, retained-code behavior and installed acceptance scope.
+
+For a web build that supplies only the qualified Executive resource, use the
+existing `ops.executive_os.os_release_assets` recipe with its explicit
+`--executive-resource` input and omit `--launch-manifest`. Its closed
+`mastermind.os_web_build.executive.v3` receipt uses mode `web+executive` and has no
+legacy manifest fields. Omitting both inputs retains the read-only v1 default;
+supplying the exact resource and canonical manifest retains the legacy v2
+`web+launch` contract. Ambient build configuration is not inherited.
+
+The commission-publication and manifest instructions below describe the legacy
+Launch flow. Its installed grants and v2-only publication qualifier are unchanged;
+a v3 resource-only artifact cannot qualify as legacy Launch enrollment. The source
+candidate does not establish installation, authorize an edge transition or clear
+any F2, original-operation, administrator or private-artifact hold recorded below.
+
 ## Publication before admission
 
 An OS launch key is the SHA-256-derived "mmos-launch-<40hex>" of the authenticated
@@ -33,6 +56,53 @@ admission. No publication registry or alternate command/lifecycle queue is added
 The browser reserves its principal-scoped persistent pointer before the HTTP
 effect. Reopen reads original intent status. It does not publish or submit again.
 Unknown publication/admission retains the original pointer for reconciliation.
+
+## Research submission and its foreground owner
+
+The installed Web-CEO v3 App composition uses the existing Session Bridge
+foreground owner for `research_only` submissions. The original bearer is still
+verified at both HTTP boundaries, source preparation still precedes admission,
+and the same operation key reaches the strict-v2 canonical sink once. The
+request owns at most 300 seconds of COO continuation; it does not enable a
+background scheduler or adopt a previously queued root. Duplicate requests
+return their original admission without driving again.
+
+An installation without attended or paid placements retains the ordinary plan-only
+contract: one validated planner completion, an open root, and no downstream
+work admission. Paid continuation requires the current root-read
+`PaidBindingSource`, the exact frozen placement union, and already registered
+Runtime Worker/quota identities. The continuation check performs no
+enrollment, capacity refresh or provider call. Each child still needs the
+existing claim, current capacity, paid lease and physical adapter checks.
+
+The App receives its immutable admission receipt and reads current status and
+results through the existing owners. A connection loss, expiry or uncertain
+return preserves the original request reference for reconciliation; it never
+authorizes another submission. Web and native research submits allow one
+430-second transport window for the existing source preparation (maximum 120
+seconds) and foreground execution. Read calls and `native_research_only` H2
+retain their existing deadlines and execution paths. Native auth-generation
+changes or token expiry drop the pending foreground HTTP request.
+
+### Native direct-task return and acknowledgement
+
+The macOS App uses `executive_direct_native_result` and
+`executive_direct_native_consume` for the existing fixed
+`/os/executive/direct-native/result` and `/os/executive/direct-native/consume`
+routes. Both retain the private Executive bearer and current auth generation;
+consumption additionally requires the existing Executive submit scope. No bearer,
+resource, source path, Worker selection or provider choice enters the webview
+command arguments. The closed request names the original work reference, Job and
+Attempt; consumption also binds the retained result digest and original operation
+key. Only a result read may use a null Attempt to resolve the original selection.
+
+The native host limits requests to 4 KiB and responses to 24 KiB. Session change
+or expiry cancels a pending exchange without replaying it. The App's ordinary
+**Read current result**, **Acknowledge this result**, and **Check status** controls
+retain their existing owners: acknowledgement is explicit, and an uncertain
+consume is reconciled by reading the same result, never by submitting again.
+This completes native transport composition; it is not installed execution proof
+or a replacement for original native-thread continuation.
 
 ## Root-sealed Studio opt-in
 
@@ -76,6 +146,33 @@ and established account/source/node/backend/port arguments. No model-selected
 config path is accepted. Seal dependencies and start through the same lifecycle.
 Legacy installs remain off; an enabled prior setting is preserved only when its
 manifest/config hashes still match. All staged modules are included in the manifest.
+
+### Successor publication with an enrolled Studio seat
+
+Keep the fixed publication seat stopped while adopting the exact protected source
+through its normal upgrade owner. Preserve its existing commission enrollment and
+old grant digest. The gateway publisher admits that profile only after joining the
+actual predecessor receipt, MCP configuration/plist and original grant; an ordinary
+first publication still requires the base profile without commission enrollment.
+The opt-in must contain exactly enabled=true and the qualified prior grant digest.
+The same normal upgrade preserves the fixed seat's already selected Paper v20
+profile after checking its exact paths, bridge hash, runtime receipt and custody.
+That qualified member is retained through the later grant refresh as well;
+unrecognized Paper profiles refuse before installation writes.
+
+Publication continues to write its existing three targets. The Studio configuration
+and manifest remain unchanged and are rechecked against the retained definition,
+including after the root grant changes. Lost acknowledgement uses the original
+transaction's reconciliation path and retained prior grant; it does not re-enroll
+the seat or substitute the newly published grant.
+
+After the new publication receipt and postimages are qualified and the original
+transaction marker is absent, use normal private-service upgrade with
+--os-commission-config-sha256 <actual-new-root-grant-sha256>, preserving the same
+account, port, source, Node and backend. Consume and verify that upgrade's own
+configuration/manifest result before normal startup. Refreshing Studio while the
+publication transaction is incomplete invalidates its retained definition and
+must leave the original operation unresolved.
 
 In the existing Executive MCP config, enable only web_ceo_v3 with
 os_executive_transport: true, os_executive_resource equal to the exact resource
@@ -150,8 +247,9 @@ the native callback is com.mastermind.os://oauth/callback. Reconcile existing
 registrations before creating clients; unknown prior registration effects are
 not permission to recreate/delete one. No offline refresh scope is needed.
 
-Supply actual immutable VITE_MM_LAUNCH_CONFIG matching installed publication
-templates. The UI's project ref maps to department, profile ref to execution_profile;
+For the legacy Launch catalog, supply actual immutable VITE_MM_LAUNCH_CONFIG
+matching installed publication templates. The UI's project ref maps to department,
+profile ref to execution_profile;
 optional fields must match what the form emits. Workspace and Content views retain
 their own existing auth/policy/binding owners. Use workspace_owner_enrollment.py
 with real client, subject and permission receipts; a working Executive token is

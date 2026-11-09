@@ -46,14 +46,18 @@ MANIFEST_PROJECTION={
 OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two independent read-only '
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
-# Exact joined #1315 + protected H2 source pins: any reviewed input drift refuses.
+# Exact joined paid producer plus finite-workstream source; any input drift refuses.
+# 2026-11-06 source audit: the shared command owner accepts an absent legacy
+# catalog, while legacy prepare/submit explicitly refuse that absent catalog.
+# With the manifest below, payload construction and operation keys are unchanged.
+# The actual producer still runs below; no payload or installed-source substitute.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
         'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        '5a676f5a4886820cf91e13d558e61623b3fdccbebde734c7941fbbc495ead668',
+        'd122bbf0d42de8aa247f077dc3c5c43ae5bfe38e22b85dc4a01dfa3bba178f34',
     'app/mastermind_os/src/launch-config.ts':
-        '00d1943314b17052a4d33626b5a6c9dcd4cddb09569aee146abc8cff4ca5ecf2',
+        '5a24a817790848228af05fa437bd8bdbbaa5ce12cc0feaeca6e20abb9e9e512e',
 }
 
 
@@ -65,14 +69,16 @@ def actual_launch_payload(tmp_path,principal_scope,*,profile_ref="research_only"
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {stripTypeScriptTypes} from 'node:module';
+
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(input.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(input.source);
 const folder=input.scratch;
 for(const [name,source] of [
  ['operation-key', 'orchestration/operation-key.ts'],
  ['executive-launch-command-port','orchestration/executive-launch-command-port.ts'],
  ['launch-config','launch-config.ts']]) {
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(input.source,source),'utf8'),{mode:'transform'});
+ let code=transformSource(source,fs.readFileSync(path.join(input.source,source),'utf8'));
  if(name==='executive-launch-command-port') {
    if(!code.includes('"./operation-key"')) throw Error('unexpected dependency source');
    code=code.replace('"./operation-key"','"./operation-key.mjs"');

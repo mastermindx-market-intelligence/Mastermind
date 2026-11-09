@@ -368,12 +368,14 @@ def test_route_mounts_through_the_executive_mcp_transport_allowlist(rsa_key, tmp
 
 
 def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
-    from ops.executive_os.os_public_edge import GET_ROUTES, POST_ROUTES
+    from ops.executive_os.os_public_edge import (GET_ROUTES, POST_ROUTES,
+        PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, AUTHORIZATION_IDENTITY_GET_ROUTES)
 
     assert GET_ROUTES.count(ROUTE) == 1
     # The composed profile retains the legacy ordering, then appends the
-    # reference reader, Control Room reads and Fabric reads in that order.
-    assert GET_ROUTES == (
+    # reference reader, Control Room reads, Fabric reads and the later
+    # project/archive/knowledge and source-operation reads, then the BYOK roles metadata read.
+    assert PRE_AUTHORIZATION_IDENTITY_GET_ROUTES == (
         "/os/", "/os/auth/callback", "/workspace/programs/current",
         "/workspace/work/current", "/workspace/mission/current",
         "/workspace/mission/v3/current", "/workspace/result/current",
@@ -383,7 +385,23 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
         "/workspace/control-room/discover/current",
         "/workspace/mission/v4/current",
         "/workspace/fabric/catalog/current", "/workspace/fabric/status/current",
+        "/workspace/project-plan/current", "/workspace/project-journal/current",
+        "/workspace/autonomy/current", "/workspace/project-session/current",
+        "/workspace/resources/capacity/current", "/workspace/project-direction/current",
+        "/workspace/project-admission/current", "/workspace/project-admission/operation",
+        "/workspace/projects/archive/current",
+        "/workspace/project-knowledge/current", "/workspace/project-memory/current",
+        "/workspace/project-source/current", "/workspace/source-operation/context",
+        "/workspace/source-operation/operation",
+        "/workspace/project-instructions/current",
+        "/workspace/instruction-admission/current", "/workspace/instruction-admission/operation",
+        "/workspace/project-access/current",
+        "/workspace/source-operation/options", "/workspace/resources/host-observation/current",
+        "/workspace/mission-result/current",
+        "/workspace/native-draft-identity/current",
+        "/workspace/byok/roles/current",
     )
+    assert GET_ROUTES == PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + AUTHORIZATION_IDENTITY_GET_ROUTES
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes
@@ -394,8 +412,12 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
     from ops.executive_os.os_public_edge import render
     config = render(manifest, 49152)
     assert config.count(ROUTE) == 1
-    assert "/workspace/result/current /workspace/result-references/current" in config
-    assert "/workspace/result-references/current /workspace/plan/current" in config
+    assert "/workspace/operator/activity/current /workspace/result-references/current" in config
+    assert "/workspace/result-references/current /workspace/control-room/state/current" in config
+    assert "/workspace/source-operation/context /workspace/source-operation/operation" in config
+    assert ("path /workspace/source-operation/prepare /workspace/source-operation/submit"
+            " /workspace/source-operation/reconcile /workspace/source-operation/advance\n") in config
+    assert config.count("max_size 98304") == 1 and config.count("max_size 64KB") == 2
 
 
 def test_producer_failure_still_rechecks_permission_before_typed_unavailable(monkeypatch):

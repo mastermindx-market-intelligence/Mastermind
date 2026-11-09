@@ -141,11 +141,13 @@ read without uptake returns the same inert identity, without prompts or effects.
 
 The new companion delivers the complete **parsed** owner bundle, including all
 omission/degradation fields; its raw acquisition observation still binds the
-original compiler bytes. No owner fields are dropped to make the 32-KiB output
-bound pass. Both entrypoints check the final serialized context including owner
-metadata; oversized output becomes a small unavailable result, never a preview
-presented as complete. Legacy adapter calls still preserve their original
-verbatim-bundle format and behavior.
+original compiler bytes. No owner fields are dropped to make the delivery bound
+pass. The owner bound derives from the upstream canonical bundle maximum
+(`MAX_BUNDLE_BYTES` in `ops/fabric_launch/agentos.py`) plus a fixed metadata
+allowance; both entrypoints check the bounded non-bundle metadata and the final
+serialized context including owner metadata; oversized output becomes a small
+unavailable result, never a preview presented as complete. Legacy adapter calls
+still preserve their original verbatim-bundle format and behavior.
 
 For an optional actual original-owner **resume** event, the existing adapter
 accepts `--charter-root`, `--owner`, and `--owner-session` together. Configure only

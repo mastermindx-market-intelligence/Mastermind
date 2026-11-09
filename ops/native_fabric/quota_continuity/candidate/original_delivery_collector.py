@@ -6,6 +6,7 @@ caller correlation and retained evidence, never authentication or a new grant.
 """
 from __future__ import annotations
 import argparse
+from datetime import datetime
 import base64
 import hashlib
 import inspect
@@ -122,6 +123,11 @@ PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'desti
                                                       'source_pins': {'log': 'b1a89114c36ed8133306a4c654e0995ae2799d9bc77fcf64a24d0d7698c3b954',
                                                                       'support': 'fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2'},
                                                       'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
+# Two reviewed historical returns. This adds reader correlation, not producer
+# authentication, a prelaunch record, acceptance, or lease settlement.
+GATEWAY_ORIGINAL_RUNS = frozenset(('fabric-app-native-drivers-j-20261105-01',
+    'fabric-app-application-process-carrier-20261105-01'))
+PLAIN_SCOPES.update({'fabric-app-native-drivers-j-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-native-drivers-j-20261105-01.request.packet', 'packet_sha256': 'a2117a47f6f8325014cd8118d8bd22de8b242a7e6c7b22ff16d4f83b95ed80d0', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '35e3fb7dcd3f4d020df4d405f40aaf18290aac04a5f158b63973924bc48acd6c', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-native-drivers-j-20261105-01-collection-v1'}, 'fabric-app-application-process-carrier-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-application-process-carrier-20261105-01.request.packet', 'packet_sha256': '6cf782cc7ccf1124f39d821a24305f15cd78f5aaabb268b72ec3a2635af9dcdb', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '41071b8c0acd26f6ef050bdf22225a20d46d6ced6b778dbf99633315dc7eeffb', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-application-process-carrier-20261105-01-collection-v1'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
 PLAIN_BINDING_SCHEMA = 'mastermind.fabric_plain_launch_binding.v1'
 PLAIN_BINDING_SCHEMA_V2 = 'mastermind.fabric_plain_launch_binding.v2'
@@ -425,6 +431,11 @@ def retained_artifact_acquisition_pool(events, value, source, contract):
 def load_binding(path, *, run_id, root, parent):
     require_caller(root)
     raw = delivery.local_file(Path(path), 65536)
+    return _validate_binding_bytes(raw, run_id=run_id, root=root, parent=parent)
+
+
+def _validate_binding_bytes(raw, *, run_id, root, parent):
+    """Common evidence validation; entrypoints separately establish authority."""
     value = reader.strict_json(raw)
     fields = {'schema','run_id','root','parent','host','mode','requested_model',
               'cwd','artifact_names','sources'}
@@ -559,7 +570,7 @@ def load_binding(path, *, run_id, root, parent):
     return value, raw, source, contract, host['ssh_alias'], registry_raw, original_validator, plain_binding
 
 
-def remote_read(request, *, home=None):
+def remote_read(request, *, home=None, diagnostic=None):
     """Fixed read-only paths. home is an inert-test seam, never in the request."""
     if (type(request) is not dict or set(request) != {'schema','run_id','root','parent','host','contract'}
             or request['schema'] != SCHEMA
@@ -615,13 +626,14 @@ def remote_read(request, *, home=None):
         observe_remote_lane_layout(lane_layout['binding'], lane_layout)
         lane_root = Path(lane_layout['binding']['path'])
     rid=request['run_id']; held=[]
-    def read(chain,name,limit,*,allow_empty=False):
+    def read(chain,name,limit,*,allow_empty=False,private=False):
         chain.verify()
         fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=chain.fd)
         held.append((chain,name,fd,None))
         before=os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
                 or before.st_nlink!=1 or before.st_mode&0o022
+                or (private and stat.S_IMODE(before.st_mode)!=0o600)
                 or not (0 if allow_empty else 1)<=before.st_size<=limit):
             raise ValueError('original_file_owner_mode_type_or_size')
         data=b''
@@ -715,6 +727,17 @@ def remote_read(request, *, home=None):
             if not re.fullmatch(rb'(0|[1-9][0-9]{0,2})\n?',rcraw) or int(rcraw)>255:
                 raise ValueError('original_rc_invalid')
             result['files']['rc']=rc
+            if diagnostic is not None:
+                if not plain or not bound and type(contract.get('binding_sha256')) is not str:
+                    raise ValueError('diagnostic_unavailable')
+                if int(rcraw)!=diagnostic['command_rc']:
+                    raise ValueError('diagnostic_unavailable')
+                with DirectoryChain(lane_root/'ext/lanes') as lanes:
+                    projection=diagnostic_from_files(request,diagnostic,read,lanes)
+                    verify()
+                    return {'schema':DIAGNOSTIC_SCHEMA,
+                        'request_sha256':sha(canonical(dict(request,diagnostic=diagnostic))),
+                        'state':'DIAGNOSED','projection':projection}
             if int(rcraw)!=0:
                 verify();result['state']='NONZERO';return result
             with DirectoryChain(lane_root/'ext/lanes') as lanes:
@@ -734,9 +757,11 @@ def remote_read(request, *, home=None):
         if packet_dir is not None:packet_dir.close()
 
 
-def remote_envelope(request):
+def remote_envelope(request, *, home=None):
+    if type(request) is dict and 'diagnostic' in request:
+        return remote_diagnostic_envelope(request,home=home)
     try:
-        return remote_read(request)
+        return remote_read(request,home=home)
     except (OSError, ValueError, TypeError, KeyError) as error:
         reason = str(error) if isinstance(error, ValueError) else 'filesystem_refused'
         allowed = {'read_request_invalid','read_contract_invalid','directory_owner_or_mode',
@@ -747,17 +772,314 @@ def remote_envelope(request):
             'reason':reason if reason in allowed else 'filesystem_refused'}
 
 
+# This is a distinct diagnostic read, never a result/acceptance path. Labels
+# correlate the original owner's commission; they do not authenticate a reader.
+DIAGNOSTIC_SCHEMA = 'mastermind.original_provider_diagnostics.v1'
+DIAGNOSTIC_ERRORS = frozenset({'rate_limit','authentication_failed','oauth_org_not_allowed',
+    'account_on_hold','verification_required','cloud_credential_error','billing_error',
+    'invalid_request','server_error','overloaded','model_not_found','unknown','max_output_tokens'})
+DIAGNOSTIC_FIELDS = frozenset({'error_types','dns_error','api_status','initial_rejection',
+    'cli_subtype','terminal_reason','num_turns','is_error','model_refusal_evidence'})
+MAX_DIAGNOSTIC_CAPTURE = 64 * 1024 * 1024
+
+
+def validate_diagnostic_projection(value):
+    if (type(value) is not dict or set(value) != DIAGNOSTIC_FIELDS
+            or type(value['error_types']) is not list
+            or any(type(v) is not str or v not in DIAGNOSTIC_ERRORS for v in value['error_types'])
+            or value['error_types'] != sorted(set(value['error_types']))
+            or value['dns_error'] not in (None, 'EAI_AGAIN')
+            or (value['api_status'] is not None and (type(value['api_status']) is not int or not 100 <= value['api_status'] <= 599))
+            or any(value[k] is not None and type(value[k]) is not bool for k in ('initial_rejection','is_error'))
+            or value['cli_subtype'] not in (None,'success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries')
+            or value['terminal_reason'] not in (None,'completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented')
+            or (value['num_turns'] is not None and (type(value['num_turns']) is not int or not 0 <= value['num_turns'] <= 1000000))
+            or value['model_refusal_evidence'] not in ('unknown','typed_model_not_found_http_4xx')):
+        raise ValueError('diagnostic_unavailable')
+    if value['initial_rejection'] is True and not (
+            value['error_types']==['rate_limit'] and value['is_error'] is True
+            and type(value['num_turns']) is int and value['num_turns']<=1):
+        raise ValueError('diagnostic_unavailable')
+    expected = ('typed_model_not_found_http_4xx' if 'model_not_found' in value['error_types']
+                and value['api_status'] in (400,404) else 'unknown')
+    if value['model_refusal_evidence'] != expected:
+        raise ValueError('diagnostic_unavailable')
+    return value
+
+
+def project_provider_capture(raw, outcome):
+    """Closed projection only: no messages, arbitrary error strings or URLs."""
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_DIAGNOSTIC_CAPTURE:
+        raise ValueError('diagnostic_unavailable')
+    try:
+        events = reader.strict_json(raw)
+    except (ValueError, UnicodeError):
+        events = [reader.strict_json(line) for line in raw.splitlines() if line.strip()]
+    if type(events) is dict:
+        events = [events]
+    if (type(events) is not list or not 1 <= len(events) <= 100000
+            or any(type(e) is not dict or type(e.get('type')) is not str for e in events)):
+        raise ValueError('diagnostic_unavailable')
+    finals = [e for e in events if e['type'] == 'result']
+    if len(finals) != 1 or finals[0] is not events[-1]:
+        raise ValueError('diagnostic_unavailable')
+    final = finals[0]
+    status = final.get('api_error_status')
+    if status is not None and (type(status) is not int or not 100 <= status <= 599):
+        raise ValueError('diagnostic_unavailable')
+    if 'api_status' in outcome and outcome['api_status'] != status:
+        raise ValueError('diagnostic_unavailable')
+    subtype=final.get('subtype')
+    subtype=subtype if subtype in ('success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries') else ('other' if subtype is not None else None)
+    if 'cli_subtype' in outcome and outcome['cli_subtype']!=subtype:
+        raise ValueError('diagnostic_unavailable')
+    terminal=final.get('terminal_reason')
+    terminal=terminal if terminal in ('completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented') else ('other' if terminal is not None else None)
+    if 'cli_terminal_reason' in outcome and outcome['cli_terminal_reason']!=terminal:
+        raise ValueError('diagnostic_unavailable')
+    initial = outcome.get('initial_rejection')
+    if initial is not None and type(initial) is not bool:
+        raise ValueError('diagnostic_unavailable')
+    errors = [e.get('error') for e in events if e['type'] == 'assistant']
+    typed = sorted({e for e in errors if type(e) is str and e in DIAGNOSTIC_ERRORS})
+    dns = any(e == 'EAI_AGAIN' if type(e) is str else
+              type(e) is dict and e.get('code') == 'EAI_AGAIN' for e in errors)
+    turns = final.get('num_turns')
+    if turns is not None and (type(turns) is not int or not 0 <= turns <= 1000000):
+        raise ValueError('diagnostic_unavailable')
+    if initial is True and not (
+            outcome.get('kind') in ('rate_limit','quota_exhausted')
+            and final.get('is_error') is True and type(turns) is int and turns <= 1
+            and len(errors) == 1 and errors[0] == 'rate_limit'
+            and any(e['type'] == 'system' and e.get('subtype') == 'init' for e in events)
+            and not final.get('permission_denials')
+            and all((e['type']=='system' and e.get('subtype')=='init')
+                or (e['type']=='assistant' and e.get('error')=='rate_limit'
+                    and not e.get('parent_tool_use_id') and type(e.get('message')) is dict
+                    and type(e['message'].get('content')) is list
+                    and all(type(b) is dict and b.get('type')=='text' for b in e['message']['content']))
+                or e['type'] in ('result','rate_limit_event') for e in events)):
+        raise ValueError('diagnostic_unavailable')
+    value = {'error_types':typed,'dns_error':'EAI_AGAIN' if dns else None,
+        'api_status':status,'initial_rejection':initial,
+        'cli_subtype':final.get('subtype') if final.get('subtype') in (
+            'success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries') else None,
+        'terminal_reason':final.get('terminal_reason') if final.get('terminal_reason') in (
+            'completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented') else None,
+        'num_turns':turns,'is_error':final.get('is_error') if type(final.get('is_error')) is bool else None,
+        'model_refusal_evidence':'typed_model_not_found_http_4xx' if 'model_not_found' in typed and status in (400,404) else 'unknown'}
+    return validate_diagnostic_projection(value)
+
+
+def validate_capture_metadata(value, run_id):
+    if (type(value) is not dict or set(value) != {'file','sha256','bytes','source_bytes','truncated'}
+            or value['file'] != run_id + '.provider.capture.jsonl'
+            or type(value['sha256']) is not str or not HEX.fullmatch(value['sha256'])
+            or type(value['bytes']) is not int or not 0 < value['bytes'] <= MAX_DIAGNOSTIC_CAPTURE
+            or type(value['source_bytes']) is not int or value['source_bytes'] != value['bytes']
+            or value['truncated'] is not False):
+        raise ValueError('diagnostic_unavailable')
+
+
+def validate_diagnostic_request(request):
+    if (type(request) is not dict or set(request) != {'schema','run_id','root','parent','host','contract','diagnostic'}
+            or request['schema'] != SCHEMA
+            or any(type(request[k]) is not str or not IDENT.fullmatch(request[k]) for k in ('run_id','root','parent','host'))):
+        raise ValueError('diagnostic_unavailable')
+    spec = request['diagnostic']
+    if (type(spec) is not dict or set(spec) != {'schema','scope','provider_sha256','process_sha256','lease_id','account','model','command_rc','capture','lane_root'}
+            or spec['schema'] != DIAGNOSTIC_SCHEMA
+            or type(request['contract']) is not dict
+            or spec['lane_root'] != request['contract'].get('lane_root')
+            or spec['scope'] != {k:request[k] for k in ('run_id','root','parent','host')}
+            or any(type(spec[k]) is not str or not HEX.fullmatch(spec[k]) for k in ('provider_sha256','process_sha256'))
+            or type(spec['lease_id']) is not str or not re.fullmatch(r'[a-f0-9]{12}',spec['lease_id'])
+            or any(type(spec[k]) is not str or not IDENT.fullmatch(spec[k]) for k in ('account','model'))
+            or type(spec['command_rc']) is not int or not 1 <= spec['command_rc'] <= 255):
+        raise ValueError('diagnostic_unavailable')
+    validate_capture_metadata(spec['capture'], request['run_id'])
+    return spec
+
+
+def diagnostic_no_marker(chain, run_id):
+    chain.verify()
+    try:
+        os.stat(run_id, dir_fd=chain.fd, follow_symlinks=False)
+    except FileNotFoundError:
+        chain.verify()
+        return
+    raise ValueError('diagnostic_unavailable')
+
+
+def diagnostic_from_files(request, spec, read, lanes):
+    process_item=read(lanes,request['run_id']+'.process.jsonl',65536,private=True)
+    process_raw=base64.b64decode(process_item['data_base64'],validate=True)
+    if sha(process_raw)!=spec['process_sha256']:raise ValueError('diagnostic_unavailable')
+    process=reader.strict_json(process_raw)
+    outcome_raw=base64.b64decode(read(lanes,request['run_id']+'.provider.json',65536,private=True)['data_base64'],validate=True)
+    if sha(outcome_raw)!=spec['provider_sha256']:raise ValueError('diagnostic_unavailable')
+    outcome=reader.strict_json(outcome_raw)
+    expected={'schema':'mastermind.provider_outcome.v1','run_id':request['run_id'],'root_id':request['root'],
+        'host':request['host'],'provider':'glm','lease_id':spec['lease_id'],'account':spec['account'],'model':spec['model'],
+        'command_rc':spec['command_rc'],'diagnostic_capture':spec['capture'],
+        'capture_sha256':spec['capture']['sha256'],'capture_bytes':spec['capture']['bytes']}
+    if type(outcome) is not dict or any(outcome.get(k)!=v for k,v in expected.items()):
+        raise ValueError('diagnostic_unavailable')
+    validate_diagnostic_process(outcome,process,request['run_id'])
+    metadata=reader.strict_json(base64.b64decode(read(lanes,request['run_id']+'.provider.capture.json',65536,private=True)['data_base64'],validate=True))
+    if metadata!=spec['capture']:raise ValueError('diagnostic_unavailable')
+    raw=base64.b64decode(read(lanes,metadata['file'],MAX_DIAGNOSTIC_CAPTURE,private=True)['data_base64'],validate=True)
+    if len(raw)!=metadata['bytes'] or sha(raw)!=metadata['sha256']:
+        raise ValueError('diagnostic_unavailable')
+    return project_provider_capture(raw,outcome)
+
+
+def read_provider_diagnostics(request, *, home=None):
+    spec=validate_diagnostic_request(request)
+    lane_root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)/'lanes'
+    if spec['lane_root'] is not None:
+        layout=validate_remote_lane_layout(spec['lane_root'])
+        if layout['binding']['host']!=request['host']:raise ValueError('diagnostic_unavailable')
+        observe_remote_lane_layout(layout['binding'],layout)
+        lane_root=Path(layout['binding']['path'])
+    # The incumbent remote reader rechecks original packet, parent-bound
+    # contract, complete published support generation, RC and held process.
+    # Already-cleaned historical operations are unavailable, never rebuilt.
+    with DirectoryChain(lane_root/'ext/active') as active:
+        diagnostic_no_marker(active,request['run_id'])
+        original={k:v for k,v in request.items() if k!='diagnostic'}
+        result=remote_read(original,home=home,diagnostic=spec)
+        diagnostic_no_marker(active,request['run_id'])
+        return result
+
+
+def remote_diagnostic_envelope(request, *, home=None):
+    try:
+        return read_provider_diagnostics(request,home=home)
+    except Exception:
+        return {'schema':DIAGNOSTIC_SCHEMA,'request_sha256':sha(canonical(request)),
+                'state':'UNAVAILABLE','reason':'diagnostic_unavailable'}
+
+
+def validate_diagnostic_process(outcome, process, run_id):
+    if (type(outcome) is not dict or type(process) is not dict
+            or outcome.get('schema')!='mastermind.provider_outcome.v1' or outcome.get('run_id')!=run_id
+            or process.get('schema')!='mastermind.local_owned_process_receipt.v1' or process.get('label')!=run_id
+            or process.get('timed_out') is not False
+            or process.get('stdout_truncated') is not False or process.get('stderr_truncated') is not False
+            or process.get('stdout_sha256')!=outcome.get('stdout_sha256')
+            or process.get('returncode')!=outcome.get('command_rc')):
+        raise ValueError('diagnostic_unavailable')
+    if (type(process.get('returncode')) is not int or not 1 <= process['returncode'] <= 255
+            or 'runtime_failure_code' not in process or process['runtime_failure_code'] is not None
+            or type(process.get('pid')) is not int or process['pid']<=0
+            or type(process.get('pgid')) is not int or process['pgid']!=process['pid']
+            or any(type(process.get(k)) is not int or process[k]<0 for k in ('stdout_bytes','stderr_bytes'))):
+        raise ValueError('diagnostic_unavailable')
+    start=datetime.fromisoformat(process['started_at'].replace('Z','+00:00'))
+    end=datetime.fromisoformat(process['ended_at'].replace('Z','+00:00'))
+    if start.tzinfo is None or end.tzinfo is None or end<start:raise ValueError('diagnostic_unavailable')
+    cleanup=process['cleanup']
+    if (type(cleanup.get('residual_count')) is not int or cleanup['residual_count']!=0
+            or cleanup.get('identity_verified') is not True or cleanup.get('census_proven') is not True
+            or cleanup.get('status') not in ('not_needed','terminated')
+            or cleanup.get('error_code') is not None or any(cleanup.get(k+'_complete') is not True
+            or cleanup.get(k+'_error') is not None for k in ('stdout_capture','stderr_capture','stdin_delivery'))
+            or (cleanup.get('status')=='terminated' and cleanup.get('session_id')!=process['pgid'])):
+        raise ValueError('diagnostic_unavailable')
+
+
+def qualify_provider_diagnostics(path, *, run_id, root, parent):
+    value,binding_raw,source,contract,alias,registry,validator,plain_binding = load_binding(path,run_id=run_id,root=root,parent=parent)
+    # Only the existing fully producer-bound ordinary lineage qualifies. Older
+    # scopes or missing original acquisition evidence are never reconstructed.
+    if plain_binding is None or value['mode'] != 'glm':
+        raise ValueError('diagnostic_unavailable')
+    import fabric_task
+    state=fabric_task.inspect_run(run_id, owner_ext=delivery.owner_path(HERE,HERE))
+    if ((state.get('state') != 'TERMINAL' or state.get('lineage_state') != 'VERIFIED_TERMINAL') or state.get('root_id') != root
+            or state.get('parent_run_id') != parent):raise ValueError('diagnostic_unavailable')
+    base=HERE/'state/remote_sub'
+    outcome_raw=delivery.local_file(base/(run_id+'.provider.json'),65536)
+    process_raw=delivery.local_file(base/(run_id+'.process.jsonl'),65536)
+    outcome=reader.strict_json(outcome_raw);process=reader.strict_json(process_raw)
+    validate_diagnostic_process(outcome,process,run_id)
+    expected={'root_id':root,'host':value['host'],'provider':'glm','model':value['requested_model'],
+              'lease_id':plain_binding['lease_id'],'account':plain_binding['account']}
+    if any(outcome.get(k)!=v for k,v in expected.items()):raise ValueError('diagnostic_unavailable')
+    lease=delivery.retained_lease(plain_binding['lease_id'],include_pool=True)
+    lease_expected={'id':plain_binding['lease_id'],'orchestrator_id':root,'host':value['host'],
+        'account':plain_binding['account'],'model':value['requested_model'],'pool':plain_binding['acquisition_pool'],'state':'released'}
+    if lease is None or any(lease[k]!=v for k,v in lease_expected.items()):raise ValueError('diagnostic_unavailable')
+    with DirectoryChain(HERE/'active') as active:diagnostic_no_marker(active,run_id)
+    capture=outcome.get('diagnostic_capture');validate_capture_metadata(capture,run_id)
+    if outcome.get('capture_sha256')!=capture['sha256'] or outcome.get('capture_bytes')!=capture['bytes']:
+        raise ValueError('diagnostic_unavailable')
+    request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract,
+        'diagnostic':{'schema':DIAGNOSTIC_SCHEMA,'scope':{k:value[k] for k in ('run_id','root','parent','host')},
+            'provider_sha256':sha(outcome_raw),'process_sha256':sha(process_raw),
+            'lease_id':plain_binding['lease_id'],'account':plain_binding['account'],
+            'model':value['requested_model'],'command_rc':process['returncode'],'capture':capture,
+            'lane_root':plain_binding['transport'].get('lane_root')}}
+    validate_diagnostic_request(request)
+    return request,alias,sha(binding_raw),sha(registry),{k:sha(v) for k,v in source.items()}
+
+
+def _collect_provider_diagnostics(path, *, run_id, root, parent, destination):
+    """Explicit source-qualified diagnostic read. Never called automatically."""
+    original=qualify_provider_diagnostics(path,run_id=run_id,root=root,parent=parent)
+    request,alias,binding_hash,registry_hash,sources=original
+    with delivery.reserve_destination(destination) as chain:
+        try:
+            response=delivery.transport(alias,request)
+            if len(response)>8192:raise ValueError('diagnostic_unavailable')
+            row=reader.strict_json(response)
+            if (type(row) is not dict or set(row)!={'schema','request_sha256','state','projection'}
+                    or row['schema']!=DIAGNOSTIC_SCHEMA or row['state']!='DIAGNOSED'
+                    or row['request_sha256']!=sha(canonical(request))):raise ValueError('diagnostic_unavailable')
+            projection=validate_diagnostic_projection(row['projection'])
+            def verify_source():
+                if qualify_provider_diagnostics(path,run_id=run_id,root=root,parent=parent)!=original:
+                    raise ValueError('diagnostic_unavailable')
+            verify_source()
+            data=canonical(projection)
+            delivery.write_exclusive(chain.fd,'diagnostics.json',data)
+            receipt={'schema':DIAGNOSTIC_SCHEMA,'state':'DIAGNOSED','run_id':run_id,'root':root,'parent':parent,
+                'request_sha256':sha(canonical(request)),'binding_sha256':binding_hash,'registry_sha256':registry_hash,
+                'source_sha256':sources,'process_sha256':request['diagnostic']['process_sha256'],
+                'provider_sha256':request['diagnostic']['provider_sha256'],'capture_sha256':request['diagnostic']['capture']['sha256'],
+                'producer_root_authenticated':False,'acceptance':'NOT_RECORDED','original_operation_mutated':False,
+                'files':[{'local_name':'diagnostics.json','bytes':len(data),'sha256':sha(data)}]}
+            delivery.publish_receipt(chain,receipt,{'paths':[]},verify_source=verify_source)
+            if receipt['state']!='DIAGNOSED':raise ValueError('diagnostic_unavailable')
+            return receipt
+        except Exception:
+            # No raw response, exception text, SSH stderr, or untrusted reason is
+            # written or printed on a failed diagnostic export.
+            raise ValueError('diagnostic_unavailable') from None
+
+
+def collect_provider_diagnostics(path, *, run_id, root, parent, destination):
+    try:
+        return _collect_provider_diagnostics(path,run_id=run_id,root=root,parent=parent,destination=destination)
+    except Exception:
+        raise ValueError('diagnostic_unavailable') from None
+
+
 def code_for_request(request):
     # Fixed reviewed code, not caller-selected commands/paths/imports. The same
     # incumbent bounded SSH reader transports it; no remote write or probe.
     source=delivery.local_file(HERE/'artifact_reader.py',65536).decode()
-    code='import base64, hashlib, json, os, pwd, re, stat, sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\n'
+    code='import base64, hashlib, json, os, pwd, re, stat, sys\nfrom datetime import datetime\nfrom pathlib import Path\nfrom types import SimpleNamespace\n'
     code+="_reader_ns={'__name__':'fixed_original_artifact_reader'}\nexec("+repr(source)+",_reader_ns)\nreader=SimpleNamespace(**_reader_ns)\n"
     remote_scopes = {key: {field: scope[field] for field in (
         'root', 'parent', 'host', 'packet_sha256', 'support_digest')}
         for key, scope in PLAIN_SCOPES.items()}
     code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCHEMA_V2='+repr(PLAIN_SCHEMA_V2)+'\nPLAIN_SCOPES='+repr(remote_scopes)+'\n'
     code+='SCHEMA='+repr(SCHEMA)+'\nMAX_STDOUT='+str(MAX_STDOUT)+'\nIDENT=re.compile('+repr(IDENT.pattern)+')\nHEX=re.compile('+repr(HEX.pattern)+')\n'
+    code+='DIAGNOSTIC_SCHEMA='+repr(DIAGNOSTIC_SCHEMA)+'\nDIAGNOSTIC_ERRORS='+repr(DIAGNOSTIC_ERRORS)+'\nDIAGNOSTIC_FIELDS='+repr(DIAGNOSTIC_FIELDS)+'\nMAX_DIAGNOSTIC_CAPTURE='+str(MAX_DIAGNOSTIC_CAPTURE)+'\n'
+    for fn in (validate_diagnostic_projection,project_provider_capture,validate_capture_metadata,validate_diagnostic_request,diagnostic_no_marker,validate_diagnostic_process,diagnostic_from_files,read_provider_diagnostics,remote_diagnostic_envelope):
+        code+=inspect.getsource(fn)+'\n'
     code+=delivery.remote_lane_root_source()+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
     code+="\ntry:\n raw=sys.stdin.buffer.read(65537)\n if len(raw)>65536:raise ValueError('request_limit')\n request=reader.strict_json(raw)\n result=remote_envelope(request)\n sys.stdout.buffer.write(canonical(result))\nexcept (OSError,ValueError,TypeError,KeyError):\n raise SystemExit(76)\n"
     return code
@@ -821,9 +1143,16 @@ class LocalBindingRefused(ValueError):
 
 def collect(path,*,run_id,root,parent,destination):
     try:
-        value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=load_binding(path,run_id=run_id,root=root,parent=parent)
+        bound=load_binding(path,run_id=run_id,root=root,parent=parent)
     except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
         raise LocalBindingRefused(str(error)) from error
+    return _collect_validated(bound, destination=destination,
+        revalidate=lambda: load_binding(path,run_id=run_id,root=root,parent=parent))
+
+
+def _collect_validated(bound, *, destination, revalidate, transport_start=None):
+    value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=bound
+    run_id,root,parent=(value[k] for k in ('run_id','root','parent'))
     if run_id in PLAIN_SCOPES and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
         raise ValueError('plain_original_destination_changed')
     request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract}
@@ -832,6 +1161,8 @@ def collect(path,*,run_id,root,parent,destination):
     with delivery.reserve_destination(destination) as chain:
         delivery.write_exclusive(chain.fd,'read-request.json',canonical(request))
         try:
+            if transport_start is not None:
+                transport_start()
             response=delivery.transport(alias,request)
         except (OSError,ValueError) as error:
             allowed={'transport_timeout','transport_output_limit','transport_unavailable'}
@@ -846,7 +1177,7 @@ def collect(path,*,run_id,root,parent,destination):
             delivery.write_exclusive(chain.fd,f'read-response.{index:03d}',response[offset:offset+reader.MAX_FILE])
         verified=validate_response(response,request,value['mode'],original_validator=original_validator)
         def verify_source():
-            current=load_binding(path,run_id=run_id,root=root,parent=parent)
+            current=revalidate()
             if (current[1:4]!=(binding_raw,source,contract) or current[5]!=registry
                     or current[7]!=plain_binding):
                 raise ValueError('original_source_changed_during_collection')
@@ -900,6 +1231,11 @@ def collect(path,*,run_id,root,parent,destination):
 
 def read_collection(path,*,expected_sha256,run_id,root,parent):
     require_caller(root)
+    return _read_collection_validated(path,expected_sha256=expected_sha256,
+        run_id=run_id,root=root,parent=parent)
+
+
+def _read_collection_validated(path,*,expected_sha256,run_id,root,parent):
     plain = PLAIN_SCOPES.get(run_id)
     if plain is not None and (str(path) != str(Path(plain['destination'])/'receipt.json')
             or root != plain['root'] or parent != plain['parent']):
@@ -1031,6 +1367,167 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
         if len(stdout)!=receipt['stdout_bytes'] or sha(stdout)!=receipt['stdout_sha256']:
             raise ValueError('collection_stdout_integrity')
         chain.verify();return stdout
+
+
+def _gateway_scope(run_id):
+    if type(run_id) is not str or run_id not in GATEWAY_ORIGINAL_RUNS:
+        raise ValueError('gateway_original_scope_refused')
+    return PLAIN_SCOPES[run_id]
+
+
+def _gateway_binding(run_id):
+    plain = _gateway_scope(run_id)
+    retained = Path(plain['packet_path']).parent
+    value = {'schema': BINDING_SCHEMA, 'run_id': run_id,
+        **{key: plain[key] for key in ('root','parent','host','mode','requested_model')},
+        'cwd': '~', 'artifact_names': [], 'sources': {
+            'packet': {'path': plain['packet_path'], 'sha256': plain['packet_sha256']},
+            'log': {'path': str(retained / (run_id + '.log')),
+                    'sha256': plain['source_pins']['log']},
+            'support': {'path': str(retained / (run_id + '.support.json')),
+                        'sha256': plain['source_pins']['support']}}}
+    return _validate_binding_bytes(canonical(value), run_id=run_id,
+        root=plain['root'], parent=plain['parent'])
+
+
+def _gateway_collection_status(run_id):
+    """Read only this destination. Absence or partial evidence permits no retry."""
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    opened = False
+    try:
+        with delivery.DirectoryChain(Path(plain['destination'])) as chain:
+            opened = True
+            try:
+                raw = delivery.read_local_at(chain, 'receipt.json', 65536)
+            except FileNotFoundError:
+                chain.verify()
+                return dict(result, state='UNKNOWN', destination_reserved=True,
+                    reason='original_collection_receipt_missing')
+            receipt = reader.strict_json(raw)
+            if (type(receipt) is not dict or receipt.get('schema') != RECEIPT_SCHEMA
+                    or any(receipt.get(key) != value for key, value in {
+                        'run_id': run_id, 'root': plain['root'], 'parent': plain['parent'],
+                        'host': plain['host'], 'mode': plain['mode']}.items())
+                    or receipt.get('original_operation_mutated') is not False
+                    or receipt.get('state') not in ('COMPLETE', 'PENDING')):
+                raise ValueError('gateway_original_receipt_unqualified')
+            digest = sha(raw)
+            if receipt['state'] == 'COMPLETE':
+                _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+                    expected_sha256=digest, run_id=run_id,
+                    root=plain['root'], parent=plain['parent'])
+            if delivery.read_local_at(chain, 'receipt.json', 65536) != raw:
+                raise ValueError('collection_receipt_changed')
+            chain.verify()
+            return dict(result, state=receipt['state'], destination_reserved=True,
+                receipt_sha256=digest, delivery_verified=receipt['state'] == 'COMPLETE')
+    except FileNotFoundError:
+        if opened:
+            return dict(result, state='UNKNOWN', destination_reserved=True,
+                effect_state='UNKNOWN', reason='original_collection_evidence_missing')
+        return dict(result, state='ABSENT', destination_reserved=False,
+            effect_state='UNKNOWN', reason='destination_absence_is_not_execution_absence')
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            reason='original_collection_evidence_unqualified')
+
+
+def _gateway_reconcile(run_id):
+    """One explicitly typed, collection-only subordinate observation.
+
+    The same fixed final leaf, the same names:[] read and the same existing
+    DirectoryChain reservation and fsync fences as an ordinary collection.
+    An existing leaf, a replaced or unsafe parent and a scope mismatch all
+    refuse with zero transport. No launch, lease, controller, retry or
+    acceptance effect is implied by the observation.
+    """
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+            failure_phase='original_local_binding',
+            this_invocation_remote_read_started=False,
+            reason='original_binding_unconfirmed')
+    remote_started = False
+    def transport_start():
+        nonlocal remote_started
+        remote_started = True
+    try:
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id), transport_start=transport_start)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+        if not remote_started:
+            return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+                failure_phase='before_remote_read', this_invocation_remote_read_started=False,
+                reason=('original_reconciliation_destination_exists' if isinstance(error, FileExistsError)
+                        else 'original_reconciliation_refused'))
+        # A later exception or missing leaf cannot retract this invocation's
+        # transport attempt. No status probe can turn it into NOT_APPLIED.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    observed = _gateway_collection_status(run_id)
+    if remote_started and (
+            observed.get('state') != 'COMPLETE'
+            or observed.get('delivery_verified') is not True):
+        # A completed transport can lose its local evidence before this final
+        # status read. Retain this invocation's uncertainty in that race too.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    return observed
+
+
+def _gateway_original_delivery(action, run_id, receipt_sha256=None):
+    """Fixed internal machine-owner operation, never a public native CLI mode.
+
+    The enrolled private gateway authorizes its invocation. These selectors
+    carry no identity or permission; all original evidence guards are shared
+    with native delivery. Same-UID access is the existing service trust model.
+    """
+    plain = _gateway_scope(run_id)
+    if (action not in ('collect', 'status', 'result', 'reconcile')
+            or (action == 'result' and (type(receipt_sha256) is not str
+                                       or not HEX.fullmatch(receipt_sha256)))
+            or (action != 'result' and receipt_sha256 is not None)):
+        raise ValueError('gateway_original_arguments_refused')
+    if action == 'status':
+        return _gateway_collection_status(run_id)
+    if action == 'result':
+        stdout = _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+            expected_sha256=receipt_sha256, run_id=run_id,
+            root=plain['root'], parent=plain['parent'])
+        return {'run_id': run_id, 'state': 'COMPLETE', 'receipt_sha256': receipt_sha256,
+            'stdout_bytes': len(stdout), 'stdout_sha256': sha(stdout),
+            'stdout_base64': base64.b64encode(stdout).decode('ascii'),
+            'acceptance': 'NOT_RECORDED'}
+    if action == 'reconcile':
+        return _gateway_reconcile(run_id)
+    observed = _gateway_collection_status(run_id)
+    if observed['state'] != 'ABSENT':
+        return observed
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return {'run_id': run_id, 'state': 'REFUSED', 'retry_authorized': False,
+            'failure_phase': 'original_local_binding',
+            'this_invocation_remote_read_started': False,
+            'reason': 'original_binding_unconfirmed'}
+    try:
+        # Existing reserve_destination is the only persistent effect fence.
+        # A racing caller or a restart cannot re-observe an existing target.
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(_gateway_collection_status(run_id), effect_state='UNKNOWN')
+    return _gateway_collection_status(run_id)
 
 
 def main(argv=None):

@@ -25,7 +25,7 @@ def scope(texts):
     """Validate each normative statement in its owning, identified section."""
     review = texts["review"].split("## Step 2B — ", 1)[-1].split("## Step 3 — ", 1)[0]
     skill = texts["skill"].split("## Independent review route: Cursor Cloud", 1)[-1].split("## Output", 1)[0]
-    worker = texts["worker"].split("For independent PR source/security review", 1)[-1].split("### FABLE", 1)[0]
+    worker = texts["worker"].split("### CURSOR \u2014 interactive engineering surface", 1)[-1].split("### FABLE", 1)[0]
     runbook = texts["runbook"].split("## Historical real example", 1)[0]
     history = texts["runbook"].split("## Historical real example — Mastermind #1515", 1)[-1]
     return {k: normalized(v) for k, v in [
@@ -69,10 +69,10 @@ REQUIRED = {
         "Never use this avenue to circumvent an explicit permission/safety denial, `retry_allowed=false`, `EFFECT_UNKNOWN`",
     ],
     "worker": [
-        "permissible attended external review surface",
-        "It is not an Executive-provider alias, a new Fabric pool, or automatic fallback",
-        "Only after Fabric unavailability is verified and the original reviewer effects are reconciled",
-        "does not replace formal non-author GitHub approval or any mandatory Fabric START/acceptance proof",
+        "Authorized GitHub-native `@cursor` Cloud comments can commission distinct read-only PR/security review",
+        "This is not an Executive alias, Fabric pool or automatic fallback",
+        "Verify Fabric unavailability and reconcile original reviewer effects before a genuinely separate authorized review",
+        "technical review is not formal non-author approval or required Fabric START/acceptance",
     ],
 }
 
@@ -109,8 +109,8 @@ def test_current_policy_fulfills_all_normative_contracts():
      "A new operation ID, distinct reviewer or new `@cursor` comment does turn"),
     ("skill", "Never use this avenue to circumvent an explicit permission/safety denial",
      "Always use this avenue to circumvent an explicit permission/safety denial"),
-    ("worker", "It is not an Executive-provider alias, a new Fabric pool, or automatic fallback",
-     "It is an Executive-provider alias, a new Fabric pool, and automatic fallback"),
+    ("worker", "This is not an Executive alias, Fabric pool or automatic fallback",
+     "This is an Executive alias, Fabric pool and automatic fallback"),
     ("review", "GitHub issue-comment `user.login` was `cursor[bot]`",
      "GitHub issue-comment `user.login` was `chriswong6031-creator`"),
     ("review", "agent-reported authenticated GitHub/MCP principal was `chriswong6031-creator`",

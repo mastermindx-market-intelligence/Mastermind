@@ -43,6 +43,40 @@ deployment acceptance: the v20 BUILT_NOT_PROVEN receipts (independent review,
 protected merge, real exact-target edit, readback, screenshot and reconnect)
 remain outstanding before any live selection.
 
+## P00 pre-dispatch requalification repair (source candidate; not installed)
+
+P00's inspection of the existing #1011 path observed Paper Desktop 0.5.18
+catalog `16e6b93f...` accepted under `TOOL_SCOPED_CONTRACT_V1`. The historical
+whole-catalog mismatch is resolved on that observed direct path; do not change
+the expected upstream digest or repeat the already accepted v20 installation.
+
+An independent offline source assessment found a remaining ordering gap: an
+edit or snapshot-guarded read qualified its requested tool, invoked the vendor
+`get_basic_info` guard, then dispatched the requested tool using the earlier
+qualification. A material descriptor change during that intervening RPC could
+therefore reach Paper. The proposed immutable v21 bridge rechecks the live
+server/getter contract, the requested tool and its outgoing inputs after the
+guard and immediately before dispatch. The shared validator also rechecks
+HTML versus legacy text payloads if the vendor changes between reviewed
+profiles. Pre-dispatch refusal remains a refusal with no requested mutation;
+post-dispatch verification uncertainty remains `EFFECT_UNKNOWN`, never replay.
+
+The v2-v20 pins remain byte-for-byte historical identities. V21 is only a source
+candidate until independent original-owner review, required hosted checks,
+protected release, and an admitted same-service activation occur. Do not
+hotpatch an installed bundle, select a new runtime, restart a service or change
+credentials from this source receipt. Accepted v20 direct-path evidence stays
+preserved, with this newly found condition carried into the next review.
+
+This repair does not broaden the allowlists. Folder creation/resource moves/
+archive/unarchive remain blocked. `create_file` still requires an exact guarded
+source or clone file and rejects `parentId`; file rename still excludes folders.
+The published app's older file-creation/focus/exclusive-file wording must be
+refreshed through the same app's normal approved action publication, not through
+a source rewrite or alternate carrier. No new whole-file or page-wide lock is
+introduced. Qualification cannot guarantee atomic vendor behavior between the
+final catalog read and call; it removes the deterministic intervening-RPC gap.
+
 ## Upgrade-resilient tool-scoped Paper compatibility (proposed source, 2026-11-02)
 
 PROBLEM: the historic full-catalog SHA admission rule made every
@@ -274,9 +308,12 @@ surface omits it, classify the mismatch as publication/surface drift: `STUDIO_TO
 reads/edits may remain available, but exact-file transition is held until the same Studio
 Direct app's **workspace-approved action snapshot** is current and `paper_prepare` is directly
 surfaced. OpenAI documents that approved MCP apps use a frozen tool/input snapshot and do not
-auto-update when the server changes. On Business, published custom apps currently cannot be
-updated in place; recreate + republish is required. Draft/dev apps must re-scan/recreate their
-tool catalog as applicable, then the caller starts a fresh chat/tool selection. Do not reproduce
+auto-update when the server changes. Business and Enterprise/Edu workspace admins with
+management permission and a valid connection can **Refresh the existing published custom
+MCP app's tool definitions without recreation**, review/publish the changed actions,
+and start a new conversation. Developer-mode connections use Refresh; Plugin Directory
+plugins use continuous tool review/rescan. If Refresh is unavailable for the exact app,
+hold at the workspace admin gate rather than creating a duplicate app or tunnel. Do not reproduce
 prepare with generic Studio `start_process`/filesystem tools, RDC, raw upstream `open_file`,
 shell, or UI automation. This keeps file transition inside the reviewed narrow action instead
 of silently broadening workstation authority.
@@ -691,17 +728,24 @@ Stop at login, app approval, absent host transport, unknown effects or an unprov
 sealed-worker grant. Do not turn synthetic fixtures, downloads, PRs or config
 staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carrier.
 
-## Sources checked 2026-09-13
+## Sources checked through 2026-10-02
 
 - https://paper.design/docs/mcp - endpoint, tools, current-file context, code export, migration.
 - https://paper.design/downloads - desktop distribution.
 - https://paper.design/pricing - Free 100 MCP calls/week; Pro 1M/week,
   $20/editor/month monthly or $16/month billed yearly. No purchase performed.
-- https://help.openai.com/en/articles/12584461 - custom app write/admin/plan gates;
-  Pro custom developer-mode MCP currently documented read/fetch only. Rechecked 2026-09-26:
-  approved MCP apps use a frozen tool/input snapshot; server changes do not auto-update the
-  workspace app. Business published apps currently require recreate + republish to change
-  tools/metadata, while admin action refresh controls differ on Enterprise/Edu.
+- https://help.openai.com/en/articles/12584461 and
+  https://developers.openai.com/plugins/deploy/connect-chatgpt - current MCP app/tool-update
+  lifecycle. Developer-mode MCP connections support an explicit **Refresh** after tool names,
+  descriptions, schemas, annotations, auth, or UI resources change; confirm refreshed metadata
+  and start a new conversation. Published Plugin Directory definitions use continuous review/rescan.
+  Current OpenAI Help Center guidance (updated October 2026) permits Business and
+  Enterprise/Edu admins to **Refresh published custom workspace MCP app tool definitions
+  in place** from workspace settings, with app-management permission and a valid connection.
+  The admin reviews and publishes the update; Enterprise/Edu Action control also
+  supports individual action Refresh. Prefer the existing tunnel/backend and do not
+  turn an older chat's tool text into a file lease or duplicate app. Only a separately
+  verified platform requirement and approved owner transition justify replacement.
 - https://github.com/openai/tunnel-client - private outbound Secure MCP Tunnel, stdio support.
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.
@@ -789,3 +833,33 @@ accepted installer from an independently authorized local or RDC host installati
 context, checking each stage before the next. A command launched through the C4 backend
 itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
 visual readback remain on Studio Direct C4.
+
+## Source readiness and named-seat diagnostics (v22; not installed)
+
+The reconciled #1409 source adds early write-readiness reporting to
+`paper_inspect` while retaining the current `TOOL_SCOPED_CONTRACT_V1` policy.
+Its `write_schema` reports compatible and incompatible write tools separately.
+An incompatible unrelated writer does not disable qualified operations; a
+connected document can also report no compatible writers. The live critical
+`get_basic_info` contract is still checked before its implicit call. Catalog
+failure remains a typed refusal and is never converted into `CONNECTED`.
+
+Named v3/v4 direct-service receipts additionally expose only
+`schema`, `seat_id`, `source_revision` and `bridge_sha256` under
+`transport_diagnostic`. The stdio projection validates the exact key set and
+value formats. Legacy unnamed bundles omit this field. These verified-install
+diagnostics identify source provenance, confer no authority and do not enter
+snapshot hashes, execution bindings, write permission or retry decisions.
+Refusals and unknown-effect receipts retain their original state and operation.
+
+The additive source generation is **v22**, bridge SHA-256
+`af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b`. Every existing generation remains immutable,
+including v12 `82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb`
+and v21 `dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa`.
+The old #1409 proposal to replace the v12 binding or restore whole-catalog-only
+write admission is superseded by the accepted protected implementation.
+
+This is source integration only. It changes no installed selector, service,
+tunnel or design. The historical #1409 staging denial remains unreplayed;
+another generation name is not permission to repeat that action. An authorized
+runtime release and same-carrier real-app acceptance remain separate.

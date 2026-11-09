@@ -43,17 +43,19 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const input = screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "Unsent exact private draft - retain." } });
     expect(canNavigateForAutomaticSignIn()).toBe(false);
     await act(async () => { web.publish(expired); });
-    expect(input.value).toBe("Unsent exact private draft - retain.");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Unsent exact private draft - retain.");
     expect(canNavigateForAutomaticSignIn()).toBe(false);
     expect(web.host.auth!.getState().acquisition).toBe(false);
     // A new identity may be about to authenticate. The old draft disappears
     // before a fresh credential can become usable.
     await act(async () => { await web.host.auth!.signIn(); });
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("");
+    expect(screen.queryByRole("textbox", { name: "Direction to Meta-CEO" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Unsent exact private draft - retain.");
   });
 
   it("preserves a private Office draft when it is off-view at passive expiry", async () => {
@@ -61,12 +63,13 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     window.MastermindMissionHost = web.host;
     const user = userEvent.setup();
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", {name:"Direction to Meta-CEO"}),
       {target:{value:"Off-view draft needs a safe return."}});
     await navigateCompanyOperation(user, "Work");
     await act(async () => { web.publish(expired); });
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.queryByRole("button", { name: "Meta-CEO" })).toBeNull();
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", {name:"Direction to Meta-CEO"}).value)
       .toBe("Off-view draft needs a safe return.");
     expect(web.host.auth!.getState().acquisition).toBe(false);
@@ -76,6 +79,7 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
       { target: { value: "Must not survive quota-rejected logout." } });
     expect(localStorage.getItem(logoutKey)).toBeNull();
@@ -83,8 +87,8 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
       web.publish({ status: "signed_out", reason: "USER_SIGNED_OUT",
         acquisition: false, content: false });
     });
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox",
-      { name: "Direction to Meta-CEO" }).value).toBe("");
+    expect(screen.queryByRole("textbox", { name: "Direction to Meta-CEO" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Must not survive quota-rejected logout.");
     expect(canNavigateForAutomaticSignIn()).toBe(true);
   });
 
@@ -92,13 +96,15 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
       { target: { value: "User text cannot cross sign-out." } });
     await act(async () => { web.publish(expired); });
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value)
       .toBe("User text cannot cross sign-out.");
     await act(async () => { await web.host.auth!.signOut(); });
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("");
+    expect(screen.queryByRole("textbox", { name: "Direction to Meta-CEO" })).toBeNull();
+    expect(document.body.textContent).not.toContain("User text cannot cross sign-out.");
     expect(localStorage.getItem(logoutKey)).toBe("1");
   });
 });

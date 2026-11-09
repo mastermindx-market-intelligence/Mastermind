@@ -7,7 +7,7 @@ import { projectOffice, type OfficeInput, type ProjectionContext } from "./meta-
 import { decodeMission } from "./mission";
 import missionFixture from "./fixtures/mission-v2-current-128c46f6.json";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue({ state: "BUILT_NOT_PROVEN" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false, invoke: vi.fn().mockResolvedValue({ state: "BUILT_NOT_PROVEN" }) }));
 beforeEach(() => {
   history.replaceState(null, "", "/os/?work_ref=WS%3AONE&root_job_id=JOB-1");
   delete window.MastermindMissionHost;
@@ -28,6 +28,7 @@ describe("explicit shell presentation", () => {
 
   it("changes render inputs without losing the company draft or its focused control", () => {
     const { container, rerender } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const field = screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "Keep my exact 公司 direction." } });
     field.focus();
@@ -55,7 +56,8 @@ describe("explicit shell presentation", () => {
     const projection = projectOffice(input, context), onDraftChange = vi.fn();
     const { rerender } = render(<MetaCeoOffice locale="zh-CN" projection={projection}
       draft={{ text: "Original private draft 原样", context }} onDraftChange={onDraftChange} />);
-    expect(screen.getByRole("heading", { name: "让整个公司有方向地前进。" })).toBeTruthy();
+    // The localized answer-state heading replaces the retired office slogan.
+    expect(screen.getByRole("heading", { name: "决策情况尚未确认。" })).toBeTruthy();
     expect(screen.getAllByText("Do exactly this. 不改写。").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "查看方向预览" }));
     const preview = screen.getByRole("region", { name: "方向预览" });

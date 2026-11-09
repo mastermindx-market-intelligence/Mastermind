@@ -5,7 +5,7 @@ from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import PullRequestFacts
 from control_plane.github_review_intent_ingress import (
     ExpectedReviewPublisher, ExternalCommentAdvisory, ExternalGitHubSourceFacts,
-    FinalPostRefusal, PublicationEffectUnknown, ReviewVerificationRefused,
+    FinalPostRefusal, PublicationEffectUnknown, PublicationPreflightUnavailable, ReviewVerificationRefused,
     PublishedReviewFacts, publication_command_id,
 )
 from control_plane.github_review_publication_record import (
@@ -271,7 +271,7 @@ def test_publication_guard_revoked_during_readback_refuses_before_post(tmp_path)
     with pytest.raises(ReviewVerificationRefused, match="NOT_AUTHORIZED"):
         call(app)
     assert gh.submits == 0
-    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert runtime.store.get_event_by_command_id(COMMAND) is None
     assert COMMAND not in app.published_command_ids()
 
 
@@ -310,9 +310,9 @@ def test_mutation_during_reviews_get_refuses_before_post(tmp_path, mutation, cod
     with pytest.raises(FinalPostRefusal, match=code):
         call(app)
     assert gh.submits == 0
-    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert runtime.store.get_event_by_command_id(COMMAND) is None
     assert COMMAND not in app.published_command_ids()
-    with pytest.raises(PublicationEffectUnknown):
+    with pytest.raises(FinalPostRefusal, match=code):
         call(app)
     assert gh.submits == 0
 
@@ -343,7 +343,7 @@ def test_unsealed_draft_is_not_a_bypass(tmp_path):
     with pytest.raises(FinalPostRefusal, match="PULL_REQUEST_DRAFT"):
         call(app)
     assert gh.submits == 0
-    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert runtime.store.get_event_by_command_id(COMMAND) is None
 
 
 def test_sealed_comment_advisory_posts_once_on_a_draft(tmp_path):
@@ -365,7 +365,7 @@ def test_sealed_advisory_cannot_use_request_changes(tmp_path):
     with pytest.raises(FinalPostRefusal, match="EXTERNAL_ADVISORY_VERB_REFUSED"):
         call(app, event="REQUEST_CHANGES")
     assert gh.submits == 0
-    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert runtime.store.get_event_by_command_id(COMMAND) is None
     assert COMMAND not in app.published_command_ids()
 
 

@@ -13,18 +13,26 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 
 
-def _decision(*, draft: bool, reviewer: str = "independent-reviewer"):
+def _decision(
+    *, draft: bool, reviewer: str = "independent-reviewer",
+    action: str = "review_requested", allow_lifecycle_review: bool = False,
+    current_permission: gri.CurrentPermission | None = None,
+):
     envelope = gri.WebhookEnvelope(
         delivery_id="11111111-2222-3333-4444-555555555555",
         event="pull_request",
-        action="review_requested",
+        action=action,
         repository=REPOSITORY,
         installation_id=4242,
         pull_number=1924,
     )
     signal = gri.IntentSignal(
         actor_login="authorized-maintainer",
-        permission_basis=gri.ActorPermissionBasis.GITHUB_ENFORCED_TRIAGE_WRITE,
+        permission_basis=(
+            gri.ActorPermissionBasis.REVERIFIED_LIFECYCLE_PERMISSION
+            if action == "ready_for_review"
+            else gri.ActorPermissionBasis.GITHUB_ENFORCED_TRIAGE_WRITE
+        ),
         requested_reviewer=reviewer,
     )
     pull_request = gri.PullRequestFacts(
@@ -44,12 +52,14 @@ def _decision(*, draft: bool, reviewer: str = "independent-reviewer"):
         installation_ids=frozenset({4242}),
         configured_reviewer="independent-reviewer",
         authorized_actors=frozenset({"authorized-maintainer"}),
+        allow_lifecycle_review=allow_lifecycle_review,
     )
     return gri.decide_review_intent(
         envelope=envelope,
         policy=policy,
         pull_request=pull_request,
         signal=signal,
+        current_permission=current_permission,
     )
 
 
@@ -71,12 +81,30 @@ def test_reviewable_ready_pr_admits_only_configured_review_intent():
     )
 
 
-def test_ready_transition_is_not_a_duplicate_review_intent_channel():
-    assert gri.intent_channel_for("pull_request", "ready_for_review") is None
-    assert (
-        gri.intent_channel_for("pull_request", "review_requested")
-        is gri.IntentSource.REVIEW_REQUESTED
+def test_ready_transition_does_not_implicitly_admit_an_automatic_review():
+    decision = _decision(draft=False, action="ready_for_review")
+    assert decision.admitted is False
+    assert decision.refusal is gri.ReviewIntentRefusal.AUTOMATIC_REVIEW_DISABLED
+
+
+def test_opt_in_ready_review_requires_fresh_permission_and_shares_manual_identity():
+    unverified = _decision(
+        draft=False, action="ready_for_review", allow_lifecycle_review=True,
     )
+    assert unverified.admitted is False
+    assert unverified.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+
+    automatic = _decision(
+        draft=False, action="ready_for_review", allow_lifecycle_review=True,
+        current_permission=gri.CurrentPermission(
+            REPOSITORY, "authorized-maintainer", "write",
+        ),
+    )
+    manual = _decision(draft=False)
+    assert automatic.admitted is True
+    assert automatic.intent_source is gri.IntentSource.PR_LIFECYCLE
+    assert manual.intent_source is gri.IntentSource.REVIEW_REQUESTED
+    assert automatic.command_id == manual.command_id
 
 
 def test_delivery_workflow_guides_review_ready_before_request_without_ci_bypass():

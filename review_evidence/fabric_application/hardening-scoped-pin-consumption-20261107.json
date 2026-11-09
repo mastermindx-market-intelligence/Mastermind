@@ -1,0 +1,116 @@
+{
+  "all_19_match": true,
+  "at": "2026-11-07T08:28:44.127292+00:00",
+  "ci_failure": {
+    "job": 128346862107,
+    "reason": "previous paired fixture contains8487163 rather than4cc5428",
+    "run": 42353416869
+  },
+  "comparison_parent": "b955c823767b504853b6d79e44d09fc71cdbdd9c",
+  "consumed_original_source": "41e86c7aa89905f9b4592d57fbf32c2d7c0f1458",
+  "contribution_operation": "fabric-app-admission-compose-20261107-sol-001",
+  "dynamic_test_rerun": false,
+  "earlier_180_case_macro_qualification_remains_at_b955": true,
+  "fixture_only_difference_from_704": "existing published admission test pin correction",
+  "macro_fixture_blob": "5440c85291efa25d2635a7034d691607cd4bf885",
+  "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "mastermind_source": "17ed69ab0ee309fd1ed97e7540dcc0c0793578cf",
+  "new_source_edits": 0,
+  "pins": [
+    {
+      "blob": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/commission_deadline.py"
+    },
+    {
+      "blob": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/go_shim.py"
+    },
+    {
+      "blob": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/lease_broker.py"
+    },
+    {
+      "blob": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/go_lease_gateway.py"
+    },
+    {
+      "blob": "38856700331b3fb3a7706a5745e23fb7b3d18cf0",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/go_lease_capability.py"
+    },
+    {
+      "blob": "c37181993a36da216c77778ebaeaae3ebe190a09",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/application_http_transports.py"
+    },
+    {
+      "blob": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/provider_outcome.py"
+    },
+    {
+      "blob": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/quota_circuit.py"
+    },
+    {
+      "blob": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/pick.py"
+    },
+    {
+      "blob": "61dc4d5e83172e6c647d058ec844f00a0b3955a6",
+      "matches_actual_composed_and_b955": true,
+      "path": "candidate/pool_ledger.py"
+    },
+    {
+      "blob": "96093c2747d2dda69b3f2255cb84e656355c87ea",
+      "matches_actual_composed_and_b955": true,
+      "path": "source/model_tier.py"
+    },
+    {
+      "blob": "02922043357d63b4bcfa3791899df27a5c42be12",
+      "matches_actual_composed_and_b955": true,
+      "path": "source/pool_status.py"
+    },
+    {
+      "blob": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/_offline_boundary.py"
+    },
+    {
+      "blob": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_go_application_handler_composition.py"
+    },
+    {
+      "blob": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_application_turn_admission.py"
+    },
+    {
+      "blob": "754d6d8c1a6391fcfefdbd26417f87944403ea2b",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_application_registered_pool_selection.py"
+    },
+    {
+      "blob": "3c1bb6f596fa8821af19c71eb2ea2327147b19eb",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_application_registered_pool_composition.py"
+    },
+    {
+      "blob": "6e990aa3be10cea5dc6ee19c621bd0b3583de909",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_application_auto_request.py"
+    },
+    {
+      "blob": "0d70a47906a23176d5eaed71a4575e925a500341",
+      "matches_actual_composed_and_b955": true,
+      "path": "tests/test_application_cross_pool_auto.py"
+    }
+  ]
+}

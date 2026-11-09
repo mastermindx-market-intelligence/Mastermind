@@ -3,9 +3,11 @@
 The broker is deliberately smaller than a scheduler or control plane.  It runs
 as the dedicated Codex worker account, accepts requests only from the configured
 Executive control UID over a Unix-domain socket, and exposes five typed
-operations around :class:`CodexWorkerAdapter`:
+operations around :class:`CodexWorkerAdapter` plus one optional, requestless
+capacity observation owned by the existing Capacity evidence adapter:
 
-``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``.
+``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``;
+``capacity-observe/v1`` is read-only and available only while the broker is idle.
 
 There is no generic command or shell endpoint.  Validation argv must be frozen
 in the start request and is matched byte-for-byte before execution.  The
@@ -194,8 +196,8 @@ _OHF_OPERATIONS = frozenset(
 )
 _ALLOWED_OPERATIONS = frozenset(
     {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
-     "interactive-canary", "assignment-seal-prepare", "assignment-seal-commit",
-     "assignment-seal-finalize"}
+     "interactive-canary", "capacity-observe/v1", "assignment-seal-prepare",
+     "assignment-seal-commit", "assignment-seal-finalize"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -1410,11 +1412,13 @@ class ExecutiveWorkerBroker:
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
+        native_realm_guard: Callable[[], None] | None = None,
         autonomy_canary_factory: Callable[
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
         subscription_realm_owner: Any | None = None,
+        capacity_observer: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._operator_only = adapter is None
         self._operator_binary_attestation = operator_binary_attestation
@@ -1503,6 +1507,14 @@ class ExecutiveWorkerBroker:
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
+        # Consume the incumbent host-owned native-realm check. Do not invent a
+        # second provider identity, credential source, or Operator arm.
+        if self.adapter_id == "claude-code":
+            if self.operator_harness_armed or not callable(native_realm_guard):
+                raise WorkerBrokerError("flat Claude requires native realm guard")
+        elif native_realm_guard is not None:
+            raise WorkerBrokerError("native realm guard requires flat Claude")
+        self.native_realm_guard = native_realm_guard
         self.autonomy_canary_factory = autonomy_canary_factory
         if subscription_realm_owner is not None:
             from control_plane.codex_provider_realm import SubscriptionRealmOwner
@@ -1512,6 +1524,9 @@ class ExecutiveWorkerBroker:
                     "subscription_realm_owner must be a SubscriptionRealmOwner"
                 )
         self.subscription_realm_owner = subscription_realm_owner
+        if capacity_observer is not None and not callable(capacity_observer):
+            raise WorkerBrokerError("capacity observer must be callable")
+        self.capacity_observer = capacity_observer
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1548,6 +1563,24 @@ class ExecutiveWorkerBroker:
         self.startup_sweep: UIDSweepReceipt | None = None
         self.last_sweep: UIDSweepReceipt | None = None
 
+    def _require_current_native_realm(self) -> None:
+        """Recheck the existing host realm immediately before native flat admission.
+
+        A revoked realm is quarantined against later starts; cancellation and
+        collection remain available for any previously admitted process.
+        """
+        if self.adapter_id != "claude-code":
+            return
+        if self._quarantined_reason == "native_realm_refused":
+            raise BrokerStateError("native realm refused")
+        try:
+            if not callable(self.native_realm_guard):
+                raise RuntimeError("native realm guard unavailable")
+            self.native_realm_guard()
+        except Exception:
+            self._quarantined_reason = "native_realm_refused"
+            raise BrokerStateError("native realm refused") from None
+
     def _require_current_autonomy(self) -> None:
         """Revalidate current arm authority without exposing receipt diagnostics."""
 
@@ -1569,6 +1602,7 @@ class ExecutiveWorkerBroker:
             return self.startup_sweep
         if self._quarantined_reason is not None:
             raise BrokerStateError("worker startup requires original-owner reconciliation")
+        self._require_current_native_realm()
         self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
@@ -1645,6 +1679,8 @@ class ExecutiveWorkerBroker:
         *,
         peer: PeerCredentials | None = None,
     ) -> Any:
+        if operation == "capacity-observe/v1":
+            return await self._capacity_observe(payload)
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1700,6 +1736,38 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    async def _capacity_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return one trusted, requestless Capacity observation while idle.
+
+        The callback is construction-owned and accepts no caller payload.  The
+        broker contributes only its existing peer/worker admission and the
+        same state lock used by modifying operations; it does not sample, rank,
+        persist, reserve, retry, or choose another host.
+        """
+
+        if payload:
+            raise BrokerProtocolError("capacity-observe/v1 payload must be empty")
+        observer = self.capacity_observer
+        if observer is None:
+            raise BrokerStateError("capacity observer is not configured")
+        self._require_current_autonomy()
+        async with self._state_lock:
+            # Waiting for the shared lock may outlive the pre-lock authority.
+            # Revalidate before the first observer read, not after its result.
+            self._require_current_autonomy()
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError("capacity observation requires an idle broker")
+            observed = observer()
+            if not isinstance(observed, Mapping):
+                raise BrokerStateError("capacity observer returned an invalid projection")
+            return dict(observed)
 
     async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Issue one fixed, non-provider boot canary while the broker is idle."""
@@ -3354,6 +3422,9 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
+            # Same host-owned identity check at every new START, not merely
+            # construction; do not gate post-revocation cancel/collect.
+            self._require_current_native_realm()
             self._starting = True
         started = False
         try:

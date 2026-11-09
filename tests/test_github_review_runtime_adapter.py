@@ -144,3 +144,23 @@ def test_commit_rechecks_external_authority_in_transaction(tmp_path):
         adapter.admit_review_intent(decision=decision(), objective="Review exact PR")
     assert len(checks) >= 2
     assert runtime.jobs.list_jobs() == []
+
+
+
+def test_risk_skip_reads_exact_incumbent_command_without_new_registry(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    adapter = ExecutiveReviewJobAdmission(runtime=runtime, admission_guard=lambda: None)
+    chosen = decision()
+    assert adapter.has_admitted_command(chosen.command_id) is False
+    receipt = adapter.admit_or_join_review_intent(decision=chosen, objective="Read only PR review")
+    assert receipt.created
+    assert adapter.has_admitted_command(chosen.command_id) is True
+    assert len(runtime.jobs.list_jobs()) == 1
+
+
+def test_risk_skip_command_status_requires_admission_guard(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    adapter = ExecutiveReviewJobAdmission(runtime=runtime)
+    with pytest.raises(ReviewAdmissionUnavailable, match="UNARMED"):
+        adapter.has_admitted_command(decision().command_id)
+    assert runtime.jobs.list_jobs() == []

@@ -167,3 +167,143 @@ describe("direct native result interaction", () => {
     expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
   });
 });
+
+it.each([
+  ["en", "dark"],
+  ["en", "light"],
+  ["zh-CN", "dark"],
+  ["zh-CN", "light"],
+] as const)(
+  "H7 correction waits for authentic terminal and separate parent acknowledgment in %s/%s",
+  async (locale, theme) => {
+    const selected = { ...selection, attempt_id: "ATT-456" };
+    const cancelled = {
+      ...result(),
+      schema: "mastermind.direct_native_result_response.cancelled.v1",
+      selection: selected,
+      result: {
+        ...result().result,
+        terminal_status: "CANCELLED",
+        summary: "The original native Job was cancelled.",
+        current_state: "CANCELLED",
+      },
+    };
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        schema: "mastermind.direct_native_result_response.v1",
+        selection,
+        availability: "UNAVAILABLE",
+        reason_codes: ["NOT_TERMINAL"],
+        result: null,
+        consumption: null,
+      })
+      .mockResolvedValueOnce(cancelled)
+      .mockResolvedValueOnce({
+        ...cancelled,
+        consumption: { state: "CONSUMED", receipt_digest: "c".repeat(64) },
+      });
+    const inspectCorrection = vi.fn().mockResolvedValue({
+      schema: "mastermind.direct_native_correction.v1",
+      selection: selected,
+      fence_generation: 7,
+      operation_key: null,
+      status: "RUNNING",
+      parent_consumed: false,
+    });
+    const correct = vi.fn((_selection, _fence, done) =>
+      done({ status: "accepted" }),
+    );
+    const consume = vi.fn((_selection, _digest, done) =>
+      done({ status: "accepted" }),
+    );
+    render(
+      <div data-theme={theme}>
+        <DirectNativeResultPanel
+          selection={selection}
+          locale={locale}
+          held={false}
+          read={read}
+          inspectCorrection={inspectCorrection}
+          onCorrect={correct}
+          onConsume={consume}
+        />
+      </div>,
+    );
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", {
+        name: locale === "en" ? "Read current result" : "读取当前结果",
+      }),
+    );
+    const button = await screen.findByRole("button", {
+      name:
+        locale === "en"
+          ? "Request stop for this native Job"
+          : "请求停止此原生任务",
+    });
+    expect(correct).not.toHaveBeenCalled();
+    expect(consume).not.toHaveBeenCalled();
+    await user.click(button);
+    expect(correct).toHaveBeenCalledTimes(1);
+    expect(correct.mock.calls[0].slice(0, 2)).toEqual([selected, 7]);
+    expect(await screen.findByText("CANCELLED")).toBeTruthy();
+    expect(consume).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", {
+        name: locale === "en" ? "Acknowledge this result" : "确认接收此结果",
+      }),
+    );
+    await waitFor(() => expect(consume).toHaveBeenCalledTimes(1));
+    expect(correct).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("a completion race shows authentic COMPLETED and never claims CANCELLED", async () => {
+  const unavailable = {
+    schema: "mastermind.direct_native_result_response.v1",
+    selection,
+    availability: "UNAVAILABLE",
+    reason_codes: ["NOT_TERMINAL"],
+    result: null,
+    consumption: null,
+  };
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(unavailable)
+    .mockResolvedValueOnce(result());
+  const inspectCorrection = vi
+    .fn()
+    .mockResolvedValue({
+      schema: "mastermind.direct_native_correction.v1",
+      selection: { ...selection, attempt_id: "ATT-456" },
+      fence_generation: 7,
+      operation_key: null,
+      status: "RUNNING",
+      parent_consumed: false,
+    });
+  const onCorrect: NonNullable<DirectNativeResultPanelProps["onCorrect"]> = (
+    _selected,
+    _fence,
+    done,
+  ) => done({ status: "accepted" });
+  render(
+    <DirectNativeResultPanel
+      selection={selection}
+      held={false}
+      read={read}
+      inspectCorrection={inspectCorrection}
+      onCorrect={onCorrect}
+      onConsume={vi.fn()}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Read current result" }));
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Request stop for this native Job",
+    }),
+  );
+  expect(await screen.findByText("Current Job state: COMPLETED")).toBeTruthy();
+  expect(screen.queryByText("CANCELLED", { exact: false })).toBeNull();
+});

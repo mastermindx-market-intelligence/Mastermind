@@ -1,9 +1,10 @@
-# GitHub independent-review ingress — decision core and adapter interfaces
+# GitHub independent-review ingress — source adapters and release contract
 
-Status: **DRAFT source slice.** Ships the decision core and the adapter
-interfaces only. No transport, credential, webhook route, or reviewer identity
-is bound here. This document is the operator contract for what a human admin
-must do before any delivery can be admitted.
+Status: **Source implementation; installed acceptance pending.** Concrete HTTP,
+Unix-socket, GitHub App, Executive Runtime, publication and Slack adapters are
+present. The installed consumer, credential bindings, public route, qualified
+reviewer and live end-to-end acceptance remain unproven. This document records
+the source contract and the incumbent administrator's release dependencies.
 
 ## What this slice is
 
@@ -26,9 +27,10 @@ has an owner:
 - **No second GitHub App / installation governance layer.**
   `scripts/github_estate_governance.py` owns installation pinning and the
   least-privilege permission projection.
-- **No second live GitHub reader.** `scripts/source_continuity.py` is the
-  bounded reader; a host adapter that needs `/pulls/{n}` must extend it rather
-  than stand up a new client.
+- **No parallel review API client.** The source adapters use the existing
+  installation-scoped `integrations/github_review_api.py` and its bounded
+  authenticated transport. Source preflight and return bind that same API
+  implementation rather than inventing another credential or reader owner.
 - **No second review registry and no second independent-review authority.** The
   Fabric's `review_required` / `reviews_job_id` / `orchestration_role='review'`
   model in `control_plane/executive_runtime.py` remains the only one. The
@@ -94,16 +96,20 @@ repository and the signed number (`PULL_NUMBER_MISMATCH` otherwise). A correct
 HMAC proves who signed the bytes; it never proves which pull request a wrong
 caller route selected.
 
-## The three intent channels
+## Explicit and automatic intent channels
 
-All three require an **allowlisted login**. Authority beyond the allowlist comes
-from exactly one of two places, and from nothing else.
+Manual channels and the default human-authorized lifecycle mode require an
+**allowlisted human login**. Their authority beyond the allowlist comes from
+the channel-specific enforcement or the externally reverified permission below.
 
 | Channel | Delivery | GitHub's own enforcement | Fresh read required? |
 | --- | --- | --- | --- |
 | Configured reviewer requested | `pull_request` / `review_requested` | Refused unless the actor holds triage/write at delivery time | No, unless `require_current_permission_for_all_channels` |
 | Intent label | `pull_request` / `labeled` | Same | Same |
 | Slash command comment | `issue_comment` / `created` | **None** — writable by anyone | **Yes** |
+| Opt-in human-authorized lifecycle review | `pull_request` / `opened`, `synchronize`, `reopened`, `ready_for_review` | No collaborator authority follows from these actions | **Always**, even if static actor fallback is enabled |
+| Standing repository-policy lifecycle review | Same four lifecycle actions; both automatic flags enabled | Host-enrolled repository/install policy; signed sender is provenance | Fresh installation-scoped PR facts; no claim of human collaborator permission |
+| Existing-owner open-PR reconciliation | Internal authenticated callable, no webhook | Host-enrolled policy plus the existing owner's execution-reference guard | Bounded scoped list and a fresh read of each PR |
 
 `issue_comment` is the open channel: GitHub's reported `author_association`
 travels in the payload and is a **claim**, not authority. With no externally
@@ -113,11 +119,50 @@ permission read; a current permission of `none` (revoked) or below
 `minimum_permission` (default `triage`) is refused with
 `ACTOR_PERMISSION_INSUFFICIENT`.
 
-Two relaxations exist, both explicit and both off by default:
-`allow_static_actor_authority` falls back to the association ceiling when no read
-is bound, and `require_current_permission_for_all_channels` extends the strict
-posture to the two channels GitHub polices itself. The module never claims a
-fresh permission check it did not perform.
+The pure policy has explicit, default-off switches:
+`allow_static_actor_authority` permits the existing explicit-channel fallback
+when no read is bound, while `require_current_permission_for_all_channels`
+extends the strict posture to the two channels GitHub polices itself. The host
+requires fresh permission for every human-authorized channel. Human-authorized
+lifecycle review never accepts the static fallback.
+
+Automatic lifecycle review also requires `allow_lifecycle_review=True`; its
+default is `False` in both the host settings and decision policy. Disabled
+lifecycle deliveries are refused before authenticated reads or ledger inspection.
+Automatic drafts defer; existing authorized label/comment draft advisory remains.
+The separate `allow_repository_policy_review` setting is also default-off. It
+permits bot-sender lifecycle events under the enrolled repository policy while
+preserving the real sender. A strict v2 decision binds the actual origin,
+installation and host policy digest. The Executive socket independently checks
+its own configured policy; reconciliation additionally requires its own bound
+owner guard and carries no fabricated sender or webhook delivery.
+
+All channels share the same repository/PR/head admission identity. New creation
+events preserve the complete original decision and normalized objective digest.
+An exact replay retains payload checks; a distinct trigger joins the first
+winner and returns its original job/decision through the socket. Legacy records
+that lack a full decision remain existing with `ADMITTED_DECISION_UNAVAILABLE`;
+they are not redispatched and do not stop unrelated PRs in a bounded scan.
+
+The receiver reports closed refusal reasons. Its reconciliation callable is
+internal, with at most 100 PRs per invocation, fixed scoped numeric pagination,
+fresh PR reads, and an explicit partial-result receipt. It introduces no timer.
+The v2 reconciliation receipt separates enumeration from source coverage and
+records isolated read failures, elapsed time, the starting scope and continuation
+hint. A pass has a cooperative default 30-second budget (maximum 60 seconds).
+A failed individual source read does not starve unrelated PRs. Installation-wide
+credential, permission, rate-limit and server deferrals stop the pass. Budget or
+read-only deferral can retain a same-page PR hint; an uncertain admission stops
+at its exact original command with no continuation permission. A resumed pass
+never claims that it observed every repository source. Later page-one sweeps
+remain necessary because GitHub pagination is not a stable snapshot.
+Job objectives validate full original text, then carry bounded excerpts and
+exact source references inside the existing socket limits. Full-source
+retrieval remains required before a reviewer may claim coverage.
+
+See [automatic coverage and rollout](GITHUB_REVIEW_AUTOMATIC_COVERAGE.md) for
+model assessment, Slack Dot review, repository-policy and backlog contracts,
+and the separate host/App and formal-approval gates.
 
 The command matches the **first non-empty comment line exactly**. A comment that
 merely mentions `/independent-review` never triggers a run.
@@ -128,7 +173,7 @@ Every non-admitted decision names exactly one closed-vocabulary value. The
 notable ones:
 
 `SIGNATURE_INVALID`, `BODY_TOO_LARGE`, `EVENT_NOT_SUPPORTED`,
-`ACTION_NOT_SUPPORTED`, `REPOSITORY_NOT_ALLOWLISTED`,
+`ACTION_NOT_SUPPORTED`, `AUTOMATIC_REVIEW_DISABLED`, `REPOSITORY_NOT_ALLOWLISTED`,
 `INSTALLATION_NOT_ALLOWLISTED`, `REVIEW_REQUEST_FOR_OTHER_REVIEWER`,
 `COMMAND_NOT_PRESENT`, `LABEL_NOT_PRESENT`, `ACTOR_NOT_AUTHORIZED`,
 `ACTOR_ASSOCIATION_INSUFFICIENT`, `ACTOR_PERMISSION_NOT_REVERIFIED`,
@@ -173,17 +218,65 @@ is a coincidence. A moved head is refused with `HEAD_MOVED`; a read that answers
 about a different pull request is refused with `PULL_NUMBER_MISMATCH`.
 
 **An uncertain POST is reconciled, never retried blind.** The concrete
-`ReconcilingReviewPublication` adapter must first atomically reserve an immutable
-publication command/payload using the *existing* Executive EventStore's
-`events.command_id` UNIQUE transaction. Only the first durable claimant can POST;
-all competing and repeated invocations must reconcile against the existing
-claim and authenticated exact GitHub review readback. A normal-success receipt
-is confirmed in that same incumbent ledger, and even a failed pre-POST or
-post-POST read keeps the claim sticky as `PublicationEffectUnknown` (not a
-safely retryable failure). An unmatched/failed read is reported as
+`ReconcilingReviewPublication` adapter first observes the exact existing claim,
+reads authenticated reviews, and performs the typed final PR/source check. A
+fresh preflight failure creates no publication reservation. Only after those
+reads succeed does the adapter atomically reserve the immutable command/payload
+in the *existing* Executive EventStore's `events.command_id` UNIQUE transaction.
+Host authorization and the three-second preflight deadline are checked inside
+the acquired transaction, including time spent waiting for the database lock.
+Only the first durable claimant can POST. An existing claim, lost reservation
+reply, or expiry after committed reservation remains sticky even if no POST is
+known to have occurred. Competing callers use positive authenticated readback;
+they never acquire another POST right. A successful effect is confirmed in the
+same ledger. Unmatched, ambiguous or unavailable readback remains
 `PUBLICATION_EFFECT_UNKNOWN`, never a second GitHub POST. A read-only
 `published_command_ids()` preflight is **not** an atomic gate. Test fakes must
 not be substituted for that production ledger.
+
+New v2 reservations retain the original publisher's numeric ID and login along
+with repository, PR, frozen head, Job, event and exact body digest. Reserved-only
+recovery occurs before current-head/result eligibility: an exact historical
+review may become visible after the head moves. It requires exactly one matching
+authenticated review and only confirms the original effect; it does not review
+the new head. The production hot path uses indexed exact-command reads, not a
+scan of every publication. Valid confirmed v1 history is retained, including
+through the original publication API. An unconfirmed v1 reservation without
+original publisher provenance stays unknown; current configuration cannot fill
+missing historical facts.
+
+### Bounded transport and admission pressure
+
+The GitHub adapter streams JSON with a one-MiB response cap; token issuance uses
+the same streaming guard with a 64-KiB cap. Both request identity encoding, refuse
+unexpected compression and close responses on every exit. A GET may make one
+short same-token, same-destination recovery attempt after a transport failure or
+500/502/503/504, within one three-second cooperative operation budget. It does
+not retry schema, permission, redirect or missing-source refusals. Review POSTs
+and installation-token POSTs remain one attempt.
+
+GitHub rate limits and server `Retry-After` responses establish adapter-local
+pacing and a typed source-wide deferral. Shared pacing is checked before every
+attempt, including after another request establishes a limit during backoff.
+The existing owner receives the delay; workers do not sleep through long limits.
+This is transport pacing, not a new task queue or retry authority. HTTPX timeouts
+bound individual I/O waits; the monotonic deadline is checked on each raw chunk,
+so these are cooperative bounds, not synchronous-call cancellation guarantees.
+
+The HTTP receiver admits at most four active synchronous operations. A busy
+receiver returns `ADMISSION_BUSY` before credentials or ports are called. Secret
+reads run outside the event loop. A timed-out operation retains its slot until
+the real worker exits, and a preflight budget check prevents starting a late
+admission. An admission already attempted at timeout remains
+`ADMISSION_EFFECT_UNKNOWN` and reconciles under the original command.
+
+Slack visibility has two separate best-effort slots. A slow Slack call does not
+delay a known admission HTTP acknowledgment or occupy admission capacity. The
+response distinguishes `SCHEDULED_BEST_EFFORT` from `DEFERRED_CAPACITY`; neither
+claims Slack delivery. Deferred visibility has not reserved or attempted a send
+and may be projected later by the original owner. This adapter adds no durable
+notification queue or background wake guarantee. An existing unknown Slack send
+remains governed by its original reservation and cannot be automatically reposted.
 
 **No unfenced auto-approval.** `PASS` maps to a GitHub `COMMENT`, never
 `APPROVE`. This slice mints no approval verb and no merge path at all, and
@@ -280,8 +373,10 @@ default `False`.
    happens an unbound port is a typed refusal — and an unbound
    `ActorPermissionPort` refuses the open comment channel by name rather than
    admitting it on a payload claim.
-8. Decide the ingress route's exposure and rate limit. This slice ships no HTTP
-   route, so there is nothing to expose yet.
+8. Qualify and bind the existing ASGI webhook source on the incumbent host's
+   exact HTTPS route with its configured limits. Source routing exists;
+   public exposure and installed acceptance still require observed release
+   evidence.
 
 ## Verification performed
 
@@ -300,13 +395,13 @@ default `False`.
 
 ### What these tests do *not* prove
 
-Every port above is exercised through a fake. There is still no concrete
-webhook HTTP listener, authenticated GitHub client, Executive/Fabric job
-adapter, result bridge, Slack producer, host secret/route binding, or live
-review readback. **The integration has not been called live or end to end, and
-a green fixture run is not live acceptance.** Qualifying the host, the App
-installation, the webhook secret, and the Slack permission remains the separate
-human-admin ceremony above.
+The source now includes concrete HTTP, Unix-socket, GitHub App, Executive Runtime,
+publication and Slack adapters. Hermetic composed tests exercise real local
+Runtime stores and transports with synthetic external services. They do not
+prove a selected installed service, enrolled GitHub App, public HTTPS route,
+qualified real worker, production review or Slack-thread delivery. A green
+fixture run is not live acceptance. Those deployment and canary facts remain
+separately required under the existing owners.
 
 ## Known gaps, unrelated to this change
 
@@ -322,3 +417,88 @@ The concrete ReconcilingReviewPublication also requires a FinalPullRequestCheck 
 Native publication still refuses a draft. The only draft exception is an explicit `EXTERNAL_GITHUB_SUBMITTER` advisory whose verb is forced to `COMMENT`. That path seals the authenticated submitter id and login into `ExternalCommentAdvisory` and the final guard re-reads both after the reviews GET. A boolean, a missing seal, a `REQUEST_CHANGES` verb, or a submitter mismatch does not open the draft.
 
 The #1763 host adapter binds the App publisher user id and login, fills review authors from the authenticated GET, reserves publication on the incumbent EventStore, and passes this typed final check. That binding is source-only. No installed GitHub App, Executive handler, worker START, formal review, or Slack production proof follows from it.
+
+
+## Authenticated socket source preflight and per-repository policy — R15
+
+The incumbent Executive socket owner now accepts exactly one source path:
+legacy `source_guard`, or the concrete `GitHubReviewSourcePreflight` through
+`source_preflight`. The latter binds 1–32 explicitly enrolled singleton
+repository/settings/API triples. Repositories are unique case-insensitively
+because v1 decisions contain no installation field. Each authenticated API must
+match the binding's exact active installation and repository; no reader or
+credential fallback is attempted.
+
+Manual and human-lifecycle decisions require a fresh, sufficient collaborator
+permission before the fresh PR read. Standing-policy and reconciliation
+sources instead require their exact installation and enabled host-policy
+digest; bot provenance never becomes human authority. Every source requires
+an open, same-repository PR at the frozen head. Draft eligibility remains
+limited to explicit label/comment review.
+
+`PreparedReviewSourceCheck` carries the complete closed decision and an
+unrenewable observation interval of at most three seconds, starting before
+network reads. It is a host-local capability, never a field supplied by a
+socket caller. GitHub reads run once before admission and outside the Runtime
+writer transaction. Both existing commit fences verify the same full decision,
+local host arm/enrollment, exact automatic policy and original deadline.
+Expiry while waiting for the writer lock or revocation at either fence leaves
+no new Job/event. This bounds the age of observed GitHub facts; it cannot
+promise instantaneous remote revocation after the read.
+
+The host-local enrollment guard is mandatory and must be free of network,
+credential and database I/O. Replacing enrollment must revoke its existing
+generation fence before accepting more work. The prepared result is private
+to one request, never a shared last-request cache.
+
+The incumbent Executive process constructs the preflight from its own exact
+API/settings/enrollment bindings, then supplies both `source_preflight=preflight`
+and `automatic_policies=preflight.automatic_policies` to the same socket owner.
+The separate reconciliation execution-reference guard remains required.
+No prepared capability crosses the public webhook or socket boundary. This immutable bounded map keys each policy by exact
+`(installation_id, repository)`. It is mutually exclusive with the legacy
+singular `automatic_policy`; absent pairs and an explicitly empty map deny
+automatic admission with no fallback. Mutating the original supplied mapping
+does not revoke its installed copy; use the existing host arm/enrollment fence
+or replace the owner under the incumbent host's configuration custody.
+
+Slack parent reservation and capture retain the same source eligibility
+checks. Capture rechecks the prepared deadline after authenticated Slack
+readback, before the existing recorder. These are the existing pre-reserve and
+pre-record boundaries; R15 does not add a new after-lock check inside the Slack
+writers. Unknown send/record effects keep their original one-attempt owners.
+
+The 614-test review-system suite passes, including actual GitHub API adapter
+calls, real Runtime writer-lock fences and a local Unix-socket admission with
+one QUEUED Job and zero Attempts. This does not install the held Executive
+handler or prove live credentials, worker START, GitHub publication or Slack
+delivery.
+
+
+## Shared webhook route for exact repository receivers — R14
+
+Compose one `GitHubReviewReceiver` per repository/active installation, then pass
+those existing objects to `GitHubReviewASGIMount(receiver_map=...)`. Up to 32 exact
+bindings share the same literal path, host, TLS posture and maximum body size.
+The mount copies the mapping and rejects ambiguity at construction. It never
+widens a receiver's policy or selects a second receiver after any refusal or
+unknown effect.
+
+Public repository/install hints select only an already-enrolled receiver. The
+original signed bytes and unchanged scope/headers reach that receiver's normal
+signature and current-source checks. Duplicate JSON keys and nonfinite values
+refuse before any secret read. Unknown or disabled tenants on an active route
+receive a refusal; they cannot select the incumbent application's auth path.
+An empty/all-disabled map and unrelated routes preserve the incumbent app.
+
+Routing has four transient read/parse slots with a bounded body budget. The
+slots are released before any response or downstream credential/admission call.
+Fragmentation does not accumulate per-chunk storage or cause quadratic replay.
+Per-receiver admission/visibility capacity remains with the receiver. A host
+settings replacement is refused before queued credential selection and before
+admission; enrollment changes require deliberate recomposition.
+
+For the R15 Executive source preflight, keep one active reader per repository:
+legacy v1 decisions do not carry installation identity. Bind the same exact
+repository policies to the receiving socket owner. Shared HTTP routing alone
+does not bind or activate that Executive consumer.

@@ -120,3 +120,20 @@ def test_broader_than_requested_app_scopes_refuse_even_if_requested_grants_prese
     app = make(handler, pem)
     with pytest.raises(GitHubAppTokenUnavailable, match="UNAVAILABLE"):
         app.token_for_installation(installation_id=4242)
+
+
+def test_token_response_is_stream_bounded_and_post_is_never_retried():
+    from test_github_review_http_recovery import Stream
+    _, pem = private_key()
+    stream = Stream([b"x" * 16384] * 1000)
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        assert req.headers["accept-encoding"] == "identity"
+        return httpx.Response(201, stream=stream)
+
+    app = make(handler, pem)
+    with pytest.raises(GitHubAppTokenUnavailable):
+        app.token_for_installation(installation_id=4242)
+    assert len(calls) == 1 and stream.closed and stream.consumed == 5

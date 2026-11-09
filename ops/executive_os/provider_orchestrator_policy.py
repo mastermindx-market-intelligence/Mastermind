@@ -73,8 +73,10 @@ CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS = frozenset({
 CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
 CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
 # Exact former canonical Codex source: installed on M2 before this review update.
-CODEX_FABRIC_PREVIOUS_BLOB_SHA = "7255ef5971c5924f8b08fe0a1b275fc95bc0dc2a"
-CODEX_FABRIC_SKILL_BLOB_SHA = "eeb2817e589d39d8983574eb86bcb8cde1a74b53"
+CODEX_FABRIC_PREVIOUS_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
+# Exact installed guide before the new Macro cwd clarification.
+CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+CODEX_FABRIC_SKILL_BLOB_SHA = "39866be369d553d185a7ea76b985d7c386ec94f6"
 CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
 CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
 CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
@@ -103,7 +105,7 @@ Leaf workers cannot fan out; only a separately admitted operator with the
 controller-issued child scope may request C0/C1 descendants.
 <!-- /mastermind-claude-fabric-entrypoint-v1 -->
 """
-ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
+ROLE_SHA256 = {'SKILL.md': 'c8841ca9b18b0a2c559cfc3b39c019b2b7e479f36029eba608d43eb5e26a5b30', 'references/meta-ceo.md': '89aef416558151057aa02d21c1cafb37482f2968b663a3f698adaa50c6908809', 'references/program-ceo.md': '8cb99036eac3e033e6f65d318b29f6ad8934cac9409a4677b06eab3bceb35d01', 'references/operator.md': '64a93b5e7a480a2ef7c6fbd4755576feac8ea93897d10644e130ea1c81f62efc', 'references/worker.md': 'f9fbd9157ad44b4a6be417e8cadec868551031ea54cc148f4a9834309d84b574', 'references/reviewer.md': '3e9586f405e7f2e0c66188b1a1509fa655aa55042dcdd54438a2db8aa8a1f6ec'}
 
 POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
@@ -1220,7 +1222,8 @@ def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
             and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256
             and hashlib.sha1(b"blob " + str(len(existing)).encode("ascii")
                              + bytes((0,)) + existing).hexdigest() not in (
-                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA)):
+                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA,
+                                 CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA)):
         raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
     original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
     updated_doc = _render_codex_fabric_entry_doc(original_doc)

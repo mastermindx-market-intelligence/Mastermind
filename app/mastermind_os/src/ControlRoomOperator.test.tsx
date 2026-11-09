@@ -82,12 +82,12 @@ function openButton(n = 1) {
   return screen.getByRole("button", { name: `Open Cursor agent binding ${bindingId(n)}` }) as HTMLButtonElement;
 }
 async function enter(user = userEvent.setup()) {
-  if (!screen.queryByRole("navigation", { name: "Company operations" })) {
+  if (!screen.queryByRole("navigation", { name: "Mission navigation" })) {
     await user.click(within(screen.getByRole("navigation", { name: "Company navigation" }))
       .getByRole("button", { name: "Today" }));
   }
-  await user.click(within(screen.getByRole("navigation", { name: "Company operations" }))
-    .getByRole("button", { name: "Control Room" }));
+  await user.click(within(screen.getByRole("navigation", { name: "Mission navigation" }))
+    .getByRole("button", { name: "Control Room workspace" }));
   await screen.findByRole("heading", { name: "Company overview" });
   return user;
 }
@@ -109,7 +109,7 @@ describe("Control Room original operator intent in App", () => {
     const user = await enter();
     await observed();
     expect(raw.readControlRoomState).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: /^Open |^Unbind |^Confirm Unbind|^Refresh builds$/ })).toBeNull();
+    expect(within(screen.getByRole("region", {name:"Workspace surfaces"})).queryByRole("button", { name: /^Open |^Unbind |^Confirm Unbind|^Refresh builds$/ })).toBeNull();
     await user.click(screen.getByRole("button", { name: "View qualified Mission for Alpha program" }));
     expect(new URL(location.href).searchParams.get("work_ref")).toBe("WS:ALPHA");
     expect(new URL(location.href).searchParams.get("root_job_id")).toBe("JOB-A");
@@ -208,13 +208,11 @@ describe("Control Room original operator intent in App", () => {
   it("discloses no binding or Discovery rows and dispatches nothing without acquisition", async () => {
     const { raw } = fixture({ signedIn: false });
     render(<App />);
-    const user = await enter();
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
     expect(screen.queryByText(bindingId(1))).toBeNull();
     expect(screen.queryByText("fixture-candidate")).toBeNull();
     expect(screen.queryByLabelText("Work reference")).toBeNull();
-    const builds = screen.getByRole("button", { name: "Refresh builds" }) as HTMLButtonElement;
-    expect(builds.disabled).toBe(true);
-    await user.click(builds);
+    expect(screen.queryByRole("button", { name: "Refresh builds" })).toBeNull();
     expect(raw.readControlRoomState).not.toHaveBeenCalled();
     expect(raw.refreshControlRoomBuilds).not.toHaveBeenCalled();
   });
