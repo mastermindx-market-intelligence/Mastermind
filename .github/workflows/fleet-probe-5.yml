@@ -1,0 +1,7 @@
+name: fleet-probe-postflip
+on: [pull_request]
+jobs:
+  probe:
+    runs-on: [self-hosted, self-ubuntu]
+    steps:
+      - run: echo "POSTFLIP_OK host=$(hostname)"
