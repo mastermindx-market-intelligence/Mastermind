@@ -4630,7 +4630,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         refreshProjects();
       }}
     >
-      Refresh Projects
+      {locale === "zh-CN" ? "刷新项目" : "Refresh Projects"}
     </button>
   );
   const workReadAvailable =

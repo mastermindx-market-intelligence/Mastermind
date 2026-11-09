@@ -29,7 +29,7 @@ it.each(['en','zh-CN'] as const)('shows real pending and failed read states, the
  await act(async()=>x.held().reject(new Error('SOURCE_UNAVAILABLE')));
  expect(screen.getByText(zh?'项目暂不可用；当前项目列表尚未确认。':'Projects are unavailable right now. The current project list could not be confirmed.')).toBeTruthy();
  expect(x.view.container.textContent).not.toContain('0 projects');expect(x.view.container.textContent).not.toContain('No projects were supplied by the current read.');
- const next=x.next(),button=screen.getByRole('button',{name:'Refresh Projects'});button.focus();fireEvent.click(button);fireEvent.click(button);
+ const next=x.next(),button=screen.getByRole('button',{name:zh?'刷新项目':'Refresh Projects'});button.focus();fireEvent.click(button);fireEvent.click(button);
  await waitFor(()=>expect(x.reads()).toHaveLength(2));expect(screen.getByText(zh?'正在读取项目…':'Reading projects…')).toBeTruthy();
  await act(async()=>next.resolve(structuredClone(actual.programs_before)));
  expect(await screen.findByText(actual.programs_before.control_room.work[0].work_ref)).toBeTruthy();
