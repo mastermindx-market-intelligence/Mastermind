@@ -50,6 +50,8 @@ POST_LONG_GATEWAY_SHA='3ab7ae015d8093f81ab41d8ae73dd849572c8718530750d70ffe551aa
 def test_codec_v1_source_prefix_unchanged_except_exact_finite_ttl_ceiling():
     old=(ROOT/'source/glm_lease_capability.py').read_bytes()
     new=(ROOT/'candidate/glm_lease_capability.py').read_bytes()
+    assert hashlib.sha256(new).hexdigest()=='ccfe3c6f4f08778d6d179d60da67f393f000b66e4997a2502a7ad180c6a571a6'
+    new=new[:17698]
     assert new.count(b'15000')==4 and b'7500' not in new
     assert hashlib.sha256(new).hexdigest()==POST_LONG_CODEC_SHA
     # Restore four exact predecessor TTL literals and check the entire original.
@@ -63,6 +65,8 @@ def test_codec_v1_source_prefix_unchanged_except_exact_finite_ttl_ceiling():
 def test_v1_gateway_methods_unchanged_except_exact_finite_ttl_ceiling():
     old=(ROOT/'source/glm_lease_gateway.py').read_bytes()
     new=(ROOT/'candidate/glm_lease_gateway.py').read_bytes()
+    assert hashlib.sha256(new).hexdigest()=='2b2e47c2e9f01ba72a33603e17465c96c084e79a32c331a8d52d0f4039bfbef7'
+    new=new[:14300]
     assert new.count(b'15000')==2 and b'7500' not in new
     assert hashlib.sha256(new).hexdigest()==POST_LONG_GATEWAY_SHA
     baseline=new.replace(b'15000',b'7500')

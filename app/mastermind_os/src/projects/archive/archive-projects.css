@@ -189,3 +189,66 @@
   line-clamp: 2;
   overflow: hidden;
 }
+
+/* Canonical M4J Projects composition: title/subtitle, filter/count, aligned
+   project/next-step/owner/recorded-state rows. Current source has no owner or
+   qualified recent context: no featured first row and no inferred work status. */
+.archive-projects[data-view="projects"] .projects-head { margin-bottom: var(--sp-7); align-items: flex-start; }
+.projects-heading { display: grid; gap: var(--sp-3); max-width: 760px; }
+.archive-projects[data-view="projects"] h1 {
+  font-family: var(--font-display); font-size: 40px; line-height: 1.2; font-weight: 600; letter-spacing: -.03em;
+}
+.projects-heading > p { color: var(--muted); font-size: 15px; line-height: 1.6; }
+.projects-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); margin-bottom: var(--sp-5); }
+.projects-list-modes { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+.projects-current-mode { display: inline-flex; align-items: center; min-height: 44px; padding: var(--sp-2) var(--sp-4); background: var(--raised); border: 1px solid var(--control-border); border-radius: var(--r-btn); font-size: 13px; font-weight: 600; }
+.archive-projects .projects-list-modes button { background: transparent; border-color: transparent; font-size: 13px; color: var(--muted); }
+.archive-projects .projects-list-modes button:hover { color: var(--text); border-color: var(--border); }
+.archive-projects .projects-search { display: flex; align-items: center; flex: 1; max-width: 380px; margin: 0; gap: var(--sp-2); }
+.projects-search input { border-radius: var(--r-btn); background: transparent; font-size: 13px; }
+.projects-search button { flex-shrink: 0; }
+.archive-projects .projects-list-count { margin-bottom: var(--sp-4); color: var(--muted); font-size: 13px; line-height: 1.5; }
+.projects-table { color: var(--text); font: inherit; border-collapse: collapse; table-layout: fixed; width: 100%; text-align: start; }
+.projects-table :is(th,td) { text-align: start; vertical-align: top; padding: var(--sp-5) var(--sp-3); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.projects-table thead th { font-size: 11px; line-height: 1.5; font-weight: 500; color: var(--faint); padding-block: var(--sp-3); }
+.projects-table thead th:first-child { width: 30%; }
+.projects-table thead th:nth-child(2) { width: 27%; }
+.projects-table thead th:nth-child(3) { width: 13%; }
+.projects-table thead th:nth-child(4) { width: 16%; }
+.projects-table thead th:last-child { width: 14%; }
+.projects-table :is(th,td):first-child { padding-left: 0; }
+.projects-table :is(th,td):last-child { padding-right: 0; }
+.projects-table tbody td { font-size: 14px; line-height: 1.6; }
+.projects-table tbody th { font-weight: 400; }
+.projects-table h2 { font-size: 16px; font-weight: 600; line-height: 1.5; }
+.projects-table .archive-ref { margin-top: var(--sp-1); }
+.projects-table .projects-owner { color: var(--faint); font-size: 13px; }
+.projects-recorded-state { display: inline-block; color: var(--muted); font-size: 13px; }
+.projects-table .projects-open button { font-size: 13px; white-space: normal; background: transparent; width: 100%; padding-inline: var(--sp-2); }
+.projects-row-source { font-size: 12px; color: var(--faint); line-height: 1.6; margin-top: var(--sp-2); }
+.projects-row-source summary, .projects-list-source summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: var(--sp-2); }
+.projects-row-source summary::before, .projects-list-source summary::before { content: "+"; font-family: var(--font-ui); }
+.projects-row-source[open] summary::before, .projects-list-source[open] summary::before { content: "−"; }
+.projects-row-source p { padding-bottom: var(--sp-2); }
+.projects-list-source { margin-top: var(--sp-5); color: var(--faint); font-size: 12px; line-height: 1.6; max-width: 760px; }
+.projects-list-source p { padding-bottom: var(--sp-2); }
+.projects-list-more { margin-top: var(--sp-4); }
+.projects-list-state { padding: var(--sp-4) 0; }
+.projects-skeleton > div { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: var(--sp-6); padding: var(--sp-6) 0; border-bottom: 1px solid var(--border); }
+.projects-skeleton span { display: block; height: 16px; border-radius: var(--r-ctl); background: var(--raised); }
+.projects-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@container archive-projects (max-width: 720px) {
+  .archive-projects[data-view="projects"] h1 { font-size: 32px; }
+  .projects-toolbar { flex-direction: column; align-items: stretch; gap: var(--sp-4); }
+  .archive-projects .projects-search { max-width: none; }
+  .projects-list-modes { flex-wrap: wrap; }
+  .projects-table, .projects-table tbody { display: block; }
+  .projects-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .projects-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: var(--sp-4); padding-block: var(--sp-5); border-bottom: 1px solid var(--border); }
+  .projects-table tbody :is(th,td) { display: block; padding: 0; border: 0; }
+  .projects-table tbody th, .projects-table td[data-label="Next step"], .projects-table td[data-label="下一步"], .projects-table .projects-open { grid-column: 1 / -1; }
+  .projects-table tbody td { padding-top: var(--sp-4); }
+  .projects-table td[data-label]::before { content: attr(data-label); display: block; color: var(--faint); font-size: 11px; margin-bottom: var(--sp-1); }
+  .projects-table .projects-open button { width: 100%; }
+  .projects-table h2 { font-size: 17px; }
+}

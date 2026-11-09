@@ -85,22 +85,27 @@ def _steps(index: int) -> list[dict]:
 
 
 def _jobs() -> dict:
-    names = [f"pytest shard {index}" for index in range(6)] + ["test"]
+    names = [f"pytest shard {index}" for index in range(6)] + ["test", "PR test scope", "PR fast checks"]
     return {
-        "total_count": 7,
+        "total_count": 9,
         "jobs": [
             {
                 "id": 117196531521 + index,
                 "name": name,
                 "status": "completed",
-                "conclusion": "success",
+                "conclusion": "skipped" if name == "PR fast checks" else "success",
                 "started_at": "2026-10-16T21:08:01Z",
                 "completed_at": "2026-10-16T21:35:00Z",
                 "head_sha": _SHA,
                 "run_id": _RUN_ID,
                 "run_attempt": 1,
                 "workflow_name": "CI",
-                "steps": _steps(index),
+                "steps": (
+                    [] if name == "PR fast checks" else
+                    [{"name": "Classify integrated source diff using protected base code",
+                      "status": "completed", "conclusion": "success"}]
+                    if name == "PR test scope" else _steps(index)
+                ),
                 "check_run_url": f"https://api.github.com{_PREFIX}/check-runs/{117196531521 + index}",
             }
             for index, name in enumerate(names)
@@ -143,7 +148,7 @@ def _read(subject: dict, touched: list[str] | None = None):
     return fetch
 
 
-def test_exact_same_sha_successful_merge_group_reuses_only_complete_four_jobs():
+def test_exact_same_sha_successful_merge_group_reuses_complete_nine_jobs():
     touched: list[str] = []
     assert proof.find_reusable_run(_env(), read_json=_read(_subject(), touched)) == _RUN_ID
     assert len(touched) == 5
@@ -402,15 +407,15 @@ def test_each_of_six_shards_and_required_gate_is_mandatory(index):
 
 
 @pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
-def test_seven_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+def test_nine_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     subject = _subject()
     if case == "old-three-shard-proof":
         subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
-        subject["jobs"]["total_count"] = 4
+        subject["jobs"]["total_count"] = len(subject["jobs"]["jobs"])
     elif case == "incomplete-page":
-        subject["jobs"]["total_count"] = 8
+        subject["jobs"]["total_count"] = 10
     else:
-        subject["jobs"]["total_count"] = 7.0
+        subject["jobs"]["total_count"] = 9.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 

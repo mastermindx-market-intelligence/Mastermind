@@ -293,7 +293,7 @@ class DriverIdentity:
     base_url: str
     endpoint: str
     protocol: str
-    env_key: str
+    env_key: Optional[str]
     default_model: Optional[str]
     allowed_models: frozenset
 
@@ -615,57 +615,44 @@ class _FixedResponsesDriver:
     allowed_models: frozenset = frozenset()
     default_model: Optional[str] = None
 
-    def __init__(self, *, transport: Callable[[TransportRequest], TransportResponse],
-                 clock: Callable[[], float] = time.time,
-                 max_timeout_seconds: float = MAX_TIMEOUT_SECONDS,
-                 realm_projection: Optional[bytes] = None,
-                 projection_sha256: Optional[str] = None):
+    wire_protocol = "responses"
+    endpoint_suffix = "/responses"
+
+    def _normalize_document(self, document):
+        return _normalize_responses(document)
+
+    def _usage_document(self, document):
+        return _usage_evidence(document)
+
+    def __init__(self, *, transport: Callable[[TransportRequest], TransportResponse], clock: Callable[[], float]=time.time, max_timeout_seconds: float=MAX_TIMEOUT_SECONDS, realm_projection: Optional[bytes]=None, projection_sha256: Optional[str]=None):
         if realm_projection is None and projection_sha256 is None:
-            # Repository callers retain their reviewed shared owner. A flat
-            # generation always supplies BOTH sealed inputs and never takes
-            # this branch, including after a malformed projection.
             realm, protocol = _shared_realm(self.realm_id)
         else:
             try:
                 from application_http_realm_projection import validate_projection
                 document = validate_projection(realm_projection, expected_sha256=projection_sha256)
-                matches = [row for row in document["drivers"] if row["driver_id"] == self.driver_id]
+                matches = [row for row in document['drivers'] if row['driver_id'] == self.driver_id]
                 if len(matches) != 1:
-                    raise ValueError("driver inventory differs")
+                    raise ValueError('driver inventory differs')
                 row = matches[0]
-                if (row["realm_id"] != self.realm_id or row["pool"] != self.pool
-                        or frozenset(row["allowed_models"]) != self.allowed_models
-                        or row["default_model"] != self.default_model):
-                    raise ValueError("driver declaration differs")
-                realm = SimpleNamespace(realm_id=row["realm_id"], provider_alias=row["provider"],
-                    base_url=row["base_url"], env_key=row["env_key"])
-                protocol = row["protocol"]
+                if row['realm_id'] != self.realm_id or row['pool'] != self.pool or frozenset(row['allowed_models']) != self.allowed_models or (row['default_model'] != self.default_model):
+                    raise ValueError('driver declaration differs')
+                realm = SimpleNamespace(realm_id=row['realm_id'], provider_alias=row['provider'], base_url=row['base_url'], env_key=row['env_key'])
+                protocol = row['protocol']
             except Exception:
-                raise TransportRefused("sealed_realm_refused", self.realm_id) from None
-        if (type(max_timeout_seconds) is not float and type(max_timeout_seconds) is not int) \
-                or isinstance(max_timeout_seconds, bool) \
-                or not math.isfinite(max_timeout_seconds) \
-                or not MIN_TIMEOUT_SECONDS <= max_timeout_seconds <= MAX_TIMEOUT_SECONDS:
-            raise TransportRefused("invalid_timeout_bound")
+                raise TransportRefused('sealed_realm_refused', self.realm_id) from None
+        if type(max_timeout_seconds) is not float and type(max_timeout_seconds) is not int or isinstance(max_timeout_seconds, bool) or (not math.isfinite(max_timeout_seconds)) or (not MIN_TIMEOUT_SECONDS <= max_timeout_seconds <= MAX_TIMEOUT_SECONDS):
+            raise TransportRefused('invalid_timeout_bound')
         if not callable(transport):
-            raise TransportRefused("transport_owner_unavailable")
+            raise TransportRefused('transport_owner_unavailable')
         self._transport = transport
         self._clock = clock
         self._max_timeout = float(max_timeout_seconds)
         self._consumed: set = set()
         self._claim_lock = threading.Lock()
-        self._identity = DriverIdentity(
-            driver_id=self.driver_id,
-            realm_id=realm.realm_id,
-            provider=realm.provider_alias,
-            pool=self.pool,
-            base_url=realm.base_url,
-            endpoint=realm.base_url + "/responses",
-            protocol=protocol,
-            env_key=realm.env_key,
-            default_model=self.default_model,
-            allowed_models=frozenset(self.allowed_models),
-        )
+        self._identity = DriverIdentity(driver_id=self.driver_id, realm_id=realm.realm_id, provider=realm.provider_alias, pool=self.pool, base_url=realm.base_url, endpoint=realm.base_url + self.endpoint_suffix, protocol=protocol, env_key=realm.env_key, default_model=self.default_model, allowed_models=frozenset(self.allowed_models))
+        if self._identity.protocol != self.wire_protocol or self._identity.endpoint != self._identity.base_url + self.endpoint_suffix:
+            raise TransportRefused('projection protocol or endpoint differs from fixed driver')
 
     # -- identity ---------------------------------------------------------
     @property
@@ -977,52 +964,35 @@ class _FixedResponsesDriver:
             reason=reason,
         )
 
-    def _observe(self, compiled: CompiledCall, permit: DispatchPermit,
-                 response: Any) -> TransportObservation:
+    def _observe(self, compiled: CompiledCall, permit: DispatchPermit, response: Any) -> TransportObservation:
         if not isinstance(response, TransportResponse):
-            return self._unknown(compiled, permit, "invalid_transport_response")
+            return self._unknown(compiled, permit, 'invalid_transport_response')
         if not isinstance(response.final_url, str) or response.final_url != self._identity.endpoint:
-            return self._unknown(compiled, permit, "upstream_redirect_refused")
+            return self._unknown(compiled, permit, 'upstream_redirect_refused')
         status = response.status
         if type(status) is not int or not 200 <= status <= 599:
-            return self._unknown(compiled, permit, "upstream_no_final_status")
+            return self._unknown(compiled, permit, 'upstream_no_final_status')
         if response.framing_complete is not True:
-            return self._unknown(compiled, permit, "upstream_incomplete")
+            return self._unknown(compiled, permit, 'upstream_incomplete')
         body = response.body
         if not isinstance(body, (bytes, bytearray)):
-            return self._unknown(compiled, permit, "invalid_transport_response")
+            return self._unknown(compiled, permit, 'invalid_transport_response')
         body = bytes(body)
         if len(body) > MAX_RESPONSE_BYTES:
-            return self._unknown(compiled, permit, "upstream_response_too_large")
-        if (response.declared_content_length is not None
-                and response.declared_content_length != len(body)):
-            return self._unknown(compiled, permit, "upstream_incomplete")
+            return self._unknown(compiled, permit, 'upstream_response_too_large')
+        if response.declared_content_length is not None and response.declared_content_length != len(body):
+            return self._unknown(compiled, permit, 'upstream_incomplete')
         digest = _sha256(body)
-        # Strict closed parse of the complete bounded body. Duplicate keys,
-        # nonfinite constants and malformed JSON leave the evidence unknown —
-        # nothing is extracted from a document that failed the strict parse,
-        # and no truncated or unproven body is ever parsed into a fabricated
-        # complete response.
         document, parsed = self._parse_document(body)
         if status != 200:
-            # A complete upstream error is a known terminal error. It is never
-            # a retry trigger and never rotates the account. Its serving model
-            # and usage — when the error body truthfully declares them — are
-            # preserved even though no answer is normalized.
-            return self._complete(compiled, permit, status, digest, "upstream_error",
-                                  None, document, parsed)
+            return self._complete(compiled, permit, status, digest, 'upstream_error', None, document, parsed)
         if not parsed:
-            return self._complete(compiled, permit, status, digest,
-                                  "upstream_protocol_error", None, document, parsed)
-        normalized = _normalize_responses(document)
+            return self._complete(compiled, permit, status, digest, 'upstream_protocol_error', None, document, parsed)
+        normalized = self._normalize_document(document)
         if normalized is None:
-            label = ("upstream_error" if isinstance(document, dict)
-                     and document.get("error") is not None
-                     else "upstream_incomplete_output")
-            return self._complete(compiled, permit, status, digest, label,
-                                  None, document, parsed)
-        return self._complete(compiled, permit, status, digest, "ok",
-                              normalized, document, parsed)
+            label = 'upstream_error' if isinstance(document, dict) and document.get('error') is not None else 'upstream_incomplete_output'
+            return self._complete(compiled, permit, status, digest, label, None, document, parsed)
+        return self._complete(compiled, permit, status, digest, 'ok', normalized, document, parsed)
 
     @staticmethod
     def _parse_document(body: bytes) -> Tuple[Optional[Any], bool]:
@@ -1036,40 +1006,16 @@ class _FixedResponsesDriver:
             return None, False
         return document, True
 
-    def _complete(self, compiled: CompiledCall, permit: DispatchPermit, status: int,
-                  digest: str, result_status: str,
-                  normalized: Optional[Dict[str, Any]], document: Any = None,
-                  parsed: bool = False) -> TransportObservation:
+    def _complete(self, compiled: CompiledCall, permit: DispatchPermit, status: int, digest: str, result_status: str, normalized: Optional[Dict[str, Any]], document: Any=None, parsed: bool=False) -> TransportObservation:
         normalized_sha = _sha256(_canonical(normalized)) if normalized is not None else None
         if normalized is not None:
-            served_model = normalized.get("served_model")
-            served_model_known = bool(normalized.get("served_model_known", False))
-            usage = dict(normalized.get("usage")
-                         or {"input_tokens": None, "output_tokens": None})
+            served_model = normalized.get('served_model')
+            served_model_known = bool(normalized.get('served_model_known', False))
+            usage = dict(normalized.get('usage') or {'input_tokens': None, 'output_tokens': None})
         else:
-            # Model/usage observation is independent of answer normalization:
-            # a known error or a non-answer outcome still carries the serving
-            # model and usage the upstream actually reported (unknown fields
-            # stay None). Root's shared owner settles known usage once; this
-            # driver writes no accounting record and grants no replay.
             served_model, served_model_known = _serving_model(document if parsed else None)
-            usage = _usage_evidence(document if parsed else None)
-        return TransportObservation(
-            driver_id=self._identity.driver_id,
-            dispatch_id=permit.dispatch_id,
-            account=permit.account,
-            model=compiled.model,
-            disposition="complete",
-            result_status=result_status,
-            upstream_status=status,
-            upstream_body_sha256=digest,
-            normalized=normalized,
-            normalized_sha256=normalized_sha,
-            served_model=served_model,
-            served_model_known=served_model_known,
-            usage=usage,
-            reason=None,
-        )
+            usage = self._usage_document(document if parsed else None)
+        return TransportObservation(driver_id=self._identity.driver_id, dispatch_id=permit.dispatch_id, account=permit.account, model=compiled.model, disposition='complete', result_status=result_status, upstream_status=status, upstream_body_sha256=digest, normalized=normalized, normalized_sha256=normalized_sha, served_model=served_model, served_model_known=served_model_known, usage=usage, reason=None)
 
 
 class MiniMaxResponsesDriver(_FixedResponsesDriver):
