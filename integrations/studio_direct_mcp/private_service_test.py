@@ -1342,6 +1342,127 @@ class TestUpgrade(unittest.TestCase):
 # Runtime identity seal
 # -------------------------------------------------------------------
 
+class TestPublicationPaperPreservation(unittest.TestCase):
+    @contextmanager
+    def publication(self, *, account="mastermind-os-publication", advanced=True):
+        import shutil
+        with IsolatedHome(account) as (home, label, roots):
+            tmp = home.parent
+            with mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA), \
+                 mock.patch.object(svc, "PAPER_V20_BRIDGE_SHA256", PAPER_BRIDGE_V20_FIXTURE_SHA):
+                source, node, backend, recorder = _do_stage(tmp, home, account, 45120)
+                config = svc._build_config(
+                    account, "127.0.0.1", 45120, node, backend, roots["state"], home,
+                    repository_workspaces=True, commission_digest="a" * 64,
+                )
+                if advanced:
+                    _seed_paper_runtime(home, svc.PAPER_RUNTIME_V20_REL, PAPER_BRIDGE_V20_FIXTURE)
+                    config["paperDesign"] = svc._paper_design_config(
+                        home, rel=svc.PAPER_RUNTIME_V20_REL,
+                        bridge_sha256=PAPER_BRIDGE_V20_FIXTURE_SHA,
+                    )
+                    shutil.rmtree(home / svc.PAPER_RUNTIME_REL)
+                roots["config"].write_text(json.dumps(config), encoding="utf-8")
+                self.reseal_config(roots)
+                _seed_node_modules(roots)
+                _seal_runtime(account, recorder)
+                args = _stage_args(_make_upgrade_source(tmp), node, backend, account, 45120)
+                args.enable_repository_workspaces = True
+                # This fixture supplies the already-admitted grant result;
+                # the separate commission suite exercises root-file authority.
+                with mock.patch.object(svc, "_run", recorder), \
+                     mock.patch.object(svc, "_commission_setting",
+                                       side_effect=lambda a, _r, _p: a.os_commission_config_sha256 or "a" * 64):
+                    yield home, roots, args, config
+
+    def reseal_config(self, roots):
+        manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+        manifest["configHash"] = svc._sha256_file(roots["config"])
+        roots["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+    def installed_bytes(self, roots):
+        return {path: path.read_bytes() for path in svc._stage_dest_files(roots) if path.is_file()}
+
+    def test_upgrade_keeps_enrolled_v20_without_default_v12(self):
+        with self.publication() as (home, roots, args, before):
+            self.assertFalse((home / svc.PAPER_RUNTIME_REL).exists())
+            rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+            self.assertEqual(after["commissionPublication"], before["commissionPublication"])
+            self.assertEqual(after["repositoryWorkspaces"], before["repositoryWorkspaces"])
+            self.assertEqual(after["gitPublish"], before["gitPublish"])
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["source"], args.source)
+            self.assertEqual(manifest["configHash"], svc._sha256_file(roots["config"]))
+            self.assertFalse((home / svc.PAPER_RUNTIME_REL).exists())
+
+    def test_explicit_grant_refresh_keeps_enrolled_v20(self):
+        with self.publication() as (_home, roots, args, before):
+            args.os_commission_config_sha256 = "b" * 64
+            # The existing commission authority tests qualify the root grant.
+            # Here the normal upgrade must compose that admitted new digest.
+            with mock.patch.object(svc, "_commission_setting", return_value="b" * 64) as grant:
+                rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            grant.assert_called_once()
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+            self.assertEqual(after["commissionPublication"],
+                             {"enabled": True, "configurationDigest": "b" * 64})
+
+    def test_default_publication_runtime_keeps_normal_upgrade(self):
+        with self.publication(advanced=False) as (_home, roots, args, before):
+            rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            after = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(after["paperDesign"], before["paperDesign"])
+
+    def test_self_consistent_unqualified_paper_selection_refuses_before_writes(self):
+        changes = (
+            ("enabled", False), ("enabled", 1), ("pythonPath", "/foreign/python"),
+            ("bridgePath", "/foreign/bridge.py"), ("bridgeSha256", "f" * 64),
+            ("appPath", "/foreign/Paper.app"), ("commandTimeoutMs", 71000),
+            ("commandTimeoutMs", 70000.0),
+            ("unexpected", True),
+        )
+        for key, value in changes:
+            with self.subTest(field=key), self.publication() as (_home, roots, args, config):
+                config["paperDesign"][key] = value
+                roots["config"].write_text(json.dumps(config), encoding="utf-8")
+                self.reseal_config(roots)
+                before = self.installed_bytes(roots)
+                with self.assertRaises(SystemExit):
+                    _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(self.installed_bytes(roots), before)
+
+    def test_unqualified_v20_runtime_refuses_before_writes(self):
+        for change in ("bridge", "receipt", "mode", "missing"):
+            with self.subTest(change=change), self.publication() as (home, roots, args, _config):
+                runtime = home / svc.PAPER_RUNTIME_V20_REL
+                bridge = runtime / "source" / "bridge.py"
+                if change == "bridge":
+                    bridge.write_bytes(b"changed bridge")
+                elif change == "receipt":
+                    (runtime / "RUNTIME.json").write_text("{}", encoding="utf-8")
+                elif change == "mode":
+                    runtime.chmod(0o755)
+                else:
+                    bridge.unlink()
+                before = self.installed_bytes(roots)
+                with self.assertRaises(SystemExit):
+                    _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(self.installed_bytes(roots), before)
+
+    def test_other_accounts_do_not_acquire_publication_runtime_preservation(self):
+        with self.publication(account="test-account") as (_home, roots, args, _config):
+            before = self.installed_bytes(roots)
+            with self.assertRaises(SystemExit):
+                _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(self.installed_bytes(roots), before)
+
+
 class TestRuntimeSeal(unittest.TestCase):
     def _staged_runtime(self, tmp: Path, home: Path):
         src, node, backend, _ = _do_stage(tmp, home)

@@ -155,6 +155,10 @@ old grant digest. The gateway publisher admits that profile only after joining t
 actual predecessor receipt, MCP configuration/plist and original grant; an ordinary
 first publication still requires the base profile without commission enrollment.
 The opt-in must contain exactly enabled=true and the qualified prior grant digest.
+The same normal upgrade preserves the fixed seat's already selected Paper v20
+profile after checking its exact paths, bridge hash, runtime receipt and custody.
+That qualified member is retained through the later grant refresh as well;
+unrecognized Paper profiles refuse before installation writes.
 
 Publication continues to write its existing three targets. The Studio configuration
 and manifest remain unchanged and are rechecked against the retained definition,
