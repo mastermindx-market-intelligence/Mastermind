@@ -1,0 +1,51 @@
+{
+  "schema": "PAPER_INDEPENDENT_ROUTE_PROBE_V1",
+  "scope": "Read-only capability qualification for independent future targets; no replay or alternate-carrier access to fenced2DK/2AO.",
+  "rootPing": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"timestamp\": \"2026-11-09T00:24:26.966Z\",\n  \"generation\": \"8997ab36-078a-4030-92d8-7b161a7c1d04\",\n  \"pingId\": \"ping-m-d415a57e\",\n  \"monotonicMs\": 114575989.298708,\n  \"monotonicDurationMs\": 0.023208,\n  \"gatewayVersion\": \"0.1.10\",\n  \"sessionId\": \"677620ca-b66b-47a1-96ba-92fd1f21f924\",\n  \"selectedHostRef\": null,\n  \"concurrency\": {\n    \"scope\": \"account-backend\",\n    \"active\": 0,\n    \"queued\": 0,\n    \"maxActive\": 8,\n    \"maxQueued\": 16,\n    \"catalogReservedSlots\": 1\n  }\n}"
+      }
+    ],
+    "structuredContent": {
+      "timestamp": "2026-11-09T00:24:26.966Z",
+      "generation": "8997ab36-078a-4030-92d8-7b161a7c1d04",
+      "pingId": "ping-m-d415a57e",
+      "monotonicMs": 114575989.298708,
+      "monotonicDurationMs": 0.023208,
+      "gatewayVersion": "0.1.10",
+      "sessionId": "677620ca-b66b-47a1-96ba-92fd1f21f924",
+      "selectedHostRef": null,
+      "concurrency": {
+        "scope": "account-backend",
+        "active": 0,
+        "queued": 0,
+        "maxActive": 8,
+        "maxQueued": 16,
+        "catalogReservedSlots": 1
+      }
+    },
+    "isError": false
+  },
+  "hostBindingAttempt": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"schema\": \"mastermind.studio_fleet_route_binding.v1\",\n  \"status\": \"REFUSED\",\n  \"effect_state\": \"NOT_APPLIED\",\n  \"code\": \"FLEET_ROUTE_PREFLIGHT_REFUSED\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "schema": "mastermind.studio_fleet_route_binding.v1",
+      "status": "REFUSED",
+      "effect_state": "NOT_APPLIED",
+      "code": "FLEET_ROUTE_PREFLIGHT_REFUSED",
+      "error_code": "INVALID_ARGUMENT"
+    },
+    "isError": true
+  },
+  "outcome": "FLEET_ROUTE_PREFLIGHT_REFUSED_NOT_APPLIED",
+  "classification": "Binding preflight refused with INVALID_ARGUMENT. No alternate alias/host/backend/prepare route attempted; no design reads or edits on this carrier.",
+  "primaryCarrier": "Mastermind Paper direct app",
+  "continuedAuthority": "Original approved estate mission; exact unknown effect remains fenced on its original carrier."
+}

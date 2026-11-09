@@ -1,0 +1,67 @@
+{
+  "schema": "PAPER_RESUMED_PROOF_ATTACHMENTS_V1",
+  "note": "Links exact already-created native image blobs plus read-only audit evidence and unexecuted repair plans. Preserved-copy content audit is incomplete as explicitly counted inside its archive. No new live Paper result is implied by a prepared plan.",
+  "baseHead": "b7c0b802cf10651b1bc3a79a8959c4e523f5d785",
+  "entries": [
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/PRESERVED_AUDIT/READ_EVIDENCE_ARCHIVE.json",
+      "sha": "ef456e615a886647f5621905f6ddf75d4dbf647b",
+      "bytes": 485353
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/plans/LIVESITE_BACKING_PLAN.json",
+      "sha": "1a4e4c522763f981aae60fa697f025ba1277ca45",
+      "bytes": 120419
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/plans/livesite_backing_plan_native_fallback.js",
+      "sha": "31e90059ccf89b08612c23a49bfe2447fb497757",
+      "bytes": 17595
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/diagnostics/NATIVE_PAPER_AX_READONLY_REPORT.json",
+      "sha": "d90ca51ccc72f2960f46eeb02a14cfff0b3c4097",
+      "bytes": 45439
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/diagnostics/TRANSMISSION_2DK_TRANSPORT_HEALTH.json",
+      "sha": "d48f9158c8bc3da9a9b630262d0777fbb28fc476",
+      "bytes": 4645
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/reports/paper_visual_review_added_P16.json",
+      "sha": "53945367b0dd70b6c219a57730504154b2379d43"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/native/added652/P16.jpg",
+      "sha": "4d22e3ad0b876f4c93f958c8c3480760f9352721"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/native/added652/P17.jpg",
+      "sha": "21fdea8fe181d83b38df7877ce5f773584770a05"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/native/added652/P18.jpg",
+      "sha": "1279e40792bc590064389c9659f0a64c3f1aeebc"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/native/added652/P17-nav.jpg",
+      "sha": "0473198596f53de41dd2c53ef1abb6f9b67fbf27"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/proof/native/added652/P18-nav.jpg",
+      "sha": "0595c53fb0913625d08780a6c36a0f717a1edd36"
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/diagnostics/STUDIO_INDEPENDENT_ROUTE_PROBE.json",
+      "sha": "2a1aae256bf60ab486608c8b79bb6a979cd36ec0",
+      "bytes": 2375
+    }
+  ],
+  "scopeResults": {
+    "P16": "Prior native visual QA pass; unchanged accepted surface.",
+    "P17_P18": "Bonds navigation native QA pass with exact current context receipts.",
+    "preservedFiles": "38 of217 page censuses and1 complete native JSX scope in attached historical archive; later cursor exists separately.",
+    "liveSiteBackings": "12-target plan prepared, no new backing execution."
+  }
+}

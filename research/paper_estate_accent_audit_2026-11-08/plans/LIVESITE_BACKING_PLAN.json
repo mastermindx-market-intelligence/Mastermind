@@ -1,0 +1,3176 @@
+{
+  "schema": "PAPER_LIVESITE_TWELVE_TRANSLATED_BACKING_PLAN_V1",
+  "status": "ROOT_REVIEWABLE_PLAN_NOT_EXECUTED",
+  "procedurePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "sourceAuditCommit": "801055fcc79ed8378ac1879f09f3ad1c9dc4ce90",
+  "carrier": "Mastermind Paper direct",
+  "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+  "pageId": "p-1-0",
+  "sourceProvenance": {
+    "canonicalClassificationBlob": "554ea90c66ac222c4469e5be88cd57d3779a5d01",
+    "classificationMaterialization": "Root-provided parsed store materialization; local byte digest is reported separately and is not asserted equal to canonical Git serialization.",
+    "translationLedgerSha256": "0d6c815cb56368a27244b03b9f628bc3f2d725973164192d7c6aa830b141ea38",
+    "translationLedgerRecordedAt": "2026-11-08T21:35:42.684028+00:00",
+    "mergedPlanSha256": "0caff2d10ea0b224373bb4beaa8b40abacbbd964996a5b861553eeed568b929a",
+    "completedPlacementRepairStatus": "ALL_TWELVE_BACKING_REPAIRS_COMPLETE",
+    "localInputs": {
+      "CLASSIFICATION_DELTA.json": {
+        "localBytes": 873101,
+        "localSha256": "2cad061f61712680bbc538d4e2b6ef79687c2fe6d987bc5be8fb7bf8108aa9f4",
+        "localGitBlob": "42d1596c42e53a96e51613bacc4f756d20432509"
+      },
+      "PRESERVATION.json": {
+        "localBytes": 1082934,
+        "localSha256": "923230acdc6bf0425456328b51b911248d503c0e29ec48914155791d8fb76d4b",
+        "localGitBlob": "8016a4d54733b351156791fd30bd2f306f4e6730"
+      },
+      "CONTINUATION_UTILITIES.json": {
+        "localBytes": 24441,
+        "localSha256": "ffcca2ff0977330bf9bd4528838115f3e1f490f00a0c182a695fac7cdc3e306c",
+        "localGitBlob": "50608d5912bdcaa159557713407aba8dff87f5e6"
+      },
+      "NATIVE_PRESERVATION_UTILITY_READS.json": {
+        "localBytes": 7313,
+        "localSha256": "d5b70ff719a3ea84901a87f9e2a8c9394766d0679cfe617ff459bdf47e4cf912",
+        "localGitBlob": "055efff2937c062524ff967362c59f11c9addc1e"
+      }
+    },
+    "catalogFile": "LIVESITE_BACKING_CATALOG.json",
+    "catalogSha256": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb"
+  },
+  "scope": {
+    "targetIds": [
+      "39W-0",
+      "8BT-0",
+      "42N-0",
+      "42X-0",
+      "438-0",
+      "43I-0",
+      "43S-0",
+      "443-0",
+      "44D-0",
+      "44N-0",
+      "44X-0",
+      "46S-0"
+    ],
+    "targetCount": 12,
+    "doNotTouchIds": [
+      "46P-0"
+    ],
+    "doNotRedoCompletedRepairs": [
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FOQ-0",
+        "wrapperId": "ZL6-0",
+        "paintedChildId": "ZL7-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FP0-0",
+        "wrapperId": "ZL9-0",
+        "paintedChildId": "ZLA-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FPB-0",
+        "wrapperId": "ZLC-0",
+        "paintedChildId": "ZLD-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FPL-0",
+        "wrapperId": "ZLF-0",
+        "paintedChildId": "ZLG-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FPV-0",
+        "wrapperId": "ZLI-0",
+        "paintedChildId": "ZLJ-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FQ6-0",
+        "wrapperId": "ZLL-0",
+        "paintedChildId": "ZLM-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FQG-0",
+        "wrapperId": "ZLO-0",
+        "paintedChildId": "ZLP-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FQQ-0",
+        "wrapperId": "ZLR-0",
+        "paintedChildId": "ZLS-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FR0-0",
+        "wrapperId": "ZLU-0",
+        "paintedChildId": "ZLV-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "originalAuditedNode": "FSV-0",
+        "wrapperId": "ZLX-0",
+        "paintedChildId": "ZLY-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "originalAuditedNode": "Z64-0",
+        "wrapperId": "2886-0",
+        "paintedChildId": "2887-0",
+        "stage": "COMPLETE"
+      },
+      {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "originalAuditedNode": "ZUF-0",
+        "wrapperId": "2889-0",
+        "paintedChildId": "288A-0",
+        "stage": "COMPLETE"
+      }
+    ],
+    "doNotRunOtherTranslatedControls": [
+      "29-0",
+      "NM-0",
+      "O9-0"
+    ],
+    "sourceChangedIntentionally": [
+      "Remove each own source translate on the new cloned child.",
+      "Use original un-translated left/top so unchanged labels fit.",
+      "Apply only the accepted box-shadow patch to cloned native paint.",
+      "Reorder the globe and local View wrapper/label pair only as specified."
+    ],
+    "sourcePreserved": [
+      "All12 source primitive identities remain preserved when parked.",
+      "All unchanged labels, text, typography, geometry, markers and halo transforms.",
+      "Existing foreground parent441 remains later than42M.",
+      "Fixture84B and all ancestor stacking remain unchanged relative to the separate Options overlay.",
+      "Node46P and its subtree remain untouched."
+    ]
+  },
+  "utility": {
+    "knownNodeId": "8QM-0",
+    "knownParentId": "4EO-0",
+    "ownershipEvidence": "NATIVE_PRESERVATION_UTILITY_READS.json, Live family, existing Empty audit preservation template",
+    "nativeReadAt": "2026-11-08T23:58:54.548Z",
+    "observedComponent": "Frame",
+    "observedStyles": {
+      "position": "absolute",
+      "left": "0px",
+      "top": "0px",
+      "width": "1px",
+      "height": "1px",
+      "opacity": "0"
+    },
+    "mustFreshReadBeforeParking": true,
+    "createAnotherUtility": false,
+    "neverReplaceOrClearAfterParking": true,
+    "parkingSequence": "Verify replacement native pair first, then move only its old exact source primitive into the existing hidden utility before final combined-board render; retain originals through final acceptance.",
+    "warning": "isVisible=true is compatible with an opacity0 utility; prove its exact own opacity0 and attached identity rather than interpreting isVisible alone."
+  },
+  "layeringPlans": [
+    {
+      "id": "map_backings_414",
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "boardId": "414-0",
+      "destinationParentId": "42M-0",
+      "sameOriginOtherForegroundParentId": "441-0",
+      "sourceParents": {
+        "42M-0": {
+          "left": "0px",
+          "top": "0px",
+          "width": "1440px",
+          "height": "700px"
+        },
+        "441-0": {
+          "left": "0px",
+          "top": "0px",
+          "width": "1440px",
+          "height": "700px"
+        }
+      },
+      "requiredOrder": [
+        "435-0 globe artwork",
+        "NEW_UNPAINTED_COMMON_BACKING_LAYER",
+        "existing foreground children in their existing relative order"
+      ],
+      "imageReorder": {
+        "nodeId": "435-0",
+        "parentId": "42M-0",
+        "destination": "first child in the same parent",
+        "preserve": "Exact image asset, position, dimensions and paint; do not edit its pixels."
+      },
+      "layerStyle": {
+        "position": "absolute",
+        "left": "0px",
+        "top": "0px",
+        "width": "1440px",
+        "height": "700px",
+        "overflow": "visible"
+      },
+      "wrapperPaint": "None. No new background, border, shadow, opacity, filter or zIndex.",
+      "backingOrder": [
+        "42N-0",
+        "42X-0",
+        "438-0",
+        "43I-0",
+        "43S-0",
+        "443-0",
+        "44D-0",
+        "44N-0",
+        "44X-0"
+      ],
+      "reason": "The globe image currently occurs after the Hong Kong and Taiwan foreground. A layer below the entire 42M parent would be covered by that image. Placing all nine backings after the same image and before all existing foreground prevents a backing in the later 441 parent from painting over an earlier label.",
+      "limits": "Keep 441 later than 42M; keep all foreground parents, marker/halo transforms and label geometry unchanged. Existing label-to-label overlaps are source conditions and are not silently recast as new defects.",
+      "verification": "Resolve current IDs first. Verify same-parent image reorder and native asset identity, all nine backing dimensions/opacity/paint, every label/marker, and the combined board stacking. Do not certify from an isolated backing capture."
+    },
+    {
+      "id": "terminal_view_32e",
+      "parentId": "39I-0",
+      "requiredLocalOrder": [
+        "39Z-0",
+        "NEW_ALIGNED_VIEW_BACKING_WRAPPER",
+        "39X-0",
+        "3A0-0"
+      ],
+      "rowFillId": "39Z-0",
+      "labelWrapperId": "39X-0",
+      "labelTextId": "39Y-0",
+      "nextResearchCaptionId": "3A0-0",
+      "reason": "The later Research row fill starts at y532.86; the View label spans y526.61–538.61. Its lower 5.75px intersects that later fill in the source paint order. Reorder only the backing and existing View label wrapper locally; do not shift the control.",
+      "preserve": "Keep label text/geometry and all parent/ancestor order. The fixture 84B-0 remains in its original relationship to the separate Options overlay."
+    },
+    {
+      "id": "terminal_view_84a",
+      "parentId": "8BF-0",
+      "requiredLocalOrder": [
+        "8BW-0",
+        "NEW_ALIGNED_VIEW_BACKING_WRAPPER",
+        "8BU-0",
+        "8BX-0"
+      ],
+      "rowFillId": "8BW-0",
+      "labelWrapperId": "8BU-0",
+      "labelTextId": "8BV-0",
+      "nextResearchCaptionId": "8BX-0",
+      "reason": "The later Research row fill starts at y532.86; the View label spans y526.61–538.61. Its lower 5.75px intersects that later fill in the source paint order. Reorder only the backing and existing View label wrapper locally; do not shift the control.",
+      "preserve": "Keep label text/geometry and all parent/ancestor order. The fixture 84B-0 remains in its original relationship to the separate Options overlay."
+    }
+  ],
+  "targets": [
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "32E-0",
+      "nodeId": "39W-0",
+      "parentId": "39I-0",
+      "role": "Terminal View",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "width": "56.8px",
+        "height": "20.5px",
+        "translate": "-28.398px -10.25px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#000000D1 0px 6px 15px -5px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 1203.202,
+        "top": 512.36,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "width": "56.8px",
+        "height": "20.5px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundImage": "linear-gradient(in oklab 180deg, #3E4149 0%, #1F222B 100%)",
+        "backgroundOrigin": "border-box",
+        "borderColor": "#33373F",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#000000D1 0px 6px 15px -5px",
+        "boxSizing": "border-box",
+        "height": "20.5px",
+        "overflow": "visible",
+        "width": "56.8px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 15,
+        "right": 15,
+        "top": 4,
+        "bottom": 4.5
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "39X-0",
+          "parentId": "39I-0",
+          "text": "View",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 1246.6,
+            "top": 526.61,
+            "width": 26.8,
+            "height": 12
+          },
+          "textLeafIds": [
+            "39Y-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "terminal_view_32e",
+      "sourceExpectedStyles": {
+        "backgroundImage": "linear-gradient(in oklab 180deg, #3E4149 0%, #1F222B 100%)",
+        "backgroundOrigin": "border-box",
+        "borderColor": "#33373F",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px",
+        "boxSizing": "border-box",
+        "height": "20.5px",
+        "overflow": "visible",
+        "width": "56.8px",
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "translate": "-28.398px -10.25px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "32E-0",
+        "artboardName": "SOURCE ONLY · 03 · Terminal · Chart workspace template",
+        "nodeId": "39W-0",
+        "parentId": "39I-0",
+        "stylePatch": {
+          "boxShadow": "#000000D1 0px 6px 15px -5px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "1231.6px",
+            "top": "522.61px",
+            "translate": "-28.398px -10.25px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "39W-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 2,
+          "rawSha256": "e65794a354f8745a8905564a43c7b1137500b1dcc59a4692c3b3eaf77c992ff5",
+          "offsetUtf16": 70153,
+          "endUtf16": 70624,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:07.563Z",
+            "completedAt": "2026-11-08T21:20:10.719Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "32E-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "39W-0",
+            "styles": {
+              "translate": "-28.398px -10.25px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "20.5px",
+          "left": "1231.6px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "522.61px",
+          "translate": "-28.398px -10.25px",
+          "width": "56.8px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "32E-0",
+        "artboardName": "SOURCE ONLY · 03 · Terminal · Chart workspace template",
+        "nodeId": "39W-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#000000D1 0px 6px 15px -5px;",
+        "verify": {
+          "boxShadow": "#000000D1 0px 6px 15px -5px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "84A-0",
+      "nodeId": "8BT-0",
+      "parentId": "8BF-0",
+      "role": "Terminal Options fixture View",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "width": "56.8px",
+        "height": "20.5px",
+        "translate": "-28.398px -10.25px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#000000D1 0px 6px 15px -5px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 1203.202,
+        "top": 512.36,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "width": "56.8px",
+        "height": "20.5px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundImage": "linear-gradient(in oklab 180deg, #3E4149 0%, #1F222B 100%)",
+        "backgroundOrigin": "border-box",
+        "borderColor": "#33373F",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#000000D1 0px 6px 15px -5px",
+        "boxSizing": "border-box",
+        "height": "20.5px",
+        "overflow": "visible",
+        "width": "56.8px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 15,
+        "right": 15,
+        "top": 4,
+        "bottom": 4.5
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "8BU-0",
+          "parentId": "8BF-0",
+          "text": "View",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 1246.6,
+            "top": 526.61,
+            "width": 26.8,
+            "height": 12
+          },
+          "textLeafIds": [
+            "8BV-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "terminal_view_84a",
+      "sourceExpectedStyles": {
+        "backgroundImage": "linear-gradient(in oklab 180deg, #3E4149 0%, #1F222B 100%)",
+        "backgroundOrigin": "border-box",
+        "borderColor": "#33373F",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px",
+        "boxSizing": "border-box",
+        "height": "20.5px",
+        "overflow": "visible",
+        "width": "56.8px",
+        "position": "absolute",
+        "left": "1231.6px",
+        "top": "522.61px",
+        "translate": "-28.398px -10.25px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "84A-0",
+        "artboardName": "SOURCE ONLY · Terminal Options · Gamma · Design fixture",
+        "nodeId": "8BT-0",
+        "parentId": "8BF-0",
+        "stylePatch": {
+          "boxShadow": "#000000D1 0px 6px 15px -5px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "1231.6px",
+            "top": "522.61px",
+            "translate": "-28.398px -10.25px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "8BT-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 9,
+          "rawSha256": "7b4adcc1c25b1bcf7c84967e75526e24173ee1990711b6e6738a9aefb41e9503",
+          "offsetUtf16": 72714,
+          "endUtf16": 73185,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:15.375Z",
+            "completedAt": "2026-11-08T21:20:17.444Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "84A-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "8BT-0",
+            "styles": {
+              "translate": "-28.398px -10.25px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "20.5px",
+          "left": "1231.6px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "522.61px",
+          "translate": "-28.398px -10.25px",
+          "width": "56.8px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "84A-0",
+        "artboardName": "SOURCE ONLY · Terminal Options · Gamma · Design fixture",
+        "nodeId": "8BT-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF12 0px 1px 0px inset, #000000D1 0px 6px 15px -5px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#000000D1 0px 6px 15px -5px;",
+        "verify": {
+          "boxShadow": "#000000D1 0px 6px 15px -5px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "42N-0",
+      "parentId": "42M-0",
+      "role": "Hong Kong",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "414.66px",
+        "top": "447px",
+        "width": "173.88px",
+        "height": "28.01px",
+        "translate": "-121.736px -29.2px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 292.924,
+        "top": 417.8,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "414.66px",
+        "top": "447px",
+        "width": "173.88px",
+        "height": "28.01px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#3C527AD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "28.01px",
+        "opacity": "0.238548",
+        "overflow": "visible",
+        "width": "173.88px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 10.5,
+        "right": 21.89,
+        "top": 6.12,
+        "bottom": 5.01
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "42O-0",
+          "parentId": "42M-0",
+          "text": "🇭🇰",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 425.16,
+            "top": 453.12,
+            "width": 17.5,
+            "height": 16
+          },
+          "textLeafIds": [
+            "42P-0"
+          ]
+        },
+        {
+          "nodeId": "42Q-0",
+          "parentId": "42M-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 449.67,
+            "top": 456.62,
+            "width": 8.75,
+            "height": 8.75
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "42R-0",
+          "parentId": "42M-0",
+          "text": "+0.98%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 465.42,
+            "top": 454,
+            "width": 42.73,
+            "height": 16
+          },
+          "textLeafIds": [
+            "42S-0"
+          ]
+        },
+        {
+          "nodeId": "42T-0",
+          "parentId": "42M-0",
+          "text": "25,207.18",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 516.03,
+            "top": 455.31,
+            "width": 50.62,
+            "height": 14
+          },
+          "textLeafIds": [
+            "42U-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#3C527AD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "28.01px",
+        "opacity": "0.238548",
+        "overflow": "visible",
+        "width": "173.88px",
+        "position": "absolute",
+        "left": "414.66px",
+        "top": "447px",
+        "translate": "-121.736px -29.2px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "42N-0",
+        "parentId": "42M-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "414.66px",
+            "top": "447px",
+            "translate": "-121.736px -29.2px",
+            "opacity": "0.238548"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "42N-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 14440,
+          "endUtf16": 14915,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "42N-0",
+            "styles": {
+              "translate": "-121.736px -29.2px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "28.01px",
+          "left": "414.66px",
+          "opacity": "0.238548",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "447px",
+          "translate": "-121.736px -29.2px",
+          "width": "173.88px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "42N-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "42X-0",
+      "parentId": "42M-0",
+      "role": "Taiwan",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "404.44px",
+        "top": "464.65px",
+        "width": "181.11px",
+        "height": "29.5px",
+        "translate": "-121.542px -25.9px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 282.898,
+        "top": 438.75,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "404.44px",
+        "top": "464.65px",
+        "width": "181.11px",
+        "height": "29.5px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "29.5px",
+        "opacity": "0.486479",
+        "overflow": "visible",
+        "width": "181.11px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 11.07,
+        "right": 23.04,
+        "top": 6.45,
+        "bottom": 6.12
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "42Y-0",
+          "parentId": "42M-0",
+          "text": "🇹🇼",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 415.51,
+            "top": 471.1,
+            "width": 18.44,
+            "height": 16.59
+          },
+          "textLeafIds": [
+            "42Z-0"
+          ]
+        },
+        {
+          "nodeId": "430-0",
+          "parentId": "42M-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 441.31,
+            "top": 474.79,
+            "width": 9.22,
+            "height": 9.22
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "431-0",
+          "parentId": "42M-0",
+          "text": "-0.05%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 457.91,
+            "top": 472.03,
+            "width": 42.99,
+            "height": 16
+          },
+          "textLeafIds": [
+            "432-0"
+          ]
+        },
+        {
+          "nodeId": "433-0",
+          "parentId": "42M-0",
+          "text": "43,634.19",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 509.19,
+            "top": 473.41,
+            "width": 53.32,
+            "height": 14
+          },
+          "textLeafIds": [
+            "434-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "29.5px",
+        "opacity": "0.486479",
+        "overflow": "visible",
+        "width": "181.11px",
+        "position": "absolute",
+        "left": "404.44px",
+        "top": "464.65px",
+        "translate": "-121.542px -25.9px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "42X-0",
+        "parentId": "42M-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "404.44px",
+            "top": "464.65px",
+            "translate": "-121.542px -25.9px",
+            "opacity": "0.486479"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "42X-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 17313,
+          "endUtf16": 17790,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "42X-0",
+            "styles": {
+              "translate": "-121.542px -25.9px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "29.5px",
+          "left": "404.44px",
+          "opacity": "0.486479",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "464.65px",
+          "translate": "-121.542px -25.9px",
+          "width": "181.11px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "42X-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "438-0",
+      "parentId": "42M-0",
+      "role": "United States",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "736.18px",
+        "top": "574.9px",
+        "width": "184.64px",
+        "height": "32px",
+        "translate": "-66.32px -15.5px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 669.86,
+        "top": 559.4,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "736.18px",
+        "top": "574.9px",
+        "width": "184.64px",
+        "height": "32px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "184.64px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 12,
+        "right": 14,
+        "top": 7,
+        "bottom": 7
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "439-0",
+          "parentId": "42M-0",
+          "text": "🇺🇸",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 748.18,
+            "top": 581.9,
+            "width": 20,
+            "height": 18
+          },
+          "textLeafIds": [
+            "43A-0"
+          ]
+        },
+        {
+          "nodeId": "43B-0",
+          "parentId": "42M-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 776.18,
+            "top": 585.9,
+            "width": 10,
+            "height": 10
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "43C-0",
+          "parentId": "42M-0",
+          "text": "+0.17%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 794.18,
+            "top": 582.9,
+            "width": 53.08,
+            "height": 16
+          },
+          "textLeafIds": [
+            "43D-0"
+          ]
+        },
+        {
+          "nodeId": "43E-0",
+          "parentId": "42M-0",
+          "text": "7,650.50",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 856.26,
+            "top": 584.4,
+            "width": 50.56,
+            "height": 14
+          },
+          "textLeafIds": [
+            "43F-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "184.64px",
+        "position": "absolute",
+        "left": "736.18px",
+        "top": "574.9px",
+        "translate": "-66.32px -15.5px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "438-0",
+        "parentId": "42M-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "736.18px",
+            "top": "574.9px",
+            "translate": "-66.32px -15.5px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "438-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 20526,
+          "endUtf16": 20977,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "438-0",
+            "styles": {
+              "translate": "-66.32px -15.5px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "32px",
+          "left": "736.18px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "574.9px",
+          "translate": "-66.32px -15.5px",
+          "width": "184.64px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "438-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "43I-0",
+      "parentId": "42M-0",
+      "role": "Canada",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "713.52px",
+        "top": "494px",
+        "width": "189.36px",
+        "height": "32px",
+        "translate": "-75.38px -33.4px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 638.14,
+        "top": 460.6,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "713.52px",
+        "top": "494px",
+        "width": "189.36px",
+        "height": "32px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "189.36px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 12,
+        "right": 14,
+        "top": 7,
+        "bottom": 7
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "43J-0",
+          "parentId": "42M-0",
+          "text": "🇨🇦",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 725.52,
+            "top": 501,
+            "width": 20,
+            "height": 18
+          },
+          "textLeafIds": [
+            "43K-0"
+          ]
+        },
+        {
+          "nodeId": "43L-0",
+          "parentId": "42M-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 753.52,
+            "top": 505,
+            "width": 10,
+            "height": 10
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "43M-0",
+          "parentId": "42M-0",
+          "text": "-0.19%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 771.52,
+            "top": 502,
+            "width": 50.52,
+            "height": 16
+          },
+          "textLeafIds": [
+            "43N-0"
+          ]
+        },
+        {
+          "nodeId": "43O-0",
+          "parentId": "42M-0",
+          "text": "35,806.70",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 831.04,
+            "top": 503.5,
+            "width": 57.84,
+            "height": 14
+          },
+          "textLeafIds": [
+            "43P-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "189.36px",
+        "position": "absolute",
+        "left": "713.52px",
+        "top": "494px",
+        "translate": "-75.38px -33.4px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "43I-0",
+        "parentId": "42M-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "713.52px",
+            "top": "494px",
+            "translate": "-75.38px -33.4px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "43I-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 23344,
+          "endUtf16": 23793,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "43I-0",
+            "styles": {
+              "translate": "-75.38px -33.4px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "32px",
+          "left": "713.52px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "494px",
+          "translate": "-75.38px -33.4px",
+          "width": "189.36px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "43I-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "43S-0",
+      "parentId": "42M-0",
+      "role": "Japan",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "416.56px",
+        "top": "494px",
+        "width": "198.67px",
+        "height": "32px",
+        "translate": "-122.836px -9.6px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 293.724,
+        "top": 484.4,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "416.56px",
+        "top": "494px",
+        "width": "198.67px",
+        "height": "32px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "198.67px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 12,
+        "right": 25,
+        "top": 7,
+        "bottom": 7
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "43T-0",
+          "parentId": "42M-0",
+          "text": "🇯🇵",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 428.56,
+            "top": 501,
+            "width": 20,
+            "height": 18
+          },
+          "textLeafIds": [
+            "43U-0"
+          ]
+        },
+        {
+          "nodeId": "43V-0",
+          "parentId": "42M-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 456.56,
+            "top": 505,
+            "width": 10,
+            "height": 10
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "43W-0",
+          "parentId": "42M-0",
+          "text": "+0.50%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 474.56,
+            "top": 502,
+            "width": 48.83,
+            "height": 16
+          },
+          "textLeafIds": [
+            "43X-0"
+          ]
+        },
+        {
+          "nodeId": "43Y-0",
+          "parentId": "42M-0",
+          "text": "64,931.19",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 532.39,
+            "top": 503.5,
+            "width": 57.84,
+            "height": 14
+          },
+          "textLeafIds": [
+            "43Z-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#6A5F3ED5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "198.67px",
+        "position": "absolute",
+        "left": "416.56px",
+        "top": "494px",
+        "translate": "-122.836px -9.6px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "43S-0",
+        "parentId": "42M-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "416.56px",
+            "top": "494px",
+            "translate": "-122.836px -9.6px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "43S-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 26155,
+          "endUtf16": 26605,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "43S-0",
+            "styles": {
+              "translate": "-122.836px -9.6px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "32px",
+          "left": "416.56px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "494px",
+          "translate": "-122.836px -9.6px",
+          "width": "198.67px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "43S-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D4A01773 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "443-0",
+      "parentId": "441-0",
+      "role": "Korea",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "420.3px",
+        "top": "435.5px",
+        "width": "191.39px",
+        "height": "32px",
+        "translate": "-118.095px -46.6px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 302.205,
+        "top": 388.9,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "420.3px",
+        "top": "435.5px",
+        "width": "191.39px",
+        "height": "32px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "191.39px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 12,
+        "right": 25,
+        "top": 7,
+        "bottom": 7
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "444-0",
+          "parentId": "441-0",
+          "text": "🇰🇷",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 432.3,
+            "top": 442.5,
+            "width": 20,
+            "height": 18
+          },
+          "textLeafIds": [
+            "445-0"
+          ]
+        },
+        {
+          "nodeId": "446-0",
+          "parentId": "441-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 460.3,
+            "top": 446.5,
+            "width": 10,
+            "height": 10
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "447-0",
+          "parentId": "441-0",
+          "text": "+0.97%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 478.3,
+            "top": 443.5,
+            "width": 48.83,
+            "height": 16
+          },
+          "textLeafIds": [
+            "448-0"
+          ]
+        },
+        {
+          "nodeId": "449-0",
+          "parentId": "441-0",
+          "text": "6,755.75",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 536.13,
+            "top": 445,
+            "width": 50.56,
+            "height": 14
+          },
+          "textLeafIds": [
+            "44A-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "191.39px",
+        "position": "absolute",
+        "left": "420.3px",
+        "top": "435.5px",
+        "translate": "-118.095px -46.6px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "443-0",
+        "parentId": "441-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "420.3px",
+            "top": "435.5px",
+            "translate": "-118.095px -46.6px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "443-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 29139,
+          "endUtf16": 29591,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "443-0",
+            "styles": {
+              "translate": "-118.095px -46.6px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "32px",
+          "left": "420.3px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "435.5px",
+          "translate": "-118.095px -46.6px",
+          "width": "191.39px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "443-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "44D-0",
+      "parentId": "441-0",
+      "role": "United Kingdom",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "738.42px",
+        "top": "376.7px",
+        "width": "189.36px",
+        "height": "32px",
+        "translate": "-82.38px -25.3px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 656.04,
+        "top": 351.4,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "738.42px",
+        "top": "376.7px",
+        "width": "189.36px",
+        "height": "32px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "189.36px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 12,
+        "right": 14,
+        "top": 7,
+        "bottom": 7
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "44E-0",
+          "parentId": "441-0",
+          "text": "🇬🇧",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 750.42,
+            "top": 383.7,
+            "width": 20,
+            "height": 18
+          },
+          "textLeafIds": [
+            "44F-0"
+          ]
+        },
+        {
+          "nodeId": "44G-0",
+          "parentId": "441-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 778.42,
+            "top": 387.7,
+            "width": 10,
+            "height": 10
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "44H-0",
+          "parentId": "441-0",
+          "text": "-1.45%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 796.42,
+            "top": 384.7,
+            "width": 50.52,
+            "height": 16
+          },
+          "textLeafIds": [
+            "44I-0"
+          ]
+        },
+        {
+          "nodeId": "44J-0",
+          "parentId": "441-0",
+          "text": "10,659.10",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 855.94,
+            "top": 386.2,
+            "width": 57.84,
+            "height": 14
+          },
+          "textLeafIds": [
+            "44K-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "32px",
+        "overflow": "visible",
+        "width": "189.36px",
+        "position": "absolute",
+        "left": "738.42px",
+        "top": "376.7px",
+        "translate": "-82.38px -25.3px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44D-0",
+        "parentId": "441-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "738.42px",
+            "top": "376.7px",
+            "translate": "-82.38px -25.3px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "44D-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 31953,
+          "endUtf16": 32404,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "44D-0",
+            "styles": {
+              "translate": "-82.38px -25.3px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "32px",
+          "left": "738.42px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "376.7px",
+          "translate": "-82.38px -25.3px",
+          "width": "189.36px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44D-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "44N-0",
+      "parentId": "441-0",
+      "role": "European Union",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "742.07px",
+        "top": "348.4px",
+        "width": "175.26px",
+        "height": "30.8px",
+        "translate": "-79.539px -42.7px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 662.531,
+        "top": 305.7,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "742.07px",
+        "top": "348.4px",
+        "width": "175.26px",
+        "height": "30.8px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "30.8px",
+        "opacity": "0.838278",
+        "overflow": "visible",
+        "width": "175.26px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 11.55,
+        "right": 13.47,
+        "top": 6.74,
+        "bottom": 6.73
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "44O-0",
+          "parentId": "441-0",
+          "text": "🇪🇺",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 753.62,
+            "top": 355.14,
+            "width": 19.25,
+            "height": 17.33
+          },
+          "textLeafIds": [
+            "44P-0"
+          ]
+        },
+        {
+          "nodeId": "44Q-0",
+          "parentId": "441-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 780.57,
+            "top": 358.99,
+            "width": 9.63,
+            "height": 9.63
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "44R-0",
+          "parentId": "441-0",
+          "text": "-1.37%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 797.9,
+            "top": 356.1,
+            "width": 48.62,
+            "height": 16
+          },
+          "textLeafIds": [
+            "44S-0"
+          ]
+        },
+        {
+          "nodeId": "44T-0",
+          "parentId": "441-0",
+          "text": "6,236.20",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 855.19,
+            "top": 357.54,
+            "width": 48.67,
+            "height": 14
+          },
+          "textLeafIds": [
+            "44U-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#69424DD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "30.8px",
+        "opacity": "0.838278",
+        "overflow": "visible",
+        "width": "175.26px",
+        "position": "absolute",
+        "left": "742.07px",
+        "top": "348.4px",
+        "translate": "-79.539px -42.7px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44N-0",
+        "parentId": "441-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "742.07px",
+            "top": "348.4px",
+            "translate": "-79.539px -42.7px",
+            "opacity": "0.838278"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "44N-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 34791,
+          "endUtf16": 35266,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "44N-0",
+            "styles": {
+              "translate": "-79.539px -42.7px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "30.8px",
+          "left": "742.07px",
+          "opacity": "0.838278",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "348.4px",
+          "translate": "-79.539px -42.7px",
+          "width": "175.26px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44N-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #D0454573 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "44X-0",
+      "parentId": "441-0",
+      "role": "China",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "458.32px",
+        "top": "390.77px",
+        "width": "178.56px",
+        "height": "29.85px",
+        "translate": "-113.595px -37px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 344.725,
+        "top": 353.77,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "458.32px",
+        "top": "390.77px",
+        "width": "178.56px",
+        "height": "29.85px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#3C527AD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "29.85px",
+        "opacity": "0.63128",
+        "overflow": "visible",
+        "width": "178.56px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 11.2,
+        "right": 23.33,
+        "top": 6.53,
+        "bottom": 6.38
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "44Y-0",
+          "parentId": "441-0",
+          "text": "🇨🇳",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 469.52,
+            "top": 397.3,
+            "width": 18.66,
+            "height": 16.79
+          },
+          "textLeafIds": [
+            "44Z-0"
+          ]
+        },
+        {
+          "nodeId": "450-0",
+          "parentId": "441-0",
+          "text": "",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 495.64,
+            "top": 401.04,
+            "width": 9.33,
+            "height": 9.33
+          },
+          "textLeafIds": []
+        },
+        {
+          "nodeId": "451-0",
+          "parentId": "441-0",
+          "text": "+1.15%",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 512.43,
+            "top": 398.24,
+            "width": 45.55,
+            "height": 16
+          },
+          "textLeafIds": [
+            "452-0"
+          ]
+        },
+        {
+          "nodeId": "453-0",
+          "parentId": "441-0",
+          "text": "3,858.25",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 566.38,
+            "top": 399.64,
+            "width": 47.17,
+            "height": 14
+          },
+          "textLeafIds": [
+            "454-0"
+          ]
+        }
+      ],
+      "layeringPlanRef": "map_backings_414",
+      "sourceExpectedStyles": {
+        "backgroundColor": "#151820ED",
+        "borderColor": "#3C527AD5",
+        "borderRadius": "999px",
+        "borderStyle": "solid",
+        "borderWidth": "1px",
+        "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px",
+        "boxSizing": "border-box",
+        "height": "29.85px",
+        "opacity": "0.63128",
+        "overflow": "visible",
+        "width": "178.56px",
+        "position": "absolute",
+        "left": "458.32px",
+        "top": "390.77px",
+        "translate": "-113.595px -37px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44X-0",
+        "parentId": "441-0",
+        "stylePatch": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "458.32px",
+            "top": "390.77px",
+            "translate": "-113.595px -37px",
+            "opacity": "0.63128"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "44X-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 37668,
+          "endUtf16": 38143,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "44X-0",
+            "styles": {
+              "translate": "-113.595px -37px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "29.85px",
+          "left": "458.32px",
+          "opacity": "0.63128",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "390.77px",
+          "translate": "-113.595px -37px",
+          "width": "178.56px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "44X-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF99 0px 1px 0px inset, #00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px;",
+        "verify": {
+          "boxShadow": "#00000052 0px -9px 15px inset, #000000B3 0px 11px 26px -10px, #3F78D873 0px 5px 18px -7px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "pageId": "p-1-0",
+      "boardId": "414-0",
+      "nodeId": "46S-0",
+      "parentId": "46O-0",
+      "role": "Explore",
+      "decision": "ALIGN_RETAINED_BACKING_TO_EXISTING_LABELS",
+      "ownRootTranslate": true,
+      "translatedDescendantIds": [],
+      "childCount": 0,
+      "identifiedSubtreeNodeCount": 1,
+      "positionAndDimensions": {
+        "position": "absolute",
+        "left": "649.94px",
+        "top": "166.56px",
+        "width": "140.12px",
+        "height": "46px",
+        "translate": "0px -3.942px",
+        "overflow": "visible"
+      },
+      "desiredPaintPatch": {
+        "boxShadow": "#00000099 0px 10px 30px -12px"
+      },
+      "paintStatusAfterPatch": "RETAINED_PAINT",
+      "fullyClearedDecorativePrimitive": false,
+      "safeQualifiedMethod": "Use root’s qualified unpainted absolute Frame wrapper at desiredPlacement with the exact native painted primitive cloned at relative0/0 and translate:none. Apply only desiredPaintPatch to the native child. Preserve opacity/radius/full border/gradient/remaining shadows on the native child, not on an added wrapper. Verify the new actual native geometry/paint and combined label stacking before root reconciles the owned prior primitive.",
+      "remainingRisk": "Own translate must not pass the ordinary root-clone path. Native child placement/paint and parent stacking still require root’s actual replacement proof. No resize, content change or label-position change is proposed.",
+      "sourceEffectivePlacementPx": {
+        "left": 649.94,
+        "top": 162.618,
+        "derivation": "left+translateX; top+translateY; all px and no other own transform/rotation/origin present."
+      },
+      "desiredPlacement": {
+        "position": "absolute",
+        "left": "649.94px",
+        "top": "166.56px",
+        "width": "140.12px",
+        "height": "46px",
+        "overflow": "visible"
+      },
+      "desiredNativeChildPlacement": {
+        "position": "relative",
+        "left": "0px",
+        "top": "0px",
+        "translate": "none"
+      },
+      "preserveNativeChildPaintStyles": {
+        "backgroundColor": "#1B1F28E6",
+        "borderRadius": "999px",
+        "boxShadow": "#00000099 0px 10px 30px -12px",
+        "boxSizing": "border-box",
+        "height": "46px",
+        "overflow": "visible",
+        "width": "140.12px"
+      },
+      "labelUnionPaddingPx": {
+        "left": 30,
+        "right": 55,
+        "top": 14.5,
+        "bottom": 13.5
+      },
+      "resizeRequired": false,
+      "labelGroups": [
+        {
+          "nodeId": "46T-0",
+          "parentId": "46O-0",
+          "text": "Explore",
+          "rectIncludingDeclaredLineBoxPx": {
+            "left": 679.94,
+            "top": 181.06,
+            "width": 55.12,
+            "height": 18
+          },
+          "textLeafIds": [
+            "46T-0"
+          ]
+        }
+      ],
+      "layeringPlan": {
+        "parentId": "46O-0",
+        "insertBeforeLabelId": "46T-0",
+        "sourceParentOffset": {
+          "left": "0px",
+          "top": "700px"
+        },
+        "desiredBoardLocalPositionPx": {
+          "left": 649.94,
+          "top": 866.56
+        },
+        "reason": "Keep the wrapper before its own Explore label inside the same existing parent."
+      },
+      "sourceExpectedStyles": {
+        "backgroundColor": "#1B1F28E6",
+        "borderRadius": "999px",
+        "boxShadow": "#FFFFFF14 0px 1px 0px inset, #00000099 0px 10px 30px -12px",
+        "boxSizing": "border-box",
+        "height": "46px",
+        "overflow": "visible",
+        "width": "140.12px",
+        "position": "absolute",
+        "left": "649.94px",
+        "top": "166.56px",
+        "translate": "0px -3.942px"
+      },
+      "sourcePatchEvidence": {
+        "batch": "01",
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "46S-0",
+        "parentId": "46O-0",
+        "stylePatch": {
+          "boxShadow": "#00000099 0px 10px 30px -12px"
+        },
+        "expectedCurrentStyles": {
+          "boxShadow": "#FFFFFF14 0px 1px 0px inset, #00000099 0px 10px 30px -12px"
+        },
+        "reasons": [
+          "Remove only the sharp directional inset edge highlight. Keep any remaining blurred depth, broad inset shading and diffuse glow exactly; keep dimensions, positioning, opacity and contents."
+        ],
+        "lanes": [
+          "shadow_gradient"
+        ],
+        "isCompanionOnly": false,
+        "textContext": "",
+        "textLeafInference": false,
+        "preservationRisk": {
+          "ownSensitiveStyles": {
+            "position": "absolute",
+            "left": "649.94px",
+            "top": "166.56px",
+            "translate": "0px -3.942px"
+          },
+          "hiddenSelfOrAncestorIds": [],
+          "hiddenDescendantIds": [],
+          "zIndexSelfOrDescendantIds": [],
+          "transformedSelfOrDescendantIds": [
+            "46S-0"
+          ]
+        },
+        "source": {
+          "auditPath": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_audit.json",
+          "auditSha256": "122b77bc601bfab31bbe0a99c3890ca6a28b33e25882715c45776a12a35d65ec",
+          "recordIndex": 4,
+          "rawSha256": "146cde7e9e6cbe76bc02497db4dd2d35989cc3cf2a3302d0babaa7f155bf87da",
+          "offsetUtf16": 54146,
+          "endUtf16": 54466,
+          "capture": {
+            "startedAt": "2026-11-08T21:20:10.534Z",
+            "completedAt": "2026-11-08T21:20:13.076Z",
+            "tool": "get_jsx",
+            "arguments": {
+              "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+              "nodeId": "414-0",
+              "format": "inline-styles",
+              "includeNodeIds": true,
+              "includeRootPositioning": true
+            }
+          }
+        },
+        "classificationSources": [
+          {
+            "path": "/workspace/scratch/5ad934bc9c22/paper_new93_audit_batches/batch_01_shadow_gradient_classification.json",
+            "sha256": "a0159588751abe116f25913003a90e2e0bdc5dd943d3fac8da88c1ed24d74886",
+            "bytes": 609121
+          }
+        ],
+        "preserveSubtreeSensitiveStyles": [
+          {
+            "nodeId": "46S-0",
+            "styles": {
+              "translate": "0px -3.942px"
+            }
+          }
+        ],
+        "identifiedSubtreeNodes": 1,
+        "rootStylePreimage": {
+          "height": "46px",
+          "left": "649.94px",
+          "overflow": "visible",
+          "position": "absolute",
+          "top": "166.56px",
+          "translate": "0px -3.942px",
+          "width": "140.12px"
+        }
+      },
+      "inputPlan": {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "pageId": "p-1-0",
+        "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+        "artboardId": "414-0",
+        "artboardName": "SOURCE ONLY · 05 · Signed-in Home · Live baseline",
+        "nodeId": "46S-0",
+        "kind": "aligned-backing-live",
+        "expected": {
+          "boxShadow": "#FFFFFF14 0px 1px 0px inset, #00000099 0px 10px 30px -12px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000099 0px 10px 30px -12px;",
+        "verify": {
+          "boxShadow": "#00000099 0px 10px 30px -12px"
+        },
+        "change": "Use qualified unpainted absolute Frame with native Rectangle child, clear source translate, retain paint and label geometry; do not route through ordinary apply_clone_style_source."
+      }
+    }
+  ],
+  "executionPhases": [
+    {
+      "id": "preflight",
+      "actions": [
+        "Use existing resolver and source helpers to resolve only exact target/parent/label/globe/utility IDs.",
+        "Fresh-read source primitive JSX/info, relevant parent child lists and immutable label/globe/Options/46P witnesses.",
+        "Run exact input predicates and preserve a recoverable native preimage through existing prepare_input_batch_source; do not call apply_clone_style_source on these12 translated roots.",
+        "Require no pending_paper_mutation, no unreconciled operation ID, no completed LiveSite backing receipt, and current write_html/move_nodes qualification."
+      ]
+    },
+    {
+      "id": "view39w",
+      "actions": [
+        "Insert unpainted wrapper/native child into39I, preserve all exact child paint except accepted shadow change.",
+        "Verify actual Frame+Rectangle type, exact paint/dimensions/local position, and translate cleared.",
+        "move_nodes: wrapper after39Z; existing39X label wrapper afternewwrapper.",
+        "Verify rowFill->wrapper->labelWrapper->3A0 order and unchanged other siblings/ancestor order.",
+        "After native pair proof, park only original39W into8QM."
+      ]
+    },
+    {
+      "id": "view8bt",
+      "actions": [
+        "Repeat the same qualified sequence inside8BF: wrapper after8BW;8BU afterwrapper;8BX follows.",
+        "Do not move84B or any Options-overlay ancestor.",
+        "After native pair proof, park only original8BT into8QM."
+      ]
+    },
+    {
+      "id": "map",
+      "actions": [
+        "Move existing435 globe to index0 under its same42M parent only if fresh order requires it; verify unchanged image identity/paint/dimensions.",
+        "Create unpainted1440x700 absolute map backing layer at0,0 in42M with first42N wrapper/native child in the same write so an empty invisible container is not omitted.",
+        "Move the new common layer immediately after435 and verify it is below all foreground.",
+        "Insert eight remaining wrappers one call each into the common layer in the specified backingOrder.",
+        "Verify allnine native pairs and keep441 after42M with all foreground relative order unchanged.",
+        "After native pair proof, park exact originalnine into8QM, retaining their IDs."
+      ]
+    },
+    {
+      "id": "explore46s",
+      "actions": [
+        "Insert unpainted wrapper at649.94,166.56 into46O with native46S child clone atrelative0,0 and translate:none.",
+        "Move the wrapper before46T only; never touch46P.",
+        "Verify own parent46O stays at0,700 and board-local wrapper position is649.94,866.56.",
+        "After native pair proof, park original46S into8QM."
+      ]
+    },
+    {
+      "id": "nativeProof",
+      "actions": [
+        "Capture and actually view the combined affected boards32E,84A,414 after old originals are parked.",
+        "Verify map stacking aboveglobe/belowlabels, both View labels aboveResearchfill yet beneath Options overlay, and Explore containment.",
+        "Verify39labelcomponents/30textleaves from ledger remain unchanged and all native child paint/styles/dimensions match.",
+        "Keep uncertain effects on their existing operation/carrier; do not auto-retry or clear parked originals.",
+        "Append new receipts to existing audit owners and preserve the original12 completed repairs byte-for-byte as historical records.",
+        "Release only the affected board working indicators after acceptance."
+      ]
+    }
+  ],
+  "proofLimits": [
+    "No fresh target read, screenshot, UI action, or Paper mutation is performed by this plan author.",
+    "New native IDs are response-derived and must never be guessed.",
+    "Computed absent translate/none is acceptable only after native geometry and exact intended placement are proven.",
+    "Final rendered acceptance remains owed by the root; static plan validation is not native proof."
+  ]
+}

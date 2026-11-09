@@ -1,0 +1,63 @@
+{
+  "schema": "TRANSMISSION_2DK_TRANSPORT_HEALTH_DIAGNOSIS_V1",
+  "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "pinnedContract": {
+    "path": "docs/PAPER_DESIGN_INTEGRATION.md",
+    "blob": "89f16b9db8ac51c9979e1fe3bdd0e6f4b2b055c3",
+    "paperLoopback": "http://127.0.0.1:29979/mcp",
+    "legacyGatewayNotSubstituted": 45024
+  },
+  "reportedTimedOutOperation": "paper-accent-estate-20261108-c4-1yg28-2dk-0-accent-refinement-added-v1",
+  "reportedTunnel": "tunnel_6ab8f4a69db08191b61677f7ebc78c05",
+  "effectStatus": "UNKNOWN_NOT_RECONCILED_BY_HEALTH_PROBE",
+  "boundedHostProbeCount": 1,
+  "maximumAuthorizedHostProbes": 2,
+  "observation": {
+    "schema": "PAPER_TRANSPORT_BOUNDED_HEALTH_V1",
+    "checkedAt": "2026-11-09T00:14:09.379757+00:00",
+    "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+    "uid": 501,
+    "pythonExecutable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "targetPid": 41169,
+    "designRequests": 0,
+    "uiActions": 0,
+    "mutations": 0,
+    "processRead": {
+      "exitCode": 0,
+      "line": "41169   501 S    01-02:15:28   0.2  2.0 /Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper"
+    },
+    "paperProcessIdentityMatched": true,
+    "paperLoopback": {
+      "port": 29979,
+      "tcpConnect": "ACCEPTED",
+      "elapsedMs": 8.73,
+      "applicationProtocolRequestSent": false
+    },
+    "state": "BOUNDED_HEALTH_OBSERVED"
+  },
+  "interpretation": [
+    "M2 is reachable through the existing RDC route.",
+    "The exact previously observed Paper process is alive and its fixed loopback TCP listener accepted a connection.",
+    "No application-protocol request was sent, so Paper MCP responsiveness is not established.",
+    "The private Mastermind Paper direct tunnel health endpoint is not retained in verified continuity; legacy Studio port 45024 is not substituted.",
+    "Only root's already-inflight original-carrier reads may reconcile the reported write effect; no replay or alternate-carrier design read was attempted."
+  ],
+  "newDesignReads": 0,
+  "newUiActions": 0,
+  "newMutations": 0,
+  "command": "python3 - <<'PY'\nimport datetime,json,os,socket,subprocess,sys,time\nr={'schema':'PAPER_TRANSPORT_BOUNDED_HEALTH_V1','checkedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'deviceId':'3f5ce987-e3eb-40a3-af9f-4b0ae54919cc','uid':os.getuid(),'pythonExecutable':sys.executable,'targetPid':41169,'designRequests':0,'uiActions':0,'mutations':0}\nif os.getuid()!=501 or sys.executable!='/opt/homebrew/opt/python@3.14/bin/python3.14':\n r['state']='PROCESS_IDENTITY_MISMATCH'\nelse:\n try:\n  p=subprocess.run(['/bin/ps','-p','41169','-o','pid=,uid=,stat=,etime=,%cpu=,%mem=,comm='],capture_output=True,text=True,timeout=1)\n  line=p.stdout.strip();r['processRead']={'exitCode':p.returncode,'line':line[:700]}\n  identity=line.endswith('/Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper')\n  r['paperProcessIdentityMatched']=identity\n  if identity:\n   began=time.monotonic()\n   try:\n    with socket.create_connection(('127.0.0.1',29979),timeout=0.75):\n     r['paperLoopback']={'port':29979,'tcpConnect':'ACCEPTED','elapsedMs':round((time.monotonic()-began)*1000,2),'applicationProtocolRequestSent':False}\n   except OSError as e:\n    r['paperLoopback']={'port':29979,'tcpConnect':'FAILED','errorClass':type(e).__name__,'errno':e.errno,'elapsedMs':round((time.monotonic()-began)*1000,2),'applicationProtocolRequestSent':False}\n  r['state']='BOUNDED_HEALTH_OBSERVED'\n except Exception as e:r.update(state='BOUNDED_HEALTH_ERROR',errorClass=type(e).__name__)\nprint(json.dumps(r))\nPY",
+  "rawReceipt": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Process started with PID 49473 (shell: /bin/zsh)\nInitial output:\n{\"schema\": \"PAPER_TRANSPORT_BOUNDED_HEALTH_V1\", \"checkedAt\": \"2026-11-09T00:14:09.379757+00:00\", \"deviceId\": \"3f5ce987-e3eb-40a3-af9f-4b0ae54919cc\", \"uid\": 501, \"pythonExecutable\": \"/opt/homebrew/opt/python@3.14/bin/python3.14\", \"targetPid\": 41169, \"designRequests\": 0, \"uiActions\": 0, \"mutations\": 0, \"processRead\": {\"exitCode\": 0, \"line\": \"41169   501 S    01-02:15:28   0.2  2.0 /Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper\"}, \"paperProcessIdentityMatched\": true, \"paperLoopback\": {\"port\": 29979, \"tcpConnect\": \"ACCEPTED\", \"elapsedMs\": 8.73, \"applicationProtocolRequestSent\": false}, \"state\": \"BOUNDED_HEALTH_OBSERVED\"}\n"
+      },
+      {
+        "type": "text",
+        "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+      }
+    ],
+    "structuredContent": null,
+    "isError": false
+  }
+}

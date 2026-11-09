@@ -1,0 +1,940 @@
+{
+  "schema": "PAPER_NATIVE_AX_READONLY_QUALIFICATION_V1",
+  "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "status": "EXACT_CACHED_FILE_BINDINGS_PROVEN_ACTIVE_VISIBLE_NODE_AND_PROPERTY_CONTROLS_UNPROVEN",
+  "route": {
+    "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+    "deviceName": "m2studio",
+    "tool": "remote_desktop_commander.start_process",
+    "launchCommand": "python3",
+    "pythonExecutable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "uid": 501,
+    "paperPid": 41169,
+    "paperExecutable": "/Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper"
+  },
+  "trust": {
+    "singleNonPromptingCheckObserved": true,
+    "api": "AXIsProcessTrusted()",
+    "withOptionsUsed": false,
+    "trusted": true,
+    "checkedAt": "2026-11-08T23:48:43.014139+00:00",
+    "repeatPolicy": "Do not repeat as a recovery loop; no permission prompt, grant, TCC read, alternative process, identity change, or installation is authorized by this record."
+  },
+  "knownContentPath": {
+    "windowIndex": 0,
+    "childIndexPath": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "observedContainerChildCount": 83,
+    "exactObservedTargets": [
+      {
+        "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+        "childIndex": 1,
+        "name": "PROPHET"
+      },
+      {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "childIndex": 25,
+        "name": "Terminal"
+      },
+      {
+        "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+        "childIndex": 78,
+        "name": "Mastermind AI"
+      }
+    ],
+    "bindingRule": "A future read must revalidate exact AXURL at the observed slot. Slot drift ends that read; do not search broadly or act on a stale slot."
+  },
+  "findings": [
+    "AXWindow AXDocument was empty and AXIdentifier had no value.",
+    "Paper AXWebArea AXURL exposed exact file IDs for the three known repair files.",
+    "All three cached WebAreas simultaneously reported AXFocused true, AXHidden false, AXEnabled true while the outer window title named a different active page; these flags do not prove the visible target.",
+    "Application-level AXFocusedUIElement returned -25212/noValue at the observed time.",
+    "No selected node, inspector control, editable attribute, or property mutation has been qualified."
+  ],
+  "forbidden": [
+    "UI actions",
+    "focus/navigation/selection changes",
+    "prepare or held prepare reproduction",
+    "ChatGPT/browser account content",
+    "raw CDP or browser automation",
+    "new OS permission or prompt",
+    "TCC database reads",
+    "runtime restart/install",
+    "alternate-process trust evasion"
+  ],
+  "selectionCatalog": {
+    "catalog_sha256": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb",
+    "server": {
+      "name": "paper-desktop",
+      "version": "0.5.18"
+    },
+    "selections": [
+      {
+        "name": "get_selection",
+        "description": "Get detailed information about the currently selected nodes, including IDs, names, component types, size, and which artboard they belong to. When no fileId is provided the file the user is viewing is used.",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "fileId": {
+              "description": "The file ID that the tool should operate on. When omitted the file the user is viewing is used.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "bridge_access": "read"
+      }
+    ],
+    "selectionNamedTools": [
+      "get_selection"
+    ],
+    "blockedTools": [
+      "open_file"
+    ],
+    "source": "Already fetched live catalog only; no selection/focus tool called."
+  },
+  "counts": {
+    "axTrustChecks": 1,
+    "axReadProcessCalls": 5,
+    "paperUiActions": 0,
+    "paperUiMutations": 0,
+    "paperSelectionToolCalls": 0
+  },
+  "receipts": [
+    {
+      "key": "native_paper_ui_ax_preflight",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:48:43.014139+00:00",
+        "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+        "check": "AXIsProcessTrusted()",
+        "promptOptionsUsed": false,
+        "trusted": true,
+        "pythonExecutable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "pid": 37565,
+        "uid": 501,
+        "uiReadPerformed": false,
+        "uiActionPerformed": false,
+        "paperProcessInventory": [
+          {
+            "pid": 41169,
+            "executable": "/Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper"
+          }
+        ]
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 37565 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:48:43.014139+00:00\", \"deviceId\": \"3f5ce987-e3eb-40a3-af9f-4b0ae54919cc\", \"check\": \"AXIsProcessTrusted()\", \"promptOptionsUsed\": false, \"trusted\": true, \"pythonExecutable\": \"/opt/homebrew/opt/python@3.14/bin/python3.14\", \"pid\": 37565, \"uid\": 501, \"uiReadPerformed\": false, \"uiActionPerformed\": false, \"paperProcessInventory\": [{\"pid\": 41169, \"executable\": \"/Users/chriswong/Applications/Paper.app/Contents/MacOS/Paper\"}]}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    },
+    {
+      "key": "native_paper_window_identity_read",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:49:58.828954+00:00",
+        "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+        "targetPid": 41169,
+        "pythonExecutable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "uid": 501,
+        "allowedAttributes": [
+          "AXWindows",
+          "AXRole",
+          "AXSubrole",
+          "AXTitle",
+          "AXIdentifier",
+          "AXDocument"
+        ],
+        "uiActionPerformed": false,
+        "trustCheckRepeated": false,
+        "AXWindowsError": {
+          "code": 0,
+          "name": "success"
+        },
+        "windowCount": 1,
+        "windows": [
+          {
+            "windowIndex": 0,
+            "AXRole": {
+              "error": 0,
+              "errorName": "success",
+              "value": "AXWindow"
+            },
+            "AXSubrole": {
+              "error": 0,
+              "errorName": "success",
+              "value": "AXStandardWindow"
+            },
+            "AXTitle": {
+              "error": 0,
+              "errorName": "success",
+              "value": "Expectation Surface · R1 · 2026-10-21"
+            },
+            "AXIdentifier": {
+              "error": -25212,
+              "errorName": "noValue"
+            },
+            "AXDocument": {
+              "error": 0,
+              "errorName": "success",
+              "value": ""
+            }
+          }
+        ]
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 42404 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:49:58.828954+00:00\", \"deviceId\": \"3f5ce987-e3eb-40a3-af9f-4b0ae54919cc\", \"targetPid\": 41169, \"pythonExecutable\": \"/opt/homebrew/opt/python@3.14/bin/python3.14\", \"uid\": 501, \"allowedAttributes\": [\"AXWindows\", \"AXRole\", \"AXSubrole\", \"AXTitle\", \"AXIdentifier\", \"AXDocument\"], \"uiActionPerformed\": false, \"trustCheckRepeated\": false, \"AXWindowsError\": {\"code\": 0, \"name\": \"success\"}, \"windowCount\": 1, \"windows\": [{\"windowIndex\": 0, \"AXRole\": {\"error\": 0, \"errorName\": \"success\", \"value\": \"AXWindow\"}, \"AXSubrole\": {\"error\": 0, \"errorName\": \"success\", \"value\": \"AXStandardWindow\"}, \"AXTitle\": {\"error\": 0, \"errorName\": \"success\", \"value\": \"Expectation Surface \\u00b7 R1 \\u00b7 2026-10-21\"}, \"AXIdentifier\": {\"error\": -25212, \"errorName\": \"noValue\"}, \"AXDocument\": {\"error\": 0, \"errorName\": \"success\", \"value\": \"\"}}]}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    },
+    {
+      "key": "native_paper_bounded_metadata",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:56:00.276084+00:00",
+        "targetPid": 41169,
+        "uid": 501,
+        "scope": "Paper-only AX tree metadata, maximum depth4 and80 elements; no AXValue or actions",
+        "windowsError": 0,
+        "nodes": [
+          {
+            "path": "window0",
+            "depth": 0,
+            "AXRole": "AXWindow",
+            "AXSubrole": "AXStandardWindow",
+            "AXTitle": "Sector Intelligence · R4 · Astra Pro · 2026-11-02",
+            "AXDocument": "",
+            "AXURL": {
+              "error": -25205
+            },
+            "childCount": 4
+          },
+          {
+            "path": "window0/0",
+            "depth": 1,
+            "AXRole": "AXGroup",
+            "AXTitle": "Sector Intelligence · R4 · Astra Pro · 2026-11-02",
+            "AXDescription": "",
+            "childCount": 1
+          },
+          {
+            "path": "window0/0/0",
+            "depth": 2,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXDescription": "",
+            "childCount": 1
+          },
+          {
+            "path": "window0/0/0/0",
+            "depth": 3,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXDescription": "",
+            "childCount": 1
+          },
+          {
+            "path": "window0/0/0/0/0",
+            "depth": 4,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXDescription": ""
+          },
+          {
+            "path": "window0/1",
+            "depth": 1,
+            "AXRole": "AXButton",
+            "AXSubrole": "AXCloseButton"
+          },
+          {
+            "path": "window0/2",
+            "depth": 1,
+            "AXRole": "AXButton",
+            "AXSubrole": "AXFullScreenButton",
+            "childCount": 1
+          },
+          {
+            "path": "window0/2/0",
+            "depth": 2,
+            "AXRole": "AXGroup",
+            "childCount": 1
+          },
+          {
+            "path": "window0/2/0/0",
+            "depth": 3,
+            "AXRole": "AXGroup",
+            "childCount": 0
+          },
+          {
+            "path": "window0/3",
+            "depth": 1,
+            "AXRole": "AXButton",
+            "AXSubrole": "AXMinimizeButton"
+          }
+        ],
+        "windowCount": 1
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 68416 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:56:00.276084+00:00\", \"targetPid\": 41169, \"uid\": 501, \"scope\": \"Paper-only AX tree metadata, maximum depth4 and80 elements; no AXValue or actions\", \"windowsError\": 0, \"nodes\": [{\"path\": \"window0\", \"depth\": 0, \"AXRole\": \"AXWindow\", \"AXSubrole\": \"AXStandardWindow\", \"AXTitle\": \"Sector Intelligence \\u00b7 R4 \\u00b7 Astra Pro \\u00b7 2026-11-02\", \"AXDocument\": \"\", \"AXURL\": {\"error\": -25205}, \"childCount\": 4}, {\"path\": \"window0/0\", \"depth\": 1, \"AXRole\": \"AXGroup\", \"AXTitle\": \"Sector Intelligence \\u00b7 R4 \\u00b7 Astra Pro \\u00b7 2026-11-02\", \"AXDescription\": \"\", \"childCount\": 1}, {\"path\": \"window0/0/0\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"childCount\": 1}, {\"path\": \"window0/0/0/0\", \"depth\": 3, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"childCount\": 1}, {\"path\": \"window0/0/0/0/0\", \"depth\": 4, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\"}, {\"path\": \"window0/1\", \"depth\": 1, \"AXRole\": \"AXButton\", \"AXSubrole\": \"AXCloseButton\"}, {\"path\": \"window0/2\", \"depth\": 1, \"AXRole\": \"AXButton\", \"AXSubrole\": \"AXFullScreenButton\", \"childCount\": 1}, {\"path\": \"window0/2/0\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"childCount\": 1}, {\"path\": \"window0/2/0/0\", \"depth\": 3, \"AXRole\": \"AXGroup\", \"childCount\": 0}, {\"path\": \"window0/3\", \"depth\": 1, \"AXRole\": \"AXButton\", \"AXSubrole\": \"AXMinimizeButton\"}], \"windowCount\": 1}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    },
+    {
+      "key": "native_paper_content_chain_metadata",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:56:23.070022+00:00",
+        "targetPid": 41169,
+        "uid": 501,
+        "scope": "Follow only observed content-group branch; maximum16 levels and24 sibling metadata records; no AXValue, UI action, accessibility setting, or trust recheck",
+        "nodes": [
+          {
+            "depth": 1,
+            "AXRole": "AXGroup",
+            "AXTitle": "Sector Intelligence · R4 · Astra Pro · 2026-11-02",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 1
+          },
+          {
+            "depth": 2,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 1
+          },
+          {
+            "depth": 3,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 1
+          },
+          {
+            "depth": 4,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 1
+          },
+          {
+            "depth": 5,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 1
+          },
+          {
+            "depth": 6,
+            "AXRole": "AXGroup",
+            "AXTitle": "",
+            "AXIdentifier": {
+              "error": -25212
+            },
+            "childCount": 83,
+            "childrenMetadata": [
+              {
+                "index": 0,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 1,
+                "AXRole": "AXWebArea",
+                "AXTitle": "PROPHET · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 2,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Market Memory · Revision evidence · R1 · 2026-11-05 · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 3,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Terminal · Options R1 · Design Upgrade · 2026-10-21 · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 4,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21 · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 5,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Macro · Policy Monitor · Production Design · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 6,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Mastermind Product Design System — Canonical · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 7,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Jolly vase · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5HDPF3HSZFJJAFMARVQSHZR/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 8,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper MCP write-path verification · design-lead · 2026-11-08 · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M6XNXMVK65A0JRXKJHXT7ZCF",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 9,
+                "AXRole": "AXWebArea",
+                "AXTitle": "MASTERMIND PAGES (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5HVW84WZFE62DREB6QB9ZDJ/p-24-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 10,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Mastermind · Market Guide · Re-envisioning · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 11,
+                "AXRole": "AXWebArea",
+                "AXTitle": "AERLOR — Hospitality Website & Design System · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 12,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper E2E acceptance — file+page+order verified · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5JRN1HWF62YK527NKCY7WD5/p-2-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 13,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper visual row guard canary 2026-10-22 (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5K0V5AGPSDXKA2K1PH1ABNE/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 14,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper reviewed deletion regression 2026-10-22 (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5JV8SY6WP21H72WKK7GJ5R6/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 15,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper exact Copy link canary 2026-10-22 (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5K3WQXMD1QKXM2SBD7VABW1/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 16,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Young harmony (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5JKR6H0JNN07BA3YKQDXBNC/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 17,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Paper E2E acceptance — file+page+order verified (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5JS8TNZKQ01SJS4D0S9VQFC/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 18,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Mastermind Paper v20 Scratch Acceptance 2026-11-04 · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M6JA41WWACWMRRVMVX1NQP9K/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 19,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Young harmony · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5HPWFPQ2Z5X79A9H8MJFKK0/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 20,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Young harmony (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5HQ8VMMY87NVDENZAGJNYKM/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 21,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Young harmony (copy) · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M5HRAG5659SFE58D3PTA7D0V/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 22,
+                "AXRole": "AXWebArea",
+                "AXTitle": "DUPLICATE DO NOT EDIT · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M3NQQ5KHTEZ50AGPT3RAD4BN/p-1-0",
+                "AXDocument": {
+                  "error": -25212
+                }
+              },
+              {
+                "index": 23,
+                "AXRole": "AXWebArea",
+                "AXTitle": "International Markets · Core + Global Surveillance · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "AXURL": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG",
+                "AXDocument": {
+                  "error": -25212
+                }
+              }
+            ]
+          }
+        ],
+        "windowTitle": "Sector Intelligence · R4 · Astra Pro · 2026-11-02",
+        "stoppedAt": "branchOrLeaf"
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 70135 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:56:23.070022+00:00\", \"targetPid\": 41169, \"uid\": 501, \"scope\": \"Follow only observed content-group branch; maximum16 levels and24 sibling metadata records; no AXValue, UI action, accessibility setting, or trust recheck\", \"nodes\": [{\"depth\": 1, \"AXRole\": \"AXGroup\", \"AXTitle\": \"Sector Intelligence \\u00b7 R4 \\u00b7 Astra Pro \\u00b7 2026-11-02\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"depth\": 3, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"depth\": 4, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"depth\": 5, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"depth\": 6, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 83, \"childrenMetadata\": [{\"index\": 0, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}, {\"index\": 1, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"PROPHET \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 2, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Market Memory \\u00b7 Revision evidence \\u00b7 R1 \\u00b7 2026-11-05 \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 3, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Terminal \\u00b7 Options R1 \\u00b7 Design Upgrade \\u00b7 2026-10-21 \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 4, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Terminal \\u00b7 Options R1 \\u00b7 Design Upgrade \\u00b7 W3 mobile \\u00b7 2026-10-21 \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 5, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Macro \\u00b7 Policy Monitor \\u00b7 Production Design \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 6, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Mastermind Product Design System \\u2014 Canonical \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 7, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Jolly vase \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5HDPF3HSZFJJAFMARVQSHZR/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 8, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper MCP write-path verification \\u00b7 design-lead \\u00b7 2026-11-08 \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M6XNXMVK65A0JRXKJHXT7ZCF\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 9, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"MASTERMIND PAGES (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5HVW84WZFE62DREB6QB9ZDJ/p-24-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 10, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Mastermind \\u00b7 Market Guide \\u00b7 Re-envisioning \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 11, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"AERLOR \\u2014 Hospitality Website & Design System \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 12, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper E2E acceptance \\u2014 file+page+order verified \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5JRN1HWF62YK527NKCY7WD5/p-2-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 13, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper visual row guard canary 2026-10-22 (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5K0V5AGPSDXKA2K1PH1ABNE/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 14, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper reviewed deletion regression 2026-10-22 (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5JV8SY6WP21H72WKK7GJ5R6/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 15, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper exact Copy link canary 2026-10-22 (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5K3WQXMD1QKXM2SBD7VABW1/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 16, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Young harmony (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5JKR6H0JNN07BA3YKQDXBNC/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 17, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Paper E2E acceptance \\u2014 file+page+order verified (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5JS8TNZKQ01SJS4D0S9VQFC/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 18, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Mastermind Paper v20 Scratch Acceptance 2026-11-04 \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M6JA41WWACWMRRVMVX1NQP9K/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 19, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Young harmony \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5HPWFPQ2Z5X79A9H8MJFKK0/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 20, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Young harmony (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5HQ8VMMY87NVDENZAGJNYKM/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 21, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Young harmony (copy) \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M5HRAG5659SFE58D3PTA7D0V/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 22, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"DUPLICATE DO NOT EDIT \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M3NQQ5KHTEZ50AGPT3RAD4BN/p-1-0\", \"AXDocument\": {\"error\": -25212}}, {\"index\": 23, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"International Markets \\u00b7 Core + Global Surveillance \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"AXURL\": \"https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG\", \"AXDocument\": {\"error\": -25212}}]}], \"windowTitle\": \"Sector Intelligence \\u00b7 R4 \\u00b7 Astra Pro \\u00b7 2026-11-02\", \"stoppedAt\": \"branchOrLeaf\"}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    },
+    {
+      "key": "native_paper_exact_target_metadata",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:57:05.049751+00:00",
+        "targetPid": 41169,
+        "uid": 501,
+        "scope": "Known83-child Paper content container only; exact known file IDs; metadata-only first2 child levels per match; no values/actions",
+        "matches": [
+          {
+            "containerChildIndex": 1,
+            "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "name": "PROPHET",
+            "AXURL": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0",
+            "AXTitle": "PROPHET · Paper",
+            "AXFocused": true,
+            "AXHidden": false,
+            "AXEnabled": true,
+            "nodes": [
+              {
+                "path": "webarea",
+                "depth": 0,
+                "AXRole": "AXWebArea",
+                "AXTitle": "PROPHET · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 1
+              },
+              {
+                "path": "webarea/0",
+                "depth": 1,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 3
+              },
+              {
+                "path": "webarea/0/0",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              },
+              {
+                "path": "webarea/0/1",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              },
+              {
+                "path": "webarea/0/2",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              }
+            ]
+          },
+          {
+            "containerChildIndex": 25,
+            "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal",
+            "AXURL": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM",
+            "AXTitle": "Terminal · Paper",
+            "AXFocused": true,
+            "AXHidden": false,
+            "AXEnabled": true,
+            "nodes": [
+              {
+                "path": "webarea",
+                "depth": 0,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Terminal · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 1
+              },
+              {
+                "path": "webarea/0",
+                "depth": 1,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 1
+              },
+              {
+                "path": "webarea/0/0",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              }
+            ]
+          },
+          {
+            "containerChildIndex": 78,
+            "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+            "name": "Mastermind AI",
+            "AXURL": "https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1",
+            "AXTitle": "Mastermind AI · Paper",
+            "AXFocused": true,
+            "AXHidden": false,
+            "AXEnabled": true,
+            "nodes": [
+              {
+                "path": "webarea",
+                "depth": 0,
+                "AXRole": "AXWebArea",
+                "AXTitle": "Mastermind AI · Paper",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 1
+              },
+              {
+                "path": "webarea/0",
+                "depth": 1,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                },
+                "childCount": 3
+              },
+              {
+                "path": "webarea/0/0",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              },
+              {
+                "path": "webarea/0/1",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              },
+              {
+                "path": "webarea/0/2",
+                "depth": 2,
+                "AXRole": "AXGroup",
+                "AXTitle": "",
+                "AXDescription": "",
+                "AXIdentifier": {
+                  "error": -25212
+                }
+              }
+            ]
+          }
+        ],
+        "windowTitle": "News Intelligence · R3 Ledger + R2 States",
+        "containerChildCount": 83
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 74237 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:57:05.049751+00:00\", \"targetPid\": 41169, \"uid\": 501, \"scope\": \"Known83-child Paper content container only; exact known file IDs; metadata-only first2 child levels per match; no values/actions\", \"matches\": [{\"containerChildIndex\": 1, \"fileId\": \"01M3NT5Y3G5HTJHVR0K5W2MDJM\", \"name\": \"PROPHET\", \"AXURL\": \"https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0\", \"AXTitle\": \"PROPHET \\u00b7 Paper\", \"AXFocused\": true, \"AXHidden\": false, \"AXEnabled\": true, \"nodes\": [{\"path\": \"webarea\", \"depth\": 0, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"PROPHET \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"path\": \"webarea/0\", \"depth\": 1, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 3}, {\"path\": \"webarea/0/0\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}, {\"path\": \"webarea/0/1\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}, {\"path\": \"webarea/0/2\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}]}, {\"containerChildIndex\": 25, \"fileId\": \"01M3NSZGE8JWN2EZCSF0DT05RM\", \"name\": \"Terminal\", \"AXURL\": \"https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM\", \"AXTitle\": \"Terminal \\u00b7 Paper\", \"AXFocused\": true, \"AXHidden\": false, \"AXEnabled\": true, \"nodes\": [{\"path\": \"webarea\", \"depth\": 0, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Terminal \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"path\": \"webarea/0\", \"depth\": 1, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"path\": \"webarea/0/0\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}]}, {\"containerChildIndex\": 78, \"fileId\": \"01M3P1QEHS5XXQY85BJT6QR2E1\", \"name\": \"Mastermind AI\", \"AXURL\": \"https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1\", \"AXTitle\": \"Mastermind AI \\u00b7 Paper\", \"AXFocused\": true, \"AXHidden\": false, \"AXEnabled\": true, \"nodes\": [{\"path\": \"webarea\", \"depth\": 0, \"AXRole\": \"AXWebArea\", \"AXTitle\": \"Mastermind AI \\u00b7 Paper\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 1}, {\"path\": \"webarea/0\", \"depth\": 1, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}, \"childCount\": 3}, {\"path\": \"webarea/0/0\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}, {\"path\": \"webarea/0/1\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}, {\"path\": \"webarea/0/2\", \"depth\": 2, \"AXRole\": \"AXGroup\", \"AXTitle\": \"\", \"AXDescription\": \"\", \"AXIdentifier\": {\"error\": -25212}}]}], \"windowTitle\": \"News Intelligence \\u00b7 R3 Ledger + R2 States\", \"containerChildCount\": 83}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    },
+    {
+      "key": "native_paper_focus_ancestry",
+      "tool": "remote_desktop_commander.start_process",
+      "observations": {
+        "checkedAt": "2026-11-08T23:57:33.922860+00:00",
+        "targetPid": 41169,
+        "uid": 501,
+        "scope": "Paper AXFocusedUIElement and maximum20 parent metadata nodes only; no action or values",
+        "focusedElementError": -25212,
+        "ancestry": []
+      },
+      "rawToolReceipt": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 77132 (shell: /bin/zsh)\nInitial output:\n{\"checkedAt\": \"2026-11-08T23:57:33.922860+00:00\", \"targetPid\": 41169, \"uid\": 501, \"scope\": \"Paper AXFocusedUIElement and maximum20 parent metadata nodes only; no action or values\", \"focusedElementError\": -25212, \"ancestry\": []}\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    }
+  ]
+}
