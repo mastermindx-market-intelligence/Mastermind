@@ -639,16 +639,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-# Successor enrollment keeps these six reviewed literals and enclosing calls
-# unchanged; only intervening control flow moves five spans. The exact full
-# postimage was re-reviewed without adding an identity or numeric exception.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '1264fbc0a591aacf02fe2fe42b04b957752331154f2a11d22a33ec37330440d1',
+# Original-transaction recovery keeps these six literal tokens, their enclosing
+# owners and calls unchanged. Root re-reviewed the full recovery diff and these
+# exact moved spans; no identity/numeric exception or scanner rule is added.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'e8c812d6bc11a00a00db0fbb0bf4b60ff354c3b4ff9fcce18e3e11cebe45d0b0',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6995, 35, 37, 'int', '80'),
-           (6996, 50, 55, 'int', '0o755'),
-           (7876, 41, 46, 'int', '0o644'),
-           (8662, 64, 69, 'int', '0o644'),
-           (10074, 41, 46, 'int', '0o644'))}
+           (7008, 35, 37, 'int', '80'),
+           (7009, 50, 55, 'int', '0o755'),
+           (7889, 41, 46, 'int', '0o644'),
+           (8689, 64, 69, 'int', '0o644'),
+           (10104, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
