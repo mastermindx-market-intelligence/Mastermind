@@ -1,0 +1,81 @@
+{
+  "schema": "pbr-w1-source-rulings/v1",
+  "mission": "Mastermind #1693 covering release; Persistent Sector Leadership #1202 consumer",
+  "original_branch": "claude/ssd-pbr-runtime-85f3de87bc7b8894",
+  "parent": "91b281fe2ca88bf6f6cf32f5b530a8bbc84e7da9",
+  "qualified_target": "3652d8907df1738de551dd3032b42aa2a2acb482",
+  "live_master_checked": "6696153d323e3ab712884fa60cdf7bda6dbe5ce6",
+  "installed_old": "ff16c192cc7b932e59c28c4fe30aeaf27bcb7595",
+  "driver_preimage_sha256": "a796af3f194a5673716613511dde2f74404b8cd89fe37021380112138955abfb",
+  "runbook_preimage_sha256": "f60d98aec6238ef9f2122c6dd265b37b73fbc15508c57b30d9cfeed881b5312b",
+  "pbr_rb_preimage_sha256": "536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac",
+  "test_preimage_sha256": "5f1b637da97e11c9b50caac473580f02bdea26d40ff62b690c5674d9ecd7a57d",
+  "source_sha256": {
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/install_w1.sh": "3dd869109715307eb5ba90df69f3ef169be71e482e4ff81f41def2bc6ec39482",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/pbr_rb.py": "e7d9a16b3dbe5e9ed085d0de7ece79590046f3b3a363cc41b84b84c93030c68a",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/test_install_w1_jsonschema.py": "21e7c4dade256a52a39b5f98112ce10e4feb26c1d57d29a87f841145cc56f298",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/remote_blob_manifest.py": "49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/remote_dists.py": "b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/INSTALL_RUNBOOK.md": "220ade325cfd55f8e223a9b25a63e362a1d06d3c68548e84fd0690bee85736f8"
+  },
+  "rulings": {
+    "D-G7A-3": "Exact complete six-path OLD/target manifest: the D-G7A-2 bundle with #2175 target blobs for app/main.py (ca6886c3) and app/scheduler.py (eb9840ad); deploy scripts unchanged; mixes with D-G7A-2 STOP. Fabric path is selection-gated; rb health refuses non-waterfall backend or non-codex-first policy.",
+    "D-G7B-5": "Exact four-path manifest: D-G7B-4 OLD side, #2228/#2297 targets for pyproject (jsonschema line plus inert package-data stanza) and both comment-only gate locks, plus the test-only requirements/hermes-transport-observation-test.in absent at OLD. T2 equal; the D-G7B-4 runtime condition applies unchanged with ruling D-G7B-5."
+  },
+  "r8c_punch_list": {
+    "MINOR_1_hash_sites": "runbook pins table and bootstrap shasum both name 3dd86910",
+    "MINOR_2_s0_unreadable_g7b": "g7b_ruled_mode rc 1 STOPs at s0 (selftest g4_ruled_unreadable)",
+    "MINOR_3_provenance": "runbook D-G7A-2 provenance cites f32ad4eb, the qualified source",
+    "NIT_1_s4_message": "T2 STOP names the compatibility failure reason",
+    "NIT_2_one_hash": "selftest and fixture both ran at driver 3dd86910",
+    "section_A_seat_wt": "driver and runbook SEAT_WT = pbr-runtime-rev3-22e74a0f5c56c38e"
+  },
+  "qualification": {
+    "syntax_rc": 0,
+    "source_selftest": {
+      "cases": 122,
+      "rc": 0,
+      "seconds": 54,
+      "driver_sha256": "3dd869109715307eb5ba90df69f3ef169be71e482e4ff81f41def2bc6ec39482",
+      "log_sha256": "7b07c6b720710b0212e7e3bc69691ca0d496f88f91d1f6e4d3f65aed75ba9d28",
+      "live_composition": "g5_ruled_live OLD..origin/master@6696153d -> D-G7B-5; a15_live_pr2175 -> D-G7A-3"
+    },
+    "actual_target_g7a": {
+      "rc": 0,
+      "mode": "D-G7A-3",
+      "origin_master": "6696153d",
+      "log_sha256": "1dbf046331422db4b3f31d39904ea34ec07bb866f0b37ca80540506ddd7d98dd"
+    },
+    "runtime_condition_offline": {
+      "tests": 15,
+      "rc": 0,
+      "seconds": 19,
+      "driver_sha256": "3dd869109715307eb5ba90df69f3ef169be71e482e4ff81f41def2bc6ec39482",
+      "test_sha256": "21e7c4dade256a52a39b5f98112ce10e4feb26c1d57d29a87f841145cc56f298",
+      "log_sha256": "34df39a7f2e776e3d6a9a17dd22573ba931095956157bee0e277a868a8baf494"
+    },
+    "pbr_rb_health_selfcheck": {
+      "legacy_waterfall_codex_first": 0,
+      "fabric_backend_and_policy": 3,
+      "waterfall_with_fabric_policy": 3,
+      "fields_absent": 3,
+      "log_sha256": "9efb08525abc003e7099b22e76e1c44dfd7166938a1a82b48f5ec9f67db8aeed",
+      "rollback_note": "OLD ff16c192 /health reports reasoning_backend from brain client and a fixed codex-first policy; reasoning_policy_ok already required waterfall, so the OLD rollback health gate is unchanged."
+    }
+  },
+  "self_review": "SELF_REVIEWED; independent fabric review r9 pending; not a GitHub APPROVED review",
+  "effects": {
+    "ssh_or_vps_query": false,
+    "runtime_pin_changed": false,
+    "wake_changed": false,
+    "deployment_started": false
+  },
+  "retained_evidence": "/Volumes/Mastermind/evidence/pbr/runbook-reviews/rev38-qualification",
+  "remaining": [
+    "Fabric review r9 of rev 3.8",
+    "Merge freeze (T3) held through s3 of the Tue 2026-11-10 W1 window",
+    "2026-11-10 window and original live gates; s0 re-evaluates the actual frozen target",
+    "Fresh T2 compatibility at s1/prelaunch/s4",
+    "Exact covering release identity and natural consumer proof"
+  ]
+}

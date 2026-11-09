@@ -1,4 +1,4 @@
-"""Offline W1 D-G7B-4 tests. The SSH executable is a local fixture; no host access."""
+"""Offline W1 D-G7B-4 / D-G7B-5 tests. The SSH executable is a local fixture; no host access."""
 import hashlib
 import json
 import os
@@ -82,7 +82,7 @@ class JsonschemaConditionTests(unittest.TestCase):
             "SHA=" + self.target, "WT=fixture", "G7B_MODE=D-G7B-4", "T2_MODE=equal",
             "PY=" + shlex.quote(sys.executable),
             "VPS=(" + shlex.quote(str(self.ssh)) + " fixture-host)",
-            "g7b_jsonschema_pair() { return 0; }",
+            "g7b_jsonschema_pair() { return 0; }", "g7b_d5_manifest() { return 1; }",
         ]) + "\n"
 
     def tearDown(self):
@@ -154,6 +154,33 @@ class JsonschemaConditionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(proof.exists())
         self.assertFalse(self.trace.exists())
+
+    D5 = "G7B_MODE=D-G7B-5\ng7b_jsonschema_pair() { return 1; }\ng7b_d5_manifest() { return 0; }\n"
+
+    def test_d5_ruling_binds_every_phase(self):
+        result, proof = self.condition(before=self.D5)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(proof.read_text())["ruling"], "D-G7B-5")
+        for phase in ("prelaunch", "post"):
+            result, proof = self.condition(phase, before=self.D5)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(json.loads(proof.read_text())["ruling"], "D-G7B-5")
+
+    def test_d5_source_with_wrong_missing_or_unreadable_state_refuses(self):
+        for before in (self.D5 + "G7B_MODE=D-G7B-4\n", self.D5 + "unset G7B_MODE\n", self.D5 + "G7B_MODE=legacy\n",
+                       self.D5 + "T2_MODE=floor_pending\n", self.D5 + "g7b_d5_manifest() { return 2; }\n"):
+            with self.subTest(before=before):
+                result, proof = self.condition(before=before)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(proof.exists())
+                self.assertFalse(self.trace.exists())
+
+    def test_cross_ruling_baseline_refuses(self):
+        self.establish_pre()
+        result, proof = self.condition("prelaunch", before=self.D5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("D-G7B-5 runtime condition REFUSED", result.stderr)
+        self.assertFalse(proof.exists())
 
     def test_missing_prior_proof_refuses_without_contact(self):
         result, proof = self.condition("prelaunch")

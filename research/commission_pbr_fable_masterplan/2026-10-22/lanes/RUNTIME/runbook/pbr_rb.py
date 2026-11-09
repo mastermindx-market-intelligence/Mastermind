@@ -201,6 +201,9 @@ def cmd_health(args):
         "commit": body.get("commit") == args.sha,
         "reasoning_policy_ok": body.get("reasoning_policy_ok") is True,
         "scheduled_runtime_ok": body.get("scheduled_runtime_ok") is True,
+        # rev 3.8 / D-G7A-3: W1 installs the legacy reasoning selection only; a Fabric-selected service is refused
+        "reasoning_backend": body.get("reasoning_backend") == "waterfall",
+        "reasoning_policy": body.get("reasoning_policy") == "codex_first_claude_oauth_fallback",
     }
     return verdict("health", all(checks.values()), observed_commit=body.get("commit"), **checks)
 
