@@ -1769,6 +1769,29 @@ def _paper_design_config(
     }
 
 
+def _publication_upgrade_paper_config(
+    account: str, previous_config: dict, user_root: Path,
+) -> dict | None:
+    """Retain the fixed publication seat's qualified, already selected v20."""
+    if account != "mastermind-os-publication" or "paperDesign" not in previous_config:
+        return None
+    paper = previous_config["paperDesign"]
+    if (type(paper) is not dict or paper.get("enabled") is not True
+            or type(paper.get("commandTimeoutMs")) is not int):
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    if paper == _paper_design_config(user_root):
+        return None
+    expected = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256,
+    )
+    if paper != expected:
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    _verify_paper_runtime(
+        user_root, runtime_rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256,
+    )
+    return expected
+
+
 def _fleet_status_config(user_root: Path) -> dict | None:
     launcher = user_root / FLEET_STATUS_LAUNCHER_REL
     if not launcher.exists():
@@ -5178,23 +5201,38 @@ def cmd_upgrade(args) -> int:
         )
         _verify_upgrade_preserves_installed_fleet_capabilities(
             prior, roots, projected)
-    # Preserve the existing restricted profile; do not silently restore tools.
-    if not fabric_only:
-        _verify_paper_runtime(_user_root())
-
-    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
-    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
-    retained_config = None
     retained_raw = _fabric_release_bytes(roots["config"])
     if hashlib.sha256(retained_raw).hexdigest() != prior["configHash"]:
         raise SystemExit("original upgrade configuration changed")
     previous_config = _original_json(retained_raw.decode("utf-8"))
+    # Keep the existing restricted profile and the fixed publication seat's
+    # already selected Paper generation. Runtime qualification precedes writes.
+    retained_paper = None
+    if not fabric_only:
+        retained_paper = _publication_upgrade_paper_config(account, previous_config, _user_root())
+        if retained_paper is None:
+            _verify_paper_runtime(_user_root())
+
+    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
+    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
+    retained_config = None
     if previous_config.get("originalCollection") is not None:
         retained_config = dict(previous_config)
         if original_collection is None:
             retained_config.pop("originalCollection")
         else:
             retained_config["originalCollection"] = original_collection
+    if retained_paper is not None:
+        # Rebuild through the normal owner so an explicitly refreshed commission
+        # digest still takes effect; retain only the exact qualified Paper member.
+        if retained_config is None:
+            retained_config = _build_config(
+                account, host, port, node_abs, backend_abs, roots["state"], _user_root(),
+                repository_workspaces=repository_workspaces, commission_digest=commission_digest,
+                fabric_only=fabric_only, modern_fabric=modern_fabric,
+                original_collection=original_collection,
+            )
+        retained_config["paperDesign"] = retained_paper
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
