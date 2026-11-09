@@ -104,11 +104,11 @@ tokens; the source-changing commit is named at each pin. No pin was deleted,
 skipped, xfailed or weakened.
 
 1. `tests/executive_fabric_release_identity_review.py` `REVIEWED_FILES`:
-   - `integrations/mastermind_workspace_app/app.py` → sha256 `f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95`; sites rows 927/938/946/952/961/971/976/982 → **928/939/947/953/962/972/977/983** (same columns; values 400/403/400/400/400/403/503/403 unchanged). Source commit `<COMMIT1>` (+1 line, the fence/route admission).
-   - `control_plane/workspace_read_service.py` → sha256 `4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1`; sites `((719,93,96),(721,56,59),(728,46,49),(729,56,59))` → **`((723,93,96),(725,56,59),(732,46,49),(733,56,59))`** all `'403'`. Source commit `<COMMIT1>` (+4 lines, the trusted-source constructor guard).
-2. `tests/executive_company_identity_review.py` anchor `_handle_ceo_ingress_connection`: `source_sha256` `21754f04…` → **`af0a97de9bfc503db756626d0eacf65876848473cfb2230d8fbe478c9bb5c1cc`**; `ast_sha256` `27f53e56…` → **`8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912`**; relative site paths `'body', 59` → **`'body', 60`** for the three ingress denial operands (spellings unchanged; deeper indexes held; verified same literals resolve at lines 6056/6069/6071 before recording). Source commit `<COMMIT1>` (one import + one elif inside the reviewed method). This anchor is shared by `tests/test_company_consultation_identity_review.py` (no separate edit needed).
-3. `tests/test_workspace_fabric_review_pins.py`: `STATUS_SITES` `((6048,66,69),(6061,74,77),(6063,75,78))` → **`((6056,66,69),(6069,74,77),(6071,75,78))`** (`executive_service.py` rows). Source commit `<COMMIT1>`.
-4. `tests/test_workspace_control_room_review_pins.py`: `EXPECTED[HTTP_PATH]` rows 927/938/946/952/961/971/976/982 → **928/939/947/953/962/972/977/983** (same columns). Source commit `<COMMIT1>`.
+   - `integrations/mastermind_workspace_app/app.py` → sha256 `f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95`; sites rows 927/938/946/952/961/971/976/982 → **928/939/947/953/962/972/977/983** (same columns; values 400/403/400/400/400/403/503/403 unchanged). Source commit ``108e84da3`` (+1 line, the fence/route admission).
+   - `control_plane/workspace_read_service.py` → sha256 `4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1`; sites `((719,93,96),(721,56,59),(728,46,49),(729,56,59))` → **`((723,93,96),(725,56,59),(732,46,49),(733,56,59))`** all `'403'`. Source commit ``108e84da3`` (+4 lines, the trusted-source constructor guard).
+2. `tests/executive_company_identity_review.py` anchor `_handle_ceo_ingress_connection`: `source_sha256` `21754f04…` → **`af0a97de9bfc503db756626d0eacf65876848473cfb2230d8fbe478c9bb5c1cc`**; `ast_sha256` `27f53e56…` → **`8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912`**; relative site paths `'body', 59` → **`'body', 60`** for the three ingress denial operands (spellings unchanged; deeper indexes held; verified same literals resolve at lines 6056/6069/6071 before recording). Source commit ``108e84da3`` (one import + one elif inside the reviewed method). This anchor is shared by `tests/test_company_consultation_identity_review.py` (no separate edit needed).
+3. `tests/test_workspace_fabric_review_pins.py`: `STATUS_SITES` `((6048,66,69),(6061,74,77),(6063,75,78))` → **`((6056,66,69),(6069,74,77),(6071,75,78))`** (`executive_service.py` rows). Source commit ``108e84da3``.
+4. `tests/test_workspace_control_room_review_pins.py`: `EXPECTED[HTTP_PATH]` rows 927/938/946/952/961/971/976/982 → **928/939/947/953/962/972/977/983** (same columns). Source commit ``108e84da3``.
 
 Not touched: `tests/test_next_mounted_identity_pins.py`, `tests/test_executive_reviewed_site_identity_tokens.py`, `tests/test_company_consultation_identity_review.py` (shares anchor (2), self-adjusts), d7 (`scripts/executive_os_phase1c.py` unedited — production install deliberately left to the integrator), `tests/test_discovery_correction_identity_review.py` (auth.rs untouched).
 
@@ -144,8 +144,45 @@ cd app/mastermind_os && npm run typecheck
 → rc=0
 
 cd app/mastermind_os && npx vitest run --maxWorkers=2
-→ <TS_COUNT>
+→ final: 7129 passed | 12 skipped | 1 failed (7142) across 429 files; the one
+  failure is `App.project-draft-files.test.tsx` with a 5s jsdom timeout — the
+  load-flake signature E's reconciliation already documented for this machine
+  (full-parallel runs under external load); it passes 5/5 in isolation (rc=0)
+  and passed in the prior full run. Every deterministically-failing test found
+  during this lane was root-caused and fixed (see the regression section); the
+  two prior full runs' 78–81 failures were the auth-store loop, all green now.
 ```
+
+### OS-side regressions found and fixed during this lane (before commit)
+
+1. **Auth-store render loop (78–81 App tests red).** The first panel mount read
+   auth through `useSyncExternalStore` with an inline `getSnapshot` closure;
+   against App hosts whose `getState()` returns a fresh object per call this
+   drove React into `Maximum update depth exceeded` (`updateStoreInstance →
+   forceStoreRerender` loop), first masked as 5s jsdom timeouts under load.
+   Bisected empirically: base `host.ts`/`web-auth.ts`/`AttendedFabricWorkspace.tsx`
+   passed 32/32; my `host.ts`+`web-auth.ts` with base workspace still passed —
+   the mount was the sole cause. Fixed by adopting the incumbent panel pattern
+   exactly (`CapacityFabricRead.tsx:15`): plain render-time
+   `host?.auth?.getState()`.
+2. **Single-listener auth mock displacement (1 App test red).** After (1), one
+   office test still failed deterministically (`refuses a submission whose
+   frozen preview is no longer current`): the office test mock's
+   `subscribe: fn => { listener = fn; … }` keeps ONE listener slot, and my
+   block's in-`useEffect` auth subscription displaced the App's listener, so
+   `made.notify` never advanced the App's epoch and the stale-preview refusal
+   never fired. Passed on base, failed with the mount, passed with the
+   subscription removed (each verified by rerun). A bound host already bumps
+   its epoch on every auth change and the parent remounts this block through
+   `key={epoch}`, so the in-block subscription was redundant: removed; the
+   effect now only aborts/drops any owned read. `host.ts`/`web-auth.ts` diffs
+   are purely additive (optional interface members + a guarded spread inert
+   until a client defines `readT3AttemptFleet`) and were proven non-causal by
+   the same bisections.
+
+Three of my own first-draft test assertions were also wrong (unavailable
+`toBeDisabled` matcher; a no-op fault mutation; an assertion aimed at the
+wrong region) — all corrected.
 
 (Isolation re-runs: the three pin/review files re-ran green after the d8
 reword — `18 passed in 3.41s`.)

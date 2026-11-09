@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { MissionHost } from "../host";
 import { validT3AttemptId, type DuplicateKind, type InvariantVerdict, type T3Attempt, type T3AttemptFleetRead } from "./t3-attempt-fleet-contract";
 import "./t3-attempt-fleet.css";
@@ -14,13 +14,8 @@ export function T3AttemptFleetBlock({ host, locale = "en", attemptId }: {
   const zh = locale === "zh-CN", t = (en: string, cn: string) => zh ? cn : en;
   const id = useId();
   const reader = host?.readT3AttemptFleet, epoch = host?.invalidationGeneration?.();
-  // Subscribe to the host's auth store so a sign-out re-renders this block even
-  // before any read was issued (a stale "permitted" button must never survive).
-  // The snapshot is a stable primitive key: hosts may mint a fresh state object
-  // per getState() call, and an unstable snapshot would re-render forever.
-  const subscribe = useCallback((onChange: () => void) => host?.auth?.subscribe?.(onChange) ?? (() => {}), [host]);
-  const authKey = () => { const s = host?.auth?.getState(); return s ? `${s.status}|${s.acquisition ? 1 : 0}` : ""; };
-  useSyncExternalStore(subscribe, authKey, authKey);
+  // Plain render-time auth read (incumbent panel pattern): the epoch key remounts
+  // this block when auth changes, and the effect below drops any owned read.
   const auth = host?.auth?.getState();
   const permitted = !!host && !!reader && Number.isSafeInteger(epoch) && auth?.status === "signed_in" && auth.acquisition;
   const selectable = validT3AttemptId(attemptId);
@@ -28,10 +23,12 @@ export function T3AttemptFleetBlock({ host, locale = "en", attemptId }: {
   const abort = useRef<AbortController | null>(null), current = useRef({ host, reader });
   current.current = { host, reader };
   const visible = permitted && owned?.host === host && owned.reader === reader && owned.epoch === epoch && owned.attemptId === attemptId ? owned.read : null;
+  // No in-block auth subscription: the parent keys this block by the host epoch,
+  // and a bound host bumps that epoch on every auth change (remount ⇒ fresh
+  // permitted). Subscribing here would also crowd out single-listener hosts.
   useEffect(() => {
     abort.current?.abort(); setOwned(null);
-    const off = host?.auth?.subscribe(() => { abort.current?.abort(); setOwned(null); });
-    return () => { abort.current?.abort(); off?.(); };
+    return () => { abort.current?.abort(); };
   }, [host, reader, attemptId]);
   const refresh = async () => {
     if (!host || !reader || !permitted || epoch === undefined || !selectable) return;
