@@ -67,9 +67,9 @@ class Settings:
         ids = [r.route_id for r in self.routes]
         if len(set(ids)) != len(ids):
             raise ValueError("route ids must be unique")
-        slugs = [slug for _, slugs in self.aliases for slug in slugs]
-        if len(set(slugs)) != len(slugs):
-            raise ValueError("alias target lists must be unique")
+        for alias, targets in self.aliases:
+            if not alias or not targets or not all(isinstance(t, str) and t for t in targets):
+                raise ValueError("every alias needs at least one model target")
 
 
 def _routes_from_document(document: dict) -> tuple[Route, ...]:
