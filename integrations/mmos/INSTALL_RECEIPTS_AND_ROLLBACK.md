@@ -151,6 +151,27 @@ filesystem changes; the current bundle is always *moved* to
 `rollback-tmp-<ts>` (never deleted); the archived bundle is digest-verified
 against its stored receipt before anything moves.
 
+### 5.1 Installing a fresh build (Director I2)
+
+The mirror of rollback for placing a newly built `.app` at the install
+location — one command, same safety model (dry-run default, rc 3; refuses
+while the app is/may be running, rc 4; never kills/quits/launches):
+
+```sh
+$R --bundle "$HOME/Applications/Mastermind OS.app" \
+   install --from <built-or-archived "Mastermind OS.app"> --execute
+```
+
+It requires the source to be an existing `.app` that is neither the install
+target nor nested with it (rc 2 otherwise), snapshots the current bundle
+first (idempotent §5 step 0), preserves the replaced bundle under
+`install-tmp-<ts>`, and requires the re-observed install digest to equal the
+source bundle's receipt digest (rc 7 mismatch / rc 8 EFFECT_UNKNOWN with the
+previous bundle preserved). A dry-run prints the INSTALL PLAN and changes
+nothing — not even the snapshot. The full human runbook (launch, honest
+user-path checklist, rollback drill, #983 evidence) is
+`integrations/mmos/INSTALLED_ACCEPTANCE_SCRIPT.md`.
+
 ## 6. PROPOSED (not applied): src-tauri `MM_RECEIPT` marker
 
 src-tauri is integrator-owned; this lane did **not** edit it. The patch below

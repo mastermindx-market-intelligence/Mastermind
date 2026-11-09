@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Archive-snapshot / plan / execute rollback tool for the installed
-Mastermind OS desktop app (``Mastermind OS.app``).
+"""Archive-snapshot / plan / execute rollback + install tool for the
+installed Mastermind OS desktop app (``Mastermind OS.app``).
 
-Dry-run is the DEFAULT. ``plan`` and a bare ``execute`` only print the exact
-steps; mutations happen solely under ``execute --to <receipt-or-dir>
---execute``. The tool never kills, quits or launches the app: quitting the
-running application is printed as a HUMAN step and a live app running from
-the current bundle refuses the rollback. The previous bundle is always
-preserved (moved, never deleted) under ``<archive-root>/rollback-tmp-<ts>``.
+Dry-run is the DEFAULT. ``plan`` and a bare ``execute``/``install`` only
+print the exact steps; mutations happen solely under ``execute --to
+<receipt-or-dir> --execute`` or ``install --from <built .app> --execute``.
+The tool never kills, quits or launches the app: quitting the running
+application is printed as a HUMAN step and a live app running from the
+current bundle refuses the mutation. The previous bundle is always preserved
+(moved, never deleted) under ``<archive-root>/rollback-tmp-<ts>`` (execute)
+or ``<archive-root>/install-tmp-<ts>`` (install).
+
+``install --from`` places a freshly built ``.app`` at the install location:
+it snapshots the current bundle first (same idempotent ``snapshot``), then
+moves the current bundle aside and copies the source in, requiring the
+re-observed install receipt digest to equal the source bundle's digest. The
+source is a build product, NOT an archive entry, so it is not subject to the
+``--archive-root`` containment rule — but it must be an existing ``.app``
+that is neither the install target itself nor nested inside it (or vice
+versa).
 
 Archive layout (created by ``snapshot``)::
 
@@ -22,11 +33,14 @@ receipt digest before anything moves, and refuse ``--to`` targets that
 resolve outside ``--archive-root`` (path traversal).
 
 Exit codes:
-    0 success (snapshot done/already archived, plan printed, execute verified)
+    0 success (snapshot done/already archived, plan printed, execute/install
+      verified)
     1 operational error (missing bundle/archive, ambiguous archive)
-    2 malformed arguments
-    3 execute refused: --execute not provided (dry-run only)
-    4 execute refused: running app is (or may be) from the current bundle
+    2 malformed arguments (including install --from that is not an existing
+      .app, or is/nests the install target)
+    3 execute/install refused: --execute not provided (dry-run only)
+    4 execute/install refused: running app is (or may be) from the current
+      bundle
     5 execute/plan refused: archive receipt digest verification failed
     6 refused: --to target resolves outside --archive-root
     7 executed but the re-observed install does not match (kept old bundle)
@@ -366,6 +380,175 @@ def cmd_execute(bundle: Path, archive_root: Path, to_raw: str, execute: bool) ->
 
 
 # ---------------------------------------------------------------------------
+# install (place a freshly built .app at the install location)
+# ---------------------------------------------------------------------------
+
+def _refuse_self_install(bundle: Path, source: Path) -> bool:
+    """Refuse --from that is (or nests with) the install target itself."""
+    bundle_real = os.path.realpath(bundle)
+    source_real = os.path.realpath(source)
+    nested = (
+        source_real == bundle_real
+        or source_real.startswith(bundle_real + os.sep)
+        or bundle_real.startswith(source_real + os.sep)
+    )
+    if nested:
+        print(
+            "mmos_rollback.py: refused: --from must be a separate bundle, not the "
+            f"install target itself or nested with it ({source_real} vs {bundle_real})",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
+def render_install_plan(
+    *,
+    install_path: Path,
+    current: dict | None,
+    source: dict,
+    archive_root: Path,
+) -> str:
+    revision = source["source_revision"]["value"]
+    identity = source["build_identity"]["value"]
+    tmp_dir = archive_root / f"install-tmp-<{_utc_stamp()}>"
+    steps = [
+        "INSTALL PLAN — dry-run; NOTHING has been changed.",
+        f"  Install target : {install_path}",
+    ]
+    if current is not None:
+        steps += [
+            f"    current digest: {current['receipt_digest']}",
+            "    current source_revision="
+            f"{current['source_revision']['value']}  build_identity="
+            f"{current['build_identity']['value']}",
+        ]
+    else:
+        steps.append("    no bundle is currently installed at this path (fresh install)")
+    steps += [
+        f"  Source bundle  : {source['bundle_path']}",
+        f"    source_revision={revision}  build_identity={identity}",
+        f"    source digest : {source['receipt_digest']}",
+        "  0. HUMAN STEP (this tool never automates it): quit the running "
+        "Mastermind OS app (Mastermind OS menu → Quit Mastermind OS, or Cmd-Q).",
+    ]
+    if current is not None:
+        steps += [
+            "  1. Snapshot the current bundle into the archive (idempotent by "
+            "receipt digest) so the rollback anchor exists before anything moves.",
+            f"  2. Move the current bundle {install_path} → {tmp_dir / install_path.name} "
+            "(reversible move; nothing is deleted).",
+        ]
+    else:
+        steps.append("  1-2. No current bundle to snapshot or move aside.")
+    steps += [
+        f"  3. Copy the source bundle {source['bundle_path']} → {install_path}.",
+        f"  4. Re-run scripts/mmos_installed_receipt.py --bundle {install_path} "
+        f"and require digest == {source['receipt_digest']}.",
+        "  5. HUMAN STEP: relaunch Mastermind OS and confirm the Build details "
+        "panel (Source revision / Build identity) equals the receipt, plus one "
+        "real user-path action.",
+    ]
+    return "\n".join(steps)
+
+
+def cmd_install(bundle: Path, archive_root: Path, from_raw: str, execute: bool) -> int:
+    source_path = Path(from_raw).expanduser()
+    if source_path.suffix != ".app" or not source_path.is_dir():
+        print(
+            f"mmos_rollback.py: --from must be an existing .app bundle: {source_path}",
+            file=sys.stderr,
+        )
+        return EXIT_ARGS
+    if _refuse_self_install(bundle, source_path):
+        return EXIT_ARGS
+    source = observe_bundle(source_path)
+    if not source["bundle_exists"]:
+        print(f"mmos_rollback.py: source bundle not found: {source_path}", file=sys.stderr)
+        return EXIT_ERROR
+    current = observe_bundle(bundle)
+    has_current = current["bundle_exists"]
+    plan = render_install_plan(
+        install_path=bundle,
+        current=current if has_current else None,
+        source=source,
+        archive_root=archive_root,
+    )
+    if not execute:
+        print(plan)
+        print()
+        print(
+            "INSTALL REFUSED: --execute was not provided; this was a dry-run. "
+            "Re-run with --execute to apply the plan above."
+        )
+        return EXIT_REFUSED_DRY_RUN
+    if has_current:
+        if _refuse_running(current):
+            return EXIT_REFUSED_RUNNING
+        rc = cmd_snapshot(bundle, archive_root)
+        if rc != EXIT_OK:
+            return rc
+    else:
+        print(
+            "note: no bundle currently installed at the target; "
+            "skipping snapshot and move-aside."
+        )
+
+    tmp_dir = archive_root / f"install-tmp-{_utc_stamp()}"
+    moved_current = None
+    if has_current:
+        tmp_dir.mkdir(parents=True, exist_ok=False)
+        moved_current = tmp_dir / bundle.name
+        try:
+            os.rename(bundle, moved_current)
+        except OSError:
+            shutil.move(str(bundle), str(moved_current))
+    try:
+        shutil.copytree(source_path, bundle, symlinks=True)
+    except OSError as error:
+        print(f"mmos_rollback.py: copying source bundle failed: {error}", file=sys.stderr)
+        shutil.rmtree(bundle, ignore_errors=True)  # remove any partial copy we created
+        if has_current:
+            try:
+                os.rename(moved_current, bundle)
+            except OSError as restore_error:
+                print(
+                    "EFFECT_UNKNOWN: restore of the moved current bundle failed "
+                    f"({restore_error}); the previous bundle is preserved at "
+                    f"{moved_current} and nothing was installed. Reconcile manually.",
+                    file=sys.stderr,
+                )
+                return EXIT_EFFECT_UNKNOWN
+            print(
+                "mmos_rollback.py: no changes applied; the current bundle was restored "
+                "in place.",
+                file=sys.stderr,
+            )
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return EXIT_ERROR
+
+    fresh = observe_bundle(bundle)
+    if has_current:
+        print(f"previous bundle preserved at: {moved_current}")
+    if fresh["receipt_digest"] == source["receipt_digest"]:
+        print(f"installed bundle {bundle} matches source digest {source['receipt_digest']}")
+        print(
+            "remaining HUMAN steps: relaunch Mastermind OS, confirm the Build details "
+            "panel (Source revision / Build identity) equals the receipt, and perform "
+            "one real user-path action."
+        )
+        return EXIT_OK
+    mismatch = (
+        f"EXECUTED BUT MISMATCH: the re-observed install digest "
+        f"{fresh['receipt_digest']} != source {source['receipt_digest']}."
+    )
+    if has_current:
+        mismatch += f" The previous bundle is preserved at {moved_current}."
+    print(mismatch, file=sys.stderr)
+    return EXIT_INSTALLED_MISMATCH
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -390,6 +573,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="archive directory (or its receipt.json) to roll back to")
     execute.add_argument("--execute", action="store_true",
                          help="actually apply the plan (required for any mutation)")
+    install = sub.add_parser("install", help="install a freshly built .app at --bundle "
+                                             "(dry-run without --execute)")
+    install.add_argument("--from", required=True, dest="from_dir", metavar="BUILT_APP",
+                         help="source .app bundle from a build (not an archive entry)")
+    install.add_argument("--execute", action="store_true",
+                         help="actually apply the install (required for any mutation)")
     return parser
 
 
@@ -406,6 +595,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_plan(bundle, archive_root, args.to)
     if args.command == "execute":
         return cmd_execute(bundle, archive_root, args.to, args.execute)
+    if args.command == "install":
+        return cmd_install(bundle, archive_root, args.from_dir, args.execute)
     print(f"mmos_rollback.py: unknown command {args.command!r}", file=sys.stderr)
     return EXIT_ARGS
 
