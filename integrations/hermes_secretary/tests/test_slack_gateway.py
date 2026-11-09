@@ -181,6 +181,33 @@ class InboundAdmissionSafetyTests(unittest.TestCase):
         addressed = self.event(text="<@U0BT71H4FQE> engineering: help")
         self.assertEqual(self.fleet.admit(addressed, []), ("engineering", "alias:engineering"))
 
+    def test_grok_secretary_external_slack_mention_cannot_be_captured(self):
+        # M2's legacy roster carries Grok's Slack U-ID under the virtual
+        # Hermes Secretary, although that role has no xoxp- user enrollment.
+        self.conf["agents"]["secretary"]["slack_user_id"] = "U0BTCHX8HMF"
+        self.conf["agents"]["secretary"]["user_token_file"] = None
+        mention = self.event(text="<@U0BTCHX8HMF> secretary, report")
+        self.assertIsNone(self.fleet.admit(mention, []))
+        self.assertEqual(self.fleet.state["recent"], {})
+        # A genuine mention of our shared bot still routes normally.
+        self.assertEqual(self.fleet.admit(
+            self.event(text="<@U0BT71H4FQE> secretary: report"), []
+        ), ("secretary", "alias:secretary"))
+
+    def test_native_user_mention_requires_real_per_agent_token(self):
+        self.conf["agents"]["secretary"]["slack_user_id"] = "U0BTCHX8HMF"
+        self.conf["agents"]["secretary"]["user_token_file"] = None
+        params = dict(text="<@U0BTCHX8HMF> hello", channel="C0CBC6AEAQZ",
+                      user="U0BRET6191C", is_dm=False)
+        self.assertNotEqual(gateway.route(self.conf, **params),
+                            ("secretary", "mention:account"))
+        # Once an independently authorized user-token enrollment exists,
+        # the same native @user ID becomes eligible without another app.
+        self.conf["agents"]["secretary"]["user_token_file"] = "slack-user-secretary.env"
+        with patch.object(gateway, "identity_mode", return_value=("user", "private")):
+            self.assertEqual(gateway.route(self.conf, **params),
+                             ("secretary", "mention:account"))
+
     def test_nonallowlisted_user_cannot_exhaust_budget(self):
         attack = self.event(text="<@U0BT71H4FQE> delivery: do this", user="U0OUTSIDER9")
         self.assertIsNone(self.fleet.admit(attack, []))
