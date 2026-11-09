@@ -447,6 +447,9 @@ def repair_orch_group_write(*, operation_id, home=None, uid=None, platform=None,
             os.close(fd)
 
 
+ORCH_REPAIR_ORIGINAL_OPERATION = 'mmos-u4-orch-maintenance-01a15741-20261108-v1'
+
+
 def guarded_orch_repair(driver, registry_bytes, ssh_config_bytes, *, operation_id,
                         expected_module_sha, expected_storage_sha):
     """Root-only composition using the SAME enrolled Broker, not a snapshot.
@@ -504,6 +507,8 @@ def public_reason(exc):
             'orch_repair_postimage': 'ORCH_REPAIR_POSTIMAGE_UNQUALIFIED',
             'orch_repair_effect_unknown_no_replay': 'ORCH_REPAIR_EFFECT_UNKNOWN',
             'orch_repair_live_guard': 'ORCH_REPAIR_LIVE_GUARD_REQUIRED',
+            'orch_repair_record_unqualified': 'ORCH_REPAIR_RECORD_UNQUALIFIED',
+            'orch_repair_record_changed': 'ORCH_REPAIR_RECORD_CHANGED',
             'preimage_changed_or_prior_install_hold': 'PREIMAGE_OR_PRIOR_INSTALL_HOLD',
             'install_effect_unknown_no_replay': 'INSTALL_EFFECT_UNKNOWN',
         }
@@ -539,12 +544,12 @@ def public_refusal(exc):
 def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
                    expected_module_sha, expected_storage_sha, payload=None,
                    expected_before=None, operation_id=None, original_settled=False,
-                   expected_policy_sha=None):
-    """One fixed enrolled transport plan; no network or automatic source trust."""
+                   expected_policy_sha=None, expected_reader_sha=None, expected_driver_sha=None):
+    """Fixed enrolled plan; no network or automatic source trust."""
     binding = storage.enrolled_binding('ubuntu4', registry_bytes, ssh_config_bytes)
     if binding['binding'] != {'account': ACCOUNT, 'hostnames': [HOSTNAME]}:
         raise storage.InstallHeld('fixed_host_account')
-    if kind not in {'inspect', 'install', 'inspect-custody', 'repair-orch-group-write'}:
+    if kind not in {'inspect', 'install', 'inspect-custody', 'repair-orch-group-write', 'read-orch-repair', 'read-orch-repair-framed'}:
         raise storage.InstallHeld('operation_kind')
     if not _hex(expected_module_sha) or not _hex(expected_storage_sha):
         raise storage.InstallHeld('installer_source_pin')
@@ -559,12 +564,28 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
         if raw is None or _sha(raw) != wanted:
             raise storage.InstallHeld('installer_source_pin')
         sources.append((base64.b64encode(raw).decode(), wanted))
+    if kind in {'read-orch-repair', 'read-orch-repair-framed'}:
+        if not _hex(expected_reader_sha):
+            raise storage.InstallHeld('installer_source_pin')
+        file = Path(__file__).with_name('orch_repair_read.py')
+        fd = storage._directory(file.parent, os.getuid())
+        try:
+            raw = storage._read(fd, file.name, os.getuid())
+        finally:
+            os.close(fd)
+        if raw is None or _sha(raw) != expected_reader_sha:
+            raise storage.InstallHeld('installer_source_pin')
+        sources.append((base64.b64encode(raw).decode(), expected_reader_sha))
+    elif expected_reader_sha is not None:
+        raise storage.InstallHeld('installer_source_pin')
     request = {'kind': kind}
-    if kind == 'repair-orch-group-write':
+    if kind in {'repair-orch-group-write', 'read-orch-repair', 'read-orch-repair-framed'}:
         if (payload is not None or expected_before is not None or expected_policy_sha is not None
                 or original_settled is not False or type(operation_id) is not str
                 or not 1 <= len(operation_id) <= 128
                 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-' for c in operation_id)):
+            raise storage.InstallHeld('orch_repair_identity')
+        if kind in {'read-orch-repair', 'read-orch-repair-framed'} and operation_id != ORCH_REPAIR_ORIGINAL_OPERATION:
             raise storage.InstallHeld('orch_repair_identity')
         request['operation_id'] = operation_id
     if kind == 'install':
@@ -576,6 +597,11 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
         request.update(payload=base64.b64encode(payload).decode(),
                        expected_before=expected_before, expected_after=expected_policy_sha,
                        operation_id=operation_id, original_settled=True)
+    if kind == 'read-orch-repair-framed':
+        from ops.native_fabric.quota_continuity.rollout.orch_repair_read import framed_plan
+        return framed_plan(driver, binding, sources, expected_driver_sha)
+    if expected_driver_sha is not None:
+        raise storage.InstallHeld('installer_source_pin')
     code = ('import base64,hashlib,json,types\n'
             'sources=' + repr(sources) + '\n'
             'n={"__name__":"fixed_storage_dependency","__file__":"preview_install.py"}\n'
@@ -587,9 +613,14 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
             'if hashlib.sha256(raw).hexdigest()!=sources[1][1]:raise SystemExit(78)\n'
             'exec(compile(raw,"ubuntu4_policy.py","exec"),p)\n'
             'r=json.loads(' + repr(json.dumps(request)) + ')\n'
+            'if r["kind"]=="read-orch-repair":\n'
+            ' raw=base64.b64decode(sources[2][0])\n'
+            ' if hashlib.sha256(raw).hexdigest()!=sources[2][1]:raise SystemExit(78)\n'
+            ' q={"__name__":"fixed_orch_repair_read","storage":types.SimpleNamespace(**n),"_scope":p["_scope"],"_entries":p["_entries"]}\n'
+            ' exec(compile(raw,"orch_repair_read.py","exec"),q)\n'
             'if "payload" in r:r["payload"]=base64.b64decode(r["payload"])\n'
-            'try: print(json.dumps(p["inspect_custody"]() if r["kind"]=="inspect-custody" else p["repair_orch_group_write"](operation_id=r["operation_id"]) if r["kind"]=="repair-orch-group-write" else p["operate"](**r),sort_keys=True))\n'
-            'except (OSError,ValueError) as e: print(json.dumps(dict({"state":"HELD_OR_UNKNOWN","replay":False},**p["public_refusal"](e))));raise SystemExit(78)\n')
+            'try: print(json.dumps(p["inspect_custody"]() if r["kind"]=="inspect-custody" else p["repair_orch_group_write"](operation_id=r["operation_id"]) if r["kind"]=="repair-orch-group-write" else q["read_orch_repair"](operation_id=r["operation_id"]) if r["kind"]=="read-orch-repair" else p["operate"](**r),sort_keys=True))\n'
+            'except (OSError,ValueError) as e: print(json.dumps(dict({"state":"HELD_OR_UNKNOWN","replay":False},**({"retry_authorized":False,"lifecycle_authority":False} if r["kind"]=="read-orch-repair" else {}),**p["public_refusal"](e))));raise SystemExit(78)\n')
     command = shlex.join(['python3', '-c', code])
     return {'kind': kind, 'target': binding, 'argv': driver.SSH + [binding['alias'], command],
             'timeout': 20, 'dispatch_authorized': False,

@@ -833,7 +833,7 @@ NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-bu
 # successor pins to a qualified retained-Go application ingress. This is the
 # same cohort the incumbent native forward-selection proof already admits; it
 # is not a new roster, seat set or enrollment.
-NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4'))
+NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
 NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
                     'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
                     'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
@@ -891,16 +891,7 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
 
 # Retained sealed Tailnet seats, each with only its original and exact native
 # pool-pin postimage. These are profile selectors, never an argv fallback.
-_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
-    "fabric-design": frozenset((
-        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
-        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
-    )),
-    "fabric-read": frozenset((
-        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
-        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
-    )),
-}
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {'fabric-design': frozenset(('87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c', 'b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46', 'a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c')), 'fabric-read': frozenset(('f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb', '328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819', '6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c'))}
 
 
 
@@ -1679,17 +1670,24 @@ def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> 
     }
 
 
+PAPER_RUNTIME_V22_REL = Path(".local/share/mastermind-paper/runtime/v22")
+PAPER_RUNTIME_V22_BRIDGE_SHA256 = "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b"
+
+
 def _verify_paper_runtime(
     user_root: Path, *, expected_sha: str | None = None,
     runtime_rel: Path | None = None, rel: Path | None = None,
 ) -> dict:
     # One owner, two reviewed callers: M1 uses runtime_rel; C2 uses rel.
+    if runtime_rel == PAPER_RUNTIME_V22_REL or rel == PAPER_RUNTIME_V22_REL:
+        if (runtime_rel != PAPER_RUNTIME_V22_REL or rel != PAPER_RUNTIME_V22_REL
+                or expected_sha != PAPER_RUNTIME_V22_BRIDGE_SHA256):
+            raise SystemExit("Paper v22 requires the exact reviewed runtime and bridge")
+
     if runtime_rel is not None and rel is not None and runtime_rel != rel:
         raise SystemExit("Paper runtime conflicting generation selectors")
     runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
-    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
-                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL,
-                           PAPER_RUNTIME_V10_REL):
+    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL, M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL, PAPER_RUNTIME_V10_REL, PAPER_RUNTIME_V22_REL):
         raise SystemExit("paper runtime generation is not an admitted target")
     if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
         fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
@@ -1769,6 +1767,29 @@ def _paper_design_config(
         "appPath": str(user_root / PAPER_APP_REL),
         "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
     }
+
+
+def _publication_upgrade_paper_config(
+    account: str, previous_config: dict, user_root: Path,
+) -> dict | None:
+    """Retain the fixed publication seat's qualified, already selected v20."""
+    if account != "mastermind-os-publication" or "paperDesign" not in previous_config:
+        return None
+    paper = previous_config["paperDesign"]
+    if (type(paper) is not dict or paper.get("enabled") is not True
+            or type(paper.get("commandTimeoutMs")) is not int):
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    if paper == _paper_design_config(user_root):
+        return None
+    expected = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256,
+    )
+    if paper != expected:
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    _verify_paper_runtime(
+        user_root, runtime_rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256,
+    )
+    return expected
 
 
 def _fleet_status_config(user_root: Path) -> dict | None:
@@ -5180,23 +5201,38 @@ def cmd_upgrade(args) -> int:
         )
         _verify_upgrade_preserves_installed_fleet_capabilities(
             prior, roots, projected)
-    # Preserve the existing restricted profile; do not silently restore tools.
-    if not fabric_only:
-        _verify_paper_runtime(_user_root())
-
-    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
-    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
-    retained_config = None
     retained_raw = _fabric_release_bytes(roots["config"])
     if hashlib.sha256(retained_raw).hexdigest() != prior["configHash"]:
         raise SystemExit("original upgrade configuration changed")
     previous_config = _original_json(retained_raw.decode("utf-8"))
+    # Keep the existing restricted profile and the fixed publication seat's
+    # already selected Paper generation. Runtime qualification precedes writes.
+    retained_paper = None
+    if not fabric_only:
+        retained_paper = _publication_upgrade_paper_config(account, previous_config, _user_root())
+        if retained_paper is None:
+            _verify_paper_runtime(_user_root())
+
+    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
+    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
+    retained_config = None
     if previous_config.get("originalCollection") is not None:
         retained_config = dict(previous_config)
         if original_collection is None:
             retained_config.pop("originalCollection")
         else:
             retained_config["originalCollection"] = original_collection
+    if retained_paper is not None:
+        # Rebuild through the normal owner so an explicitly refreshed commission
+        # digest still takes effect; retain only the exact qualified Paper member.
+        if retained_config is None:
+            retained_config = _build_config(
+                account, host, port, node_abs, backend_abs, roots["state"], _user_root(),
+                repository_workspaces=repository_workspaces, commission_digest=commission_digest,
+                fabric_only=fabric_only, modern_fabric=modern_fabric,
+                original_collection=original_collection,
+            )
+        retained_config["paperDesign"] = retained_paper
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),

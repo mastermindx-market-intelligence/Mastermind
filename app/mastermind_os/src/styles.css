@@ -612,6 +612,18 @@ code {
   cursor: pointer;
   color: var(--text);
 }
+/* Existing native connection disclosure: comfortable keyboard/touch target. */
+.work-connection-details > summary {
+  min-height: 44px;
+  padding-block: var(--sp-2);
+  box-sizing: border-box;
+}
+.work-connection-details dl { grid-template-columns: minmax(0, 1fr); }
+.work-connection-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--sp-3);
+}
 .reason-details code {
   display: block;
   margin-top: 8px;

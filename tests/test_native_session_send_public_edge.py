@@ -25,7 +25,8 @@ ROUTE = "/os/executive/session/send"
 def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
     assert ROUTE in edge.POST_ROUTES
     assert edge.PRE_BYOK_ROLES_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
+    assert edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
+    assert edge.GET_ROUTES == edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + edge.AUTHORIZATION_IDENTITY_GET_ROUTES
     assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
@@ -33,7 +34,7 @@ def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
         "/os/executive/direct-native/correction",
     )
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
-    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
+    assert (edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert ROUTE not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
     assert (edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES,
             edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
@@ -168,7 +169,7 @@ def test_composed_profile_preserves_parent_native_and_project_predecessors():
         "/os/executive/direct-native/correction",
     )
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
-    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
+    assert (edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert edge.PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
     assert edge.PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert "/workspace/byok/roles/current" in _WORKSPACE_ADDITIONAL_GET_ROUTES

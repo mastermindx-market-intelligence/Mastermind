@@ -1516,13 +1516,47 @@ def _agentos_selected_record_sources(root: Path, plan: _MacroMaterializationPlan
         raise GatewayError("backend_unavailable", "installed context record sources unavailable") from None
 
 
+def _clone_git_object_directory(
+    source: Path, destination: Path, *, deadline: float, pack_directory: bool = False,
+) -> None:
+    _check_deadline(deadline, label="Macro materialization")
+    source_stat = source.lstat()
+    if not stat.S_ISDIR(source_stat.st_mode) or stat.S_ISLNK(source_stat.st_mode):
+        raise OSError("installed Git objects are not a direct directory")
+    destination.mkdir(mode=stat.S_IMODE(source_stat.st_mode))
+    with os.scandir(source) as entries:
+        children = sorted(entries, key=lambda entry: entry.name)
+    for entry in children:
+        _check_deadline(deadline, label="Macro materialization")
+        child = Path(entry.path)
+        if pack_directory and re.fullmatch(r"tmp_pack_[A-Za-z0-9]{6}", entry.name):
+            observed = child.lstat()
+            # Git publishes these by renaming to pack-<hash>.pack. They are
+            # not database inputs and may retain a different writer's 0600
+            # mode. Never open, chmod or remove them. Their metadata remains
+            # in the unchanged before/after Git generation seal.
+            if stat.S_ISREG(observed.st_mode) and observed.st_nlink == 1:
+                continue
+        if not pack_directory and entry.name == "pack":
+            _clone_git_object_directory(
+                child, destination / entry.name, deadline=deadline,
+                pack_directory=True,
+            )
+        else:
+            _clone_tree(child, destination / entry.name, deadline=deadline)
+    shutil.copystat(source, destination, follow_symlinks=False)
+
+
 def _clone_git_read_database(source: Path, destination: Path, *, deadline: float) -> None:
     source_stat = source.lstat()
     if not stat.S_ISDIR(source_stat.st_mode) or stat.S_ISLNK(source_stat.st_mode):
         raise OSError("installed Git metadata is not a direct directory")
     destination.mkdir(mode=stat.S_IMODE(source_stat.st_mode))
-    for name in ("HEAD", "config", "objects"):
+    for name in ("HEAD", "config"):
         _clone_tree(source / name, destination / name, deadline=deadline)
+    _clone_git_object_directory(
+        source / "objects", destination / "objects", deadline=deadline,
+    )
     for name in ("packed-refs", "refs"):
         candidate = source / name
         if candidate.exists() or candidate.is_symlink():
