@@ -404,3 +404,23 @@ Verified in this commission: thirteen new artboards and one directory entry, pre
 Two pre-dispatch document-drift responses were reconciled by reading the original target and confirming the missing intended node before a fresh edit. One empty-container insertion error was reconciled against the unchanged childless original target, then repaired by replacing that owned container with a proper frame. There are no unresolved Paper effects. No refused action was moved to another carrier.
 
 The next implementation action is GLM-00: reconcile accepted/installed versions, authoritative roster, active maintenance and qualified routes on the incumbent programme. Do not redo the accepted design work unless source, requirements or product feedback changes. The current design branch remains the owner of this document; full worker briefs should link here and return through the existing canonical owner, without a new transport/control plane.
+
+
+## 14. Paper refinement continuation — 9 November 2026
+
+Current Chairman directive: improve Mastermind OS Paper design only, preserving the Noir Atelier identity and reconciling Capacity Fabric, Teamlink cross messaging, Hermes always-on teams, T3 Code and DeepSeek Harness. This is a design continuation; implementation packets above remain NOT_STARTED by this session.
+
+Procedure pin: Mastermind `ff6d5ab67c3535056d69f603fac0d95c058baad8`; product doctrine pin: Macro `315efde9307bf8a3d241a7683432dfff92cd4a9e`. Source-linked scope receipt: [existing carrier continuation](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2345#issuecomment-6735157236).
+
+### Scoped design plan
+
+- **D1 — Reconcile:** inspect the current editable product, matching state/build pages and source contracts. Separate runtime, harness, model, account pool and execution host. Preserve the original parent and actual return destination.
+- **D2 — Compose:** tighten the existing Team, Capacity/Fleet, Team conversation, Code and Today journeys. Keep useful existing features and IDs, with a named destination for every relocated detail. Preserve live/unknown writers and historical Knowledge-only uncertain effects.
+- **D3 — Respond:** refine narrow, light and Chinese counterparts and design the important stale/unavailable/queued/working/returned/review states. Define motion, keyboard, focus, context return and render-performance targets outside product copy.
+- **D4 — Verify:** inspect actual Paper screenshots, check native node/text readback, record exact mutations and source limitations, and update this existing guide. Do not claim implemented behavior or measured runtime speed from a design file.
+
+DONE_WHEN: cohesive editable Paper primary journeys across all five named integrations, restrained hierarchy and deliberate controls, clear truthful sample/unknown states, usable narrow layouts, explicit builder contracts and verified native visual readback. Original broad product implementation acceptance remains separate.
+
+The current task has no app/runtime writes, provider calls, bot launches, merge or release action. Root retains canvas edits for PRINCIPAL_JUDGMENT and UNIQUE_APPROVED_ACCESS; one bounded native reasoning advisor may critique cross-system semantics with no modifying authority. This advisory role is not paid implementation labor or a new runtime principal. WHY NOT FABLE: bounded architecture critique and direct design composition need no separate principal takeover.
+
+Integration invalidator discovered before edits: the newer native T3 Capacity Fabric provider path and the DSH-backed ACP coding path are distinct; the earlier T3-to-DSH drawing must not be read as a universal path. The live router and the authenticated OS capacity projection also have separate proof boundaries. Further exact source reconciliation is recorded with the design results below.
