@@ -547,6 +547,21 @@ class StateConflict(RuntimeProofError):
     """The operation conflicts with the current state machine or lease."""
 
 
+class _ChildRequestAdmissionHalt(Exception):
+    """Internal: an in-transaction admission guard already decided the request.
+
+    Raised from inside the ``BEGIN IMMEDIATE`` transaction that would have
+    inserted the Job, so the transaction rolls back with nothing created,
+    and the caller returns the already-computed :class:`AdmissionOutcome`
+    (a REPLAY handle or a precise WAIT).  It never escapes the admission
+    path: it is not a ``StateConflict`` and it carries no error meaning.
+    """
+
+    def __init__(self, outcome: Any) -> None:
+        super().__init__(str(getattr(outcome, "state", outcome)))
+        self.outcome = outcome
+
+
 class WorkerStatus(str, Enum):
     AVAILABLE = "AVAILABLE"
     BUSY = "BUSY"
@@ -16701,6 +16716,13 @@ class JobRegistry:
         planner and nothing is created.  A replay always outranks the
         caps so a retry after a lost response still recovers its
         handle.
+
+        The caps are not a check-then-act: ``create_job`` re-runs this
+        decision (replay first, then ``ready_counts`` and the caps)
+        *inside* the ``BEGIN IMMEDIATE`` transaction that inserts the
+        Job, so concurrent admissions of distinct keys settle at exactly
+        the bound and the loser of that race receives the same WAIT this
+        method would have returned serially.
         """
 
         from control_plane.child_execution_contracts import (
@@ -16840,6 +16862,35 @@ class JobRegistry:
             f"root={request.root_ref} parent={request.immediate_parent_run_ref} "
             f"digest={digest[:12]}"
         )
+        def recheck_inside_transaction(connection: Any) -> None:
+            """The authoritative admission decision, inside the write lock.
+
+            Same precedence as the read-phase pre-check: an already-admitted
+            record replays first (a redelivery must recover its handle even
+            when the queue filled while it was in flight), then the caps are
+            recomputed from the locked database so concurrent admissions of
+            DISTINCT keys settle at exactly the bound instead of overshooting
+            it.  Either answer raises before the insert, so nothing is created.
+            """
+
+            existing = existing_admission(connection)
+            if existing is not None:
+                try:
+                    outcome = decide_admission(
+                        request, existing=existing, root_ready=0, fleet_ready=0,
+                        policy=resolved_policy)
+                except ChildRequestAdmissionConflict as exc:
+                    raise StateConflict(str(exc)) from exc
+                raise _ChildRequestAdmissionHalt(outcome)
+            root_ready, fleet_ready = ready_counts(connection)
+            wait = child_request_queue_wait(
+                root_ready, fleet_ready,
+                policy=resolved_policy, root_ref=request.root_ref)
+            if wait is not None:
+                raise _ChildRequestAdmissionHalt(AdmissionOutcome(
+                    state="WAIT", wait_reason=str(wait["reason"]),
+                    wait_detail=wait, **common))
+
         try:
             job = self.create_job(
                 objective,
@@ -16848,7 +16899,14 @@ class JobRegistry:
                 attempt_limit=1,
                 command_id=command_id,
                 provenance=provenance,
+                _child_request_ready_guard=recheck_inside_transaction,
             )
+        except _ChildRequestAdmissionHalt as halt:
+            # The Job's write transaction rolled back with nothing created.
+            # This caller lost a race on the caps (or reconciled against a
+            # concurrent winner) and gets exactly the answer it would have
+            # received serially: one synchronous decision, no retry loop.
+            return halt.outcome
         except StateConflict:
             # The events UNIQUE arbitrates a concurrent duplicate of the
             # same triple; reconcile against the surviving record rather
@@ -16955,6 +17013,7 @@ class JobRegistry:
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
         _principal_commit_guard: Callable[[], None] | None = None,
+        _child_request_ready_guard: Callable[[Any], None] | None = None,
         _planner_plan_schema_version: str | None = None,
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
         _instruction_source: object | None = None,
@@ -17242,6 +17301,32 @@ class JobRegistry:
             if result is not None:
                 raise StateConflict("principal commit guard refused")
 
+        def run_child_request_ready_guard(connection: sqlite3.Connection) -> None:
+            """Recheck the child-request admission inside THIS write transaction.
+
+            The caller's pre-read is only an optimization.  The authoritative
+            replay-and-cap decision must run under the same ``BEGIN IMMEDIATE``
+            lock that inserts the Job and its ``JOB_CREATED`` receipt, or two
+            concurrent admissions of *distinct* keys each observe a free slot
+            before either commits and the ready-queue bound is overshot.
+            A refusal raises before any row is written, so the transaction
+            rolls back with nothing created.
+            """
+
+            if _child_request_ready_guard is None:
+                return
+            if (not callable(_child_request_ready_guard)
+                    or inspect.iscoroutinefunction(_child_request_ready_guard)
+                    or inspect.iscoroutinefunction(
+                        getattr(_child_request_ready_guard, "__call__", None))):
+                raise StateConflict(
+                    "child request ready guard must be synchronous")
+            result = _child_request_ready_guard(connection)
+            if inspect.isawaitable(result):
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise StateConflict("child request ready guard refused")
+
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             # A command accepted while this creator waited must reconcile before
@@ -17479,6 +17564,9 @@ class JobRegistry:
                     connection, root_row=parent_row, constraints=normalized_constraints,
                     plan_schema_version=_planner_plan_schema_version,
                 )
+            # Last gate before the single insert: the admission recheck runs
+            # under this transaction's BEGIN IMMEDIATE write lock.
+            run_child_request_ready_guard(connection)
             job = self._create_job_in_transaction(
                 connection,
                 spec=_JobCreationSpec(
