@@ -64,7 +64,9 @@ link is `binding.lease_ref == lease.lease_id`; consider recording the
 
 ## Contract tests already proving the shared side
 
-`tests/test_executive_claim_job_placement_authority.py` (35 passed):
+`tests/test_executive_claim_job_placement_authority.py` (23 passed — 19
+pre-existing + the 4 below; an earlier draft of this note said "35", which
+was this file plus `tests/test_workspace_lease.py` (12) in one invocation):
 
 - `test_t3_native_claim_issues_v1_1_binding_with_t3_idempotency_join`
 - `test_plain_adapter_route_stays_a_v1_binding`

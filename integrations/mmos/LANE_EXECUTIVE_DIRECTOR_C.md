@@ -104,8 +104,10 @@ C3 contract-test mapping (claim seam):
   (`WS-PROPHET-END-TO-END-R7.md`, hash-prefixed continuation lines in folded
   block scalars); staged `036e8d26…` accepts 115/115. Parser-boundary proof,
   no server involved. See `EXECUTIVE_READER_DIAGNOSIS.md`.
-- C3: 35/35 green in `tests/test_executive_claim_job_placement_authority.py`
-  (31 pre-existing + 4 new) at `119d72b1a`; real SQLite stores, temp dirs.
+- C3: 23/23 green in `tests/test_executive_claim_job_placement_authority.py`
+  (19 pre-existing + 4 new) and 12/12 in `tests/test_workspace_lease.py` at
+  `119d72b1a` (the two files together are the 35 an earlier draft cited);
+  real SQLite stores, temp dirs.
 - C4: observation run RC=0; artifacts committed with sha256 recorded in
   `QUOTA_TRUTH_2026-11-09T0925Z.md` (raw rows 6 observed / 17 unknown;
   composed 8 observed / 13 unknown over 21 canonical resources).
