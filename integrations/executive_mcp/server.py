@@ -600,6 +600,9 @@ _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
     "/workspace/resources/models/current",
+    # Composed from #2351: the signed read-only Capacity Fabric projection
+    # shares the incumbent public credential/host fences and refuses queries.
+    "/workspace/resources/fabric/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
