@@ -733,15 +733,20 @@ def _build_resource_row(
                 }
             )
 
-    # Live provider_api observation (OQ-3): supersedes an unknown and may
-    # supersede a registry fact for the same field while keeping both
-    # provenance entries. A typed unknown NEVER converts to a number.
+    # Live observation (OQ-3): supersedes an unknown and may supersede a
+    # registry fact for the same field while keeping both provenance
+    # entries. A typed unknown NEVER converts to a number.
     if observation is not None and observation.observed:
         provenance = observation.provenance or {}
         remaining = _bounded_number(observation.usage)
         remaining_basis = observation.usage_unit
         quota_observed_at = provenance.get("observed_at")
-        if provenance.get("endpoint_host_path"):
+        if provenance.get("source_kind") == "local_gateway_state":
+            if provenance.get("source_ref"):
+                quota_source = (
+                    f"local_gateway_state:{provenance['source_ref']}"
+                )
+        elif provenance.get("endpoint_host_path"):
             quota_source = f"provider_api:{provenance['endpoint_host_path']}"
         if observation.reset_at is not None:
             reset_at = observation.reset_at
@@ -845,22 +850,28 @@ def _build_resource_row(
     if observation is not None and observation.observed:
         raw_provenance = dict(observation.provenance or {})
         provenance_block: dict[str, Any] = {
-            "source_kind": "provider_api",
-            "endpoint_host_path": raw_provenance.get("endpoint_host_path"),
-            "http_status": raw_provenance.get("http_status"),
+            "source_kind": raw_provenance.get("source_kind") or "provider_api",
             "observed_at": raw_provenance.get("observed_at"),
             "expires_at": raw_provenance.get("expires_at"),
             "confidence": raw_provenance.get("confidence"),
         }
+        if raw_provenance.get("source_kind") == "local_gateway_state":
+            provenance_block["source_ref"] = raw_provenance.get("source_ref")
+        else:
+            provenance_block["endpoint_host_path"] = raw_provenance.get(
+                "endpoint_host_path"
+            )
+            provenance_block["http_status"] = raw_provenance.get("http_status")
         windows = (observation.details or {}).get("windows")
         if windows is not None:
             provenance_block["windows"] = windows
         row["quota_observation"] = provenance_block
         row["provenance"] = list(registry_provenance) + [
             {
-                "source_kind": "provider_api",
+                "source_kind": provenance_block["source_kind"],
                 "field": "remaining_quota",
                 "endpoint_host_path": provenance_block.get("endpoint_host_path"),
+                "source_ref": provenance_block.get("source_ref"),
                 "observed_at": provenance_block.get("observed_at"),
             }
         ]

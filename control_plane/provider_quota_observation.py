@@ -32,6 +32,7 @@ import dataclasses
 import hashlib
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,7 +43,7 @@ from typing import Any, NoReturn
 
 OBSERVATION_SCHEMA = "mastermind.provider_quota_observation/v1"
 
-SOURCE_KINDS = frozenset({"provider_api"})
+SOURCE_KINDS = frozenset({"provider_api", "local_gateway_state"})
 
 #: Typed refusals. An ``observed=False`` record carries exactly one of these
 #: and NO usage/limit numbers at all.
@@ -502,6 +503,188 @@ def observe_provider(
     )
 
 
+ANTHROPIC_GATEWAY_ENV_KEYS = (
+    "ANTHROPIC_FIVE_HOUR_BUDGET",
+    "ANTHROPIC_WEEKLY_BUDGET",
+    "ANTHROPIC_WINDOW_5H_S",
+    "ANTHROPIC_WINDOW_WEEKLY_S",
+)
+
+
+def observe_anthropic_oauth_gateway_state(
+    gateway_dir: object,
+    *,
+    now: float | None = None,
+    provider: str = "anthropic-oauth",
+) -> list[QuotaObservation]:
+    """Observe the managed Anthropic OAuth gateway's durable budget ledger.
+
+    The local gateway (``ops/native_fabric/anthropic_oauth_proxy``) is the
+    fleet's sole managed path for these subscription accounts. Its SQLite
+    ledger records every proxied request (weight, model, outcome) under
+    sliding 5h/weekly windows with per-account budgets configured by the
+    gateway owner; pre-flight failures are refunded (rows removed) while
+    settled ``http_*`` rows stay recorded — exactly the gateway's own
+    admission math, replayed read-only here. This is a REAL usage
+    observation of the managed path, NOT a provider API response: the
+    configured budget is a configured ceiling (never labeled a
+    provider-stated limit), and consumption outside the managed gateway is
+    not included and never claimed as zero.
+
+    ``gateway_dir`` is the gateway's runtime directory holding
+    ``gateway.env`` (budget configuration; only the four ANTHROPIC_* keys
+    above are ever read — never tokens) and ``state/budget.sqlite3`` (the
+    durable ledger, opened strictly read-only).
+    """
+    base = Path(str(gateway_dir))
+    env_path = base / "gateway.env"
+    db_path = base / "state" / "budget.sqlite3"
+    if not env_path.is_file() or not db_path.is_file():
+        _refuse(
+            "PROVIDER_QUOTA_OBSERVATION_INPUT_INVALID",
+            "gateway env or budget ledger missing",
+        )
+    budgets: dict[str, float] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, raw = stripped.partition("=")
+        if name.strip() in ANTHROPIC_GATEWAY_ENV_KEYS:
+            try:
+                budgets[name.strip()] = float(raw.strip())
+            except ValueError:
+                _refuse(
+                    "PROVIDER_QUOTA_OBSERVATION_INPUT_INVALID",
+                    f"gateway env {name.strip()} is not numeric",
+                )
+    for required in ANTHROPIC_GATEWAY_ENV_KEYS:
+        if required not in budgets or budgets[required] <= 0:
+            _refuse(
+                "PROVIDER_QUOTA_OBSERVATION_INPUT_INVALID",
+                f"gateway env {required} missing or invalid",
+            )
+    budget_5h = budgets["ANTHROPIC_FIVE_HOUR_BUDGET"]
+    budget_weekly = budgets["ANTHROPIC_WEEKLY_BUDGET"]
+    window_5h = budgets["ANTHROPIC_WINDOW_5H_S"]
+    window_weekly = budgets["ANTHROPIC_WINDOW_WEEKLY_S"]
+
+    import sqlite3
+
+    try:
+        connection = sqlite3.connect(
+            f"file:{db_path}?mode=ro", uri=True, timeout=5
+        )
+    except sqlite3.Error:
+        _refuse(
+            "PROVIDER_QUOTA_OBSERVATION_INPUT_INVALID",
+            "gateway budget ledger unreadable",
+        )
+    connection.row_factory = sqlite3.Row
+    try:
+        moment = float(now) if now is not None else time.time()
+        observed_at = datetime.fromtimestamp(moment, tz=timezone.utc)
+        expires_at = observed_at + timedelta(seconds=OBSERVATION_TTL_SECONDS)
+        source_ref = "anthropic-gateway/state/budget.sqlite3"
+        records: list[QuotaObservation] = []
+        accounts = {
+            str(row["account_id"]): str(row["label"])
+            for row in connection.execute(
+                "SELECT account_id, label FROM account_meta"
+            )
+        }
+        for account_id, label in sorted(accounts.items(), key=lambda kv: kv[1]):
+            windows: dict[str, Any] = {}
+            primary_remaining: float | None = None
+            primary_reset: str | None = None
+            for window_name, window_s, budget in (
+                ("five_hour", window_5h, budget_5h),
+                ("weekly", window_weekly, budget_weekly),
+            ):
+                cutoff = moment - window_s
+                rows = connection.execute(
+                    "SELECT ts, weight, outcome FROM usage "
+                    "WHERE account_id=? AND ts > ? ORDER BY ts",
+                    (account_id, cutoff),
+                ).fetchall()
+                used_weight = round(sum(float(r["weight"]) for r in rows), 4)
+                used_pct = round(min(100.0, used_weight / budget * 100.0), 2)
+                remaining_pct = round(max(0.0, 100.0 - used_pct), 2)
+                # The window starts recovering when its oldest contributing
+                # event exits; an empty window has nothing to recover.
+                reset_at = (
+                    _iso_z(
+                        datetime.fromtimestamp(
+                            float(rows[0]["ts"]) + window_s, tz=timezone.utc
+                        )
+                    )
+                    if rows
+                    else None
+                )
+                windows[window_name] = {
+                    "used_pct": used_pct,
+                    "remaining_pct": remaining_pct,
+                    "used_weight": used_weight,
+                    "configured_budget_weight": budget,
+                    "in_window_events": len(rows),
+                    "reset_at": reset_at,
+                }
+                if window_name == "five_hour":
+                    primary_remaining = remaining_pct
+                    primary_reset = reset_at
+            cooldown_row = connection.execute(
+                "SELECT until, reason FROM cooldown WHERE account_id=?",
+                (account_id,),
+            ).fetchone()
+            cooldown_until = None
+            if cooldown_row is not None and float(cooldown_row["until"]) > moment:
+                cooldown_until = _iso_z(
+                    datetime.fromtimestamp(
+                        float(cooldown_row["until"]), tz=timezone.utc
+                    )
+                )
+            if primary_remaining is None:
+                continue
+            records.append(
+                QuotaObservation(
+                    provider=provider,
+                    account=label,
+                    shared_quota_resource_ref=f"{provider}:{label}",
+                    observed=True,
+                    usage=primary_remaining,
+                    usage_unit="percent_of_window_remaining",
+                    limit=None,
+                    limit_unit=None,
+                    reset_at=primary_reset,
+                    cooldown_until=cooldown_until,
+                    reason_code=None,
+                    provenance={
+                        "source_kind": "local_gateway_state",
+                        "source_ref": source_ref,
+                        "observed_at": _iso_z(observed_at),
+                        "expires_at": _iso_z(expires_at),
+                        "confidence": "managed_gateway_durable_ledger",
+                    },
+                    details={
+                        "windows": windows,
+                        "configured_budget_basis": (
+                            "gateway env ANTHROPIC_*_BUDGET — configured "
+                            "ceiling enforced by the managed gateway, not a "
+                            "provider-stated limit"
+                        ),
+                        "scope_note": (
+                            "usage observed on the managed gateway path only; "
+                            "consumption outside the gateway is not included "
+                            "and is not claimed as zero"
+                        ),
+                    },
+                )
+            )
+        return records
+    finally:
+        connection.close()
+
+
 def _endpoint_ref(url: object) -> str:
     """host+path of the endpoint; query strings (auth-bearing) are dropped."""
     if not isinstance(url, str):
@@ -629,17 +812,41 @@ def _observed_entry(
             "PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID",
             f"{provider}:{account} observed entry lacks provenance",
         )
-    if provenance.get("source_kind") != "provider_api":
+    source_kind = provenance.get("source_kind")
+    if source_kind not in SOURCE_KINDS:
         _refuse(
             "PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID",
-            "source_kind must be provider_api",
+            f"source_kind must be one of {sorted(SOURCE_KINDS)}",
         )
-    endpoint = provenance.get("endpoint_host_path")
-    if not isinstance(endpoint, str) or not 0 < len(endpoint) <= MAX_ENDPOINT:
-        _refuse("PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID", "endpoint_host_path")
-    status = provenance.get("http_status")
-    if type(status) is not int or status != 200:
-        _refuse("PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID", "http_status")
+    if source_kind == "local_gateway_state":
+        # A managed local gateway ledger: no HTTP surface, so provenance
+        # names the durable state source instead of an endpoint+status.
+        source_ref = provenance.get("source_ref")
+        if (
+            not isinstance(source_ref, str)
+            or not 0 < len(source_ref) <= MAX_ENDPOINT
+            or not source_ref.isprintable()
+        ):
+            _refuse(
+                "PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID",
+                "source_ref must be a bounded printable reference",
+            )
+        if provenance.get("endpoint_host_path") is not None or provenance.get(
+            "http_status"
+        ) is not None:
+            _refuse(
+                "PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID",
+                "local_gateway_state provenance must not claim an HTTP surface",
+            )
+        endpoint = source_ref
+        status = None
+    else:
+        endpoint = provenance.get("endpoint_host_path")
+        if not isinstance(endpoint, str) or not 0 < len(endpoint) <= MAX_ENDPOINT:
+            _refuse("PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID", "endpoint_host_path")
+        status = provenance.get("http_status")
+        if type(status) is not int or status != 200:
+            _refuse("PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID", "http_status")
     observed_at = _parse_utc_seconds(provenance.get("observed_at"))
     expires_at = _parse_utc_seconds(provenance.get("expires_at"))
     expected_expiry = observed_at + timedelta(seconds=OBSERVATION_TTL_SECONDS)
@@ -673,6 +880,19 @@ def _observed_entry(
     if entry.get("usage_unit") != "percent_of_window_remaining":
         _refuse("PROVIDER_QUOTA_OBSERVATION_SCHEMA_INVALID", "usage_unit")
     details = entry.get("details")
+    emitted_provenance: dict[str, Any] = {
+        "source_kind": str(source_kind),
+        "observed_at": _iso_z(observed_at),
+        "expires_at": _iso_z(expires_at),
+        "confidence": str(confidence),
+    }
+    if source_kind == "local_gateway_state":
+        emitted_provenance["source_ref"] = endpoint
+    else:
+        emitted_provenance["endpoint_host_path"] = endpoint
+        emitted_provenance["http_status"] = (
+            int(status) if isinstance(status, int) else None
+        )
     return QuotaObservation(
         provider=provider,
         account=account,
@@ -685,14 +905,7 @@ def _observed_entry(
         reset_at=reset_at,
         cooldown_until=cooldown_until,
         reason_code=None,
-        provenance={
-            "source_kind": "provider_api",
-            "endpoint_host_path": endpoint,
-            "http_status": int(status),
-            "observed_at": _iso_z(observed_at),
-            "expires_at": _iso_z(expires_at),
-            "confidence": str(confidence),
-        },
+        provenance=emitted_provenance,
         details=dict(details) if isinstance(details, Mapping) else None,
     )
 

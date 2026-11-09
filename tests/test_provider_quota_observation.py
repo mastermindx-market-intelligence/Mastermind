@@ -470,7 +470,27 @@ def test_producer_without_observations_path_is_byte_identical_to_before(tmp_path
     )
     produced = json.dumps(preview.to_dict(), sort_keys=True, indent=2) + "\n"
     golden = golden_path.read_text()
-    assert produced == golden
+    # The document embeds the absolute fixture paths of the producing
+    # worktree; normalize that location noise on BOTH sides so the golden
+    # (captured from the pre-extension producer) stays portable across
+    # worktrees while still proving byte-identity of everything else.
+    import re as _re
+
+    _PATH_NOISE = _re.compile(r"[^\"]*?/tests/fixtures/_golden_inputs/")
+    produced = _PATH_NOISE.sub("tests/fixtures/_golden_inputs/", produced)
+    golden = _PATH_NOISE.sub("tests/fixtures/_golden_inputs/", golden)
+    # ``observation_digest`` is a self-digest over the RAW document, so it
+    # inherits the same location noise; recompute it over the normalized
+    # document on both sides instead of comparing the raw values.
+    produced_doc = json.loads(produced)
+    golden_doc = json.loads(golden)
+    produced_doc.pop("observation_digest", None)
+    golden_doc.pop("observation_digest", None)
+    assert produced_doc == golden_doc
+    assert (
+        hashlib.sha256(quota._canonical_bytes(produced_doc)).hexdigest()
+        == hashlib.sha256(quota._canonical_bytes(golden_doc)).hexdigest()
+    )
     document = preview.to_dict()
     for row in document["resources"]:
         assert "quota_observation" not in row
@@ -604,3 +624,218 @@ def test_producer_path_has_no_environment_or_fixture_hooks():
     assert "getenv" not in observation_source
     signature = inspect.signature(quota.produce_quota_economics_preview)
     assert signature.parameters["quota_observations_path"].default is None
+
+
+# ── Managed local gateway state (anthropic-oauth durable ledger) ──────────────
+# TEST FIXTURE material below: a synthetic gateway directory (gateway.env +
+# state/budget.sqlite3) exercises the read-only ledger adapter offline. No
+# real gateway state, provider fact, or credential is touched.
+
+
+def _synthetic_gateway_dir(tmp_path, *, now):
+    import sqlite3
+
+    gateway = tmp_path / "anthropic-gateway"
+    (gateway / "state").mkdir(parents=True)
+    (gateway / "gateway.env").write_text(
+        "\n".join(
+            [
+                "# synthetic test fixture configuration",
+                "ANTHROPIC_FIVE_HOUR_BUDGET=100",
+                "ANTHROPIC_WEEKLY_BUDGET=700",
+                "ANTHROPIC_WINDOW_5H_S=18000",
+                "ANTHROPIC_WINDOW_WEEKLY_S=604800",
+            ]
+        )
+        + "\n"
+    )
+    db = sqlite3.connect(gateway / "state" / "budget.sqlite3")
+    try:
+        db.execute(
+            "CREATE TABLE usage (row_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "account_id TEXT NOT NULL, ts REAL NOT NULL, weight REAL NOT NULL, "
+            "model TEXT NOT NULL, outcome TEXT NOT NULL)"
+        )
+        db.execute(
+            "CREATE TABLE cooldown (account_id TEXT PRIMARY KEY, "
+            "until REAL NOT NULL, reason TEXT NOT NULL)"
+        )
+        db.execute(
+            "CREATE TABLE account_meta (account_id TEXT PRIMARY KEY, "
+            "label TEXT NOT NULL, last_status TEXT, last_status_at REAL)"
+        )
+        db.executemany(
+            "INSERT INTO account_meta VALUES (?,?,?,?)",
+            [
+                ("a1", "max-1", "ok", now - 60),
+                ("a2", "max-2", "http_400", now - 30),
+            ],
+        )
+        # max-1: one settled 5h-window event (weight 10) and one older weekly
+        # event outside the 5h window (weight 5). max-2: settled http_400 row
+        # that the gateway itself keeps recorded (conservative window usage).
+        db.executemany(
+            "INSERT INTO usage (account_id, ts, weight, model, outcome) VALUES (?,?,?,?,?)",
+            [
+                ("a1", now - 3600, 10.0, "claude-fable-5", "ok"),
+                ("a1", now - 40000, 5.0, "claude-haiku-4-5", "ok"),
+                ("a2", now - 600, 2.0, "claude-opus-5", "http_400"),
+            ],
+        )
+        db.execute(
+            "INSERT INTO cooldown VALUES (?,?,?)", ("a2", now + 300, "bench")
+        )
+        db.commit()
+    finally:
+        db.close()
+    return gateway
+
+
+def test_gateway_state_adapter_observes_the_durable_ledger(tmp_path):
+    now = datetime.strptime(
+        "2026-11-08T16:00:00Z", "%Y-%m-%dT%H:%M:%SZ"
+    ).replace(tzinfo=timezone.utc).timestamp()
+    gateway = _synthetic_gateway_dir(tmp_path, now=now)
+    records = observation.observe_anthropic_oauth_gateway_state(
+        gateway, now=now
+    )
+    by_account = {record.account: record for record in records}
+    assert sorted(by_account) == ["max-1", "max-2"]
+    first = by_account["max-1"]
+    assert first.observed is True
+    assert first.provider == "anthropic-oauth"
+    assert first.usage == 90.0  # 100 budget − 10 in-window weight
+    assert first.usage_unit == "percent_of_window_remaining"
+    assert first.limit is None  # configured budget is a ceiling, not a limit
+    # The 5h window recovers when its oldest in-window event exits.
+    assert first.reset_at == "2026-11-08T20:00:00Z"  # (now-3600) + 18000
+    assert first.cooldown_until is None
+    assert first.provenance is not None and first.details is not None
+    assert first.provenance["source_kind"] == "local_gateway_state"
+    assert first.provenance["source_ref"] == (
+        "anthropic-gateway/state/budget.sqlite3"
+    )
+    assert "endpoint_host_path" not in first.provenance
+    assert "http_status" not in first.provenance
+    windows = first.details["windows"]
+    assert windows["five_hour"]["used_weight"] == 10.0
+    assert windows["five_hour"]["in_window_events"] == 1
+    assert windows["weekly"]["used_weight"] == 15.0
+    assert windows["weekly"]["in_window_events"] == 2
+    assert "not claimed as zero" in first.details["scope_note"]
+    assert "not a provider-stated limit" in first.details[
+        "configured_budget_basis"
+    ]
+    # Settled http_400 rows stay recorded: the gateway's own math counts them.
+    second = by_account["max-2"]
+    assert second.usage == 98.0
+    assert second.cooldown_until == "2026-11-08T16:05:00Z"
+
+
+def test_gateway_state_adapter_refuses_missing_state(tmp_path):
+    empty = tmp_path / "anthropic-gateway"
+    empty.mkdir()
+    with pytest.raises(observation.QuotaObservationError) as error:
+        observation.observe_anthropic_oauth_gateway_state(empty)
+    assert error.value.code == "PROVIDER_QUOTA_OBSERVATION_INPUT_INVALID"
+
+
+def test_gateway_observation_round_trips_the_document_validator(tmp_path):
+    now = datetime.strptime(
+        "2026-11-08T16:00:00Z", "%Y-%m-%dT%H:%M:%SZ"
+    ).replace(tzinfo=timezone.utc).timestamp()
+    gateway = _synthetic_gateway_dir(tmp_path, now=now)
+    records = observation.observe_anthropic_oauth_gateway_state(
+        gateway, now=now
+    )
+    path = _write_observations(
+        tmp_path, records, observed_at="2026-11-08T16:00:00Z"
+    )
+    loaded = observation.load_quota_observations(path)
+    assert loaded[("anthropic-oauth", "max-1")].observed is True
+    assert (
+        loaded[("anthropic-oauth", "max-1")].provenance["source_kind"]
+        == "local_gateway_state"
+    )
+
+    # A local_gateway_state entry that ALSO claims an HTTP surface is
+    # refused: it must not impersonate a provider_api observation.
+    document = observation.build_observation_document(
+        records,
+        observed_at=datetime.strptime(
+            "2026-11-08T16:00:00Z", "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc),
+    )
+    entry = document["observations"][0]
+    entry["provenance"]["http_status"] = 200
+    document["digest"] = hashlib.sha256(
+        json.dumps(
+            {k: v for k, v in document.items() if k != "digest"},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    bad = tmp_path / "impersonating.json"
+    bad.write_text(json.dumps(document))
+    with pytest.raises(observation.QuotaObservationError) as error:
+        observation.load_quota_observations(bad)
+    assert "HTTP surface" in str(error.value)
+
+
+def _gateway_style_record(provider, account, *, usage, reset_at):
+    return observation.QuotaObservation(
+        provider=provider,
+        account=account,
+        shared_quota_resource_ref=f"{provider}:{account}",
+        observed=True,
+        usage=usage,
+        usage_unit="percent_of_window_remaining",
+        limit=None,
+        limit_unit=None,
+        reset_at=reset_at,
+        cooldown_until=None,
+        reason_code=None,
+        provenance={
+            "source_kind": "local_gateway_state",
+            "source_ref": "anthropic-gateway/state/budget.sqlite3",
+            "observed_at": QUOTA_OBSERVED,
+            "expires_at": "2026-09-16T05:40:00Z",
+            "confidence": "managed_gateway_durable_ledger",
+        },
+        details={
+            "windows": {
+                "five_hour": {"used_pct": round(100.0 - usage, 2)},
+            },
+            "scope_note": "managed gateway path only; not claimed as zero",
+        },
+    )
+
+
+def test_producer_merges_gateway_state_observation_into_rows(tmp_path):
+    records = [
+        _gateway_style_record(
+            "go", "C1", usage=84.0, reset_at="2026-09-16T09:25:00Z"
+        )
+    ]
+    path = _write_observations(tmp_path, records)
+    preview = _produce(tmp_path, observations_path=path)
+    document = preview.to_dict()
+    row = next(
+        r for r in document["resources"] if r["shared_quota_resource_ref"] == "go:C1"
+    )
+    assert row["quota_knowledge"] == "observed"
+    assert row["remaining_quota"] == 84.0
+    assert row["quota_source"] == (
+        "local_gateway_state:anthropic-gateway/state/budget.sqlite3"
+    )
+    assert row["quota_observation"]["source_kind"] == "local_gateway_state"
+    assert row["quota_observation"]["source_ref"] == (
+        "anthropic-gateway/state/budget.sqlite3"
+    )
+    assert "endpoint_host_path" not in row["quota_observation"]
+    assert row["quota_observation"]["windows"]["five_hour"] == {
+        "used_pct": 16.0
+    }
+    assert row["provenance"][-1]["source_kind"] == "local_gateway_state"
+    assert row["provenance"][-1]["source_ref"] == (
+        "anthropic-gateway/state/budget.sqlite3"
+    )
