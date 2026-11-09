@@ -711,6 +711,19 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
         executive_send,
     })
 }
+// An API that has not opted in to offline access may return a valid access
+// token without issuing refresh credentials. Keep that grant in memory only;
+// reject an explicitly present but malformed refresh credential.
+fn initial_refresh_token(value: &Value) -> Result<Option<&str>> {
+    match value.get("refresh_token") {
+        None => Ok(None),
+        Some(Value::String(value)) if crate::native_refresh::valid_refresh(value) => {
+            Ok(Some(value.as_str()))
+        }
+        Some(_) => Err("REFRESH_TOKEN_INVALID".into()),
+    }
+}
+
 pub async fn callback(app: AppHandle, raw: String) {
     let state = app.state::<NativeAuth>();
     let transaction = match state.lock().and_then(|mut inner| inner.consume(&raw)) {
@@ -753,19 +766,18 @@ pub async fn callback(app: AppHandle, raw: String) {
             }
             let access = parse_token(v.clone(), pending.resource)?;
             if pending.continuation.is_none() && pending.resource.persistent() {
-                let refresh = v.get("refresh_token").and_then(Value::as_str)
-                    .filter(|s| crate::native_refresh::valid_refresh(s))
-                    .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
-                let _keychain = state.keychain_lock.lock()
-                    .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
-                let mut inner = state.lock()?;
-                if pending.intent == SignInIntent::PrimaryAccount {
-                    inner.primary_exchange_current(&pending, &client)?;
+                if let Some(refresh) = initial_refresh_token(&v)? {
+                    let _keychain = state.keychain_lock.lock()
+                        .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+                    let mut inner = state.lock()?;
+                    if pending.intent == SignInIntent::PrimaryAccount {
+                        inner.primary_exchange_current(&pending, &client)?;
+                    }
+                    if inner.generation != pending.generation || !inner.exchanging {
+                        return Err("AUTHENTICATION_CHANGED".into());
+                    }
+                    crate::native_refresh::save(&client, pending.resource.audience(), refresh)?;
                 }
-                if inner.generation != pending.generation || !inner.exchanging {
-                    return Err("AUTHENTICATION_CHANGED".into());
-                }
-                crate::native_refresh::save(&client, pending.resource.audience(), refresh)?;
             }
             Ok(access)
         }),
@@ -5007,6 +5019,52 @@ mod retained_activity_selection_tests {
         inner.invalidate();
         assert!(!inner.restoring);
         assert_eq!(inner.status().status, "signed_out");
+    }
+
+    #[test]
+    fn missing_initial_refresh_token_keeps_valid_access_in_memory() {
+        let response = serde_json::json!({
+            "access_token": "synthetic-access-only",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "mastermind.workspace.read",
+        });
+        assert_eq!(initial_refresh_token(&response).unwrap(), None);
+        let access = parse_token(response, Resource::Acquisition).unwrap();
+        let mut inner = Inner::with_executive_resource(Some("native-client"), None);
+        inner.transaction(Resource::Acquisition).unwrap();
+        let state = inner.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = inner.consume(&format!("{CALLBACK}?state={state}&code=test-code")).unwrap();
+        assert!(inner.finish_exchange(&pending, Ok(access)).is_some());
+        assert!(inner.status().acquisition);
+        let content_response = serde_json::json!({
+            "access_token": "synthetic-content-only",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "mastermind.workspace.content.read",
+        });
+        assert_eq!(initial_refresh_token(&content_response).unwrap(), None);
+        let content = parse_token(content_response, Resource::Content).unwrap();
+        let content_state = inner.pending.as_ref().unwrap().state.clone();
+        let (content_pending, _, _) = inner.consume(&format!("{CALLBACK}?state={content_state}&code=test-code")).unwrap();
+        assert!(inner.finish_exchange(&content_pending, Ok(content)).is_none());
+        assert_eq!(inner.status().status, "signed_in");
+        assert!(inner.status().acquisition && inner.status().content);
+    }
+
+    #[test]
+    fn initial_refresh_token_rejects_present_malformed_credentials() {
+        let synthetic = "synthetic-refresh-credential-not-real";
+        let present = serde_json::json!({"refresh_token": synthetic});
+        assert_eq!(initial_refresh_token(&present).unwrap(), Some(synthetic));
+        for malformed in [
+            serde_json::json!({"refresh_token": null}),
+            serde_json::json!({"refresh_token": 123}),
+            serde_json::json!({"refresh_token": "short"}),
+            serde_json::json!({"refresh_token": "x".repeat(4097)}),
+        ] {
+            assert_eq!(initial_refresh_token(&malformed).unwrap_err(), "REFRESH_TOKEN_INVALID");
+        }
     }
 
     #[test]
