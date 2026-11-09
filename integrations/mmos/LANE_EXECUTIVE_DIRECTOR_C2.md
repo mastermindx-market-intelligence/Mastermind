@@ -209,3 +209,15 @@ env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
 
 
 > Integrator note (Fable): the 77-file union run was NOT completed inside the lane (turn ended mid-run); counts above are the lane's focused suites. The integrator re-runs the union on the merged build head.
+
+## Integrator disposition of the lane's later commits (Fable, 2026-11-10)
+
+The lane's thread continued after its interim report and produced `1015db4c2` (relocating the return wiring to
+`integrations/session_bridge/execution_return_wiring.py` because `control_plane` must never import `integrations`) and
+`fe370450e` (ledger final; 86-file union **3973 passed + 1 xfailed, 0 failed**). Those two commits are **not merged**: the
+build branch had already resolved the same boundary violation the other way — the wiring stays in
+`control_plane/execution_return_wiring.py` with the Hermes deliverer INJECTED (duck-typed `async deliver(record)`) by the
+composing service, which keeps the terminal-seal seam Executive-owned and was the version reviewed in
+`REVIEW2_GUARD_PINS_NAMESPACE_OPUS_20261110.md` §C. The lane's union count is recorded here as the lane's own evidence for
+its `e155eecfc` bytes. The recorded guard finding (v1.1 label refused at the binding gate) was fixed by the integrator in
+`918f1e5a7` (schema allowlist) and the nm15 expectation updated in `07748bdbe`.
