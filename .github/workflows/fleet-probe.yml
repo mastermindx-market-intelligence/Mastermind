@@ -1,0 +1,7 @@
+name: fleet-runner-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: [self-hosted, self-ubuntu]
+    steps:
+      - run: echo "PROBE_OK $(hostname)"
