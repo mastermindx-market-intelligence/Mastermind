@@ -1,12 +1,12 @@
 {
-  "application_after_manifest_sha256": "6f2752c54f0fa2a58d49fe8f994551732a7510356c2c193e7880bd9f1708ba59",
+  "application_after_manifest_sha256": "ed5de7829d0aef3e6a306a93ba8779cf80164e5b96e6faf2d083ed7b584099d0",
   "application_before_manifest_sha256": "ac671d31e6b1ed204554452a1cc31ed13f2c1706a4ba784d9dc48a1f55cd1ab2",
   "members": {
     "ext/fabric_task.py": {
-      "after": "c5536896f85db738f4d636dd37e81b44939716597544be559cd6b9abeb2b8826",
+      "after": "d25596efdf68f2334722916702ee7e97ecbe76f9269f37734d274de6d301a94f",
       "before": "867b7ff8a450959e5a103e3050b688a5d0c13a56438f3627eaa79e43ee819c83",
       "bytes": 126169,
-      "patch_sha256": "7f22987ec06db9d1244d5e8cc9622093a0cda9b8e6087582a21f90de4bfd3b05",
+      "patch_sha256": "e0cf432e6e702a8b7c85d80bc72c14f3e92c6889729f3e4a22edd0bed69873bc",
       "patch_source": "rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch"
     },
     "ext/lease_broker.py": {
@@ -24,10 +24,10 @@
       "patch_source": "rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch"
     },
     "ext/support_bundle.py": {
-      "after": "2e331a32f6915f6d4641a4385f9ec2bd23bf606c9b7d6ba54d8799eb5c5dcb3c",
+      "after": "1c99fed809912561bad0d378412ef8a9ba4fba2da20659be91d50e35faab3d59",
       "before": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
-      "bytes": 51723,
-      "patch_sha256": "531226b42bb777d1962ebce6f246c87a9273a67e6c61f0b60f14b16d90f5365c",
+      "bytes": 53151,
+      "patch_sha256": "49c144233015e802552a2f66d7a6ecf4b70e9a5f1d6897c0bc22959957162754",
       "patch_source": "rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch"
     }
   },

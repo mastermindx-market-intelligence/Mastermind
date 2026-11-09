@@ -1802,9 +1802,16 @@ def test_fleet_launch_repair_preserves_application_publisher_and_inspector(
     def function(stage, member, name):
         tree = ast.parse((stage / "native-code-stage" / member).read_bytes())
         return ast.dump(next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name))
-    for member, name in (("ext/support_bundle.py", "ensure_policy"), ("ext/fabric_task.py", "_inspect_run")):
-        assert function(fleet_launch_repair_builds.base, member, name) == function(
-            memory_support_builds.base, member, name)
+    # The missing-policy branch intentionally extends ensure_policy. Every
+    # maintenance/CAS helper after it and the application inspector stay exact.
+    member = "ext/support_bundle.py"
+    parent = ast.parse((memory_support_builds.base / "native-code-stage" / member).read_bytes())
+    ensure = next(n for n in parent.body if isinstance(n, ast.FunctionDef) and n.name == "ensure_policy")
+    for node in parent.body:
+        if isinstance(node, ast.FunctionDef) and node.lineno > ensure.end_lineno:
+            assert function(fleet_launch_repair_builds.base, member, node.name) == ast.dump(node)
+    assert function(fleet_launch_repair_builds.base, "ext/fabric_task.py", "_inspect_run") == function(
+        memory_support_builds.base, "ext/fabric_task.py", "_inspect_run")
 
 
 def test_fleet_launch_repair_staged_original_runtime_behaviors(fleet_launch_repair_builds, tmp_path):
@@ -1850,3 +1857,13 @@ def test_fleet_launch_repair_unqualified_flags_refuse_before_output(tmp_path, fl
         with pytest.raises(SystemExit) as stopped:
             builder.main()
     assert stopped.value.code == 2 and not output.exists()
+
+
+def test_fleet_launch_repair_initializes_only_absent_idle_policy(fleet_launch_repair_builds, tmp_path):
+    result = subprocess.run([
+        sys.executable, "-B", str(ROOT / "tests/support_policy_bootstrap_cases.py"),
+        str(fleet_launch_repair_builds.glm),
+    ], cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Ran 16 tests" in result.stderr
+    assert result.stderr.rstrip().endswith("OK")

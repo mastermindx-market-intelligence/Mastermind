@@ -1267,12 +1267,12 @@ def compose_provider_memory_support_stage(root, output, manifest, files):
         manifest[relative] = row["after"]
 
 
-PROVIDER_FLEET_LAUNCH_REPAIR_RECORD_SHA256 = "fdecc4a744d877fe66ee6ba5709b37de41ad6be3e1ef149be5e88fc2a7911976"
+PROVIDER_FLEET_LAUNCH_REPAIR_RECORD_SHA256 = "243c8b9b06e902025b544b27947a11b36adc41365e9fc3c507923da3d2c54ff8"
 PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS = {
-    "ext/fabric_task.py": "c5536896f85db738f4d636dd37e81b44939716597544be559cd6b9abeb2b8826",
+    "ext/fabric_task.py": "d25596efdf68f2334722916702ee7e97ecbe76f9269f37734d274de6d301a94f",
     "ext/lease_broker.py": "d6da96bb45792fc87da81e8065a80956325a2536b1fba11ca10ea21933df8d6c",
     "ext/remote_sub.sh": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
-    "ext/support_bundle.py": "2e331a32f6915f6d4641a4385f9ec2bd23bf606c9b7d6ba54d8799eb5c5dcb3c",
+    "ext/support_bundle.py": "1c99fed809912561bad0d378412ef8a9ba4fba2da20659be91d50e35faab3d59",
 }
 PROVIDER_FLEET_LAUNCH_REPAIR_NATIVE_MARKERS = {
     "ext/fabric_task.py": "b487c422dc70742f2ec302bbf0cc416acd17d49f62ba33b0cae9a20d8fe06550",

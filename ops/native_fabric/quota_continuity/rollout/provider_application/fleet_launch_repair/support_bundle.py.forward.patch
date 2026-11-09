@@ -3,20 +3,31 @@
 @@ -1,7 +1,7 @@
  #!/usr/bin/env python3
  """support_bundle: pure file publication helper, Python3 stdlib only."""
--
-+
+ 
 -import os, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
 +import os, re, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
  from pathlib import Path
--
-+
+ 
  # Fixed public source closure (no credentials or controller-only helpers)
-@@ -308,37 +308,219 @@
+@@ -230,6 +230,14 @@
+         from fabric_policy_snapshot import validate_publication
+         try:
+             validate_publication(source_dir / "pools.yaml", stable_ext)
++        except FileNotFoundError as exc:
++            target = stable_ext.parent / "orch/fabric/pools.yaml"
++            if exc.errno != errno.ENOENT or exc.filename != str(target):
++                raise
++            outcome = ensure_policy(source_dir / "pools.yaml", stable_ext,
++                                    manifest["pools.yaml"], require_absent=True)
++            validate_publication(source_dir / "pools.yaml", stable_ext)
++            print(f"{outcome} sha256={manifest['pools.yaml']}", file=sys.stderr)
+         except ValueError as exc:
+             # Only a verified critical-policy difference can need refresh.
+             # Compatible advisory snapshots keep working beside active lanes;
+@@ -308,37 +316,219 @@
              time.sleep(min(0.02, remaining))
--
-+
--
-+
+ 
+ 
 -def _is_retained_settlement_metadata(path):
 -    """Classify retained metadata; never settle a run or remove a lane marker.
 -
@@ -248,7 +259,7 @@
          def unique_pairs(pairs):
              result = {}
              for key, value in pairs:
-@@ -347,15 +529,56 @@
+@@ -347,23 +537,67 @@
                  result[key] = value
              return result
          value = json.loads(raw, object_pairs_hook=unique_pairs)
@@ -262,8 +273,9 @@
      finally:
          if descriptor is not None:
              os.close(descriptor)
-+
-+
+ 
+ 
+-def ensure_policy(source, stable_ext, expected_hash, *, expected_current_hash=None, rollback_source=None):
 +def _is_retained_settlement_metadata(path):
 +    """Classify retained metadata; never settle a run or remove a lane marker.
 +
@@ -308,8 +320,58 @@
 +                and seat[1]["hold"] == value)
 +    except (OSError, ValueError, TypeError, UnicodeError, RecursionError, LaneRuntimeError):
 +        return False
--
 +
--
 +
- def ensure_policy(source, stable_ext, expected_hash, *, expected_current_hash=None, rollback_source=None):
++def ensure_policy(source, stable_ext, expected_hash, *, expected_current_hash=None,
++                  rollback_source=None, require_absent=False):
+     """Refresh policy through the original owner; strict callers require CAS.
+ 
+     The optional path permits only native-fingerprint-compatible changes and
+     retains an independent exact preimage. Historical callers are unchanged.
+     """
++    if require_absent and (expected_current_hash is not None or rollback_source is not None):
++        raise ValueError("SUPPORT_POLICY_ABSENCE_MODE_CONFLICT")
+     if expected_current_hash is not None or rollback_source is not None:
+         return _publish_compatible_policy(source, stable_ext, expected_hash,
+             expected_current_hash=expected_current_hash, rollback_source=rollback_source)
+@@ -373,6 +607,9 @@
+     data = source.read_bytes()
+     if len(data) > 2 * 1024 * 1024 or _hex64(data) != expected_hash:
+         raise ValueError("SUPPORT_POLICY_HASH_MISMATCH")
++    if require_absent:
++        from fabric_policy_snapshot import critical_fingerprint
++        critical_fingerprint(data)
+     active = stable_ext / "active"
+     _require_kind(active, stat.S_ISDIR)
+     target = stable_ext.parent / "orch/fabric/pools.yaml"
+@@ -386,6 +623,8 @@
+         try:
+             old_mode = 0o600
+             if os.path.lexists(target):
++                if require_absent:
++                    raise ValueError("SUPPORT_POLICY_APPEARED")
+                 _require_kind(target, stat.S_ISREG)
+                 old_mode = stat.S_IMODE(target.stat().st_mode)
+                 if target.read_bytes() == data:
+@@ -400,11 +639,19 @@
+                     stream.flush()
+                     os.fchmod(stream.fileno(), old_mode)
+                     os.fsync(stream.fileno())
+-                os.replace(name, target)
++                if require_absent:
++                    # Publish this staged inode only if the destination is still
++                    # absent, including against writers outside the admission lock.
++                    try:
++                        os.link(name, target, follow_symlinks=False)
++                    except FileExistsError as exc:
++                        raise ValueError("SUPPORT_POLICY_APPEARED") from exc
++                else:
++                    os.replace(name, target)
+             finally:
+                 if os.path.lexists(name):
+                     os.unlink(name)
+-            return "POLICY_REFRESHED_IDLE"
++            return "POLICY_INITIALIZED_IDLE" if require_absent else "POLICY_REFRESHED_IDLE"
+         finally:
+             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+ 
