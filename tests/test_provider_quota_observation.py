@@ -493,6 +493,12 @@ def test_producer_without_observations_path_is_byte_identical_to_before(tmp_path
     # digest over the normalized config so byte-identity of every other
     # field still decides the assertion.
     for document in (produced_doc, golden_doc):
+        # Distinct review (REVIEW_C_E_OPUS_20261109 B3): before normalizing,
+        # prove each side's recorded config digest really covers its own
+        # config, so a drift confined to ``source_config_digest`` is caught.
+        assert document["producer"]["source_config_digest"] == hashlib.sha256(
+            factory._canonical_bytes(document["producer"]["source_config"])
+        ).hexdigest()
         document["producer"]["source_config"].pop("provider_binary_identity_digest", None)
         document["producer"]["source_config_digest"] = hashlib.sha256(
             factory._canonical_bytes(document["producer"]["source_config"])
