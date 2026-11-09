@@ -98,7 +98,9 @@ __all__ = [
     "ChildExecutionRequest",
     "CHILD_EXECUTION_REQUEST_SCHEMA",
     "CHILD_EXECUTION_REQUEST_SCHEMA_V1_1",
+    "CHILD_EXECUTION_REQUEST_SCHEMA_V1_2",
     "FALLBACK_MODES",
+    "OriginalRequesterBinding",
     "ExecutionBinding",
     "EXECUTION_BINDING_SCHEMA",
     "EXECUTION_BINDING_SCHEMA_V1_1",
@@ -618,6 +620,7 @@ class CapabilityRequest:
 # extension fields IS a v1 record and normalizes to one).
 
 CHILD_EXECUTION_REQUEST_SCHEMA_V1_1 = "ChildExecutionRequest.v1.1"
+CHILD_EXECUTION_REQUEST_SCHEMA_V1_2 = "ChildExecutionRequest.v1.2"
 EXECUTION_BINDING_SCHEMA_V1_1 = "ExecutionBinding.v1.1"
 
 #: Runtime/harness dimension of a route (Rev 5 §5 "runtime/harness × ...").
@@ -761,6 +764,65 @@ class WorkspaceRequirements:
         return cls(**dict(payload or {}))
 
 
+# --- 2c. v1.2 sparse extension: original requester binding (return path) -------
+#
+# The return-path integrator gap (Director F gap 1): the admission envelope
+# carried no origin binding, so a sealed attempt could not be routed back to
+# the Hermes/T3 seat that requested it.  v1.2 adds ONE optional sparse block.
+# Compat law mirrors v1.1 exactly: absent block → byte-identical v1/v1.1
+# serialization and digest; present block → participates in the digest (the
+# requester selects the return destination, so a requester swap under the
+# same idempotency triple is a conflict, not a retry).  The block carries
+# references only — never an authenticated namespace: authentication is
+# runtime-owned and joined at settlement from ``binding.caller_namespace``.
+
+#: Carrier kinds the return path distinguishes at settlement (open set —
+#: validated non-blank, not membership, like runtime kinds).
+CARRIER_KINDS = (
+    "hermes_teammate",   # persistent Hermes teammate/bot seat
+    "hermes_session",    # Hermes conversation/session seat
+    "t3_thread",         # T3 Code native thread seat
+    "api_principal",     # authenticated API principal (no native seat)
+)
+
+
+@dataclass(frozen=True)
+class OriginalRequesterBinding:
+    """Where a sealed result must return to (v1.2 sparse block).
+
+    ``teammate_id``/``conversation_id``/``project_id`` are REQUIRED bounded
+    identifiers (the settlement composition needs all three to address the
+    return); ``carrier_kind`` is optional free-form context.  All are
+    references, not credentials: nothing here authenticates the requester.
+    """
+
+    teammate_id: str
+    conversation_id: str
+    project_id: str
+    carrier_kind: str = ""
+
+    def __post_init__(self) -> None:
+        _require_bounded_identifier(self.teammate_id, "original_requester.teammate_id")
+        _require_bounded_identifier(
+            self.conversation_id, "original_requester.conversation_id")
+        _require_bounded_identifier(self.project_id, "original_requester.project_id")
+        if self.carrier_kind:
+            if not self.carrier_kind.strip():
+                raise ValueError(
+                    "original_requester.carrier_kind must be non-blank when supplied")
+            _require_bounded_identifier(
+                self.carrier_kind, "original_requester.carrier_kind")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _record_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | "OriginalRequesterBinding" | None) -> "OriginalRequesterBinding | None":
+        if payload is None or isinstance(payload, OriginalRequesterBinding):
+            return payload
+        return cls(**dict(payload or {}))
+
+
 # --- 3. ChildExecutionRequest.v1 (Rev 4 §S1 l.56–65; promoted from the draft) --
 
 CHILD_EXECUTION_REQUEST_SCHEMA = "ChildExecutionRequest.v1"
@@ -818,6 +880,13 @@ class ChildExecutionRequest:
     #: Declared descendant envelope when the child itself will fan out
     #: natively (pairs with the binding's ``descendant_policy``).
     declared_fanout: FanoutEnvelope | None = None
+    # --- v1.2 sparse extension (return path; absent = v1/v1.1 record) ---
+    #: Origin binding for the return path: which Hermes/T3 seat requested
+    #: this child, so a sealed attempt can be routed back.  Absent block
+    #: digests byte-identically to v1/v1.1; present block participates in
+    #: the digest.  References only — authentication is joined at
+    #: settlement from ``binding.caller_namespace``, never carried here.
+    original_requester: OriginalRequesterBinding | None = None
 
     def __post_init__(self) -> None:
         _require_bounded_identifier(self.root_ref, "root_ref")
@@ -844,7 +913,10 @@ class ChildExecutionRequest:
                 f"declares {self.policy_revision!r}")
         if self.runtime_preference and not self.runtime_preference.strip():
             raise ValueError("runtime_preference must be non-blank when supplied")
-        if self._has_v1_1_extensions:
+        if self._has_v1_2_extensions:
+            object.__setattr__(
+                self, "schema", CHILD_EXECUTION_REQUEST_SCHEMA_V1_2)
+        elif self._has_v1_1_extensions:
             object.__setattr__(
                 self, "schema", CHILD_EXECUTION_REQUEST_SCHEMA_V1_1)
 
@@ -858,6 +930,12 @@ class ChildExecutionRequest:
             or self.workspace_requirements is not None
             or self.declared_fanout is not None)
 
+    @property
+    def _has_v1_2_extensions(self) -> bool:
+        """True when the v1.2 return-path block is declared (schema label
+        v1.2 wins over v1.1 when both are present)."""
+        return self.original_requester is not None
+
     def idempotency_key(self) -> tuple[str, str, str]:
         """The idempotency triple (root, immediate_parent, logical_child_key)."""
         return (self.root_ref, self.immediate_parent_run_ref, self.logical_child_key)
@@ -869,14 +947,21 @@ class ChildExecutionRequest:
         IDENTICALLY before and after the Rev 5 extension (redelivering a
         v1-era request after an upgrade is a retry, never a conflict);
         declared v1.1 content participates (a request that adds locality
-        or a fan-out envelope is semantically different work)."""
+        or a fan-out envelope is semantically different work).  The v1.2
+        ``original_requester`` block follows the same sparse law: absent
+        block → v1/v1.1 digests unchanged; present block → participates
+        (the requester selects the return destination, so a requester swap
+        under the same idempotency triple is a conflict, never a retry)."""
         payload = _record_to_dict(self)
         payload.pop("notes", None)
-        return _sparse_v1_1(
+        payload = _sparse_v1_1(
             payload,
             ("locality", "runtime_preference", "workspace_requirements",
              "declared_fanout"),
             self._has_v1_1_extensions)
+        if self.original_requester is None:
+            payload.pop("original_requester", None)
+        return payload
 
     @property
     def request_digest(self) -> str:
@@ -900,6 +985,8 @@ class ChildExecutionRequest:
             ("locality", "runtime_preference", "workspace_requirements",
              "declared_fanout"),
             self._has_v1_1_extensions)
+        if self.original_requester is None:
+            payload.pop("original_requester", None)
         payload["request_digest"] = self.request_digest
         return payload
 
@@ -907,7 +994,8 @@ class ChildExecutionRequest:
     def from_dict(cls, payload: Mapping[str, Any]) -> "ChildExecutionRequest":
         data = dict(payload or {})
         _pop_schema(data, (CHILD_EXECUTION_REQUEST_SCHEMA,
-                           CHILD_EXECUTION_REQUEST_SCHEMA_V1_1), cls.__name__)
+                           CHILD_EXECUTION_REQUEST_SCHEMA_V1_1,
+                           CHILD_EXECUTION_REQUEST_SCHEMA_V1_2), cls.__name__)
         supplied_digest = data.pop("request_digest", None)
         decision = data.get("routing_decision")
         if isinstance(decision, Mapping):
@@ -919,6 +1007,8 @@ class ChildExecutionRequest:
         data["workspace_requirements"] = WorkspaceRequirements.from_dict(
             data.get("workspace_requirements"))
         data["declared_fanout"] = FanoutEnvelope.from_dict(data.get("declared_fanout"))
+        data["original_requester"] = OriginalRequesterBinding.from_dict(
+            data.get("original_requester"))
         request = cls(**data)
         if supplied_digest is not None and supplied_digest != request.request_digest:
             raise ValueError(

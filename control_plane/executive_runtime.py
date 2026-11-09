@@ -16874,6 +16874,14 @@ class JobRegistry:
                 "command_id": command_id,
             },
         }
+        # v1.2 sparse return-path block (Director F gap 1): persist the
+        # original requester at admission so settlement can route the
+        # sealed result back.  Kept OUTSIDE the child_request schema fields
+        # above — the provenance schema label stays v1 so the existing
+        # child_request_of / ready_counts SQL filters keep matching.
+        if request.original_requester is not None:
+            provenance["original_requester"] = (
+                request.original_requester.to_dict())
         objective = (
             f"[child-request] key={request.logical_child_key} "
             f"root={request.root_ref} parent={request.immediate_parent_run_ref} "
@@ -18969,6 +18977,12 @@ def _join_native_runtime_binding(
 class AttemptRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
+        #: Director F gap 2 seam: OPTIONAL post-terminal execution-return
+        #: wiring for t3-native attempts, installed on this registry (the
+        #: single terminal-seal owner) by the composing supervisor via
+        #: control_plane/execution_return_wiring.install_execution_return_seam.
+        #: None (the default) changes nothing anywhere.
+        self._execution_return_seam: object | None = None
 
     def get_attempt(self, attempt_id: str) -> Attempt | None:
         with self.store.read() as connection:
@@ -21484,6 +21498,17 @@ class AttemptRegistry:
             job_id = str(row["job_id"])
         job = JobRegistry(self.store).get_job(job_id)
         assert job is not None
+        seam = getattr(self, "_execution_return_seam", None)
+        if seam is not None:
+            # Director F gap 2 (return wiring): AFTER the terminal seal is
+            # durably committed, one optional return delivery for a
+            # t3-native attempt.  The seam records its own receipt event,
+            # never raises into the seal, and an uninstalled seam (None)
+            # changes nothing.  The try/except is a last-resort fence only.
+            try:
+                seam(job=job, status=status)
+            except Exception:
+                pass
         return job
 
     def complete_attempt(
