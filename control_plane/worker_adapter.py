@@ -102,6 +102,18 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         adapter_id="hermes-native", implemented=True,
         implementation="control_plane.hermes_worker_adapter.HermesWorkerAdapter",
     ),
+    # WO-18 (MMOS V1, OQ-11/OQ-7): the scoped V1 DeepSeek route's adapter
+    # identity — the incumbent DeepSeek lane is OpenCodeWorkerAdapter
+    # (control_plane/opencode_worker.py, OQ-11 ruling).  Registered so the
+    # scoped route can be NAMED by the routing policy, deliberately
+    # implemented=False: WO-16 armed binding compatibility only ("the lane
+    # stays explicitly unavailable" — no production confinement profile or
+    # broker composition exists), so a routing policy can never bind a live
+    # worker through this id until that composition is reviewed.  Naming the
+    # route selects nothing and launches nothing.
+    "opencode-free-cli": AdapterDescriptor(
+        adapter_id="opencode-free-cli", implemented=False,
+    ),
 }
 
 
