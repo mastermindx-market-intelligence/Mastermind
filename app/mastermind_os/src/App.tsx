@@ -181,7 +181,7 @@ import {
   type WorkDocument,
 } from "./work";
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
-import { nativePartialAuthPresentation } from "./native-partial-auth-presentation";
+import { nativeAuthFeedback, nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
@@ -5941,6 +5941,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
     preferencesControl={preferencesControl}
     feedback={authState?.reason && !successfulSignOut && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+      native ? nativeAuthFeedback(authState, locale) ?? copy.signInFailed :
       authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
@@ -6074,7 +6075,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {partialNativeAuth ? <p className="muted">{partialNativeAuth.description}</p>
                 : authState.reason && authState.status !== "unconfigured" ? (
                 <p className="muted">
-                  {authState.reason === "POPUP_BLOCKED"
+                  {native ? nativeAuthFeedback(authState, locale) ??
+                    (authState.acquisition ? copy.conversationUnavailable : copy.signInFailed)
+                    : authState.reason === "POPUP_BLOCKED"
                     ? copy.allowPopup
                     : authState.reason === "POPUP_CLOSED"
                       ? copy.popupClosed
