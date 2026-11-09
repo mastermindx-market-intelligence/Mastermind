@@ -596,7 +596,8 @@ def create_app(cfg: Settings | None = None, *,
         return headers
 
     def _oauth_accounts(route: Route):
-        accounts = codex_oauth.read_accounts(cfg.auth_store, route.pool)
+        accounts = codex_oauth.read_accounts(
+            app.state.settings.auth_store, route.pool)
         now = time.time()
         state: RouterState = app.state.router_state
         eligible = [a for a in accounts
@@ -605,9 +606,9 @@ def create_app(cfg: Settings | None = None, *,
         return accounts, eligible
 
     async def _refresh_once(route: Route, account):
-        upstream: httpx.AsyncClient = app.state.upstream
         return await _run_in_executor(
-            codex_oauth.refresh_account, cfg.auth_store, route.pool, account,
+            codex_oauth.refresh_account, app.state.settings.auth_store,
+            route.pool, account,
             token_url=route.token_url, client_id=route.client_id,
             client=_SyncHttpClient(upstream))
 
