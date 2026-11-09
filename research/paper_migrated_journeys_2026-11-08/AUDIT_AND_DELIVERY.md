@@ -10,7 +10,7 @@ Paper carriers: Mastermind Paper initially; the existing Studio Direct adapter f
 
 ## Delivered design map
 
-Direct entry points for the seventeen files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
+Direct entry points for the 18 files amended in this successor. Each file retains its existing current, Draft, Proposed or Reference status. These are native Paper changes; the sections below distinguish design proof, inspected source behavior and remaining implementation obligations.
 
 | Area | Delivered design change |
 | --- | --- |
@@ -31,6 +31,7 @@ Direct entry points for the seventeen files amended in this successor. Each file
 | [Watchlist save recovery](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0) | Added EN390 and ZH320 browser-retention failure states; checking storage preserves the original operation and never resends a save. |
 | [Shared Shell company search](https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0) | Added a proposed phone selection/return journey with exact listing identity and enabled Analysis access when descriptive metadata is unavailable. |
 | [Expectation Surface](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | Added proposed EN/ZH finder-loading and unavailable states that preserve the query and chart, with a source-bound retry and no-match contract. |
+| [Intelligence Hub](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | Updated the entry map for later current/reference work, added exact Build and Archive destinations, and distinguished provisional research-list returns. |
 
 ## Verified mobile meaning corrections
 
@@ -1096,9 +1097,51 @@ Read-only reasoning on Risk Radar found that calibration uncertainty, unrounded 
 
 Read-only reasoning on the OS Projects sharing path found that pending, recorded, unknown, no-effect, changed and refused decisions already have design coverage, including exact owner-receipt reread and distinct dismissal behavior. The visible confirmed access statement still requires actual implementation evidence; bounded source inspection did not establish it. No new sharing owner, invitation, permission change or unsupported success state was introduced. These bounded reviews are preservation decisions, not runtime acceptance.
 
+## Intelligence Hub — update the entry map after later design work
+
+[File/page](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0), existing entry board `5E9-0`. Later Hub work introduced the current product-layout reference, research-order help, four provisional research-list return states, a build preservation page and an original-geometry archive. The entry map still described the earlier contents: five desktop boards, seventeen research/risk boards, four current contracts plus archive, and no route to the new build page.
+
+This is a changed-facts update to the accepted directory, not a replacement of its authority or an attempt to complete the held AXON destination.
+
+### Verified destinations
+
+Root read the exact page inventories and the current directory, product and build JSX before editing:
+
+| Page | Observed contents | Directory treatment |
+| --- | --- | --- |
+| `p-2-0` | Four core R4 contracts, provisional research-list-return supplement `7XY-0`, archived build log `6UI-0`, score-meaning build reference `6Z2-0`. | `5ES-0` names the supporting references; `5ET-0` says AUTHORITY + REFERENCES. |
+| `p-3-0` | Six boards: China command `KE-0`, comparison `10M-0`, US product reference `7FJ-0`, memory `158-0`, coverage/alert draft `1AP-0`, and proposed research-order explanation `854-0`. | `5F0-0` adds the proposed help; `5F1-0` says 6 BOARDS · MIXED STATUS. |
+| `p-5-0` | Seventeen original research/risk states plus four provisional evidence/filing returns: `7Y5-0`, `7QG-0`, `80K-0`, `7SY-0`. | `5FG-0` names their research-list origin; `5FH-0` says 17 + 4 PROVISIONAL. |
+| `p-C-0` | Build preservation `7FE-0`: retained methods, source meanings, alert limits and return contracts. | New row `85D-0`, with exact page and board, marked BUILD REFERENCE. |
+| `p-B-0` | Retained original US geometry `86-0`; hidden utility template is not a product destination. | New row `85K-0`, marked ARCHIVE, points to the current product-layout reference at `p-3-0 / 7FJ-0`. |
+
+The thirteen mobile boards and twenty-three loading/filter/locale boards match the retained counts. Header `5ED-0` now gives the exact `p-2-0` start and exposes the build-reference reading path. The historical Alt Data page remains source only.
+
+### Native result and preservation
+
+Root inspected the original1440×783 and final1440×948 native captures. The existing row design is preserved, with two matching content-sized rows between locale coverage and Held. Long descriptions wrap cleanly; all status labels and the final held row fit.
+
+Only seven existing text leaves changed, exactly as planned: `5ED-0`, `5ES-0`, `5ET-0`, `5F0-0`, `5F1-0`, `5FG-0`, `5FH-0`. All **31 other original text leaves** remain identical, including hidden transfer/provenance notes and the AXON hold. The two added rows contribute ten text leaves.
+
+All five operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-hub-directory-current-references-20261109-c4-sd`
+- `paper-hub-directory-current-scope-20261109-c4-sd`
+- `paper-hub-directory-reference-order-20261109-c4-sd`
+- `paper-hub-directory-reference-names-20261109-c4-sd`
+- `paper-hub-directory-finish-20261109-c4-sd`
+
+Explicit finish released only `5E9-0`. Product views, source-bound build contracts, archived geometry, source-only material and QA/held targets were read or referenced, not modified. These are native location and status corrections; they do not demonstrate clickable navigation or change runtime, source or release ownership.
+
+### Bounded preservation decisions
+
+A separate read-only Crypto audit found that later saved-case amendment `3IP-0` and states09–16 already address failed collection reads, missing saved versions, horizon preservation, parent return, explicit save/remove intent and semantic focus. The inspected Macro #9580 candidate remains Draft and unmerged at `5e496c24c962e85a4f7f514dd43dc61443b95cab`; template blob `ff46d4408d243bcebb8e6cac95167b4a6ef933c4`. No duplicate Crypto state was added.
+
+The canonical Product Design System audit likewise found current F02 authority, unavailable/access distinctions, uncertain-write protection, conditional focus restoration and44px house hit targets already covered. Its later build companion remains a task tree, not an execution queue or permission grant. Historical G15 and `9SE-0`/`9SM-0` uncertainties remain intact. No token or system-contract mutation was made.
+
 ## Active continuation
 
-The successor covers seventeen design files. The proposed ticker-finder availability module is visually verified, its244 original build-root text leaves are preserved, and the exact source gap is recorded separately from runtime implementation. Preserve accepted work, live writers and existing holds. Continue only with a concrete source-supported architecture, journey or clarity gap beyond the accepted work and later current states.
+The successor covers18 design files. The Hub map now exposes current/reference destinations without promoting provisional states. The next supported corrections are the Bonds duration-review backing interpretation and the shared tool-search example count; preserve their existing inspectors, query, destinations, source bindings and release status.
 
 ## Acceptance boundary
 
