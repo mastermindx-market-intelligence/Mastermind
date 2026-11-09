@@ -640,9 +640,54 @@ All14 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish relea
 
 No source implementation, live data request, browser interaction, provider configuration, deployment, PR approval or held import was changed by this phase.
 
+
+## T47 ranked search — make Clear restore the prior view
+
+[Ranked Search and Discovery / T47 Draft](https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0) contains eight existing1440/390, EN/ZH, light/dark variants. Its native contract already requires that a rank21–50 match opens the existing disclosure and that Clear restores the exact pre-search open/closed choice with focus returned to the input. Existing drawings showed initial rest, compact match, no match and no emitted rows, but omitted both required post-Clear outcomes.
+
+Root read the native desktop contract `2N-0`, restoration/focus text `2U-0`/`2X-0`, phone counterparts `FD-0`/`FG-0`, and the unchanged Draft qualifications. No incumbent T47 implementation or current PR was established by the bounded authority lookup. This phase clarifies an existing **draft design contract**; it does not claim source or runtime implementation.
+
+### New paired-state companions
+
+| Board | Locale/theme | Native bounds and position |
+| --- | --- | --- |
+| `P9-0` /09 | Light English | 1440×908, x−900/y695 |
+| `UV-0` /10 | Dark Chinese | 1440×874, x620/y695 |
+
+Each companion contains two390px cases:
+
+1. Originally closed: empty focused field,50 matching restored, ranks21–50 closed.
+2. Originally open: empty focused field,50 matching restored, ranks21–50 open.
+
+The explicit synthetic50-emitted-row assumption is retained. BTC rank01, ETH rank02 and the open-case XMR rank21 preview retain their identities; financial metrics remain unavailable dashes. The preview is expressly abbreviated. The existing snapshot date/provider/coverage strip stays below the rows without fabricated dates, providers or receipts.
+
+The complete field focus outline is visible in both cases. Native readback confirms each search input, Clear button and disclosure target is44px high. All four cases show empty placeholder fields and restored50-matching counts; each language has exactly one closed and one open disclosure state, with XMR visible only in the open preview.
+
+The adjacent build reference makes the existing rule concrete: preserve the original choice at the start of a nonempty query; temporary auto-opening must not overwrite it; Clear ends that search and returns focus; a later search starts from the reader's then-current choice. This is local component-state clarification, not a new store, route, reader or provider request. The native Escape, Enter, no-JavaScript and unchanged-rank/date/source requirements remain.
+
+### Original variants and proof boundary
+
+All eight original headers now point to09/P9 or10/UV. Original interaction contracts, no-match/no-emitted-row distinctions, financial placeholders and RIG/current-source/runtime qualifications remain unchanged. Each original had62 text leaves outside its edited reference sentence; **all496 unchanged leaves matched exactly** after the update.
+
+Root inspected complete native screenshots of both companions and the changed390px English/Chinese header treatments. The original board bounds remain unchanged; the new companions fit without clipping and sit80.5px below the preceding1440px row, with80px horizontal separation.
+
+The existing qualification is retained in substance and visibly in both languages: RIG approval, genuine baseline/current-source captures and runtime fit remain unqualified; original R4 boards, application source and data contracts are outside this edit. Focus appearance is static Paper proof, not keyboard/browser execution.
+
+All7 phase operations returned APPLIED_RESPONSE_OBSERVED. Explicit finish released only the two new boards and the eight original headers touched.
+
+- `paper-t47-clear-return-english-copy-20261109-c4-sd`
+- `paper-t47-clear-return-english-body-20261109-c4-sd`
+- `paper-t47-clear-return-chinese-copy-20261109-c4-sd`
+- `paper-t47-clear-return-chinese-body-20261109-c4-sd`
+- `paper-t47-clear-return-source-references-20261109-c4-sd`
+- `paper-t47-clear-return-board-names-20261109-c4-sd`
+- `paper-t47-clear-return-finish-20261109-c4-sd`
+
+The Shared Market Tools and Research Launcher file remains Reference. The bounded authority inspection found no current-build promotion; no F01/F02 held operation or source was changed.
+
 ## Active continuation
 
-The successor now covers nine design files, including current Terminal Returns. Preserve all accepted work and existing holds. The next bounded design gap is T47's existing draft Clear contract: the drawings show search opening ranks21–50, but do not visually show restoration of the exact pre-search open/closed choice. Inspect its native contract and add a qualified paired return-state companion, preserving the synthetic50-row assumption, source/approval limits and Draft status. The Shared Market Tools and Research Launcher remains Reference; no current-build promotion was justified by the bounded authority inspection.
+The successor now covers ten design files. Preserve accepted work and all existing holds. The next bounded finding is in the separate migrated Market Memory evidence-workspace reference: the five-value source-inspection panel does not visibly identify its selected saved case, especially on390px after three case rows. Inspect the exact design and incumbent source card binding before adding explicit illustrative case identity. Accepted revision-evidence/recovery targets and the newer R3 chooser/copy outcomes remain outside that amendment.
 
 
 ## Acceptance boundary
