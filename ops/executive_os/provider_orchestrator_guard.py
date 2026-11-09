@@ -10,12 +10,13 @@ child routing fence.
 WO-11 (MMOS V1, CRITICAL): for sessions the placement owner has armed onto the
 shared placement path, every paid launch and native delegation must be covered
 by the CURRENT broker-issued ExecutionBinding.v1, validated against the
-owner-issued placement receipt over the authenticated owner channel. Refusal
-classes: missing binding, stale fence, provider substitution after reservation,
-unaccounted descendant. There is no independent signing authority — the binding
-is only an assignment of opaque references, trusted exactly as far as it matches
-the owner's current lease. The gate fences the launches it observes through this
-provider hook; it does not claim to fence arbitrary processes.
+owner-issued placement receipt, accepted only from a path the fenced session
+cannot write (owner service-account channel). Refusal classes: missing binding,
+stale fence, provider substitution after reservation, unaccounted descendant.
+There is no independent signing authority — the binding is only an assignment
+of opaque references, trusted exactly as far as it matches the owner's current
+lease. The gate fences every lexically observed launch in the commands it is
+shown through this provider hook; it does not claim to fence arbitrary processes.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 import time
@@ -151,49 +153,70 @@ _BINDING_IDENTITY_FIELDS = (
     "logical_child_key",
     "request_digest",
     "attempt_ref",
+    "assignment_generation",
 )
 _BINDING_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 #: Optional owner-projected integrity pin for the receipt file: the SHA-256
-#: of the receipt bytes the owner wrote at claim (or at the latest lease
-#: event it re-projected into this session). The receipt path is same-uid
-#: writable state; without this pin the fenced principal could rewrite or
-#: replay a self-consistent receipt, so lease currency is then conditional
-#: on owner write discipline (see "Known limits" in the module docstring).
+#: of the receipt bytes the owner wrote. Defence in depth only — the trust
+#: basis is the owner-only receipt channel (see ``_receipt_channel_problem``).
 PLACEMENT_RECEIPT_DIGEST_ENV = "MASTERMIND_PLACEMENT_RECEIPT_DIGEST"
-#: Closed composite-mode vocabulary: the ONLY multi-segment launch tokens
-#: the guard will resolve to reserved lanes, mapped to the lanes each one
-#: actually spends. Any other composite (``glm-grok``, ``glm-deepseek``)
-#: is an invented lane the guard cannot attribute and is refused.
-COMPOSITE_LAUNCH_MODES: dict[str, tuple[str, ...]] = {
-    "glm-codex": ("glm", "codex"),
-    "minimax-codex": ("minimax", "codex"),
-    "go-codex": ("go", "codex"),
-    "go-claude": ("go", "claude"),
-    "codex-native": ("codex",),
-    "claude-native": ("claude",),
-    "glm-frontier": ("glm",),
-    "__glm_vision": ("glm",),
+#: The only lease state that admits a launch (exact, case-sensitive).
+LEASE_STATE_HELD = "HELD"
+#: Exact env tokens that arm the gate (a projected binding also arms it).
+SHARED_PLACEMENT_ARM_TOKENS = ("1", "true", "yes", "on")
+
+#: Closed per-wrapper mode vocabularies (the alternations FABRIC_LAUNCH_RE
+#: recognizes). Under shared placement a wrapper invoked with any OTHER
+#: mode is an unknown paid launch and is refused, never ignored.
+_SUB_MODES = frozenset(_SUB_LAUNCH_MODE[3:-1].split("|"))
+_REMOTE_MODES = frozenset(_REMOTE_LAUNCH_MODE[3:-1].split("|"))
+_SLOT_POOLS = frozenset(_SLOT_POOL[3:-1].split("|"))
+#: Wrapper-internal pure helper modes that never acquire a slot or spawn a
+#: provider (documented in sub.sh): not paid launches.
+NON_LAUNCH_WRAPPER_MODES = frozenset({"__launch_plan", "__glm_memory"})
+#: Every wrapper shape: (name, index of the mode/pool argument, closed mode
+#: vocabulary or None for the open ``pool`` vocabulary, matched exactly).
+_WRAPPER_SHAPES = {
+    "pool run": (0, None),
+    "pool remote": (1, None),
+    "sub.sh": (0, _SUB_MODES),
+    "remote_sub.sh": (1, _REMOTE_MODES),
+    "slot.py": (0, _SLOT_POOLS),
 }
-
-# Provider/pool token of each supported paid-launch wrapper shape. Each
-# pattern is anchored at the START of a FABRIC_LAUNCH_RE match (``.match``
-# on the launch slice), so the token always belongs to THAT launch and never
-# to a later launch in the same command (regex-priority confusion).
-_LAUNCH_PATH = r"(?:[A-Za-z0-9_./-]+/)?"
-_LAUNCH_TOKEN_RES: tuple[tuple[re.Pattern[str], int], ...] = (
-    (re.compile(
-        r"(?is)^" + _LAUNCH_PATH
-        + r"pool\s+remote\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)"), 2),
-    (re.compile(r"(?is)^" + _LAUNCH_PATH + r"pool\s+run\s+([A-Za-z0-9_.-]+)"), 1),
-    (re.compile(
-        r"(?is)^" + _LAUNCH_PATH
-        + r"remote_sub\.sh\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)"), 2),
-    (re.compile(r"(?is)^" + _LAUNCH_PATH + r"sub\.sh\s+([A-Za-z0-9_.-]+)"), 1),
-    (re.compile(
-        r"(?is)^(?:python(?:3(?:\.\d+)?)?\s+)?" + _LAUNCH_PATH
-        + r"slot\.py\s+([A-Za-z0-9_.-]+)"), 1),
+_WRAPPER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
+    r"(?P<wrapper>pool[ \t]+(?:run|remote)|remote_sub\.sh|sub\.sh|slot\.py)"
+    r"(?![A-Za-z0-9_.-])",
+    re.I,
 )
-
+_WRAPPER_ARG_RE = re.compile(r"[ \t]+([^\s;&|<>()`{}]+)")
+_SIMPLE_COMMAND_SPLIT_RE = re.compile(r"[;&|\n(){}`]|\$\(")
+#: Read-only inspectors: a wrapper NAME given to them as an argument is a
+#: file being read, not a launch (``grep -n slot.py docs/runbook.md``).
+_INSPECTORS = frozenset({
+    "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg",
+    "wc", "ls", "stat", "file", "diff", "cmp", "shasum", "sha1sum",
+    "sha256sum", "md5", "md5sum", "nl", "od", "xxd",
+})
+_COMMAND_PREFIX_WORDS = frozenset({
+    "do", "then", "else", "elif", "if", "while", "until", "!",
+})
+#: Constructs that can change the launch environment outside lexical
+#: observation: eval/source of computed text, shell startup files, and
+#: assignments through a computed variable name.
+#: Wrapper source fed to a shell (``cat sub.sh | bash -s grok``) launches
+#: without a lexically visible invocation.
+_SHELL_FEED_RE = re.compile(
+    r"\|\s*(?:\S*/)?(?:ba|z|da|k)?sh\b"
+    r"|(?:^|[\s;&|(])(?:\S*/)?(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*<"
+)
+_UNOBSERVABLE_ENV_RE = re.compile(
+    r"(?:^|[;&|(`{\n]|\$\()\s*(?:eval|source|\.)(?=\s)"
+    r"|(?:^|[\s;&|(`{])(?:BASH_ENV|ENV)\+?="
+    r"|(?:^|[\s;&|(`{])(?:export|declare|typeset|readonly|local)"
+    r"(?:\s+-\S+)*\s+[A-Za-z0-9_]*\$"
+    r"|(?:^|[\s;&|(`{])printf\s+-v\s*\$"
+)
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -390,11 +413,9 @@ def shared_placement_armed() -> bool:
     already projected a binding into the session environment."""
     if os.environ.get(BINDING_ENV, "").strip():
         return True
-    return os.environ.get(SHARED_PLACEMENT_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
+    return (
+        os.environ.get(SHARED_PLACEMENT_ENV, "").strip().lower()
+        in SHARED_PLACEMENT_ARM_TOKENS
     )
 
 
@@ -412,37 +433,81 @@ def _binding_problems(binding: object, owner: str) -> str:
     if not _BINDING_HEX64_RE.match(str(binding.get("request_digest") or "")):
         return f"{owner}: request_digest must be a 64-char lowercase hex digest"
     for name in ("fence_counter", "assignment_generation"):
-        value = binding.get(name, 0)
+        # Required, never defaulted: an absent fence must not pass as fence 0.
+        value = binding.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return f"{owner}: {name} must be an integer >= 0"
+            return f"{owner}: {name} must be present as an integer >= 0"
     return ""
 
 
+def _canonical_command(command: str) -> str:
+    """The command with shell quoting (quotes, backslashes) removed, so a
+    name or mode split or hidden by quotes (``"POOL_ORCH""ESTRATOR_ID=x"``,
+    ``sub.sh "grok"``) is scanned as the shell will see it."""
+    return re.sub(r"[\"'\\]", "", command.replace("\\\n", " "))
+
+
+def _simple_command_head(canon: str, offset: int) -> str:
+    """Basename of the first word of the simple command containing
+    ``offset`` (assignments and compound-command keywords skipped)."""
+    starts = [m.end() for m in _SIMPLE_COMMAND_SPLIT_RE.finditer(canon, 0, offset)]
+    prefix = canon[(starts[-1] if starts else 0):offset].split()
+    for word in prefix:
+        if word in _COMMAND_PREFIX_WORDS or re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+            continue
+        return word.rsplit("/", 1)[-1].lower()
+    return ""
+
+
+def _wrapper_invocations(command: str) -> list[tuple[int, str, str, bool]]:
+    """EVERY wrapper invocation in ``command``, positional:
+    ``(offset, wrapper, token, known_mode)`` for all five shapes, repeated.
+
+    Unlike :data:`FABRIC_LAUNCH_RE`, the mode is NOT required to be on the
+    wrapper's list: an off-list mode (``sub.sh zebra-glm``) is still an
+    invocation (``known_mode=False``) so it can be refused instead of
+    passing unobserved. A wrapper name with no argument, an argument of a
+    read-only inspector (``cat sub.sh``), or a documented pure helper mode
+    (``sub.sh __launch_plan``) is not a paid launch.
+    """
+    canon = _canonical_command(command)
+    found: list[tuple[int, str, str, bool]] = []
+    for match in _WRAPPER_RE.finditer(canon):
+        wrapper = re.sub(r"\s+", " ", match.group("wrapper").lower())
+        index, modes = _WRAPPER_SHAPES[wrapper]
+        args: list[str] = []
+        position = match.end()
+        while len(args) < index + 2:
+            arg = _WRAPPER_ARG_RE.match(canon, position)
+            if not arg:
+                break
+            args.append(arg.group(1).lower())
+            position = arg.end()
+        if not args:
+            continue
+        head = _simple_command_head(canon, match.start())
+        if head in _INSPECTORS:
+            continue
+        token = args[index] if len(args) > index else ""
+        if token in NON_LAUNCH_WRAPPER_MODES or (
+            len(args) > index + 1 and args[index + 1] == "__launch_plan"
+        ):
+            continue
+        known = bool(token) and (modes is None or token in modes)
+        found.append((match.start(), wrapper, token, known))
+    return found
+
+
 def launch_provider_tokens(command: str) -> list[tuple[int, str]]:
-    """``(offset, token)`` for EVERY paid launch the common launch path
-    recognizes in ``command``, in positional order.
+    """``(offset, token)`` for EVERY paid launch in ``command``, positional.
 
     Covers every wrapper shape: ``pool run <pool>``, ``pool remote <host>
     <pool>``, ``sub.sh <mode>``, ``remote_sub.sh <host> <mode>`` and
     ``slot.py <pool>`` — the same wrappers every engine's paid launch goes
-    through, which is what makes the gate engine-independent. The token is
-    read from the launch's own slice (anchored match), so a compound
-    command (``pool run glm …; pool run grok …``) yields one entry per
-    launch and a later launch can never stand in for an earlier one.
+    through. Each token is read from its own launch's arguments, so a later
+    launch can never stand in for an earlier one.
     """
-    tokens: list[tuple[int, str]] = []
-    for launch in FABRIC_LAUNCH_RE.finditer(command):
-        tokens.append((launch.start(), _launch_token_at(command, launch)))
-    return tokens
-
-
-def _launch_token_at(command: str, launch: "re.Match[str]") -> str:
-    tail = command[launch.start():]
-    for regex, group in _LAUNCH_TOKEN_RES:
-        match = regex.match(tail)
-        if match:
-            return match.group(group).strip().lower()
-    return ""
+    return [(offset, token) for offset, _, token, _ in _wrapper_invocations(command)]
 
 
 def launch_provider_token(command: str) -> str:
@@ -452,21 +517,127 @@ def launch_provider_token(command: str) -> str:
     return tokens[0][1] if tokens else ""
 
 
-def _provider_token_matches(token: str, allowed: set[str]) -> bool:
-    """A launch token satisfies the reservation only when it IS a reserved
-    value, or is a member of the closed :data:`COMPOSITE_LAUNCH_MODES`
-    vocabulary whose declared lanes include a reserved value. Attacker-
-    chosen composites (``glm-grok``) contain a reserved segment but spend
-    a lane the guard cannot attribute, so they do not match."""
-    if not token:
-        return True
-    reserved = {value for value in allowed if value}
-    if token in reserved:
-        return True
-    lanes = COMPOSITE_LAUNCH_MODES.get(token)
-    if lanes is None:
-        return False
-    return any(lane in reserved for lane in lanes)
+def _env_clear_offsets(canon: str) -> list[int]:
+    """Offsets of ``env`` invocations that clear the inherited environment
+    (``env -i``, ``env -``, ``--ignore-environment``, clustered ``-iv``) or
+    re-split their arguments (``-S``), which can hide a clear."""
+    offsets: list[int] = []
+    for match in re.finditer(r"(?<![A-Za-z0-9_.-])env(?=[ \t])", canon):
+        words = re.match(r"[^;&|\n()`]*", canon[match.end():]).group(0).split()
+        index = 0
+        while index < len(words):
+            word = words[index]
+            if (
+                word in ("-", "--ignore-environment", "-S")
+                or word.startswith("--split-string")
+                or re.fullmatch(r"-[A-Za-z]*[iS][A-Za-z]*", word)
+            ):
+                offsets.append(match.start())
+                break
+            if word in ("-u", "-C", "-P", "--unset", "--chdir"):
+                index += 2
+                continue
+            if word.startswith("-") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word):
+                index += 1
+                continue
+            break
+    return offsets
+
+
+def _effective_identity_values(command: str, name: str) -> list[str] | None:
+    """Canonical view of every way ``command`` sets ``name`` for its child.
+
+    Returns ``None`` when the command does not touch ``name`` (the inherited
+    session value governs); otherwise EVERY value the child could receive:
+    each literal assignment in any form — prefix (last wins), ``env``,
+    ``export``/``declare``/``readonly``, ``+=``, quoted or split by quotes,
+    nested inside ``sh -c '…'`` — plus ``''`` for every clearing or
+    non-literal form (``unset``, ``env -u``, ``env -i`` not followed by a
+    reassignment, ``printf -v``, ``read``, ``declare -n``, ``${NAME:=…}``,
+    dynamic ``$``/backtick values). The caller refuses unless every value
+    equals the server-derived projection.
+    """
+    canon = _canonical_command(command)
+    values = list(_command_assignments(command, name))
+    events: list[tuple[int, str]] = []
+    occurrence = re.compile(
+        rf"(?:(?<![A-Za-z0-9_])|(?<=-u)){re.escape(name)}(?![A-Za-z0-9_])"
+    )
+    for match in occurrence.finditer(canon):
+        before, after = canon[:match.start()], canon[match.end():]
+        if after.startswith("="):
+            value = re.match(r"=([^\s;&|<>()`{}]*)", after).group(1)
+            events.append((match.start(), "" if "$" in value else value))
+        elif before.endswith("$") or (
+            before.endswith("${") and not re.match(r":?=", after)
+        ):
+            continue  # a read of the value, not a change
+        elif re.search(r"(?:^|[\s;&|(])export\s+$", before) and re.match(
+            r"(?:[\s;&|)]|$)", after
+        ):
+            continue  # bare `export NAME` re-exports the inherited value
+        else:
+            events.append((match.start(), ""))
+    for offset in _env_clear_offsets(canon):
+        if not any(at > offset and value for at, value in events):
+            events.append((offset, ""))
+    canonical = [value for _, value in events]
+    extra = [value for value in values if value not in canonical]
+    if not canonical and not extra:
+        return None
+    return canonical + extra
+
+
+def _principal_ids() -> tuple[int, frozenset[int]]:
+    """(effective uid, group ids) of the fenced principal (this session)."""
+    return os.geteuid(), frozenset({os.getegid(), *os.getgroups()})
+
+
+def _principal_controls(info: os.stat_result, uid: int, gids: frozenset[int]) -> bool:
+    if uid == 0 or info.st_uid == uid:
+        return True  # root, or the owner (who can always chmod/replace)
+    mode = info.st_mode
+    if stat.S_ISLNK(mode):
+        return False  # replacing a symlink is governed by its directory
+    writable = bool(mode & stat.S_IWOTH) or (
+        info.st_gid in gids and bool(mode & stat.S_IWGRP)
+    )
+    if writable and stat.S_ISDIR(mode) and mode & stat.S_ISVTX:
+        return False  # sticky: entries the principal does not own are safe
+    return writable
+
+
+def _receipt_channel_problem(path_text: str) -> str:
+    """'' when the receipt can only have been produced by the placement owner.
+
+    Trust basis (no signing authority exists by design): the owner runs as
+    its own service account (``_mastermind_exec``) and projects the receipt
+    into a path the fenced principal cannot write. Every component of both
+    the literal and the resolved path must be outside the principal's
+    control — not owned by it, not writable by it — so it can neither
+    rewrite the receipt, restore an older copy, nor re-point a symlink. A
+    receipt the session could have written itself is refused outright.
+    """
+    uid, gids = _principal_ids()
+    literal = Path(os.path.abspath(path_text))
+    resolved = Path(os.path.realpath(path_text))
+    for chain in (literal, resolved):
+        for component in (*reversed(chain.parents), chain):
+            try:
+                info = os.lstat(component)
+            except OSError:
+                return f"{component} cannot be inspected"
+            if _principal_controls(info, uid, gids):
+                return (
+                    f"{component} is owned or writable by this session's "
+                    "principal"
+                )
+    try:
+        if not stat.S_ISREG(os.stat(resolved).st_mode):
+            return f"{resolved} is not a regular file"
+    except OSError:
+        return f"{resolved} cannot be inspected"
+    return ""
 
 
 def _expected_projection(binding: dict) -> dict[str, str]:
@@ -484,9 +655,7 @@ def _expected_projection(binding: dict) -> dict[str, str]:
     }
 
 
-def validate_execution_binding(
-    command: str, launches: "list[re.Match[str]] | None" = None
-) -> None:
+def validate_execution_binding(command: str) -> None:
     """Refuse paid launches/delegations not covered by the CURRENT
     broker-issued ExecutionBinding (WO-11; Rev 4 S3.D l.287-289, S4 steps
     3-4).
@@ -497,32 +666,33 @@ def validate_execution_binding(
     child identity, or more than one paid launch under one binding). The
     binding is only an assignment of opaque references — never a
     credential, and there is no independent signing authority: it is
-    trusted exactly as far as it matches the authenticated owner's current
-    lease receipt. This gate fences the launches it observes through the
-    provider hook; it does not fence arbitrary processes.
+    trusted exactly as far as it matches the owner's current lease receipt.
 
-    Known limits (documented, not claimed):
+    Trust basis and what remains trusting:
 
-    * The receipt file is same-uid writable state. With the owner-projected
-      ``MASTERMIND_PLACEMENT_RECEIPT_DIGEST`` pin the guard refuses any
-      receipt that is not byte-identical to what the owner wrote, so the
-      fenced principal cannot rewrite or replay a self-consistent receipt.
-      WITHOUT the pin, lease currency (stale fence / released / expired) is
-      conditional on owner write discipline: the owner must re-project the
-      receipt atomically per lease event, and a principal that rewrites the
-      receipt is not detected. The session environment (binding + pin) is
-      the trusted channel because a launched command cannot alter it.
-    * Recognition scope: the gate observes the wrapper vocabulary in
-      ``FABRIC_LAUNCH_RE`` (``pool run|remote``, ``sub.sh <known mode>``,
-      ``remote_sub.sh <host> <known mode>``, ``slot.py <known pool>``).
-      A wrapper invoked with a mode outside that vocabulary (e.g.
-      ``sub.sh zebra-glm``) is not a recognised paid launch and passes
-      through neither this gate nor the legacy identity checks; keeping
-      the wrapper mode lists in sync with the deployed wrappers is the
-      owner's responsibility. Composite modes are resolved only through
-      the closed ``COMPOSITE_LAUNCH_MODES`` vocabulary.
-    * Launches staged through heredocs/files and executed later are
-      outside the lexically observed command (pre-existing limit).
+    * Session environment (binding, receipt path, optional digest pin): the
+      owner projects it into the provider process; a launched command cannot
+      alter the environment this hook runs in, so command-level assignments
+      of these names are ignored.
+    * Receipt: accepted only from an owner-only channel — every component
+      of its path must be outside the fenced principal's control (see
+      ``_receipt_channel_problem``). The principal therefore cannot forge,
+      roll back or replay it; a receipt it could have written is refused.
+      This relies on the OS uid boundary between the session and the
+      owner's service account: a same-uid owner gets no shared-placement
+      launches at all (fail closed), and root is outside this model.
+    * Lease currency: the receipt is as current as the owner's re-projection
+      (atomic replace per lease event, WO-18). If the owner stops
+      re-projecting, ``lease_expires_at_ms`` still bounds the lease.
+
+    Lexical scope (documented, not claimed): the gate judges the command
+    text it is shown — every wrapper invocation in it (all five shapes,
+    repeated, heredoc bodies included, off-list modes refused) and every
+    identity assignment form. Scripts staged in an EARLIER command or a
+    file and executed later, and environment injected by provider-side
+    mechanisms outside the command, are not observed; eval/source/
+    computed-name assignments in a launch command are refused as
+    unobservable.
     """
     raw_binding = os.environ.get(BINDING_ENV, "").strip()
     if not raw_binding:
@@ -553,6 +723,16 @@ def validate_execution_binding(
             "cannot be checked against the current lease. Never launch a "
             "paid child while placement truth is uncertain."
         )
+    channel_problem = _receipt_channel_problem(receipt_path)
+    if channel_problem:
+        deny(
+            "Mastermind shared-placement guard: the placement receipt is not "
+            f"owner-authenticated — {channel_problem}, so the fenced session "
+            "could have forged, rolled back or replayed it. The receipt must "
+            "be projected by the placement owner into a path this session "
+            "cannot write. Never launch a paid child while placement truth "
+            "is uncertain."
+        )
     try:
         receipt_bytes = Path(receipt_path).read_bytes()
         receipt = json.loads(receipt_bytes.decode("utf-8"))
@@ -563,11 +743,6 @@ def validate_execution_binding(
             "against the current lease. Never launch a paid child while "
             "placement truth is uncertain."
         )
-    # Receipt integrity pin: the receipt path is same-uid writable state.
-    # When the owner projected the receipt digest into the session alongside
-    # the binding, the file must still be byte-identical to what the owner
-    # wrote — a rewritten or replayed receipt (self-consistent fence, HELD,
-    # far-future expiry) is refused before any field is trusted.
     pinned_digest = os.environ.get(PLACEMENT_RECEIPT_DIGEST_ENV, "").strip().lower()
     if pinned_digest:
         if not _BINDING_HEX64_RE.match(pinned_digest):
@@ -576,8 +751,7 @@ def validate_execution_binding(
                 f"{PLACEMENT_RECEIPT_DIGEST_ENV} must be the 64-char hex "
                 "SHA-256 of the owner-written receipt."
             )
-        actual_digest = hashlib.sha256(receipt_bytes).hexdigest()
-        if actual_digest != pinned_digest:
+        if hashlib.sha256(receipt_bytes).hexdigest() != pinned_digest:
             deny(
                 "Mastermind shared-placement guard: receipt integrity — the "
                 f"placement receipt at {receipt_path} does not match the "
@@ -601,9 +775,8 @@ def validate_execution_binding(
 
     # Unaccounted descendants: the presented binding must BE the owner's
     # current fenced assignment — same (root, immediate parent, logical
-    # child) identity, same admitted digest, same fenced attempt. A binding
-    # for a different child under this session is a descendant the
-    # placement authority never admitted or claimed.
+    # child) identity, same admitted digest, same fenced attempt and
+    # assignment generation.
     for name in _BINDING_IDENTITY_FIELDS:
         if str(binding.get(name)) != str(current.get(name)):
             deny(
@@ -623,8 +796,6 @@ def validate_execution_binding(
             "Mastermind shared-placement guard: placement receipt "
             "fence_counter must be an integer."
         )
-    # The receipt's own top-level lease fields must agree with the binding
-    # it embeds; a receipt that disagrees with itself is not owner truth.
     if fence_now != current.get("fence_counter") or str(
         receipt.get("attempt_ref")
     ) != str(current.get("attempt_ref")):
@@ -633,8 +804,8 @@ def validate_execution_binding(
             "internally inconsistent (top-level fence_counter/attempt_ref "
             "disagree with its embedded execution_binding)."
         )
-    fence_held = binding.get("fence_counter", 0)
-    lease_state = str(receipt.get("lease_state") or "").strip().upper()
+    fence_held = binding.get("fence_counter")
+    lease_state = receipt.get("lease_state")
     expires_ms = receipt.get("lease_expires_at_ms")
     if isinstance(expires_ms, bool) or not isinstance(expires_ms, int):
         deny(
@@ -642,7 +813,7 @@ def validate_execution_binding(
             "lease_expires_at_ms must be an integer (epoch milliseconds)."
         )
     expired = int(time.time() * 1000) >= expires_ms
-    if fence_held != fence_now or lease_state != "HELD" or expired:
+    if fence_held != fence_now or lease_state != LEASE_STATE_HELD or expired:
         deny(
             "Mastermind shared-placement guard: stale fence — the presented "
             f"binding holds fence {fence_held} but the owner's current "
@@ -652,14 +823,25 @@ def validate_execution_binding(
             "authority instead of launching on a superseded assignment."
         )
 
-    # Server-derived projections: EVERY identity the launched child could
-    # receive must equal what the binding projects. All shell-level
-    # assignments are judged (first, last, duplicated, nested `export`),
-    # because the shell applies the last one and a nested export overrides
-    # at runtime — a benign first assignment is not the child's identity.
+    if not command:
+        launches: list[tuple[int, str, str, bool]] = []
+    else:
+        if _UNOBSERVABLE_ENV_RE.search(_canonical_command(command)):
+            deny(
+                "Mastermind shared-placement guard: unobservable launch "
+                "environment — eval, source/., BASH_ENV/ENV or a computed "
+                "variable name can change the child's POOL_* identity outside "
+                "what this guard can check. Run the paid launch as a plain "
+                "command."
+            )
+        launches = _wrapper_invocations(command)
+
+    # Server-derived projections: EVERY identity value the launched child
+    # could receive must equal what the binding projects (canonical view of
+    # all assignment/clearing forms; see _effective_identity_values).
     for env_name, expected_value in _expected_projection(binding).items():
-        declared = _command_assignments(command, env_name)
-        if not declared:
+        declared = _effective_identity_values(command, env_name)
+        if declared is None:
             declared = [os.environ.get(env_name, "").strip()]
         offending = [value for value in declared if value != expected_value]
         if offending:
@@ -675,53 +857,66 @@ def validate_execution_binding(
                     else ""
                 )
                 + ". A child cannot re-root, re-parent or promote itself by "
-                "changing the environment."
+                "changing the environment (unset/env -i/nested shells count)."
             )
 
-    # Provider substitution: after reservation EVERY launch in the command
-    # must use the reserved provider/pool. One binding covers one attempt,
-    # so a second paid launch in the same command is an unaccounted
-    # descendant even when its token matches.
-    if launches:
-        allowed = {
-            str(binding.get("pool_ref") or "").strip().lower(),
-            str(binding.get("provider_ref") or "").strip().lower(),
-        }
-        reserved = sorted(name for name in allowed if name)
-        tokens = [
-            _launch_token_at(command, launch)
-            for launch in sorted(launches, key=lambda item: item.start())
-        ]
-        for token in tokens:
-            if not _provider_token_matches(token, allowed):
-                deny(
-                    "Mastermind shared-placement guard: provider substitution — "
-                    f"the current binding reserved {reserved} but this launch "
-                    f"requests {token!r}. A reservation cannot be re-pointed at "
-                    "a different provider after the fact (composite modes are "
-                    f"limited to {sorted(COMPOSITE_LAUNCH_MODES)}); re-claim "
-                    "through the placement authority."
-                )
-        if len(tokens) > 1:
+    # Every paid launch in the command, positionally: an off-list wrapper
+    # mode is refused (never ignored); every token must equal the reserved
+    # pool_ref EXACTLY (no composite/segment acceptance); one binding covers
+    # one attempt, so a second launch is an unaccounted descendant.
+    reserved = str(binding.get("pool_ref") or "").strip().lower()
+    for _, wrapper, token, known in launches:
+        if not known:
             deny(
-                "Mastermind shared-placement guard: unaccounted descendant — "
-                f"this command carries {len(tokens)} paid launches "
-                f"{tokens} but the current binding covers exactly one "
-                "attempt. Every paid child must be admitted and claimed "
-                "through the placement authority before launch."
+                "Mastermind shared-placement guard: unknown wrapper mode — "
+                f"{wrapper} {token or '<missing>'!r} is not on the recognised "
+                "paid-launch vocabulary, so it is treated as a paid launch the "
+                "guard cannot attribute and refused."
             )
+        if token != reserved:
+            deny(
+                "Mastermind shared-placement guard: provider substitution — "
+                f"the current binding reserved pool_ref {reserved!r} but this "
+                f"launch requests {token!r}. Launch tokens must equal the "
+                "reserved pool exactly; a reservation cannot be re-pointed at "
+                "a different provider after the fact. Re-claim through the "
+                "placement authority."
+            )
+    if len(launches) > 1:
+        deny(
+            "Mastermind shared-placement guard: unaccounted descendant — "
+            f"this command carries {len(launches)} paid launches "
+            f"{[token for _, _, token, _ in launches]} but the current binding "
+            "covers exactly one attempt. Every paid child must be admitted "
+            "and claimed through the placement authority before launch."
+        )
 
 
-def guard_fabric_launch(command: str) -> None:
+def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
+    raw = command if raw_command is None else raw_command
     launches = list(FABRIC_LAUNCH_RE.finditer(command))
-    if not launches:
+    armed = shared_placement_armed()
+    # An off-list wrapper mode is still an observed launch (REVIEW_2329
+    # M-4): under shared placement it is refused by the gate; otherwise it
+    # gets the legacy identity checks instead of passing unchecked.
+    invocations = _wrapper_invocations(raw if armed else command)
+    if armed:
+        canon = _canonical_command(raw)
+        if _WRAPPER_RE.search(canon) and _SHELL_FEED_RE.search(canon):
+            deny(
+                "Mastermind shared-placement guard: unobservable launch — "
+                "wrapper source fed to a shell launches without a visible "
+                "wrapper invocation. Invoke the wrapper directly."
+            )
+    if not launches and not invocations:
         return
 
     # WO-11: shared-placement sessions validate the broker-issued
     # ExecutionBinding against the owner's current lease BEFORE any other
     # launch check — on the common paid-launch path, engine-independent.
-    if shared_placement_armed():
-        validate_execution_binding(command, launches)
+    # The armed gate judges the raw command, heredoc bodies included.
+    if armed:
+        validate_execution_binding(raw)
 
     inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
     assigned_roots = _command_assignments(command, "POOL_ORCHESTRATOR_ID")
@@ -754,7 +949,7 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
         return
     command = str(tool_input.get("command") or "")
     clean = strip_heredocs(command)
-    guard_fabric_launch(clean)
+    guard_fabric_launch(clean, command)
     if "gh " not in clean:
         return
 
