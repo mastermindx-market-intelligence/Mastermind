@@ -97,6 +97,33 @@ class ApplicationNativeSelection:
         return self._encoded
 
 
+def _application_http_account_bindings(accounts, recipes):
+    """Keep each original transport's account namespace separate."""
+    try:
+        pools = {recipe["pool"] for recipe in recipes}
+        if not pools.issubset({"bailian", "glm"}):
+            raise ValueError("unknown HTTP pool")
+        if isinstance(accounts, dict):
+            if set(accounts) != pools:
+                raise ValueError("account pools differ")
+            if any(isinstance(value, (str, bytes, dict)) for value in accounts.values()):
+                raise ValueError("invalid account collection")
+            result = {pool: frozenset(value) for pool, value in accounts.items()}
+        else:
+            if isinstance(accounts, (str, bytes)):
+                raise ValueError("invalid account collection")
+            legacy = frozenset(accounts)
+            if not pools and not legacy:
+                return {}
+            if pools != {"bailian"}:
+                raise ValueError("explicit pool account binding required")
+            result = {"bailian": legacy}
+        if any(not names for names in result.values()):
+            raise ValueError("empty transport account set")
+        return result
+    except (KeyError, TypeError, ValueError) as error:
+        raise LeaseGatewayError("invalid_application_http_accounts") from error
+
 class GoLeaseGateway:
     def __init__(self, db_path, accounts, models, *, clock=time.time, signing_key=None,
                  application_broker=None, application_http_recipes=(), application_http_accounts=(),
@@ -111,7 +138,9 @@ class GoLeaseGateway:
         # Application-only projections never broaden the worker capability
         # account/model sets above. Fresh grants remain the admission authority.
         self._application_http_recipes = {}
-        self._application_http_accounts = frozenset(application_http_accounts)
+        application_http_recipes = tuple(application_http_recipes)
+        self._application_http_accounts_by_pool = _application_http_account_bindings(application_http_accounts, application_http_recipes)
+        self._application_http_accounts = frozenset(account for names in self._application_http_accounts_by_pool.values() for account in names)
         if any(not isinstance(account, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", account) is None
                for account in self._application_http_accounts):
             raise LeaseGatewayError("application transport refused")
@@ -192,6 +221,8 @@ class GoLeaseGateway:
             if not isinstance(signing_key, bytes) or len(signing_key) < 32:
                 raise LeaseGatewayError("lease capability refused")
             self._signing_key = signing_key
+        if set(self._application_http_recipes) & set(self._application_native_recipes):
+            raise LeaseGatewayError("ambiguous_application_transport")
 
     def _connection(self):
         try:
@@ -316,7 +347,7 @@ class GoLeaseGateway:
     def application_recipe(self, pool, model):
         """Fresh immutable copy of the sealed transport projection, not authority."""
         try:
-            recipes = self._application_native_recipes if pool in NATIVE_APPLICATION_POOLS else self._application_http_recipes
+            recipes = self._application_native_recipes if ((pool, model) in self._application_native_recipes) else self._application_http_recipes
             encoded, digest = recipes[(pool, model)]
             return json.loads(encoded), digest
         except (KeyError, TypeError):
@@ -326,7 +357,7 @@ class GoLeaseGateway:
         if pool == "go" and model in self._models:
             return self._accounts, None, None
         recipe, digest = self.application_recipe(pool, model)
-        accounts = self._application_native_accounts[pool] if pool in NATIVE_APPLICATION_POOLS else self._application_http_accounts
+        accounts = self._application_native_accounts[pool] if ((pool, model) in self._application_native_recipes) else self._application_http_accounts_by_pool[pool]
         return accounts, recipe, digest
 
     def _application_route(self, pool, model):
@@ -341,19 +372,19 @@ class GoLeaseGateway:
             if self._application_selection_profile is None or model not in self._models:
                 return None, None, None
             return self._accounts, None, self._application_selection_profile.document
-        if pool == "bailian":
+        if (pool == 'bailian' or (pool == 'glm' and (pool, model) in self._application_http_recipes)):
             try:
                 recipe, digest = self.application_recipe(pool, model)
             except LeaseGatewayError:
                 return None, None, None
             # The H driver accepts chat tool declarations and results over its
             # responses protocol; no media, no upstream streaming.
-            projection = {"pool": pool, "model": model, "mode": "bailian",
+            projection = {"pool": pool, "model": model, "mode": pool,
                 "protocol": recipe["protocol"], "streaming": False,
                 "driver": recipe["driver_id"], "profile": recipe["realm_id"],
                 "source": "bailian-" + recipe["source_projection_sha256"],
                 "capabilities": {"text": True, "tools": True, "vision": False}}
-            return self._application_http_accounts, digest, projection
+            return self._application_http_accounts_by_pool[pool], digest, projection
         if pool in NATIVE_APPLICATION_POOLS:
             encoded = self._application_native_selection.get((pool, model))
             if encoded is None:
@@ -478,7 +509,7 @@ class GoLeaseGateway:
                         models = (requested,)
                     elif pool == "go":
                         models = sorted(self._models)
-                    elif pool == "bailian":
+                    elif (pool in self._application_http_accounts_by_pool):
                         models = sorted(model for candidate_pool, model in self._application_http_recipes
                                         if candidate_pool == pool)
                     else:
@@ -492,7 +523,7 @@ class GoLeaseGateway:
                             continue
                         projections[(pool, model)] = projection
                         try:
-                            if requested is None and pool in NATIVE_APPLICATION_POOLS:
+                            if requested is None and ((pool, model) in self._application_native_recipes):
                                 recipe = json.loads(self._application_native_recipes[(pool, model)][0])
                                 concrete = dict(payload, model=model)
                                 _application_native_payload(recipe, concrete)
@@ -698,14 +729,14 @@ class GoLeaseGateway:
             prepared = broker.prepare_application_request(principal_id=principal_id, turn_id=turn_id,
                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
                 transport_commitment=transport_commitment,
-                native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None,
+                native_payload=frozen if (claims['v'] == 3) else None,
                 original_payload=original_payload if routed_digest is not None or scoped else None)
             if prepared.get("dispatch_permitted"):
                 # The original handler sends these immutable, digest-bound bytes.
                 # They are internal dispatch material, never a public receipt/log.
                 prepared["payload_bytes"] = json.dumps(frozen, sort_keys=True, separators=(",", ":"),
                     ensure_ascii=False, allow_nan=False).encode("utf-8")
-                if expected_pool in NATIVE_APPLICATION_POOLS:
+                if (claims['v'] == 3):
                     from lease_broker import _application_native_payload
                     if type(self) is not GoLeaseGateway:
                         raise LeaseGatewayError("application native owner unavailable")

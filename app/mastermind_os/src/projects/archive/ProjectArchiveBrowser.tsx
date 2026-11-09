@@ -114,6 +114,8 @@ export function ProjectArchiveBrowser({ scopeKey, programs, currentCatalogue, re
     <ArchiveProjectsView key={scopeKey} scopeKey={scopeKey} locale={locale} mode={mode} newProjectControl={newProjectControl}
       status={pages.length ? "ready" : visible?.status ?? "unread"} projects={projectRows} archived={archived}
       coverage={pages[0] ? { checked: checkedRefs.length, supplied: pages[0].catalogue.qualified_catalogue_count, companyTotal: null } : null}
+      {...(currentCatalogue ? {currentProjectsState: currentCatalogue.value.state === "PENDING"
+        ? "pending" as const : currentCatalogueIsCurrent() ? "ready" as const : "unavailable" as const} : {})}
       inspectedWorkRef={visible ? inspected : null} canRead={permitted} onRead={() => void load()}
       onChangeMode={next => { setMode(next); setInspected(null); if (next === "archived" && !pages.length && !busy) void load(); }}
       onInspectArchive={inspect} onOpenProject={onOpenProject || onNavigateMission ? openProject : undefined} />

@@ -4,6 +4,12 @@ on:
   pull_request:
     paths:
       - app/mastermind_os/**
+      - integrations/worker_browser_runtime/app-control/**
+      - integrations/workbench_browser_mcp/**
+      - integrations/workbench_action_mcp/service.py
+      - control_plane/browser_resource_contract.py
+      - tests/test_os_app_control_profile.py
+      - tests/test_workbench_browser_port.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
   merge_group:
@@ -12,6 +18,12 @@ on:
     branches: [master]
     paths:
       - app/mastermind_os/**
+      - integrations/worker_browser_runtime/app-control/**
+      - integrations/workbench_browser_mcp/**
+      - integrations/workbench_action_mcp/service.py
+      - control_plane/browser_resource_contract.py
+      - tests/test_os_app_control_profile.py
+      - tests/test_workbench_browser_port.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
   workflow_dispatch:
@@ -62,9 +74,37 @@ jobs:
           cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"
       - name: Build isolated browser source fixture
         run: npx vite build --config vite.browser-proof.config.ts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Qualify app control through an MCP client and rendered App
+        working-directory: .
+        run: |
+          npm ci --prefix integrations/worker_browser_runtime --ignore-scripts --no-audit --no-fund
+          npm ci --prefix integrations/worker_browser_runtime/app-control --ignore-scripts --no-audit --no-fund
+          node --test integrations/worker_browser_runtime/app-control/adapter.test.cjs
+          app_control_chrome="$(command -v google-chrome || command -v chromium || true)"
+          if [ -z "$app_control_chrome" ]; then
+            npm exec --prefix integrations/worker_browser_runtime -- playwright install --with-deps chromium
+            app_control_chrome="$(node -e 'process.stdout.write(require("./integrations/worker_browser_runtime/node_modules/playwright").chromium.executablePath())')"
+          fi
+          export MM_APP_CONTROL_CHROMIUM="$app_control_chrome"
+          MM_APP_CONTROL_PROOF_OUTPUT="$RUNNER_TEMP/mastermind-app-control-proof" node integrations/worker_browser_runtime/app-control/browser-proof.cjs
+          python -m venv "$RUNNER_TEMP/mmos-app-control-python"
+          "$RUNNER_TEMP/mmos-app-control-python/bin/python" -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in 'pytest==9.1.1'
+          "$RUNNER_TEMP/mmos-app-control-python/bin/python" -m pytest --noconftest -o addopts= -q \
+            tests/test_os_app_control_profile.py tests/test_workbench_browser_port.py \
+            --junitxml="$RUNNER_TEMP/mastermind-app-control-proof/workbench-stdio.xml"
       - name: Record exact compiled source identity
         run: |
           node --input-type=module -e 'import fs from "node:fs"; const receipt = JSON.stringify({schema: "mastermind.os.compiled_test_receipt.v1", source_revision: process.env.GITHUB_SHA, run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT, live_acceptance: false}) + "\n"; for (const dir of ["dist", "dist-browser-proof"]) fs.writeFileSync(`${dir}/build-receipt.json`, receipt);'
+      - name: Retain app control source proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-app-control-${{ github.sha }}
+          path: ${{ runner.temp }}/mastermind-app-control-proof
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain compiled web candidate
         uses: actions/upload-artifact@v4
         with:

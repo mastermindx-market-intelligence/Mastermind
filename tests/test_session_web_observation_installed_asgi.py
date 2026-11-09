@@ -162,7 +162,7 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
                     foreign = auth._read_token(rsa_key, iat=now - 1, nbf=now - 1,
                                                exp=now + 300, client_id="another-client")
                     _, empty = await host.call(http, foreign, OBSERVE_TOOL, {})
-                    assert empty["ok"] is True and empty["data"]["sources"] == []
+                    assert empty["ok"] is True and empty["data"]["sources"] == [], empty
                     assert len(calls) == 1
                     # A caller cannot smuggle a profile selector into the private tool.
                     malformed = await _raw_ceo_request(Path(raw["ceo_ingress_socket_path"]), (
@@ -185,7 +185,7 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
                     assert withheld["ok"] is False and withheld["data"] is None
                     assert len(calls) == 2
                     _, empty = await host.call(http, token, OBSERVE_TOOL, {})
-                    assert empty["ok"] is True and empty["data"]["sources"] == []
+                    assert empty["ok"] is True and empty["data"]["sources"] == [], empty
                     assert len(calls) == 2, "withdrawn permission must not re-enter C2"
             assert constructors, "the actual Control factory never composed the installed owner"
 

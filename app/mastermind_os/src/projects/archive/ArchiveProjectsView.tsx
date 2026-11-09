@@ -18,6 +18,8 @@ export interface ArchiveProjectsViewProps {
   mode: "projects" | "archived";
   status: "unread" | "loading" | "ready" | "unavailable";
   projects: readonly ArchiveProjectCard[];
+  /** Separate current catalogue outcome. Archive permission is not catalogue authority. */
+  currentProjectsState?: "pending" | "ready" | "unavailable";
   archived: readonly ArchivedProject[];
   coverage: { checked: number; supplied: number; companyTotal: null } | null;
   inspectedWorkRef: string | null;
@@ -35,6 +37,22 @@ export interface ArchiveProjectsViewProps {
 // projection. No row, count or company total is invented in this view.
 const COPY_ZH: Record<string, string> = {
   "Projects": "项目",
+  "Choose a project to view its plan, sources and conversations.": "选择项目，查看计划、来源和对话。",
+  "All projects": "全部项目",
+  "Current projects": "当前项目",
+  "Project": "项目",
+  "Owner": "负责人",
+  "Recorded state": "记录状态",
+  "Clear search": "清除搜索",
+  "Show fewer projects": "收起项目",
+  "Source details": "来源详情",
+  "About this list": "关于此列表",
+  "Names, next steps and recorded states come from the current project read. An owner is not supplied by this source.": "名称、下一步和记录状态来自当前项目读取；此来源未提供负责人。",
+  "Refresh Projects to try the current list again. Archived projects uses a separate read.": "请刷新项目后重试当前列表。归档项目使用独立的读取权限。",
+  "The list is still being read. No project count is confirmed yet.": "正在读取列表，项目数量尚未确认。",
+  "Reading projects…": "正在读取项目…",
+  "Projects are unavailable right now. The current project list could not be confirmed.": "项目暂不可用；当前项目列表尚未确认。",
+  "No projects were supplied by the current read.": "当前读取未提供项目。",
   "Archived": "已归档",
   "Find a project": "查找项目",
   "No supplied projects match this search.": "没有已提供的项目匹配此搜索。",
@@ -98,22 +116,23 @@ function ProjectRow({ card, t, onOpenProject }: {
   card: ArchiveProjectCard; t: Translate; onOpenProject?: (workRef: string) => void;
 }) {
   const label = card.title || card.workRef;
-  return <li className="archive-row">
-    <div className="archive-identity">
+  return <tr>
+    <th scope="row" className="projects-list-identity">
       <h2>{label}</h2>
       <p className="archive-ref">{card.workRef}</p>
-    </div>
-    <p className="archive-field"><span>{t("Next step")}</span>{card.nextAction || t("No next action projected")}</p>
-    <p className="archive-field"><span>{t("State")}</span>{card.state || t("Unknown")}</p>
-    <p className="archive-chip" data-archive={card.archiveStatus}>
-      <span>{t("Archive status")}</span>
-      {card.archiveStatus === "UNKNOWN" ? t("Archive unknown") : t("Not declared")}
-    </p>
-    <div className="archive-actions">
+      <details className="projects-row-source">
+        <summary>{t("Source details")}</summary>
+        <p>{t("Archive status")}: <span>{card.archiveStatus === "UNKNOWN" ? t("Archive unknown") : t("Not declared")}</span></p>
+      </details>
+    </th>
+    <td data-label={t("Next step")}>{card.nextAction || t("No next action projected")}</td>
+    <td data-label={t("Owner")} className="projects-owner">{t("Not supplied")}</td>
+    <td data-label={t("Recorded state")}><span className="projects-recorded-state">{card.state || t("Unknown")}</span></td>
+    <td className="projects-open">
       {onOpenProject && card.openable !== false && <button type="button" aria-label={`${t("Open project")} ${label}`}
-        onClick={() => onOpenProject(card.workRef)}>{t("Open project")}</button>}
-    </div>
-  </li>;
+        onClick={() => onOpenProject(card.workRef)}>{t("Open project")}<span aria-hidden="true"> →</span></button>}
+    </td>
+  </tr>;
 }
 
 function ArchiveRow({ row, t, onInspect, openRef }: {
@@ -175,13 +194,15 @@ function Inspector({ found, workRef, t, onBack, headingRef }: {
 }
 
 function ArchiveProjectsScoped({
-  locale, mode, status, projects, archived, coverage, inspectedWorkRef,
+  locale, mode, status, projects, currentProjectsState, archived, coverage, inspectedWorkRef,
   canRead, onRead, onChangeMode, onInspectArchive, onOpenProject, newProjectControl,
 }: ArchiveProjectsViewProps) {
   const zh = locale === "zh-CN";
   const t: Translate = value => (zh ? COPY_ZH[value] ?? value : value);
   const [query, setQuery] = useState("");
   const [projectQuery, setProjectQuery] = useState("");
+  const [showAllProjects, setShowAllProjects] = useState(false);
+  const projectSearch = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const inspectorHeading = useRef<HTMLHeadingElement>(null);
   const rowButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -213,19 +234,27 @@ function ArchiveProjectsScoped({
   const searchId = useId(), projectSearchId = useId();
   const projectTerm = projectQuery.trim().toLocaleLowerCase();
   const visibleProjects = projects.filter(row => !projectTerm || `${row.title ?? ""}\n${row.workRef}`.toLocaleLowerCase().includes(projectTerm));
+  const listedProjects = showAllProjects ? visibleProjects : visibleProjects.slice(0, 8);
+  const projectCount = projectTerm
+    ? zh ? `匹配 ${visibleProjects.length} 个项目，共 ${projects.length} 个` : `${visibleProjects.length} of ${projects.length} projects match this search`
+    : zh ? `此视图中有 ${projects.length} 个项目` : `${projects.length} ${projects.length === 1 ? "project" : "projects"} in this view`;
   const term = query.trim().toLocaleLowerCase();
   const matches = archived.filter(row =>
     !term || `${row.title ?? ""}\n${row.work_ref}`.toLocaleLowerCase().includes(term));
   const inspected = inspectedWorkRef === null
     ? null
     : archived.find(row => row.work_ref === inspectedWorkRef) ?? null;
-  const statusLine = !canRead
+  const projectsReady = currentProjectsState === undefined ? canRead : currentProjectsState === "ready";
+  const statusLine = mode === "projects"
+    ? currentProjectsState === "pending" ? t("Reading projects…")
+      : currentProjectsState === "unavailable" ? t("Projects are unavailable right now. The current project list could not be confirmed.") : null
+    : !canRead
     ? t("Open archive records in an authorized current project context.")
     : status === "unread" ? t("Archive evidence has not been read yet.")
     : status === "loading" ? t("Reading archive evidence…")
     : status === "unavailable" ? t("The archive source is unavailable.")
     : null;
-  return <section className="archive-projects" lang={locale}
+  return <section className="archive-projects" data-view={mode} lang={locale}
     aria-label={mode === "archived" ? t("Archived projects") : t("Projects")}>
     {mode === "archived"
       ? <header className="archive-head">
@@ -233,34 +262,50 @@ function ArchiveProjectsScoped({
         <div className="archive-header-actions"><button type="button" onClick={() => changeMode("projects")}>{t("Back to projects")}</button>
           <button type="button" disabled={!canRead || status === "loading"} onClick={onRead}>{t("Refresh archived projects")}</button></div>
       </header>
-      : <header className="archive-head">
-        <h1 ref={heading} tabIndex={-1}>{t("Projects")}</h1>
-        <div className="archive-header-actions">{newProjectControl}
-          <button type="button" disabled={!canRead || status === "loading"} onClick={onRead}>
-            {t("Refresh archived projects")}
-          </button>
-        </div>
+      : <header className="archive-head projects-head">
+        <div className="projects-heading"><h1 ref={heading} tabIndex={-1}>{t("Projects")}</h1>
+          <p>{t("Choose a project to view its plan, sources and conversations.")}</p></div>
+        <div className="archive-header-actions">{newProjectControl}</div>
       </header>}
-    {mode === "projects" && <p className="archive-note">
-      {t("Archive status comes only from checked source records. It does not indicate whether work is running.")}
-    </p>}
     {statusLine && <p className="archive-status" role="status">{statusLine}</p>}
     {mode === "projects" ? <>
-      {canRead && <div className="archive-search"><label htmlFor={projectSearchId}>{t("Find a project")}</label>
-        <input id={projectSearchId} type="search" value={projectQuery} placeholder={t("Find a project")} onChange={event => setProjectQuery(event.target.value)} /></div>}
-      {!canRead ? null
-        : projects.length === 0
-          ? <p className="archive-empty">{t("No project records are shown in this view.")}</p>
-          : visibleProjects.length === 0 ? <p className="archive-empty">{t("No supplied projects match this search.")}</p>
-          : <ul className="archive-list">
-            {visibleProjects.map(card =>
-              <ProjectRow key={card.workRef} card={card} t={t} onOpenProject={onOpenProject} />)}
-          </ul>}
-      {/* Navigation only: the entry never claims data and stays enabled even
-          when the checked sample declares no archived projects. */}
-      <div className="archive-footer">
-        <button type="button" onClick={() => changeMode("archived")}>{t("Archived projects")}</button>
+      <div className="projects-toolbar">
+        <nav aria-label={t("Projects")} className="projects-list-modes">
+          <span className="projects-current-mode" aria-current="page">{t("All projects")}</span>
+          <button type="button" onClick={() => changeMode("archived")}>{t("Archived projects")}</button>
+        </nav>
+        {projectsReady && <div className="archive-search projects-search">
+          <label className="projects-visually-hidden" htmlFor={projectSearchId}>{t("Find a project")}</label>
+          <input ref={projectSearch} id={projectSearchId} type="search" value={projectQuery} placeholder={t("Find a project")}
+            onChange={event => {setProjectQuery(event.target.value);setShowAllProjects(false);}} />
+          {projectQuery && <button type="button" onClick={() => {setProjectQuery("");setShowAllProjects(false);projectSearch.current?.focus();}}>{t("Clear search")}</button>}
+        </div>}
       </div>
+      {!projectsReady ? <div className="projects-list-state">
+        {currentProjectsState === "pending" ? <>
+          <p className="archive-note">{t("The list is still being read. No project count is confirmed yet.")}</p>
+          <div className="projects-skeleton" aria-hidden="true">{[0,1,2].map(i=><div key={i}><span/><span/><span/></div>)}</div>
+        </> : <p className="archive-note">{t("Refresh Projects to try the current list again. Archived projects uses a separate read.")}</p>}
+      </div> : <>
+        <p className="projects-list-count" role="status" aria-live="polite">{projectCount}</p>
+        {projects.length === 0
+          ? <p className="archive-empty">{t(currentProjectsState === "ready"
+            ? "No projects were supplied by the current read." : "No project records are shown in this view.")}</p>
+          : visibleProjects.length === 0 ? <p className="archive-empty">{t("No supplied projects match this search.")}</p>
+          : <table className="projects-table" aria-label={t("Current projects")}>
+            <thead><tr><th scope="col">{t("Project")}</th><th scope="col">{t("Next step")}</th>
+              <th scope="col">{t("Owner")}</th><th scope="col">{t("Recorded state")}</th>
+              <th scope="col"><span className="projects-visually-hidden">{t("Open project")}</span></th></tr></thead>
+            <tbody>{listedProjects.map(card => <ProjectRow key={card.workRef} card={card} t={t} onOpenProject={onOpenProject} />)}</tbody>
+          </table>}
+        {visibleProjects.length > 8 && <div className="projects-list-more"><button type="button" onClick={() => setShowAllProjects(!showAllProjects)}>
+          {showAllProjects ? t("Show fewer projects") : zh ? `查看全部 ${visibleProjects.length} 个项目` : `See all ${visibleProjects.length} projects`}
+        </button></div>}
+        <details className="projects-list-source"><summary>{t("About this list")}</summary>
+          <p>{t("Names, next steps and recorded states come from the current project read. An owner is not supplied by this source.")}</p>
+          <p>{t("Archive status comes only from checked source records. It does not indicate whether work is running.")}</p>
+        </details>
+      </>}
     </> : <>
       {!canRead ? null : <>
         <div className="archive-search">

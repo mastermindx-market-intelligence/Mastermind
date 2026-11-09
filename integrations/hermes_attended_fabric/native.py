@@ -25,7 +25,16 @@ COMPLEXITIES = frozenset({
 KEY = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 OPERATIONS = frozenset({"preview", "submit", "status", "result"})
-MANUAL_POOLS = frozenset({"grok", "glm", "minimax", "bailian", "cursor", "ocfree", "go"})
+# xai / anthropic-oauth / openai-codex joined 2026-11-09 following the xai
+# registration precedent (orch/fabric pools.yaml + accounts.yaml catalog form,
+# executed by the Hermes native providers xai-oauth / the m2 anthropic gateway
+# 127.0.0.1:8312 / openai-codex on m2). They remain absent from routing
+# execute_order/judgment_order until a fleet executor is qualified; manual
+# selection here is request-only and Fabric admission stays authoritative.
+MANUAL_POOLS = frozenset({
+    "grok", "glm", "minimax", "bailian", "cursor", "ocfree", "go",
+    "xai", "anthropic-oauth", "openai-codex",
+})
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 # The model never receives a root/parent/caller authority field.
 TOOL_SCHEMA = {

@@ -385,6 +385,13 @@ def validate_parallel_workflow(text: str) -> None:
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
+    native = [step for step in shard_steps
+              if step.get("name") == "Verify native application admission and dispatch custody"]
+    if (len(native) != 1 or native[0].get("if") != "matrix.index == 5"
+            or shard_steps.index(native[0]) >= shard_steps.index(proof)):
+        raise ci_pytest.PolicyError(
+            "native admission gate must run once on assigned shard five before reuse proof"
+        )
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",

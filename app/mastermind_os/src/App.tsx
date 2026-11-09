@@ -1,3 +1,5 @@
+import {NativeWorkAuthorizationControl} from "./NativeWorkAuthorizationControl";
+import {NativePrimaryAccountControl} from "./NativePrimaryAccountControl";
 import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
@@ -181,7 +183,7 @@ import {
   type WorkDocument,
 } from "./work";
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
-import { nativePartialAuthPresentation } from "./native-partial-auth-presentation";
+import { nativeAuthFeedback, nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
@@ -3664,8 +3666,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const partialNativeAuth = native && authState
     ? nativePartialAuthPresentation(authState, locale) : null;
   // Presentation reuses the incumbent explicit auth action and its guards.
-  const authenticationControl = authState ? (
-                <button
+  const authenticationButtonRef = useRef<HTMLButtonElement>(null);
+  const existingAuthenticationControl = authState ? (
+                <button ref={authenticationButtonRef}
                   disabled={authState.status === "unconfigured"}
                   onClick={() => {
                     const auth = window.MastermindMissionHost?.auth;
@@ -3707,6 +3710,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                       : copy.signIn}
                 </button>
   ) : null;
+  const authenticationControl = authState && native && !authState.acquisition && !authState.content ? (
+    <NativePrimaryAccountControl host={window.MastermindMissionHost} state={authState} locale={locale}
+      pendingControl={existingAuthenticationControl} pendingControlRef={authenticationButtonRef}
+      beforeSignIn={() => nativeGoalRef.current.onAuthChange(false)} />
+  ) : existingAuthenticationControl;
   const todayNeedsAuthentication = !!authState && !authState.acquisition &&
     ["signed_out", "error", "signing_in", "unconfigured"].includes(authState.status);
   const todayAuthenticationCue = todayNeedsAuthentication ? <section className="card" aria-label={locale === "zh-CN" ? "工作区登录" : "Workspace sign-in"}>
@@ -4623,7 +4631,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         refreshProjects();
       }}
     >
-      Refresh Projects
+      {locale === "zh-CN" ? "刷新项目" : "Refresh Projects"}
     </button>
   );
   const workReadAvailable =
@@ -5941,6 +5949,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
     preferencesControl={preferencesControl}
     feedback={authState?.reason && !successfulSignOut && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+      native ? nativeAuthFeedback(authState, locale) ?? copy.signInFailed :
       authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
@@ -6000,7 +6009,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </button>
           {freshEntryUnavailableReason ? <p id="new-conversation-unavailable" className="sidebar-new-entry-hint">{freshEntryUnavailableReason}</p> : null}
           </div>
-          <button type="button" className="sidebar-search" aria-current={active === "Search" ? "page" : undefined}
+          <button type="button" className="sidebar-search" data-agent-route="Search" aria-current={active === "Search" ? "page" : undefined}
             onClick={() => {setProjectTab(null);setActive("Search");if (navigationOpen) closeNavigation();}}>
             <NavigationIcon view="Search"/>{locale === "zh-CN" ? "搜索" : "Search"}
           </button>
@@ -6010,6 +6019,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {primaryNavigation.map((x) => (
                 <button
                   key={x}
+                  data-agent-route={x}
                   className={active === x ? "active" : ""}
                   aria-label={navigationLabel(x, locale)}
                   aria-current={active === x ? "page" : undefined}
@@ -6046,6 +6056,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {advancedNavigation.map((x) => (
                   <button
                     key={x}
+                    data-agent-route={x}
                     className={active === x ? "active" : ""}
                     aria-label={advancedLabel(x, locale)}
                     aria-current={active === x ? "page" : undefined}
@@ -6074,7 +6085,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               {partialNativeAuth ? <p className="muted">{partialNativeAuth.description}</p>
                 : authState.reason && authState.status !== "unconfigured" ? (
                 <p className="muted">
-                  {authState.reason === "POPUP_BLOCKED"
+                  {native ? nativeAuthFeedback(authState, locale) ??
+                    (authState.acquisition ? copy.conversationUnavailable : copy.signInFailed)
+                    : authState.reason === "POPUP_BLOCKED"
                     ? copy.allowPopup
                     : authState.reason === "POPUP_CLOSED"
                       ? copy.popupClosed
@@ -6088,6 +6101,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               ) : null}
               {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
               {native && <NativeAuthorizationContinuationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale}/>}
+              {native && <NativeWorkAuthorizationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale} beforeSignIn={() => nativeGoalRef.current.onAuthChange(false)}/>}
             </div>
           ) : null}
         </div>
