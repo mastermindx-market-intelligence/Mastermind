@@ -3303,7 +3303,7 @@ def test_binding_gate_admits_v1_1_native_binding_and_refuses_other_labels():
 #
 # Fail-before: MASTERMIND_R6_GUARD_UNDER_TEST=<guard module path> runs these
 # tables against that module (verdicts + gate flags), e.g. the r6 guard from
-# ``git show HEAD~1:ops/executive_os/provider_orchestrator_guard.py``.
+# ``git show 29a82f779:ops/executive_os/provider_orchestrator_guard.py`` (r7 lane base).
 
 _R7_G = "grok a /tmp grok-4"
 _R7_EXT = "/opt/mastermind/ext/"
