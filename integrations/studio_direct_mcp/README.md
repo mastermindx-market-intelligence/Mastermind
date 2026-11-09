@@ -4,6 +4,48 @@ Studio Direct connects an authorized ChatGPT account to the Mac Studio's existin
 
 The gateway binds to `127.0.0.1:45017`. Its external endpoint is `https://mac-studio.taila6eca1.ts.net:8443/mcp`. Tailscale Funnel8443 is active under the user's explicit authorization; ChatGPT account linking still requires successful OAuth discovery and approval. Existing private Tailscale port 443 and the existing Desktop Commander remote service are separate.
 
+## Local M2 versus remote routes
+
+**M2 is the Studio Direct gateway's local backend, not a remote fleet route.**
+For an authorized M2 diagnostic, use a fresh, **unselected** Studio Direct MCP
+session on the M2 account gateway. The ordinary Desktop Commander tools on
+that session target local `m2studio` without any `studio_select_host` call.
+A bounded, read-only `get_config` plus `start_process("hostname")` on the
+**same unselected session** can verify the actual local host when authorized;
+the observed hostname on 2026-11-07 was `m2studio` (exit 0).
+
+`studio_select_host({hostRef: ...})` binds an MCP session **once** to one
+explicitly configured *remote* route. It is not a generic fleet-host picker:
+the `physicalFleet` section of `studio_fleet_status` is advisory Fabric
+visibility, not the Studio Direct remote-route allowlist. The installed
+`admin-business` M2 gateway's `fleetRouting.routes` contained `mini3`
+and `mini4` at the November 7 observation, **not `m2`**. Do not hard-code
+those minis as permanent inventory; inspect authorized installed configuration
+rather than treating a fresh online fleet node as a selectable remote route.
+Once the session has dispatched local Desktop Commander tools, it cannot
+subsequently select a remote host; use a different lawfully authorized new
+session for a genuinely different remote operation, not to replay a refusal.
+
+Calling `studio_select_host({hostRef: "m2"})` on this gateway is therefore
+the **wrong action**. The original `FLEET_ROUTE_PREFLIGHT_REFUSED` response
+was `NOT_APPLIED`, before local/remote host dispatch. It proves neither
+M2 outage nor lost M2 permission. Retain the denied selection as a historical
+refusal; do not repeat it via a second account, host, connector or identity.
+Independent, authorized local read-only diagnostics use the existing local
+backend and do not replay the denied remote-selection effect. This path does
+not grant Hermes/native installation, Fabric admission, privileged access,
+Ubuntu1 C26 root/admin journal access, or permission to retry a separate
+denied effect.
+
+The current installed gateway's generic preflight error can omit the specific
+`FLEET_ROUTE_HOST_NOT_CONFIGURED` reason. The existing source candidate
+[PR #1773](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1773)
+contains reason-code qualification but is not assumed installed; do not
+duplicate its source writer. Original M2 diagnosis/readback:
+[PR #2184 comment 6702814736](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2184#issuecomment-6702814736).
+New sessions also load the same-pinned `docs/sol_skills/COLD_START.md`
+local/remote distinction before concluding M2 host access is blocked.
+
 ## Runtime and account access
 
 The service label is `com.mastermind.studio-direct-mcp`. Installed files and private OAuth state live in `/Users/chriswong/.local/share/studio-direct-mcp`. The backend is pinned to `/Users/chriswong/.local/share/desktop-commander-service/vendor/node_modules/@wonderwhy-er/desktop-commander/dist/index.js`; the new gateway never modifies that engine or its existing remote parent.

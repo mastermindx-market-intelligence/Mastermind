@@ -1,5 +1,6 @@
 /** Read-only presentation over decoded owner DTOs. No reads, persistence or actions. */
 import type { MissionDocument, Missionv3Document, MissionSelection, programsFromControlRoom } from "../mission";
+import type { DependencyRow } from "./office-dependencies";
 import type { ResultEnvelopeDigestShape } from "../result";
 import { observedMissionAssociation, type WindowDocument } from "../workspace-contract";
 
@@ -24,9 +25,10 @@ export interface SourceClaim {
 }
 export interface ReadSnapshot<T> { context: ProjectionContext; source: SourceClaim; value: T | null }
 export interface ProjectedRead<T> { source: SourceClaim; value: T | null; reason: string | null }
+export type OfficeProgramsValue = ReturnType<typeof programsFromControlRoom> & { dependencies?: readonly DependencyRow[] };
 export interface OfficeInput {
   mission: ReadSnapshot<MissionDocument | Missionv3Document> | null;
-  programs: ReadSnapshot<ReturnType<typeof programsFromControlRoom>> | null;
+  programs: ReadSnapshot<OfficeProgramsValue> | null;
   result: ReadSnapshot<ResultEnvelopeDigestShape> | null;
   conversation: ReadSnapshot<WindowDocument> | null;
 }
@@ -34,7 +36,7 @@ export interface OfficeProjection {
   schema: "mastermind.product_projection.v1";
   context: ProjectionContext;
   mission: ProjectedRead<MissionDocument | Missionv3Document>;
-  programs: ProjectedRead<ReturnType<typeof programsFromControlRoom>>;
+  programs: ProjectedRead<OfficeProgramsValue>;
   result: ProjectedRead<ResultEnvelopeDigestShape>;
   conversation: ProjectedRead<WindowDocument>;
   companyTotal: null;

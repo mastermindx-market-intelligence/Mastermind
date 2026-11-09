@@ -809,6 +809,11 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         # Retirement provenance is installed only after finite cleanup; an
         # unconfigured template must never imply an accepted predecessor.
         "retired_finite_composition",
+        # Explicit sealed Memory groups remain absent in the default template.
+        "protected_memory_execution",
+        "memory_native_issuer",
+        "memory_original_result_access",
+        "memory_evaluation",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
