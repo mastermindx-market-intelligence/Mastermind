@@ -26,6 +26,7 @@ No bot, coding process, worker, restart, drain release, provider activation, dep
 | Source | Exact inspected revision or observation | Meaning |
 |---|---|---|
 | Mastermind protected master | `06ef56a39c085af72bcbf0866db8e43f99cd6034` | Governing source and existing OS implementation |
+| Mastermind publication-time source refresh | `ed7991199ccf76027f7acccc283c539c175e7e16` | Two subsequent commits add the incumbent OS app-control bridge and CI coverage; governing laws and this owned document path are unchanged |
 | Macro main | `4bd1948ac0d9ecf40301caf70cbf8cf1619fd2c4` | Design doctrine and product design system |
 | T3 Code upstream | `d0f1f7200dce1229f75314b3d9eb1d7ac3abb607` | Inspected upstream interfaces, not an installed-version claim |
 | Hermes upstream | `dcace04df1888a61fec80720e661e4ac7db5bb0e` | Inspected upstream interfaces, not an installed-version claim |
@@ -59,6 +60,7 @@ Maintenance observations are similarly scoped. A dated #983 comment reported one
 | Existing office and advisory organization | `src/meta-ceo/MetaCeoOffice.tsx`, `src/organization/**` |
 | Attended jobs and inspectable receipts | `src/fabric/AttendedFabricWorkspace.tsx`, `FabricMissionInspector.tsx` |
 | Host/provider observations | `src/resources/HostTelemetryPanel.tsx`, `ResourceCapacityRead.tsx`, `RetainedProviderCapacityPanel.tsx`, host observation adapters |
+| Existing semantic OS control | `src/agent-control/**`, `docs/MASTERMIND_OS_APP_CONTROL.md` at the publication-time refresh; keep the existing Workbench browser/action owner |
 | Host abstraction and native/web distinction | `src/host.ts` and the existing authenticated host implementations |
 | Shared execution contract | #2308, `control_plane/child_execution_contracts.py` |
 | Existing idempotent admission and durable waiting queue | #2317, `control_plane/child_request_admission.py` |
@@ -86,7 +88,7 @@ Proposed client route concepts are `team/:botId`, `projects/:projectId`, `code/:
 
 ### Twelve-member design fixture
 
-Paper uses Mastermind CEO, Autonomy CEO, Chief of Staff, Engineering, Delivery, Reliability, Product, Design Lead, Marketing, Intelligence, Assurance and Secretary to demonstrate the full layout. These are illustrative display assignments, not a new enrollment policy or twelve newly provisioned identities.
+Paper uses Mastermind CEO, Autonomy CEO, Chief of Staff, Engineering, Delivery, Reliability, Product, Design Lead, Marketing, Intelligence, Assurance and Secretary to demonstrate the full layout. These twelve cards are an illustrative subset for layout capacity, not a complete live roster, a new enrollment policy or twelve newly provisioned identities. The existing Meta-CEO office remains reachable explicitly from TD01 even though Meta-CEO is not one of these twelve sample cards. GLM-00 must resolve actual membership without excluding any profile merely to match the fixture.
 
 Leadership sets direction and coordinates; Engineering, Design and Product develop the product; Assurance, Reliability and Delivery verify and operate it; Intelligence and Marketing contribute specialist work; Secretary preserves communications and follow-through. The actual runtime role mapping comes from the existing owners, not from the card order.
 
@@ -215,13 +217,15 @@ Managed T3 tools that create children, linked-environment work or schedules must
 
 Use the existing authenticated application/host adapters. A same-user desktop application may use its existing native gateway attachment. The browser version must consume an authorized server projection or report the operation unavailable; it must not acquire a loopback operator proxy, private bootstrap ticket or arbitrary fleet SSH facility.
 
+The publication-time source refresh adds an existing semantic app-control bridge (`mastermind.os.app-control.v1`) through the incumbent Workbench browser owner. Extend normal accessible route buttons and controls so Team, Code and Fleet remain inspectable through that bridge. Preserve its current observation, owner/generation, privacy/exclusion, disabled-control and original-action reconciliation rules. Do not add component-specific AI business APIs or another browser/controller. Source qualification does not establish installed publication or real-consumer acceptance; GLM-06 must verify the actual intended connection. See [the refreshed app-control contract](https://github.com/mastermindx-market-intelligence/Mastermind/blob/ed7991199ccf76027f7acccc283c539c175e7e16/docs/MASTERMIND_OS_APP_CONTROL.md).
+
 The OS may maintain bounded authenticated view caches and event cursors under the existing conversation/read infrastructure. Those caches are disposable projections, not a second session/memory/event authority. On a cursor gap or reconnect, request a source snapshot; do not manufacture omitted events. Scope subscriptions to the selected workspace and active views, and use existing observer mechanisms rather than another watcher/daemon.
 
 Display host and provider evidence with source/age and a readable exclusion reason. The observed V1 topology made M2 a coordinator, Ubuntu 0 an enrolled worker candidate, and M1/other Ubuntu hosts dependent on qualification; old mini-host assumptions must not become hardcoded availability. Current actual capacity is obtained at request time, including external/manual occupancy.
 
 The DeepSeek route was named but not yet a qualified live adapter in the inspected candidate. Hermes selection also depended on the programme's owned cutover. GLM model labels in Paper are examples; installed provider/model support and account/budget eligibility decide actual routing.
 
-During drain, show affected scope, owner, age, existing runs and which commands remain permitted. Re-read at dispatch to close the preview/launch race. A drain before dispatch blocks a new start; a drain after start preserves the original observation and settlement path. Refreshing a page must not release a drain or abandon work.
+During drain, show affected scope, owner, age, existing runs and which commands remain permitted. The UI re-read improves the preview but does not enforce the launch. The existing execution owner must enforce current scoped drain policy, binding generation, permissions and reservation through its fenced claim/launch check at the actual start or continuation boundary. Continuations follow that owner's scoped drain policy; a second preflight read alone does not close the time-of-check/time-of-use gap. A drain before dispatch blocks a new start; a drain after start preserves the original observation and settlement path. Refreshing a page must not release a drain or abandon work.
 
 ## 9. Paper delivery and interaction contract
 
@@ -291,7 +295,7 @@ Implement TD01–TD03 and TD08/TD10 using existing conversation/project componen
 
 **Owned surface:** Team/product UI and route composition assigned to this worker. Other workers consume the shared route contract without editing the same shell files concurrently.
 
-**Pass:** keyboard/deep-link/draft/return behavior; all roster sizes; EN/ZH and light/dark at desktop, tablet and 390px; stale/error states; no provider credentials or new conversation store.
+**Pass:** existing app-control route/accessible-control markers and privacy boundaries remain usable; keyboard/deep-link/draft/return behavior; all roster sizes; EN/ZH and light/dark at desktop, tablet and 390px; stale/error states; no provider credentials or new conversation store.
 
 ### GLM-03 — T3 read/attach adapter and coding workspace
 
@@ -311,7 +315,7 @@ Extend the existing admission/binding/host execution route for T3-backed DSH. Im
 
 **Owned surface:** the applicable existing route/adapter seam and discriminating execution-contract tests. Do not fork admission/placement or rewrite unrelated V1 work.
 
-**Pass:** single actual launch; lost acknowledgement produces the same recovered receipt or explicit uncertainty; drain/permission/budget/host races refuse safely; cancellation startup race settles; no cross-environment replay or unadmitted T3 children.
+**Pass:** the actual owner start/continuation gate enforces current drain policy, binding generation, permissions and reservation; single actual launch; lost acknowledgement produces the same recovered receipt or explicit uncertainty; drain/permission/budget/host races refuse safely; cancellation startup race settles; no cross-environment replay or unadmitted T3 children.
 
 ### GLM-05 — Fleet, capacity and maintenance
 
@@ -387,7 +391,7 @@ The eventual acceptance record must contain:
 6. Evidence that exactly one provider process started for the canary.
 7. Changed-file snapshot, relevant test/check results and reviewed source result.
 8. Return into the original bot conversation and project, surviving a refresh/reconnect.
-9. Actual permitted desktop/browser paths, keyboard/narrow/theme/language checks.
+9. Actual permitted desktop/browser paths, keyboard/narrow/theme/language checks, and the existing semantic app-control inspect/navigate/act/check path on the intended connection when available; unavailable installation is reported rather than replaced by a second controller.
 10. Current maintenance and capacity observations, rollback behavior and residual limitations.
 11. Separate release/deployment/acceptance receipts where owed.
 
