@@ -435,6 +435,10 @@ class Fleet:
         self.conf = conf
         self.state = load_state()
         self.lock = threading.Lock()
+        # Same-Slack-thread Hermes turns must serialize before reading the
+        # resumable native ID; otherwise two workers may both start fresh.
+        # This holds only mutual-exclusion state, not another durable queue.
+        self._turn_gates: dict[str, tuple[threading.Lock, int]] = {}
         bot = read_env(conf["bot"]["token_file"]).get("SLACK_BOT_TOKEN")
         app = read_env(conf["bot"]["app_token_file"]).get("SLACK_APP_TOKEN")
         if not bot or not app:
@@ -466,6 +470,34 @@ class Fleet:
         return self.sender.post(agent, channel, text, thread_ts, run_id)
 
     def work(self, event: dict, agent: str, reason: str, authorizations: list[str]) -> None:
+        channel = event.get("channel", "")
+        root = event.get("thread_ts") or event.get("ts") or ""
+        # Slash invocations have no root until the original placeholder is
+        # posted; each invocation is independent and does not share a gate.
+        key = f"{channel}:{root}" if root else ""
+        if not key:
+            return self._work_serialized(event, agent, reason, authorizations)
+        with self.lock:
+            if key in self._turn_gates:
+                turn_lock, n = self._turn_gates[key]
+                self._turn_gates[key] = (turn_lock, n + 1)
+            else:
+                turn_lock = threading.Lock()
+                self._turn_gates[key] = (turn_lock, 1)
+        try:
+            with turn_lock:
+                # Read the latest session ID only after the previous thread
+                # worker has finished and durably saved its receipt.
+                return self._work_serialized(event, agent, reason, authorizations)
+        finally:
+            with self.lock:
+                current_lock, n = self._turn_gates[key]
+                if current_lock is turn_lock and n == 1:
+                    del self._turn_gates[key]
+                elif current_lock is turn_lock:
+                    self._turn_gates[key] = (turn_lock, n - 1)
+
+    def _work_serialized(self, event: dict, agent: str, reason: str, authorizations: list[str]) -> None:
         conf = self.conf
         dconf = conf.get("dispatch") or {}
         channel = event.get("channel", "")
