@@ -1,0 +1,10 @@
+{
+  "conversation_id": "sess-3f9c2",
+  "refusal_code": null,
+  "return_digest": "6876dc96ef1f67e0b8525c6115bd95fdbe0b0bbe422f021e173fc3ded2619549",
+  "return_id": "execret-6876dc96ef1f67e0b8525c6115bd95fd",
+  "schema": "mastermind.execution_return_delivery/v1",
+  "state": "delivered",
+  "submission_id": "execret-8088b1cc2de199e9a50b32aff50b536c",
+  "transport_ref": "adm-42"
+}
