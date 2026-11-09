@@ -283,16 +283,24 @@ def _recovery_binding(
 # =============================================================================
 
 class T3DescriptorTests(unittest.TestCase):
-    def test_descriptor_is_registered_unimplemented_and_resolvable(self) -> None:
+    def test_descriptor_is_registered_implemented_and_resolvable(self) -> None:
+        # Flipped implemented=False -> True by the recorded LIVE receipt
+        # (integrations/t3/live_proof/t3_live_proof_receipt.json; one real
+        # t3_thread_launch + cursor read + result collection through the
+        # adapter, 2026-11-09).  UNSELECTED status and the receipt path are
+        # documented in tests/test_worker_adapter.py's pin docstring.
         descriptor = adapter_descriptor("t3-native")
-        self.assertFalse(descriptor.implemented)
+        self.assertTrue(descriptor.implemented)
         self.assertEqual(descriptor.adapter_id, "t3-native")
         implementation = adapter_implementation("t3-native")
         self.assertIs(implementation, T3ExecutionAdapter)
         self.assertEqual(implementation.adapter_id, "t3-native")
 
-    def test_t3_native_stays_out_of_the_implemented_pin(self) -> None:
-        self.assertIs(ADAPTER_DESCRIPTORS["t3-native"].implemented, False)
+    def test_t3_native_is_in_the_implemented_pin_with_documented_receipt(self) -> None:
+        from tests.test_worker_adapter import MASTER_IMPLEMENTED_ADAPTER_IDS
+
+        self.assertIs(ADAPTER_DESCRIPTORS["t3-native"].implemented, True)
+        self.assertIn("t3-native", MASTER_IMPLEMENTED_ADAPTER_IDS)
 
     def test_constructed_adapter_binds_and_satisfies_protocols(self) -> None:
         adapter = construct_reviewed_adapter(
@@ -301,7 +309,7 @@ class T3DescriptorTests(unittest.TestCase):
         self.assertIsInstance(adapter, WorkerExecutionAdapter)
         self.assertIsInstance(adapter, RecoverableWorkerExecutionAdapter)
         descriptor = bind_reviewed_adapter(adapter, "t3-native")
-        self.assertFalse(descriptor.implemented)
+        self.assertTrue(descriptor.implemented)
 
 
 # =============================================================================

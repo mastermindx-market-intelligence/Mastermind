@@ -26,10 +26,16 @@ The seam vocabulary follows the verified census at that pin:
 
 Honesty notes (Rev 5 D3):
 
-* **BUILT_NOT_PROVEN** — the adapter is built, but no real native T3
-  execution + result return through the selected runtime has been observed
-  yet.  The descriptor is registered with ``implemented=False``;
-  registration selects nothing.
+* **PROVEN_LIVE for this adapter's own path** — one real native T3 execution
+  + result return through this adapter has been observed and recorded
+  (``integrations/t3/live_proof/t3_live_proof_receipt.json``: real
+  ``t3_thread_launch`` with the binding-derived ``clientRequestId``,
+  incremental-cursor reads to a terminal state, and ``collect_result``
+  returning the native result "T3-PROOF-OK", 2026-11-09, environment
+  m2studio / T3 Code 0.1.7).  The descriptor is therefore registered with
+  ``implemented=True`` per the pin law in ``tests/test_worker_adapter.py``;
+  registration still selects nothing — the adapter stays UNSELECTED until
+  the incumbent runtime composes the real MCP port into its transport.
 * **delegate_task lineage is never forged** — an external Hermes session
   is NOT a native T3 parent provider-session credential.  The launch
   envelope has no ``delegatedFrom`` field by construction; this adapter
@@ -346,8 +352,9 @@ class T3ExecutionAdapter:
 
     Every method follows Rev 5 §3A/§7.  Selection is a deployment act by
     the incumbent runtime; constructing or registering this class selects
-    nothing (the descriptor stays ``implemented=False`` until a real
-    native execution + result return through the selected runtime).
+    nothing (the adapter's own path is PROVEN_LIVE by the recorded receipt
+    in ``integrations/t3/live_proof/`` — but it stays UNSELECTED until the
+    selected runtime composes the real MCP port into its transport).
     """
 
     adapter_id = T3_NATIVE_ADAPTER_ID

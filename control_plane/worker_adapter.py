@@ -106,14 +106,18 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     # the native T3 thread seams (launch with a binding-derived clientRequestId,
     # incremental-cursor reads, exact-run interrupt, replay-only recovery)
     # through an injected T3NativeClientPort; the adapter never speaks
-    # HTTP/MCP, holds no credentials, and spawns no processes.  BUILT_NOT_
-    # PROVEN: no real native execution + result return through the selected
-    # runtime has been observed yet, so the descriptor is implemented=False —
-    # registration selects nothing and a routing policy cannot bind a live
-    # worker through this id.  Donor: T3 Code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
+    # HTTP/MCP, holds no credentials, and spawns no processes.  PROVEN_LIVE
+    # for the adapter's own path by the recorded receipt pinned in
+    # tests/test_worker_adapter.py (one real t3_thread_launch + cursor read
+    # + result collection through the adapter against a real T3 server,
+    # 2026-11-09; result "T3-PROOF-OK").  Still deliberately UNSELECTED —
+    # no routing policy binds a live worker through this id until the
+    # incumbent runtime selects it, and wiring the real MCP port into the
+    # selected runtime's transport composition is a deployment act.
+    # Donor: T3 Code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
     # (seams adapted, never rebuilt); delegate_task lineage is never forged.
     "t3-native": AdapterDescriptor(
-        adapter_id="t3-native", implemented=False,
+        adapter_id="t3-native", implemented=True,
         implementation="control_plane.t3_execution_adapter.T3ExecutionAdapter",
     ),
     # WO-18 (MMOS V1, OQ-11/OQ-7): the scoped V1 DeepSeek route's adapter
