@@ -30,6 +30,10 @@ from control_plane.browser_resource_contract import (
     ALLOWED_BROWSER_TOOLS,
     READ_ONLY_BROWSER_TOOLS,
     WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    APP_CONTROL_TOOL_SCHEMA_DIGEST,
+    browser_tools_for_digest,
+    browser_read_tools_for_digest,
+    validate_app_control_origin,
     BrowserMode,
 )
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
@@ -586,7 +590,7 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
-            if self._lease_expired() and tool not in READ_ONLY_BROWSER_TOOLS:
+            if self._lease_expired() and tool not in browser_read_tools_for_digest(self._session.receipt.tool_schema_digest):
                 return self._response(
                     request_id=request_id, ok=False, error="REQUEST_REFUSED"
                 )
@@ -790,6 +794,7 @@ def playwright_child_argv(
     output_dir: str,
     mode: str,
     profile_dir: str | None,
+    app_control_origin: str | None = None,
 ) -> tuple[str, ...]:
     node_executable = _absolute_cli_path(node_executable, "node_executable")
     mcp_cli_path = _absolute_cli_path(mcp_cli_path, "mcp_cli_path")
@@ -821,6 +826,15 @@ def playwright_child_argv(
     forbidden = {"--shared-browser-context", "--cdp-endpoint", "--extension"}
     if forbidden.intersection(argv):
         raise BrowserRelayError("unsafe shared or attached browser requested")
+    if app_control_origin is not None:
+        try:
+            validate_app_control_origin(app_control_origin)
+        except ValueError as error:
+            raise BrowserRelayError("app control origin is invalid") from error
+        # The fixed source-owned child shares one context with the pinned SDK.
+        # It accepts no transport, CDP, extension, or caller-selected code path.
+        argv[1] = str(Path(mcp_cli_path).parents[3] / "app-control/child.cjs")
+        argv.extend(("--app-origin", app_control_origin))
     return tuple(argv)
 
 
@@ -830,6 +844,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--socket-path", required=True)
     parser.add_argument("--node-executable", required=True)
     parser.add_argument("--mcp-cli-path", required=True)
+    parser.add_argument("--app-control-origin")
     parser.add_argument("--chrome-executable", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=[BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value], required=True)
@@ -854,9 +869,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         mode=args.mode,
         profile_dir=args.profile_dir,
+        app_control_origin=args.app_control_origin,
     )
     credential_guard = None
     if args.credential_runtime_root is not None or args.credential_manifest_sha256 is not None:
+        if args.app_control_origin is not None:
+            raise BrowserRelayError("app control and vault profiles are not jointly qualified")
         from control_plane.worker_browser_b1 import workbench_credential_launch
         if (args.mode != BrowserMode.ISOLATED.value or args.profile_dir is not None
                 or args.credential_runtime_root is None or args.credential_manifest_sha256 is None):
@@ -890,11 +908,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             "NO_COLOR": "1",
             "PATH": "/usr/bin:/bin",
         }
+    profile_digest = APP_CONTROL_TOOL_SCHEMA_DIGEST if args.app_control_origin is not None else WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
     session = McpStdioSession(
         argv=child_argv,
         env=child_env,
-        allowed_tools=ALLOWED_BROWSER_TOOLS,
-        expected_tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        allowed_tools=browser_tools_for_digest(profile_digest),
+        expected_tool_schema_digest=profile_digest,
         credential_enabled=credential_guard is not None,
         credential_launch_guard=credential_guard,
     )
