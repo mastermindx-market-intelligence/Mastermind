@@ -10,7 +10,7 @@ This extends the existing migration and design-clarity work. It is not a new pro
 
 ## Current continuation · AI workers are the primary audience
 
-The central [Agent README](AGENT_README.md) and native [AI-worker protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0) are applied and visually verified. The current index includes 556 observed pages, including recent GMI, Prophet and Mastermind OS additions. File-local orientation is in progress; see [CHECKPOINT.md](CHECKPOINT.md). The earlier completed pass below remains its dated evidence, not the current source-delivery frontier.
+The central [Agent README](AGENT_README.md) and native [AI-worker protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0) are applied and visually verified. 5 of 50 local guides are verified; the structured index contains all 50 planned task routes and exact recovery prefixes. Current observed count: 560 pages, including the new local guides. See [CHECKPOINT.md](CHECKPOINT.md) for the active frontier. Earlier completed work below remains dated evidence.
 
 ## Start here
 

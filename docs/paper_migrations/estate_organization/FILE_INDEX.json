@@ -7,7 +7,7 @@
   "counts": {
     "resources": 83,
     "readable_design_files": 80,
-    "pages": 556,
+    "pages": 560,
     "dividers": 19
   },
   "entry_url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
@@ -109,7 +109,7 @@
           "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-9-0"
         }
       ],
-      "retention_note": "Primary estate navigation. Eight pages: product map, existing build-source guide, lineage, three family indexes and recovery/cleanup.",
+      "retention_note": "Primary estate navigation: AI start/protocol, product map, existing build-source guide, lineage, three family indexes and recovery/cleanup.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "1-0",
@@ -773,18 +773,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "REUSE",
+          "question": "Inspect reusable component and archetype rules",
+          "target": {
+            "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Inspect proposed CAGR period and recovery",
+          "target": {
+            "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-3-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-11",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
@@ -838,18 +876,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2T8WVHR3AS82TSSCNN6YS/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2T8WVHR3AS82TSSCNN6YS/p-1-0"
           },
           "qualification": "Retained F03 product-navigation, Options-entry and returned-reference designs; this is not the operational estate directory.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Retained F03 product-navigation, Options-entry and returned-reference designs; this is not the operational estate directory.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-12",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -928,7 +982,7 @@
           "baseline_name": "REF · Guide Baseline · Themes + Locales"
         }
       ],
-      "retention_note": "Reuse start, search/recoveryp-4-0 and Risk Radarp-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
+      "retention_note": "Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -955,18 +1009,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-1-0"
           },
-          "qualification": "Reuse start, search/recoveryp-4-0 and Risk Radarp-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
-          "source": "RETENTION.md"
+          "qualification": "Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STATES",
+          "question": "Search and recovery scope",
+          "target": {
+            "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0"
+          },
+          "qualification": "Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RISK_RADAR",
+          "question": "Inspect Risk Radar contextual help",
+          "target": {
+            "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-6-0"
+          },
+          "qualification": "Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-13",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M312VSDSZFVT45674GDVJVZN",
@@ -1069,7 +1161,7 @@
           "baseline_name": "07 · Source Imports + Assets · Pending Review"
         }
       ],
-      "retention_note": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide.",
+      "retention_note": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -1094,18 +1186,61 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "SCOPE",
+          "question": "Candidate 2 scope and shared-system guide",
           "target": {
             "file_id": "01M312VSDSZFVT45674GDVJVZN",
             "page_id": "p-9-0",
-            "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "47Q-0"
+            ],
+            "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0"
           },
-          "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide.",
-          "source": "RETENTION.md"
+          "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPONENTS",
+          "question": "Inspect action, read and write-state contracts",
+          "target": {
+            "file_id": "01M312VSDSZFVT45674GDVJVZN",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-4-0"
+          },
+          "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect utilities, builder bindings and existing acceptance section",
+          "target": {
+            "file_id": "01M312VSDSZFVT45674GDVJVZN",
+            "page_id": "p-7-0",
+            "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0"
+          },
+          "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPLEMENT",
+          "question": "F01 shell integration; joint F01/F02 qualification",
+          "target": {
+            "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0"
+          },
+          "qualification": "Canonical family name does not establish blanket acceptance. F02 Candidate2 and joint F01/F02 holds remain; use p-9-0 and the estate build-source guide. Source Imports p-8-1 is Pending Review. Product acceptance holds and original 9SE/9SM response custody are distinct; see the existing recovery checkpoint before touching those original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-10",
+        "page_id": "p-9-0",
+        "board_id": "47Q-0",
+        "dark": true
+      }
     },
     {
       "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
@@ -1159,18 +1294,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2Z642VN20X8WDSWV07M0M/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2Z642VN20X8WDSWV07M0M/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-14",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
@@ -1232,18 +1383,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect R42 compact search/source contract",
+          "target": {
+            "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-15",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
@@ -1305,18 +1472,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect mobile category-navigation contract",
+          "target": {
+            "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-16",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
@@ -1378,18 +1561,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Proposed saved-item to exact-watchlist flow",
+          "target": {
+            "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-17",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
@@ -1451,18 +1661,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STUDY",
+          "question": "Earlier investor-shell market-overview candidates",
+          "target": {
+            "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-18",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
@@ -1505,7 +1742,7 @@
           "baseline_name": "Shared Shell · Completion & Integration · R1"
         }
       ],
-      "retention_note": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced.",
+      "retention_note": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -1532,18 +1769,67 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "CANDIDATE",
+          "question": "F01 shell candidate; review pending",
           "target": {
             "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0"
           },
-          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced.",
-          "source": "RETENTION.md"
+          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "INTEGRATION",
+          "question": "Inspect shell integration and source bindings",
+          "target": {
+            "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0"
+          },
+          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Proposed Today comparison basis",
+          "target": {
+            "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-3-0"
+          },
+          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPLEMENT",
+          "question": "F02 Candidate 2 system scope",
+          "target": {
+            "file_id": "01M312VSDSZFVT45674GDVJVZN",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0"
+          },
+          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read the existing F01/F02 source and acceptance qualifications",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-19",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
@@ -1621,18 +1907,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Dated governed reference",
           "target": {
             "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STUDY",
+          "question": "R2 study scope",
+          "target": {
+            "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STATES",
+          "question": "Public snapshot states",
+          "target": {
+            "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-3-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "Retained filter controls",
+          "target": {
+            "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-4-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-20",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
@@ -1889,7 +2213,7 @@
           "baseline_name": "99 · Hub · Transfer QA + Held"
         }
       ],
-      "retention_note": "Reuse start5E9-0 and build-source guidep-C-0/73A-0. US Buy-Board and China Stocks Board are distinct valid routes. AXON157-0 remains held/empty.",
+      "retention_note": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -1914,18 +2238,72 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Scope and market destinations",
           "target": {
             "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "5E9-0"
+            ],
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0"
           },
-          "qualification": "Reuse start5E9-0 and build-source guidep-C-0/73A-0. US Buy-Board and China Stocks Board are distinct valid routes. AXON157-0 remains held/empty.",
-          "source": "RETENTION.md"
+          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "CONTRACT",
+          "question": "Inspect R4 contracts",
+          "target": {
+            "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0"
+          },
+          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect clarity and build-source evidence",
+          "target": {
+            "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "page_id": "p-C-0",
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-C-0"
+          },
+          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESKTOP",
+          "question": "Select actual desktop product boards",
+          "target": {
+            "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0"
+          },
+          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "MOBILE",
+          "question": "Select actual mobile product boards",
+          "target": {
+            "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-4-0"
+          },
+          "qualification": "US Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-21",
+        "page_id": "p-1-0",
+        "board_id": "5E9-0",
+        "dark": false
+      }
     },
     {
       "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
@@ -1979,18 +2357,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-22",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
@@ -2052,18 +2446,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect session-evidence interaction and build contract",
+          "target": {
+            "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-23",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -2169,18 +2579,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0"
           },
           "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Build · Clarity & receipt contracts",
+          "target": {
+            "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+            "page_id": "p-8-0",
+            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-8-0"
+          },
+          "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "04 · Implementation + Visual Engine · References",
+          "target": {
+            "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-6-0"
+          },
+          "qualification": "Reuse WTI journey entry and qualified R25 answer4T3-0; retain R22/R23/R24 architecture and held portfolio scope.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-24",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
@@ -2242,18 +2679,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Build · No-match visibility",
+          "target": {
+            "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2SGKNTEESDJX96ZSJJGPF/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-25",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
@@ -2333,9 +2786,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 4,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -2384,11 +2844,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+        "page_id": "p-5-0",
+        "board_id": "2ZU-0",
+        "node_id": "2ZU-0",
+        "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
@@ -2399,19 +2862,39 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "Dated R2 selection and build/data contracts",
           "target": {
             "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
             "page_id": "p-1-0",
-            "board_id": "1-0",
-            "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "1-0",
+              "11-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0"
           },
           "qualification": "Recorded R2 build selection over earlier studies, dated 2026-09-27. Preserve source/evidence/behavior contracts; current operative implementation selection is not re-certified.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SCOPE",
+          "question": "R4 guide links all three substantive Sector layers",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0"
+          },
+          "qualification": "Recorded R2 build selection over earlier studies, dated 2026-09-27. Preserve source/evidence/behavior contracts; current operative implementation selection is not re-certified.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "present_verified",
+      "agent_guide_observed_at": "2026-11-09T11:34:44.798Z",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-05",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
@@ -2426,9 +2909,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 1,
+      "page_count": 2,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-2-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-2-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -2452,11 +2942,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "page_id": "p-2-0",
+        "board_id": "5G9-0",
+        "node_id": "5G9-0",
+        "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-2-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
@@ -2467,19 +2960,54 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "Substantive Research, Watches and state matrix",
           "target": {
             "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
             "page_id": "p-1-0",
-            "board_id": "56C-0",
-            "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "4ED-0",
+              "3DN-0",
+              "4OO-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0"
           },
           "qualification": "Retain Research 4ED-0, Watches 3DN-0, states 4OO-0 and historical supersession 56C-0. Produced versus R4 GAP is an unresolved implementation-status disagreement.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "LINEAGE",
+          "question": "Dated supersession table, not exhaustive preservation proof",
+          "target": {
+            "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "56C-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0"
+          },
+          "qualification": "Retain Research 4ED-0, Watches 3DN-0, states 4OO-0 and historical supersession 56C-0. Produced versus R4 GAP is an unresolved implementation-status disagreement.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SCOPE",
+          "question": "R4 scope guide; R3 is a retained substantive layer",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0"
+          },
+          "qualification": "Retain Research 4ED-0, Watches 3DN-0, states 4OO-0 and historical supersession 56C-0. Produced versus R4 GAP is an unresolved implementation-status disagreement.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "present_verified",
+      "agent_guide_observed_at": "2026-11-09T11:33:58.255Z",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-04",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
@@ -2500,9 +3028,13 @@
         {
           "type": "page",
           "id": "p-9-0",
-          "name": "00 · Start here · Scope & retained requirements",
+          "name": "00 · AGENT README · Scope & routes",
           "icon": "arrow",
-          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0"
+          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0",
+          "aliases": [
+            "00 · Start here · Scope & retained requirements"
+          ],
+          "baseline_name": "00 · Start here · Scope & retained requirements"
         },
         {
           "type": "page",
@@ -2573,7 +3105,7 @@
           "baseline_name": "Reference · Unbound timing fixtures"
         }
       ],
-      "retention_note": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain.",
+      "retention_note": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "HBU-0",
@@ -2587,11 +3119,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "page_id": "p-9-0",
+        "board_id": "HBU-0",
+        "node_id": "HD9-0",
+        "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0",
+        "kind": "reused_guidance_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
@@ -2602,19 +3137,85 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "Provisional D05 journey and build contract",
           "target": {
             "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
-            "page_id": "p-9-0",
-            "board_id": "HBU-0",
-            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "page_id": "p-3-0",
+            "board_ids": [
+              "BML-0"
+            ],
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-3-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain.",
-          "source": "RETENTION.md"
+          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Native R4 M1 suite and state variants",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0"
+          },
+          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Models, interaction and exact return",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-5-0",
+            "board_ids": [
+              "GPI-0"
+            ],
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-5-0"
+          },
+          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "R3 Research/Watches/states; Produced/GAP disagreement",
+          "target": {
+            "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "4ED-0",
+              "3DN-0",
+              "4OO-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0"
+          },
+          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RECORDED_REFERENCE",
+          "question": "R2 selection dated 27 September 2026",
+          "target": {
+            "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "1-0",
+              "11-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0"
+          },
+          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "present_verified",
+      "agent_guide_observed_at": "2026-11-09T11:25:44.710Z",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-01",
+        "page_id": "p-9-0",
+        "board_id": "HBU-0",
+        "dark": false
+      }
     },
     {
       "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
@@ -2677,18 +3278,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "BioCatalyst · North Star + Build Blueprint · 2026-09-26",
+          "target": {
+            "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y34XE4JKS3A40GMMZ954JE/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-26",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
@@ -2766,18 +3383,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "R1 decision desk scope",
           "target": {
             "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "INTEGRATION",
+          "question": "Inspect source-bound integration",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Proposed selected case and filters",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-3-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "REVIEW_FLOW",
+          "question": "Manual review condition flow",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-4-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-27",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
@@ -2845,18 +3500,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "02 · Build · States + implementation",
+          "target": {
+            "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "METHODS",
+          "question": "Coverage and methods for estimates",
+          "target": {
+            "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-3-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-28",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3397SE03G626MJ72N90PF",
@@ -2891,7 +3573,7 @@
           "baseline_name": "Gov Revenue · Signal Desk · R5 · 2026-09-26"
         }
       ],
-      "retention_note": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+      "retention_note": "Read the existing in-file crosswalk and source qualifications. Stock setup/action is the front door; catalyst evidence provides context. Retain dated R5/Blueprint and R11-state distinctions; titles do not establish a current replacement.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -2919,18 +3601,23 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3397SE03G626MJ72N90PF",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF/p-1-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "qualification": "Read the existing in-file crosswalk and source qualifications. Stock setup/action is the front door; catalyst evidence provides context. Retain dated R5/Blueprint and R11-state distinctions; titles do not establish a current replacement.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-29",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
@@ -2965,7 +3652,7 @@
           "baseline_name": "Build · Saved-output inspection"
         }
       ],
-      "retention_note": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return.",
+      "retention_note": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -2992,18 +3679,48 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Saved house output: known then versus observed later",
           "target": {
             "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0"
           },
-          "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return.",
-          "source": "RETENTION.md"
+          "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Saved-case cutoff, identity and return",
+          "target": {
+            "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+            "page_id": "p-2-0",
+            "board_ids": [
+              "GK-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-2-0"
+          },
+          "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPLEMENT",
+          "question": "Source-period/vintage evidence is a separate Memory job",
+          "target": {
+            "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0"
+          },
+          "qualification": "Saved-house-output comparison and subsequent-observation fixtures. Existing guide GK-0 on p-2-0 preserves cutoff, selected-case identity and exact return. Saved-case research and source-vintage inspection are complementary. Known-at-cutoff evidence is distinct from later observations.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-06",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -3054,7 +3771,7 @@
           "baseline_name": "03 · Period selection & copy outcomes"
         }
       ],
-      "retention_note": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate.",
+      "retention_note": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -3079,18 +3796,59 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Source period, vintage and receipt evidence",
           "target": {
             "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-1-0"
           },
-          "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate.",
-          "source": "RETENTION.md"
+          "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Exact-record comparison and state contract",
+          "target": {
+            "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+            "page_id": "p-3-0",
+            "board_ids": [
+              "V1-0"
+            ],
+            "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-3-0"
+          },
+          "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STATES",
+          "question": "Comparison specimens",
+          "target": {
+            "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0"
+          },
+          "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPLEMENT",
+          "question": "Saved-case research is a separate Memory job",
+          "target": {
+            "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M6Y2V2M0J28M2PYAHWZ8SB98/p-1-0"
+          },
+          "qualification": "Source-vintage evidence and proposed exact-record CPI comparison; complements saved-case Memory. Receipt qualification and consumer proof remain separate. Preserve verified zero, missing, denied, incomplete lookup, changed source and incomparable basis as distinct outcomes.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-07",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
@@ -3144,18 +3902,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y36EQAT1J5B6Q7AVYKV2DW/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-30",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
@@ -3214,7 +3988,7 @@
           "baseline_name": "02 · Build & design rules"
         }
       ],
-      "retention_note": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct.",
+      "retention_note": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "3HH-0",
@@ -3241,19 +4015,59 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Activity and contextual returns",
           "target": {
             "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
             "page_id": "p-5-0",
-            "board_id": "3HH-0",
-            "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "3HH-0"
+            ],
+            "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0"
           },
-          "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct.",
-          "source": "RETENTION.md"
+          "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Independent ticker rail",
+          "target": {
+            "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-2-0"
+          },
+          "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "R2/R3 counts, evidence groups, source return and review",
+          "target": {
+            "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0"
+          },
+          "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "Broader September desk: search/ranking/corrections are a distinct scope",
+          "target": {
+            "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0"
+          },
+          "qualification": "Working Activity & returns p-5-0; independent rail p-2-0; R2/R3 behavior and source-return contracts remain on p-3-0. September full-desk scope is distinct. Full-desk search/ranking versus ticker-rail scope remains an open product choice; source reading, returning and explicit review saves remain separate actions.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-08",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
@@ -3307,18 +4121,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3BP50DDJVKT3Q7FMTSY3K/p-1-0"
           },
           "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "WORKING_SCOPE",
+          "question": "Activity/returns and independent rail do not establish full-desk replacement",
+          "target": {
+            "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+            "page_id": "p-5-0",
+            "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0"
+          },
+          "qualification": "Broader September News Desk study with ranked stream, search, briefs, corrections and degraded sources; not automatically superseded by the ticker rail.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-09",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
@@ -3643,7 +4484,7 @@
           "baseline_name": "History · 21–22 Oct references"
         }
       ],
-      "retention_note": "Current product entry p-1-0; current Build page p-7-0; p-6-0 is the preservation reference and p-4-0 foundations. Newly observed browse, search/index, company-evidence, relationship-availability, coverage and recovery pages remain distinct. Preserve their source qualifications.",
+      "retention_note": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -3668,18 +4509,111 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Current product composition and scope",
           "target": {
             "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-1-0"
           },
-          "qualification": "Current product entry p-1-0; current Build page p-7-0; p-6-0 is the preservation reference and p-4-0 foundations. Newly observed browse, search/index, company-evidence, relationship-availability, coverage and recovery pages remain distinct. Preserve their source qualifications.",
-          "source": "RETENTION.md"
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BROWSE",
+          "question": "Browse, search and filter interactions",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-D-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-D-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "NAVIGATE",
+          "question": "Index, search and navigation",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-8-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-8-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPANY_EVIDENCE",
+          "question": "Company evidence and recovery",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-9-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "AVAILABILITY",
+          "question": "Relationship availability",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-A-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-A-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COVERAGE",
+          "question": "Company and listing coverage",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-B-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-B-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RECOVERY",
+          "question": "Research load recovery",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-C-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-C-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect current named Build: interaction and receipts",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-7-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-7-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "Earlier preservation/build-reference guide; foundations on p-4-0",
+          "target": {
+            "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-6-0"
+          },
+          "qualification": "Fresh metadata identifies p-7-0 as Build · Interaction & receipts. p-6-0/73O-0 is the earlier preservation/build-reference guide, not an adoption statement for the new Build page. Preserve exact evidence, query, snapshot and return qualifications. Company evidence is not automatically a full dossier; read the current page's cited source and consumer proof.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-31",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -3915,18 +4849,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-1-0"
           },
           "qualification": "Reuse current family entry and recorded inspector/evidence/return work. Preserve separate R14 freeze and History287/74–76/Comparison164 boundaries; R9 archive is not interchangeable.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Build · Clarity preservation",
+          "target": {
+            "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+            "page_id": "p-M-0",
+            "url": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-M-0"
+          },
+          "qualification": "Reuse current family entry and recorded inspector/evidence/return work. Preserve separate R14 freeze and History287/74–76/Comparison164 boundaries; R9 archive is not interchangeable.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "80 · R10 · Builder Contracts & Reference States",
+          "target": {
+            "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+            "page_id": "p-B-0",
+            "url": "https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-B-0"
+          },
+          "qualification": "Reuse current family entry and recorded inspector/evidence/return work. Preserve separate R14 freeze and History287/74–76/Comparison164 boundaries; R9 archive is not interchangeable.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-32",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
@@ -4045,18 +5006,45 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0"
           },
           "qualification": "D06 heading-only WB-0/WG-0 retain explicit pointers. Complete Stage/S&P references are Terminal p-18-0:1XGS-0,1XGT-0,1XGU-0.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "D06 heading-only WB-0/WG-0 retain explicit pointers. Complete Stage/S&P references are Terminal p-18-0:1XGS-0,1XGT-0,1XGU-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPLETE_REFERENCE",
+          "question": "Complete D06 Stages and S&P allocation reference",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-18-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-18-0"
+          },
+          "qualification": "D06 heading-only WB-0/WG-0 retain explicit pointers. Complete Stage/S&P references are Terminal p-18-0:1XGS-0,1XGT-0,1XGU-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-33",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -4126,18 +5114,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0"
           },
           "qualification": "Compact Macro dialog and snapshot disclosures. Use build MH-0 on p-2-0; wider Policy Watch studies remain complementary.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Build · Evidence states & interaction",
+          "target": {
+            "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-2-0"
+          },
+          "qualification": "Compact Macro dialog and snapshot disclosures. Use build MH-0 on p-2-0; wider Policy Watch studies remain complementary.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-34",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
@@ -4207,18 +5211,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
             "page_id": "p-2-0",
-            "url": "https://app.paper.design/file/01M6Y2X53ABR4MME4ATS15B8SH/p-2-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2X53ABR4MME4ATS15B8SH/p-2-0"
           },
           "qualification": "Three scopes: Dark Flow p-1-0, Policy Watch journey/source revisions p-2-0, R2/R3 references and held placeholders p-3-0. Do not synthesize missing held screens.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Macro · Dark Flow · Implementation · 2026-10-17",
+          "target": {
+            "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M6Y2X53ABR4MME4ATS15B8SH/p-1-0"
+          },
+          "qualification": "Three scopes: Dark Flow p-1-0, Policy Watch journey/source revisions p-2-0, R2/R3 references and held placeholders p-3-0. Do not synthesize missing held screens.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-35",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M38EVF74SJWG1GANN5VP380Z",
@@ -4332,18 +5352,61 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Three separate product families",
           "target": {
             "file_id": "01M38EVF74SJWG1GANN5VP380Z",
             "page_id": "p-5-0",
-            "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-5-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "AFT-0"
+            ],
+            "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-5-0"
           },
           "qualification": "Reuse p-5-0/AFT-0 three-family directory. Existing Events/China held effects remain fenced.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Risk Radar and evidence",
+          "target": {
+            "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0"
+          },
+          "qualification": "Reuse p-5-0/AFT-0 three-family directory. Existing Events/China held effects remain fenced.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "China R2 popup studies",
+          "target": {
+            "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-3-0"
+          },
+          "qualification": "Reuse p-5-0/AFT-0 three-family directory. Existing Events/China held effects remain fenced.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Events and News studies",
+          "target": {
+            "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-4-0"
+          },
+          "qualification": "Reuse p-5-0/AFT-0 three-family directory. Existing Events/China held effects remain fenced.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-36",
+        "page_id": "p-5-0",
+        "board_id": "AFT-0",
+        "dark": true
+      }
     },
     {
       "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
@@ -4405,18 +5468,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0"
           },
           "qualification": "Retained Bonds source revisions include more than R1. Keep individual revision identity and compare by workflow with R33.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Build · Source coverage & recovery",
+          "target": {
+            "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-2-0"
+          },
+          "qualification": "Retained Bonds source revisions include more than R1. Keep individual revision identity and compare by workflow with R33.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-37",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
@@ -4478,18 +5557,40 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Bonds R33 and cross-asset transmission scope",
           "target": {
             "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "1-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0"
           },
           "qualification": "Bonds R33/transmission start1-0 and implementation map11G-0. Recorded candidate#9578 BUILT_NOT_PROVEN; bounded interactive reference verification is not production acceptance.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect R33 implementation map and candidate proof qualification",
+          "target": {
+            "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "11G-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0"
+          },
+          "qualification": "Bonds R33/transmission start1-0 and implementation map11G-0. Recorded candidate#9578 BUILT_NOT_PROVEN; bounded interactive reference verification is not production acceptance.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-38",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
@@ -4569,9 +5670,16 @@
       "entry_page_id": "p-2-0",
       "entry_url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0",
       "entry_basis": "explicit scope/guide selection",
-      "page_count": 2,
+      "page_count": 3,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-3-0"
+        },
         {
           "type": "page",
           "id": "p-2-0",
@@ -4589,7 +5697,7 @@
           "baseline_name": "ARCHIVE · Commodities Legacy 90–94 · Not for Build"
         }
       ],
-      "retention_note": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0.",
+      "retention_note": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0. Inspect each later study's source before selecting it as a replacement. Different dated fixture values do not prove lost behavior.",
       "coverage": "live targeted guide/state comparison and fresh metadata",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "B9-0",
@@ -4606,11 +5714,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "page_id": "p-3-0",
+        "board_id": "52A-0",
+        "node_id": "52A-0",
+        "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-3-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
@@ -4621,19 +5732,60 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "R2 journey map and measure contract",
           "target": {
             "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
             "page_id": "p-2-0",
-            "board_id": "B9-0",
-            "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "B9-0",
+              "4GX-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0"
           },
-          "qualification": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0.",
-          "source": "RETENTION.md"
+          "qualification": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0. Inspect each later study's source before selecting it as a replacement. Different dated fixture values do not prove lost behavior.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "COMPARE",
+          "question": "Later R3/R4 studies; adoption unresolved",
+          "target": {
+            "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+            "page_id": "p-2-0",
+            "board_ids": [
+              "4I0-0",
+              "4LS-0",
+              "4OS-0",
+              "4VP-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0"
+          },
+          "qualification": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0. Inspect each later study's source before selecting it as a replacement. Different dated fixture values do not prove lost behavior.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "Legacy instrument, roll, negative-price and recovery obligations",
+          "target": {
+            "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "9F-0",
+              "AE-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-1-0"
+          },
+          "qualification": "Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0. Inspect each later study's source before selecting it as a replacement. Different dated fixture values do not prove lost behavior.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "present_verified",
+      "agent_guide_observed_at": "2026-11-09T11:32:44.538Z",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-03",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
@@ -4648,9 +5800,16 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 4,
+      "page_count": 5,
       "divider_count": 0,
       "pages": [
+        {
+          "type": "page",
+          "id": "p-5-0",
+          "name": "00 · AGENT README · Read first",
+          "icon": "arrow",
+          "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-5-0"
+        },
         {
           "type": "page",
           "id": "p-1-0",
@@ -4699,11 +5858,14 @@
       "metadata_observed_at": "2026-11-09 11:03:44 UTC",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
-        "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
-        "page_id": "p-B-0",
-        "board_id": "GY-0",
-        "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0",
-        "kind": "central_protocol"
+        "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "page_id": "p-5-0",
+        "board_id": "3L1-0",
+        "node_id": "3L1-0",
+        "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-5-0",
+        "kind": "dedicated_agent_page",
+        "role": "guide",
+        "export_as_product_ui": false
       },
       "content_entry": {
         "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
@@ -4714,19 +5876,70 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "R4 scorecard and exact replacement scope",
           "target": {
             "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
             "page_id": "p-1-0",
-            "board_id": "QI-0",
-            "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "QI-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0"
           },
           "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Relative comparison and window contract",
+          "target": {
+            "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+            "page_id": "p-3-0",
+            "board_ids": [
+              "2ZJ-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-3-0"
+          },
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Saved-case identity and exact return",
+          "target": {
+            "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+            "page_id": "p-4-0",
+            "board_ids": [
+              "3IP-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-4-0"
+          },
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PRESERVE",
+          "question": "R1/R2 source and behavior contracts",
+          "target": {
+            "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+            "page_id": "p-2-0",
+            "board_ids": [
+              "Z1-0",
+              "251-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-2-0"
+          },
+          "qualification": "R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "present_verified",
+      "agent_guide_observed_at": "2026-11-09T11:26:41.388Z",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-02",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
@@ -4861,18 +6074,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-39",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
@@ -4926,18 +6155,54 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "DECISIONS",
+          "question": "Inspect recorded decisions",
           "target": {
             "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "1-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0"
           },
           "qualification": "Existing decisions1-0, source mappingU-0 and return contract2H-0. Preserve currency/pair direction, measure basis and gated watches.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_MAPPING",
+          "question": "Inspect currency/pair source mapping",
+          "target": {
+            "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "U-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0"
+          },
+          "qualification": "Existing decisions1-0, source mappingU-0 and return contract2H-0. Preserve currency/pair direction, measure basis and gated watches.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RETURN",
+          "question": "Inspect exact return contract",
+          "target": {
+            "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+            "page_id": "p-1-0",
+            "board_ids": [
+              "2H-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0"
+          },
+          "qualification": "Existing decisions1-0, source mappingU-0 and return contract2H-0. Preserve currency/pair direction, measure basis and gated watches.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-40",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
@@ -4999,18 +6264,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect R4 account and navigation contract",
+          "target": {
+            "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-41",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
@@ -5210,18 +6491,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-1-0"
           },
           "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Inspect R4 Returns build contracts",
+          "target": {
+            "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-2-0"
+          },
+          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-42",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Z6PYK9BAV3ECXFC575JYT7",
@@ -5766,7 +7063,7 @@
           "baseline_name": "D06 · Macro completion · Stages & S&P allocation"
         }
       ],
-      "retention_note": "All 51 source pages remain working here. Staging has two verified copies, no complete-family cutover. Preserve D08 and Returns holds and existing eight sidebar dividers.",
+      "retention_note": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -5791,18 +7088,95 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "FAMILY_MAP",
+          "question": "Choose the assigned Terminal family from the existing directory",
           "target": {
             "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
             "page_id": "p-R-0",
-            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "1BCX-0",
+              "1NDQ-0"
+            ],
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0"
           },
-          "qualification": "All 51 source pages remain working here. Staging has two verified copies, no complete-family cutover. Preserve D08 and Returns holds and existing eight sidebar dividers.",
-          "source": "RETENTION.md"
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "D06",
+          "question": "Inspect script/workspace interaction; design on p-17-0",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-19-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-19-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "D07_COMPANY",
+          "question": "Inspect D07 contract; design p-S-0 and clarity p-1B-0",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-11-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "D08B",
+          "question": "Inspect candidate contract; design p-12-0",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-14-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-14-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "D08C",
+          "question": "Inspect contract and #804 hold; design p-13-0",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-15-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RETURNS",
+          "question": "Inspect Returns scope while preserving 1B5H hold",
+          "target": {
+            "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "page_id": "p-Q-0",
+            "url": "https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Q-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "TRANSFER_STATUS",
+          "question": "Refresh live C9 and original transfer-owner receipt; partial copies are not cutover",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-9-0"
+          },
+          "qualification": "Original Terminal remains the working source location until an explicit family-specific cutover. Retained pages include working designs, candidates, proposals, references, source-only material and held targets. Select the family contract before a product board. Refresh C9 and the transfer owner's receipt for current copy status; preserve D08, Returns and original effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-43",
+        "page_id": "p-R-0",
+        "board_id": "1BCX-0",
+        "dark": true
+      }
     },
     {
       "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -5880,18 +7254,61 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Sector origin to Exposure and Change",
+          "target": {
+            "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+            "page_id": "p-1-0",
+            "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0"
+          },
+          "qualification": "R1 desktop and some mobile baseline; source-qualified owning contracts on p-3-0. Preserve later mobile amendments separately.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Flow, Volatility, Watch and review",
+          "target": {
+            "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+            "page_id": "p-2-0",
+            "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-2-0"
+          },
+          "qualification": "R1 desktop and some mobile baseline; source-qualified owning contracts on p-3-0. Preserve later mobile amendments separately.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Origin and interaction contracts",
           "target": {
             "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
             "page_id": "p-3-0",
-            "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "16B-0"
+            ],
+            "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0"
           },
           "qualification": "R1 desktop and some mobile baseline; source-qualified owning contracts on p-3-0. Preserve later mobile amendments separately.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "HELP",
+          "question": "Methods and behavior",
+          "target": {
+            "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-4-0"
+          },
+          "qualification": "R1 desktop and some mobile baseline; source-qualified owning contracts on p-3-0. Preserve later mobile amendments separately.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-44",
+        "page_id": "p-3-0",
+        "board_id": "16B-0",
+        "dark": false
+      }
     },
     {
       "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
@@ -5977,18 +7394,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "Substantive Watch/review amendment",
           "target": {
             "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
             "page_id": "p-2-0",
-            "url": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-2-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-2-0"
           },
           "qualification": "Substantive watch/review amendments p-2/p-3 and Flow/volatility amendments p-4/p-5. Original U08 study remains p-1; not merely resized screenshots.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Review amendment contract",
+          "target": {
+            "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "page_id": "p-3-0",
+            "url": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-3-0"
+          },
+          "qualification": "Substantive watch/review amendments p-2/p-3 and Flow/volatility amendments p-4/p-5. Original U08 study remains p-1; not merely resized screenshots.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DESIGN",
+          "question": "Flow and volatility amendment",
+          "target": {
+            "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "page_id": "p-4-0",
+            "url": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-4-0"
+          },
+          "qualification": "Substantive watch/review amendments p-2/p-3 and Flow/volatility amendments p-4/p-5. Original U08 study remains p-1; not merely resized screenshots.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Flow/volatility contract",
+          "target": {
+            "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "page_id": "p-5-0",
+            "url": "https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-5-0"
+          },
+          "qualification": "Substantive watch/review amendments p-2/p-3 and Flow/volatility amendments p-4/p-5. Original U08 study remains p-1; not merely resized screenshots.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-45",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
@@ -6042,18 +7497,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-1-0"
           },
           "qualification": "Macro options.html dated research workspace; distinct from Terminal D08 candidates and planning owners. Source binding 1ZN-0.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SOURCE_SELECTION",
+          "question": "Read applicable family source; no current build selection is inferred here",
+          "target": {
+            "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+          },
+          "qualification": "Macro options.html dated research workspace; distinct from Terminal D08 candidates and planning owners. Source binding 1ZN-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-46",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -6216,18 +7687,56 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "READ",
+          "question": "D03 build contract: explicitly DRAFT",
           "target": {
             "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
             "page_id": "p-D-0",
-            "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0"
           },
           "qualification": "D03 build contract p-D-0 remains explicitly DRAFT. Flagship workspace p-F-0 is a newly observed Turn 2 candidate, not an accepted replacement inferred by this index. Inspect both scope/contract and candidate for the assigned work; preserve original ZE5-0 effect custody.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "STUDIES",
+          "question": "R7–R8 retained studies",
+          "target": {
+            "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "page_id": "p-C-0",
+            "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0"
+          },
+          "qualification": "D03 build contract p-D-0 remains explicitly DRAFT. Flagship workspace p-F-0 is a newly observed Turn 2 candidate, not an accepted replacement inferred by this index. Inspect both scope/contract and candidate for the assigned work; preserve original ZE5-0 effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROPOSAL",
+          "question": "Flagship workspace: Turn 2 candidate",
+          "target": {
+            "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "page_id": "p-F-0",
+            "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-F-0"
+          },
+          "qualification": "D03 build contract p-D-0 remains explicitly DRAFT. Flagship workspace p-F-0 is a newly observed Turn 2 candidate, not an accepted replacement inferred by this index. Inspect both scope/contract and candidate for the assigned work; preserve original ZE5-0 effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "Clarity-preservation contract",
+          "target": {
+            "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "page_id": "p-E-0",
+            "url": "https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-E-0"
+          },
+          "qualification": "D03 build contract p-D-0 remains explicitly DRAFT. Flagship workspace p-F-0 is a newly observed Turn 2 candidate, not an accepted replacement inferred by this index. Inspect both scope/contract and candidate for the assigned work; preserve original ZE5-0 effect custody.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-47",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -6355,18 +7864,34 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Existing scope entry; inspect its named product/contract boards",
           "target": {
             "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "url": "https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0"
           },
           "qualification": "Reuse R10 workbench directory1ZA-0, Save/Resume p-8-0 and Buildp-9-0; preserve interrupted-response recovery.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "BUILD_READ",
+          "question": "R10 · Build + Implementation Boundaries",
+          "target": {
+            "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
+            "page_id": "p-9-0",
+            "url": "https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-9-0"
+          },
+          "qualification": "Reuse R10 workbench directory1ZA-0, Save/Resume p-8-0 and Buildp-9-0; preserve interrupted-response recovery.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "dedicated_agent_page",
+        "operation_prefix": "peo-20261109-c1-local-48",
+        "page_name": "00 · AGENT README · Read first"
+      }
     },
     {
       "file_id": "01M3NRCX55B452A12819WNE1RH",
@@ -6637,7 +8162,7 @@
           "baseline_name": "10 · SOURCE ONLY · Signed-in Home Baseline"
         }
       ],
-      "retention_note": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+      "retention_note": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
       "coverage": "baseline exact-file metadata; current naming reconciled with resource census",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [],
@@ -6662,18 +8187,105 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "SCOPE_MAP",
+          "question": "Read the existing OS map and exact task scope",
           "target": {
             "file_id": "01M3NRCX55B452A12819WNE1RH",
             "page_id": "p-1-0",
-            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "A2Q-0"
+            ],
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
-          "source": "RETENTION.md"
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "ATELIER",
+          "question": "Daily experience; builder and flow guidance p-E-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-D-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "PROJECTS",
+          "question": "Projects and evidence; project-journey guidance p-E-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-H-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "DECISIONS",
+          "question": "Decisions; supervision p-J-0 and sessions p-K-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-I-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-I-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "TEAM",
+          "question": "Team/delivery product; states p-P-0; build p-Q-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-O-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-O-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "CONVERSATIONS",
+          "question": "Team conversations; states p-S-0; build p-T-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-R-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-R-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "CODE",
+          "question": "Code workspace; states p-W-0; build p-X-0",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-U-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "SETTINGS",
+          "question": "Unified settings; inspect this page's own source qualification",
+          "target": {
+            "file_id": "01M3NRCX55B452A12819WNE1RH",
+            "page_id": "p-V-0",
+            "url": "https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0"
+          },
+          "qualification": "Product and Canonical Atelier identify design scope; new code/settings pages do not establish runtime adoption. Use incumbent project/execution/conversation owners and source contracts. Preserve original SPU/STU/T0J custody from the recovery checkpoint. Atelier retains its own theme; market token families do not mandate an OS restyle.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-49",
+        "page_id": "p-1-0",
+        "board_id": "A2Q-0",
+        "dark": true
+      }
     },
     {
       "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -6797,18 +8409,61 @@
       },
       "read_next": [
         {
-          "question": "Understand this file's scope and source qualifications",
+          "task": "LEARN",
+          "question": "Design and build source map",
           "target": {
             "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
             "page_id": "p-A-0",
-            "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0",
-            "meaning": "Existing scoped reading entry; may itself contain guidance, contracts or references. Select actual product boards before UI extraction."
+            "board_ids": [
+              "6M0-0"
+            ],
+            "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0"
           },
           "qualification": "R5 has recorded release lineage; later R7–R9 adoption is unestablished. Use local design/build map p-A-0.",
-          "source": "RETENTION.md"
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "RECORDED_REFERENCE",
+          "question": "Recorded R5 release design",
+          "target": {
+            "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-6-0"
+          },
+          "qualification": "R5 has recorded release lineage; later R7–R9 adoption is unestablished. Use local design/build map p-A-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "LATER_DESIGN",
+          "question": "R7–R8 Home and flagship direction",
+          "target": {
+            "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "page_id": "p-8-0",
+            "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-8-0"
+          },
+          "qualification": "R5 has recorded release lineage; later R7–R9 adoption is unestablished. Use local design/build map p-A-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
+        },
+        {
+          "task": "LATER_DESIGN",
+          "question": "R9 Solutions and planner direction",
+          "target": {
+            "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "page_id": "p-9-1",
+            "url": "https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-9-1"
+          },
+          "qualification": "R5 has recorded release lineage; later R7–R9 adoption is unestablished. Use local design/build map p-A-0.",
+          "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
-      "local_agent_guide_status": "not_yet_added"
+      "local_agent_guide_status": "not_yet_added",
+      "local_agent_guide_plan": {
+        "strategy": "reuse_guidance_page",
+        "operation_prefix": "peo-20261109-c1-local-50",
+        "page_id": "p-A-0",
+        "board_id": "6M0-0",
+        "dark": false
+      }
     },
     {
       "file_id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
@@ -9203,7 +10858,7 @@
     }
   ],
   "observed_at": "2026-11-09 11:03:44 UTC",
-  "organization_verified_at": "2026-11-09 06:03:42 UTC",
+  "organization_verified_at": "2026-11-09T11:36:37.447Z",
   "agent_navigation": {
     "schema": "paper.estate.agent_navigation.v1",
     "protocol": {
@@ -9216,7 +10871,9 @@
     "roles_are_navigation_not_permissions": true,
     "source_acceptance_not_refreshed_by_metadata": true,
     "product_extraction": "Agent guides and navigation-only boards are internal documentation. Select exact product boards after scope/source inspection.",
-    "rollout": "Central protocol applied; file-local guides in progress.",
-    "source_record": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6738066883"
+    "rollout": "5/50 local guides verified; central protocol applied.",
+    "source_record": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364#issuecomment-6738066883",
+    "local_guides_verified": 5,
+    "local_guides_planned": 50
   }
 }

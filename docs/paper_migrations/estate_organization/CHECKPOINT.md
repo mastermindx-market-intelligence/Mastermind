@@ -36,6 +36,20 @@ Terminal C9-0 was read again and preserved. Original Terminal remains working un
 
 Original native CLI actor remains mastermindxryan on m2studio, source author MastermindX1. The earlier auto-merge request no longer has a queue entry; PR #2364 remains OPEN, same head, unmerged. It was deliberately returned to Draft for this authorized continuation. Diagnose original run/queue outcome before a newly qualified release request; do not replay the former request. The administrative branch-protection 403 remains denied; no alternate account/carrier retry. Actual native controls/required evidence bind.
 
+## Local Agent README rollout
+
+Verified 5 of 50 planned local guides at 2026-11-09T11:36:37.447Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
+
+| File ID | Guide page | Exact guide node | Strategy |
+| --- | --- | --- | --- |
+| `01M6FAXA774QT1VRDMAG7DFQ2W` | `p-9-0` | `HD9-0` | reused_guidance_page |
+| `01M6Y3F0NXNDPAKJMJGCAD759Z` | `p-5-0` | `3L1-0` | dedicated_agent_page |
+| `01M6Y3GS3GDTC3Q1J64QCGZHJ8` | `p-3-0` | `52A-0` | dedicated_agent_page |
+| `01M6Y3Z73MXTN3MDX5661VV0KB` | `p-2-0` | `5G9-0` | dedicated_agent_page |
+| `01M6Y3K1SSX1M108ZY90KJX382` | `p-5-0` | `2ZU-0` | dedicated_agent_page |
+
+The existing FILE_INDEX.json holds each target's exact read_next routes and local_agent_guide_plan, including stable operation prefixes and the eight reusable guidance targets. Completed agent_entry locators include the small guide node_id; read that node rather than the entire canvas.
+
 ## Exact next action
 
-Add consistent local Agent README routes across the 50 mutable working/candidate/maintained-reference files, reusing guidance-only starts where possible. Keep archive/recovery/technical/staging structures unchanged and route them centrally. Separate agent_entry from the stable existing content entry; include exact build/read targets and specific source qualifications without inventing approval. Update/read back the existing index and effect chunks, exercise real ambiguous navigation cases, then complete normal source delivery on this same PR. Continue in this healthy session.
+Continue with **Market Memory · Evidence Workspace R1**, file `01M6Y2V2M0J28M2PYAHWZ8SB98`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.
