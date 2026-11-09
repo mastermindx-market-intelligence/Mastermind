@@ -786,6 +786,7 @@ def _before_provider_application_without_remote_placement(manifest):
 def before_provider_application(manifest):
     if type(manifest) is dict:
         manifest = before_glm_application_core(manifest)
+        manifest = before_provider_terminal_diagnostics(manifest)
         manifest = before_provider_maintenance_guard(manifest)
     if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
         record, _, _ = provider_remote_placement_record()
@@ -985,7 +986,129 @@ def compose_provider_maintenance_guard_stage(root, output, manifest, files):
         raise ValueError("provider maintenance APPLICATION composition differs")
 
 
+
+PROVIDER_TERMINAL_DIAGNOSTICS_RECORD_SHA256 = "623afa43937f3431ef3bf245b22b4497ad6e34afa9f42004238a84a85941ae83"
+PROVIDER_TERMINAL_DIAGNOSTICS_WORKER_SHA256 = "9e450c6aab4c4a82b8f78b5706c7eaa7236241dba030a762b6257d3b0f8d11dc"
+PROVIDER_TERMINAL_DIAGNOSTICS_PARENT_SHA256 = "2df8947c446e143d46bbf979e30dd11965080922839e2e37c3d8c0289ef2af7b"
+
+
+def provider_terminal_diagnostics_record(root=None):
+    """Authenticate the exact installed cohort and the independent source join."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
+    record = json.loads(_provider_source(
+        root / "rollout/provider_application/terminal_diagnostics/composition.json",
+        PROVIDER_TERMINAL_DIAGNOSTICS_RECORD_SHA256))
+    original = record["original_component"]
+    component = json.loads(_provider_source(root / original["source"], original["sha256"]))
+    original_patch = _provider_source(root / original["patch_source"], original["patch_sha256"])
+    member = record["member"]
+    if (record["schema"] != "native-provider-terminal-diagnostics-composition.v1"
+            or member != "ext/native_plan_worker.py"
+            or record["combined_sha256"] != PROVIDER_TERMINAL_DIAGNOSTICS_WORKER_SHA256
+            or component.get("schema") != "mastermind.native_plan_terminal_diagnostic_component.v1"
+            or component.get("member") != member
+            or component.get("before") != original["before"]
+            or component.get("after") != original["after"]
+            or component.get("after") != PROVIDER_TERMINAL_DIAGNOSTICS_PARENT_SHA256
+            or component.get("patch_sha256") != sha(original_patch)):
+        raise ValueError("provider terminal diagnostics source component differs")
+    retained = provider_maintenance_guard_files(root)
+    _, providers, _ = provider_remote_placement_record(root)
+    native40 = dict(retained)
+    for name in PROVIDER_MAINTENANCE_GUARD_MEMBERS:
+        native40[name] = providers[name]
+    native41 = dict(native40)
+    native41[member] = original["after"]
+    selected = record["installed_predecessor_profile"]
+    profile = json.loads(_provider_source(root / selected["source"], selected["sha256"]))
+    expected_patch = {
+        "before": original["before"], "after": original["after"],
+        "patch": "terminal_diagnostics/native_plan_worker.py.forward.patch",
+        "patch_sha256": original["patch_sha256"],
+    }
+    if (profile.get("schema") != "mastermind.provider_plan_native_profile/v1"
+            or len(native41) != 116 or profile.get("base_files") != native40
+            or profile.get("files") != native41 or profile.get("source_map") != {}
+            or profile.get("patches") != {member: expected_patch}
+            or _manifest_digest(native41) != selected["manifest_sha256"]
+            or retained[member] != record["guard_preimage_sha256"]):
+        raise ValueError("provider terminal diagnostics installed predecessor differs")
+    patch = _provider_source(root / record["forward_patch"], record["forward_patch_sha256"])
+    return record, native41, patch
+
+
+def provider_terminal_diagnostics_files(root=None):
+    """Return only the authenticated complete installed native41 source map."""
+    return dict(provider_terminal_diagnostics_record(root)[1])
+
+
+def before_provider_terminal_diagnostics(manifest):
+    """Invert the exact joined APPLICATION core, never a worker-only match."""
+    if type(manifest) is not dict:
+        raise ValueError("provider terminal diagnostics APPLICATION closure differs")
+    member = "ext/native_plan_worker.py"
+    if manifest.get(member) != PROVIDER_TERMINAL_DIAGNOSTICS_WORKER_SHA256:
+        return manifest
+    record, _, _ = provider_terminal_diagnostics_record()
+    if len(manifest) != 116 or _manifest_digest(manifest) != record["application_after_manifest_sha256"]:
+        raise ValueError("provider terminal diagnostics APPLICATION closure differs")
+    previous = dict(manifest)
+    previous[member] = record["guard_preimage_sha256"]
+    if _manifest_digest(previous) != record["application_before_manifest_sha256"]:
+        raise ValueError("provider terminal diagnostics APPLICATION parent differs")
+    return previous
+
+
+def compose_provider_terminal_diagnostics_stage(root, output, manifest, files):
+    """Join accepted diagnostics with the retained guard through one exact patch."""
+    record, _, patch = provider_terminal_diagnostics_record(root)
+    member = record["member"]
+    if (type(manifest) is not dict or len(manifest) != 116
+            or set(files) != set(manifest)
+            or _manifest_digest(manifest) != record["application_before_manifest_sha256"]):
+        raise ValueError("provider terminal diagnostics composition parent differs")
+    target = output / "native-code-stage" / member
+    original = _provider_source(target, record["guard_preimage_sha256"])
+    prior = dict(files[member])
+    if prior["sha256"] != sha(original) or prior["bytes"] != len(original):
+        raise ValueError("provider terminal diagnostics inventory predecessor differs")
+    successor = _quota_reset_patch(original, patch, "native_plan_worker.py")
+    if sha(successor) != record["combined_sha256"] or len(successor) != record["combined_bytes"]:
+        raise ValueError("provider terminal diagnostics combined worker differs")
+    result = dict(manifest)
+    result[member] = record["combined_sha256"]
+    if _manifest_digest(result) != record["application_after_manifest_sha256"]:
+        raise ValueError("provider terminal diagnostics composed whole closure differs")
+    target.write_bytes(successor)
+    manifest[member] = record["combined_sha256"]
+    files[member] = dict(prior, sha256=record["combined_sha256"], bytes=len(successor),
+                        composition={
+                            "schema": "native-exact-forward-patch.v1",
+                            "preimage_sha256": record["guard_preimage_sha256"],
+                            "patch_source": record["forward_patch"],
+                            "patch_sha256": record["forward_patch_sha256"],
+                            "successor_composition_sha256": PROVIDER_TERMINAL_DIAGNOSTICS_RECORD_SHA256,
+                            "inherited": prior,
+                        })
+
+
+
 def validate_go_source_transition(before, after):
+    if (type(before) is dict and
+            before.get("ext/native_plan_worker.py") == PROVIDER_TERMINAL_DIAGNOSTICS_PARENT_SHA256):
+        record, predecessor, _ = provider_terminal_diagnostics_record()
+        member = record["member"]
+        if before != predecessor or type(after) is not dict:
+            raise ValueError("provider terminal diagnostics predecessor transition differs")
+        if after.get(member) != record["combined_sha256"]:
+            raise ValueError("provider terminal diagnostics retained transition differs")
+        # Authenticate the complete joined core. Keep the expanded Go/HTTP
+        # namespace intact for the existing exact transition validator below.
+        before_provider_terminal_diagnostics(
+            before_glm_application_core(_application_base(after)))
+        projected = dict(after)
+        projected[member] = record["guard_preimage_sha256"]
+        return validate_go_source_transition(provider_maintenance_guard_files(), projected)
     if type(before) is dict and type(after) is dict and (
         before.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
         or after.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
@@ -2057,9 +2180,14 @@ def main():
                         help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
     parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
     parser.add_argument("--include-provider-plan-maintenance-guard", action="store_true")
+    parser.add_argument("--include-provider-plan-terminal-diagnostics", action="store_true",
+                        help="preserve installed native41 diagnostics and the retained guard; requires maintenance guard")
     parser.add_argument("--include-application-glm", action="store_true",
                         help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
     args = parser.parse_args()
+    if (args.include_provider_plan_terminal_diagnostics
+            and not args.include_provider_plan_maintenance_guard):
+        parser.error("--include-provider-plan-terminal-diagnostics requires --include-provider-plan-maintenance-guard")
     if (args.include_provider_plan_maintenance_guard
             and not (args.include_provider_plan_application and args.include_provider_plan_remote_placement)):
         parser.error("--include-provider-plan-maintenance-guard requires provider APPLICATION and remote placement")
@@ -2186,6 +2314,8 @@ def main():
     # quiescence broker successor) that the composed parent closure accepts.
     before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(
         before_provider_application(before_quota_reset_recovery(manifest)))))
+    if args.include_provider_plan_terminal_diagnostics:
+        compose_provider_terminal_diagnostics_stage(root, output, manifest, files)
     compose_glm_application_core(root, output, manifest, files)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:

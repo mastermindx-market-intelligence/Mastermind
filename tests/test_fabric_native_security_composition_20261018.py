@@ -37,6 +37,7 @@ PRE_SLOT_HANDOFF_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f8
 PRE_SPARSE_CONFIG_DATA_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
 SPARSE_CONFIG_DATA_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-config-data-forward.patch"
 SPARSE_CONFIG_DATA_FORWARD_PATCH_SHA = "fa1c45d7aedeb7f915b1f205900d78da259d74ba6d39a94bea68193d9235ccdb"
+PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
 FINAL_COMPOSED_SHA = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
 APPLICATION_COMPOSED_SHA = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
 CURRENT_COMPOSED_SHA = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
@@ -175,7 +176,7 @@ def _composition(directory):
     prior_long = prior_long.replace(b"not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)",
                                     b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
     assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
-    assert _sha(composed) == FINAL_COMPOSED_SHA
+    assert _sha(composed) == PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA
     assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
     return actual_current
 

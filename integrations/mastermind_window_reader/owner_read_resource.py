@@ -102,6 +102,7 @@ class NativeOutputReadResource:
         self._path=p.path.encode('ascii');self._host=p.netloc.encode('ascii');self._origin=allowed_origin.encode('ascii')
         self._limit=max_response_bytes;self._timeout=timeout_seconds
         self._binding=binding
+        self._content_identity_binding = None
 
     async def __call__(self,scope,receive,send):
         async def reply(status,payload):
@@ -237,6 +238,63 @@ def from_existing_business_owner(*,authenticator,policy,current_access,read_sour
         async def read(self,ref):
             if ref!=source_ref:raise ValueError('source changed')
             return await read_source()
-    return NativeOutputReadResource(owner=BusinessOwner(),resource=expected.resource,
+    issued_owner = BusinessOwner()
+    resource = NativeOutputReadResource(owner=issued_owner,resource=expected.resource,
         source_ref=source_ref,allowed_origin=allowed_origin,source_kind=source_kind,
         observation_binding=observation_binding)
+    # Only this actual JWT/current-permission factory can issue the native
+    # metadata seam. Ordinary injected fixture owners gain no identity route.
+    if (expected.resource == "https://mcp.mastermind-x.com/workspace/window/current"
+            and allowed_origin == "https://mcp.mastermind-x.com"):
+        resource._content_identity_binding = _ContentIdentityBinding(
+            resource, issued_owner, issued_owner.authorize, now,
+            resource._ref, resource._resource, resource._origin)
+    return resource
+
+
+@dataclass(frozen=True)
+class _ContentIdentityBinding:
+    """Private process-local issuance, not a Python sandbox or action grant."""
+    reader: object
+    owner: object
+    authorize: object
+    clock: object
+    source_ref: str
+    resource: str
+    origin: bytes
+
+    def current(self):
+        reader = self.reader
+        method = getattr(self.owner, "authorize", None)
+        if (type(reader) is not NativeOutputReadResource or reader._owner is not self.owner
+            or reader._content_identity_binding is not self
+            or reader._ref != self.source_ref or reader._resource != self.resource
+            or reader._origin != self.origin or method != self.authorize):
+            raise ValueError("identity_unavailable")
+
+    async def read(self, header):
+        from common import native_authorization_identity_contract as wire
+        self.current()
+        ticket = _ticket(await self.authorize(header, self.resource, self.source_ref))
+        self.current()
+        now = self.clock()
+        # This tuple exists only after the actual BusinessOwner's verifier,
+        # policy, current source permission and final clock checks above.
+        if (ticket is None or len(ticket) < 8 or type(now) is not int
+            or type(ticket[5]) is not int or type(ticket[6]) is not int
+            or not ticket[5] <= now < ticket[6]):
+            raise ValueError("identity_unavailable")
+        body = wire.validate_body({"schema": wire.SCHEMA, "resource": "CONTENT",
+            "account_digest": wire.comparable_account_digest(ticket[1], ticket[2], ticket[3]),
+            "expires_at_ms": ticket[6] * 1000}, "CONTENT")
+        return body, ticket
+
+
+def _content_identity_reader(reader):
+    if type(reader) is not NativeOutputReadResource:
+        raise TypeError("existing content owner required")
+    binding = reader._content_identity_binding
+    if type(binding) is not _ContentIdentityBinding or binding.reader is not reader:
+        raise TypeError("actual Business JWT content owner required")
+    binding.current()
+    return binding.read

@@ -1,4 +1,4 @@
-"""Hermetic seven-seat native-selection forward-admission regressions.
+"""Hermetic private-seat native-selection forward-admission regressions.
 
 The test executes the exact sandboxed subprocess proof from private_service,
 using nonprivileged synthetic rollout modules and isolated files. It never
@@ -531,14 +531,14 @@ class NativeForwardGoSelectionTests(unittest.TestCase):
     def test_missing_bundle_refuses(self):
         self.assertNotEqual(self.run_proof(self.root / "absent").returncode, 0)
 
-    def test_the_forward_cohort_is_the_admitted_eight(self):
+    def test_the_forward_cohort_includes_the_two_exact_tailnet_consumers(self):
         self.assertEqual(
             set(svc.NATIVE_POOL_PIN_FORWARD_ACCOUNTS),
-            set(REVIEWED_SEATS),
+            set(REVIEWED_SEATS) | {"fabric-design", "fabric-read"},
         )
-        self.assertTrue(
-            set(svc.NATIVE_POOL_PIN_FORWARD_ACCOUNTS)
-            < set(svc.NATIVE_POOL_PIN_ACCOUNTS)
+        self.assertEqual(
+            set(svc.NATIVE_POOL_PIN_FORWARD_ACCOUNTS),
+            set(svc.NATIVE_POOL_PIN_ACCOUNTS),
         )
 
 

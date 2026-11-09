@@ -829,3 +829,251 @@ def test_maintenance_unqualified_flags_refuse_before_output(tmp_path, flags):
         with pytest.raises(SystemExit) as stopped:
             builder.main()
     assert stopped.value.code == 2 and not output.exists()
+
+
+# Actual selected native41 retains terminal diagnostics from the protected
+# provider composer. The retained guard profile above is a distinct source
+# cohort; neither its name nor a worker-only match is an installation proof.
+@pytest.fixture(scope="module")
+def terminal_provider_stage(tmp_path_factory):
+    repository = ROOT.parents[2]
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    git_env = {"GIT_CONFIG_COUNT": str(count + 2),
+        f"GIT_CONFIG_KEY_{count}": "gc.auto", f"GIT_CONFIG_VALUE_{count}": "0",
+        f"GIT_CONFIG_KEY_{count + 1}": "maintenance.auto",
+        f"GIT_CONFIG_VALUE_{count + 1}": "false"}
+    with mock.patch.object(sys, "path", [str(repository / "tests"), str(repository), *sys.path]), \
+            mock.patch.dict(os.environ, git_env):
+        from test_current116_maintenance_guard_composition import current_source
+        from test_current40_terminal_diagnostic_composition import source40
+        from test_terminal_memory_successor_composition import terminal_source
+        source39 = current_source.__wrapped__(tmp_path_factory)
+        source40_path = source40.__wrapped__(source39, tmp_path_factory)
+        stage = terminal_source.__wrapped__(source40_path, tmp_path_factory)
+    files = json.loads((stage / "FILES.json").read_bytes())
+    assert files == builder.provider_terminal_diagnostics_files()
+    assert len(files) == 116
+    return SimpleNamespace(root=stage.parent, stage=stage, files=files)
+
+
+@pytest.fixture(scope="module")
+def terminal_diagnostics_builds(tmp_path_factory):
+    root = tmp_path_factory.mktemp("terminal-application-builds").resolve()
+    outputs = {}
+    common = ["--include-provider-plan-application",
+              "--include-provider-plan-remote-placement",
+              "--include-provider-plan-maintenance-guard"]
+    for name, flags in (
+        ("base", []), ("application", ["--include-go-application"]),
+        ("http", ["--include-go-application", "--include-application-http"]),
+        ("glm", ["--include-go-application", "--include-application-http",
+                 "--include-application-glm"]),
+        ("legacy_glm", ["--include-go-application", "--include-application-http",
+                        "--include-application-glm"]),
+    ):
+        output = root / name
+        terminal = [] if name == "legacy_glm" else [
+            "--include-provider-plan-terminal-diagnostics"]
+        with mock.patch.object(sys, "argv", [
+                "builder", "--output", str(output), *common, *terminal, *flags,
+        ]), redirect_stdout(io.StringIO()):
+            builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+@pytest.mark.parametrize("extension,count", [
+    ("base", 116), ("application", 118), ("http", 121), ("glm", 123),
+])
+def test_terminal_join_preserves_complete_application_closures(
+        extension, count, terminal_diagnostics_builds, maintenance_guard_builds):
+    output = getattr(terminal_diagnostics_builds, extension)
+    previous = (terminal_diagnostics_builds.legacy_glm if extension == "glm"
+                else getattr(maintenance_guard_builds, extension))
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    prior = json.loads((previous / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    record, predecessor, patch = builder.provider_terminal_diagnostics_record()
+    member = record["member"]
+    assert len(manifest) == count and set(manifest) == set(prior)
+    assert {name for name in manifest if manifest[name] != prior[name]} == {member}
+    assert manifest[member] == record["combined_sha256"]
+    assert g.digest(patch) == record["forward_patch_sha256"]
+    for name, wanted in manifest.items():
+        raw = (output / "native-code-stage" / name).read_bytes()
+        row = inventory["files"][name]
+        assert g.digest(raw) == wanted == row["sha256"]
+        assert len(raw) == row["bytes"]
+        if name != member:
+            assert raw == (previous / "native-code-stage" / name).read_bytes()
+    row = inventory["files"][member]
+    assert row["composition"]["preimage_sha256"] == prior[member]
+    assert row["composition"]["inherited"]["sha256"] == prior[member]
+    assert row["composition"]["successor_composition_sha256"] == (
+        builder.PROVIDER_TERMINAL_DIAGNOSTICS_RECORD_SHA256)
+    assert builder.before_provider_application(builder._application_base(manifest)) == (
+        builder.before_provider_application(builder._application_base(prior)))
+    if extension != "base":
+        saved = dict(predecessor), dict(manifest)
+        builder.validate_go_source_transition(predecessor, manifest)
+        assert (predecessor, manifest) == saved
+        component = json.loads((output / "external-go-component/component.json").read_bytes())
+        assert installer._go_component(
+            output / "external-go-component", Path(component["stable_ext"]), manifest)
+        assert all(manifest["ext/" + name] == wanted
+                   for name, wanted in component["native_stage_dependencies"].items())
+    if extension == "glm":
+        # This existing metadata field follows the source HEAD, so a historical
+        # 479d stage cannot be compared as a raw manifest after a new commit.
+        realm = json.loads((previous / "native-code-stage/ext/application_http_realms.v2.json").read_bytes())
+        head = subprocess.check_output(
+            ["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+             "-C", str(ROOT.parents[2]), "rev-parse", "HEAD"], text=True).strip()
+        assert realm["glm_source_commit"] == head
+
+
+def test_terminal_join_retains_both_exact_worker_parents(
+        terminal_provider_stage, terminal_diagnostics_builds, tmp_path):
+    import ast
+    record, predecessor, patch = builder.provider_terminal_diagnostics_record()
+    member = record["member"]
+    terminal = (terminal_provider_stage.stage / member).read_bytes()
+    guard = (ROOT / builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS[member]["source"]).read_bytes()
+    joined = (terminal_diagnostics_builds.base / "native-code-stage" / member).read_bytes()
+    original_patch = (ROOT / record["original_component"]["patch_source"]).read_bytes()
+    assert g.digest(terminal) == record["original_component"]["after"] == predecessor[member]
+    assert g.digest(guard) == record["guard_preimage_sha256"]
+    assert builder._quota_reset_patch(guard, patch, "native_plan_worker.py") == joined
+    # The original patch uses Git's accepted blank-context representation,
+    # whereas the new APPLICATION patch uses the stricter incumbent parser.
+    # Reverse the original component mechanically; this does not re-admit its
+    # frozen parent or create a selected-generation receipt.
+    reversed_worker = tmp_path / member
+    reversed_worker.parent.mkdir(parents=True)
+    reversed_worker.write_bytes(joined)
+    inverse = subprocess.run(
+        ["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+         "apply", "--reverse", "--whitespace=nowarn", "-"],
+        input=original_patch, cwd=tmp_path, capture_output=True)
+    assert inverse.returncode == 0, inverse.stderr.decode()
+    assert reversed_worker.read_bytes() == guard
+
+    def invoke(raw):
+        text = raw.decode()
+        node = next(item for item in ast.parse(text).body
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and item.name == "invoke")
+        return "".join(text.splitlines(keepends=True)[node.lineno - 1:node.end_lineno]).encode()
+
+    assert invoke(joined) == invoke(guard)
+    assert joined.count(invoke(joined)) == 1
+    assert joined.replace(invoke(joined), invoke(terminal), 1) == terminal
+    assert builder.provider_terminal_diagnostics_files() == predecessor
+    assert builder.provider_maintenance_guard_files()[member] == record["guard_preimage_sha256"]
+
+
+@pytest.mark.parametrize("fault", [
+    "guard-worker", "preterminal-worker", "mixed-guard", "retained",
+    "missing", "extra", "picker",
+])
+def test_terminal_join_rejects_partial_or_foreign_predecessors(fault, terminal_diagnostics_builds):
+    before = builder.provider_terminal_diagnostics_files()
+    guard = builder.provider_maintenance_guard_files()
+    record, _, _ = builder.provider_terminal_diagnostics_record()
+    if fault == "guard-worker":
+        before[record["member"]] = guard[record["member"]]
+    elif fault == "preterminal-worker":
+        before[record["member"]] = record["original_component"]["before"]
+    elif fault == "mixed-guard":
+        before["ext/experiential_transport.py"] = guard["ext/experiential_transport.py"]
+    elif fault == "retained":
+        before["ext/model_tier.py"] = "0" * 64
+    elif fault == "missing":
+        del before["ext/experiential_transport.py"]
+    elif fault == "extra":
+        before["ext/foreign.py"] = "0" * 64
+    else:
+        before["ext/pick.py"] = "0" * 64
+    after = json.loads((terminal_diagnostics_builds.glm / "native-manifest.json").read_bytes())
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("fault", [
+    "parent-worker", "guard-worker", "retained", "missing-go", "extra",
+    "mixed-guard",
+])
+def test_terminal_join_cannot_hide_invalid_expanded_target(fault, terminal_diagnostics_builds):
+    before = builder.provider_terminal_diagnostics_files()
+    after = json.loads((terminal_diagnostics_builds.glm / "native-manifest.json").read_bytes())
+    record, _, _ = builder.provider_terminal_diagnostics_record()
+    if fault == "parent-worker":
+        after[record["member"]] = before[record["member"]]
+    elif fault == "guard-worker":
+        after[record["member"]] = record["guard_preimage_sha256"]
+    elif fault == "retained":
+        after["ext/model_tier.py"] = "0" * 64
+    elif fault == "missing-go":
+        del after[g.GO_HANDLER]
+    elif fault == "extra":
+        after["ext/foreign.py"] = "0" * 64
+    else:
+        after["ext/experiential_transport.py"] = before["ext/experiential_transport.py"]
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http", "glm"])
+def test_terminal_native41_original_transaction_commits_and_recovers(
+        owner_name, extension, request, terminal_provider_stage, terminal_diagnostics_builds):
+    test_combined_application_commits_and_recovers_original_transaction(
+        owner_name, extension, request, terminal_provider_stage, terminal_diagnostics_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("boundary", ["selection", "receipt"])
+def test_terminal_native41_postcommit_recovery_does_not_select_again(
+        owner_name, boundary, request, terminal_provider_stage, terminal_diagnostics_builds):
+    test_combined_postcommit_interruption_does_not_select_again(
+        owner_name, boundary, "glm", request, terminal_provider_stage, terminal_diagnostics_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+def test_terminal_native41_stale_current_refuses_before_any_write(
+        owner_name, request, terminal_provider_stage, terminal_diagnostics_builds):
+    test_combined_plan_rechecks_complete_pointer_before_any_write(
+        owner_name, "glm", request, terminal_provider_stage, terminal_diagnostics_builds)
+
+
+@pytest.mark.parametrize("flags", [
+    ["--include-provider-plan-terminal-diagnostics"],
+    ["--include-provider-plan-application", "--include-provider-plan-remote-placement",
+     "--include-provider-plan-terminal-diagnostics"],
+])
+def test_terminal_unqualified_flags_refuse_before_output(tmp_path, flags):
+    output = tmp_path / "must-not-exist"
+    with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *flags]):
+        with pytest.raises(SystemExit) as stopped:
+            builder.main()
+    assert stopped.value.code == 2 and not output.exists()
+
+
+@pytest.mark.parametrize("members", ["HTTP_GENERATION_MEMBERS", "GLM_HTTP_GENERATION_MEMBERS"])
+def test_terminal_transport_hashes_remain_bound_by_original_installer(
+        members, terminal_diagnostics_builds):
+    output = terminal_diagnostics_builds.glm
+    component_path = output / "external-go-component"
+    component = json.loads((component_path / "component.json").read_bytes())
+    stable_ext = Path(component["stable_ext"])
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    assert installer._go_component(component_path, stable_ext, manifest)
+    manifest[next(iter(sorted(getattr(builder, members))))] = "0" * 64
+    saved = dict(manifest)
+    with pytest.raises(ValueError):
+        installer._go_component(component_path, stable_ext, manifest)
+    assert manifest == saved

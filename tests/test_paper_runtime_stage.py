@@ -118,6 +118,23 @@ class RuntimeStageTests(unittest.TestCase):
             "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
         )
 
+    def test_new_bridge_cannot_relabel_v22_and_drift_cannot_enter_v23(self):
+        current = load_local(
+            "paper_runtime_stage_current_generation_refusal",
+            ROOT / "integrations/paper_desktop/runtime_stage.py",
+        )
+        bridge = (ROOT / "integrations/paper_desktop/bridge.py").read_bytes()
+        for generation, data in (("v22", bridge), ("v23", bridge + b"\n# source drift\n")):
+            with self.subTest(generation=generation):
+                (self.source / "bridge.py").write_bytes(data)
+                with mock.patch.object(current.venv, "EnvBuilder") as builder, \
+                     mock.patch.object(current, "_probe_bridge") as probe:
+                    with self.assertRaisesRegex(current.Refusal, "SOURCE_HASH_MISMATCH"):
+                        current.stage(generation, root=self.root, _source_dir=self.source)
+                    builder.assert_not_called()
+                    probe.assert_not_called()
+                self.assertFalse((self.root / generation).exists())
+
     def test_historical_v11_pin_remains_immutable(self):
         current = load_local(
             "paper_runtime_stage_v11_predecessor",
