@@ -693,6 +693,7 @@ def test_quota_preview_requires_the_sealed_trusted_factory_boundary(tmp_path):
         "projection_path",
         "broker_db_path",
         "observed_at",
+        "quota_observations_path",
     }
     source = inspect.getsource(quota)
     # No environment reads or test hooks exist on the production path.
