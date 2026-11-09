@@ -1,0 +1,175 @@
+{
+  "reviewer": "/root/product_clarity",
+  "date": "2026-11-09",
+  "scope": "Read-only focused review of concurrently added News and Policy pages. Other writers' work; no ownership, recomposition or runtime acceptance asserted.",
+  "mutations": "None. Scratch report only.",
+  "inspection": {
+    "pageMetadataReads": 2,
+    "jsxReads": 2,
+    "screenshots": 0,
+    "sourceBehaviorRevalidation": false
+  },
+  "disposition": "Retain both additions as other writers' work. No actual conflict with the parent's source pointers was found in the inspected content. Do not count as our authored changes or deep visual/runtime verification.",
+  "news": {
+    "fileId": "01M5EXPMQTSBFBAM8KKG83FTZH",
+    "pageId": "p-5-0",
+    "pageName": "Proposed · News activity journey",
+    "url": "https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-5-0",
+    "nodeCount": 291,
+    "artboards": [
+      {
+        "id": "3HH-0",
+        "name": "News activity journey · proposed reference",
+        "childCount": 5,
+        "width": 1800,
+        "height": 2474,
+        "worldX": 0,
+        "worldY": 1158
+      }
+    ],
+    "jsxRead": {
+      "nodeId": "3HH-0",
+      "name": "News activity journey · proposed reference",
+      "characters": 64570
+    },
+    "depth": "Complete page board metadata plus the one overview/journey board as JSX. No screenshots, browser proof, or source-algorithm verification.",
+    "observations": [
+      {
+        "nodeId": "3HK-0",
+        "finding": "Explicitly Proposed interaction reference; AAPL fixture; Headlines → Activity → Help → return."
+      },
+      {
+        "nodeIds": [
+          "3L7-0",
+          "3L8-0",
+          "3LW-0",
+          "3L7-0",
+          "3OH-0",
+          "3OI-0"
+        ],
+        "finding": "Named Counted sources and How counts work destinations, with Activity return, in English and Chinese."
+      },
+      {
+        "nodeIds": [
+          "3Q2-0",
+          "3QC-0",
+          "3QN-0",
+          "3SM-0",
+          "3ST-0",
+          "3T1-0"
+        ],
+        "finding": "Distinct incomplete-count, interrupted-update and unavailable-count specimens preserve the headline journey."
+      },
+      {
+        "nodeIds": [
+          "3M8-0",
+          "3PE-0"
+        ],
+        "finding": "The proposed help explicitly describes a median-of-28-buckets baseline after 20 days, with earlier missing days currently counted as zero. This is reported as the board's wording only; formulas were not revalidated against source in this bounded task."
+      }
+    ],
+    "comparison": {
+      "parentSourcePointerNodes": [
+        "2JI-0",
+        "2JJ-0"
+      ],
+      "parentPointerBoard": "2J5-0",
+      "parentPointerPageId": "p-3-0",
+      "comparisonBasis": "Parent's saved exact JSX readbacks in portfolio-continuation-readbacks.json; new overview JSX read directly. News pointer nodes were not separately reread remotely.",
+      "sourceUrls": [
+        "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md",
+        "https://github.com/mastermindx-market-intelligence/macro/blob/main/research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md",
+        "https://github.com/mastermindx-market-intelligence/macro/blob/main/docs/DESIGN_DOCTRINE.md"
+      ],
+      "actualConflictFound": false,
+      "reason": "The proposed journey neither replaces the R3 presentation/R2 behavior authority nor asserts a conflicting repository/SHA. It resides on a separate proposed page. The broad source pointers do not by themselves prove the additional quantitative help claims."
+    }
+  },
+  "policy": {
+    "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+    "pageId": "p-3-0",
+    "pageName": "02 · Mobile disclosures",
+    "url": "https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-3-0",
+    "nodeCount": 81,
+    "artboards": [
+      {
+        "id": "XL-0",
+        "name": "Mobile · Historical channels · EN · Expanded",
+        "childCount": 3,
+        "width": 390,
+        "height": null,
+        "worldX": null,
+        "worldY": null
+      },
+      {
+        "id": "XQ-0",
+        "name": "Mobile · Context · EN · Expanded",
+        "childCount": 2,
+        "width": 390,
+        "height": null,
+        "worldX": null,
+        "worldY": null
+      },
+      {
+        "id": "XV-0",
+        "name": "Mobile · 历史渠道 · 中文 · 展开",
+        "childCount": 3,
+        "width": 390,
+        "height": null,
+        "worldX": null,
+        "worldY": null
+      },
+      {
+        "id": "Y0-0",
+        "name": "Mobile · 背景 · 中文 · 展开",
+        "childCount": 2,
+        "width": 390,
+        "height": null,
+        "worldX": null,
+        "worldY": null
+      }
+    ],
+    "jsxRead": {
+      "nodeId": "MH-0",
+      "pageId": "p-2-0",
+      "name": "05 · Evidence states & interaction contract",
+      "characters": 55168
+    },
+    "depth": "Complete new-page board metadata plus one relevant builder contract as JSX. New mobile board interiors were not individually read or screenshot-reviewed.",
+    "observations": [
+      {
+        "nodeId": "ZD-0",
+        "finding": "Maps XL/XV to preserved channel bodies BL, BC / HA, H1; XQ/Y0 to context AW/GL. Describes states of the same dialog, no new routes/requests; existing native details/summary and mx5CloseDlg retain ownership."
+      },
+      {
+        "nodeId": "ZE-0",
+        "finding": "Preserves 30 Oct reference snapshot, 18 Jul narrative review and qualified two-day count; explicitly does not establish candidate PR10493 deployment or alter release controls."
+      },
+      {
+        "nodeIds": [
+          "15J-0",
+          "15K-0",
+          "15L-0",
+          "15M-0"
+        ],
+        "finding": "Additional 320px component guidance retains one disclosure owner, 44px targets, focus on summary, independent toggles and chart/table parity; states that full page keyboard/zoom proof is still required."
+      },
+      {
+        "nodeId": "RD-0",
+        "finding": "Source-bound to candidate #10493 at c742039f; original uncertain effects and merge/release holds remain with existing owners."
+      }
+    ],
+    "comparison": {
+      "parentSourcePointerNode": "RE-0",
+      "parentPointerPageId": "p-2-0",
+      "comparisonBasis": "Parent's saved exact JSX readback plus direct current MH-0 JSX, which includes RE-0 and the same two URLs.",
+      "sourceUrls": [
+        "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+        "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/templates/_policy_monitor_dialog.html.j2"
+      ],
+      "actualConflictFound": false,
+      "reason": "The mobile design amendment and source pointer cite the same candidate identity, preserve its fixture and holds, and extend the existing disclosure contract without asserting deployment."
+    }
+  },
+  "followup": "No repair or further reads recommended for this bounded conflict check. Preserve authorship separation and record inspection depth in final portfolio coverage."
+}
