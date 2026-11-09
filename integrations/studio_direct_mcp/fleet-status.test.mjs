@@ -88,7 +88,7 @@ test('tool metadata is closed read-only status', () => {
   const description = STUDIO_FLEET_STATUS_TOOL.description;
   assert.match(description, /unselected Desktop Commander tools target local M2/);
   assert.match(description, /studio_select_host selects only operator-configured REMOTE routes/);
-  assert.match(description, /never select hostRef m2/);
+  assert.match(description, /M2 is the local default and is not a remote route/);
   assert.match(description, /physicalFleet view is advisory Fabric inventory/);
   assert.match(description, /failed remote-selection preflight does not prove/);
 });
