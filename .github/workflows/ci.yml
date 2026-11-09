@@ -341,7 +341,7 @@ jobs:
           printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
 
       - name: Verify native application admission and dispatch custody
-        if: matrix.index == 0
+        if: matrix.index == 5
         run: |
           python - <<'PYTEST'
           import unittest
