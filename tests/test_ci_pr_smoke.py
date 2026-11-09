@@ -477,11 +477,54 @@ def test_confirmed_absent_registry_keeps_legacy_empty_mapping(tmp_path, monkeypa
     "class Holder:\n    data = REVIEWED_FILES\n",
     "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
     "class Holder:\n    data = build()\n",
+    # A REVIEWED_FILES import alias must not shadow a tracked helper or an
+    # earlier alias: the runtime binding changes while the tracked mapping
+    # goes stale. Relative imports resolve on a different path space.
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "D = {'b.py': {}}\n"
+    "from side import REVIEWED_FILES as D\n"
+    "REVIEWED_FILES.update(D)\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "from .side import REVIEWED_FILES as R\n"
+    "REVIEWED_FILES.update(R)\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "from side import REVIEWED_FILES as D\n"
+    "import other as D\n"
+    "REVIEWED_FILES.update(D)\n",
+    # Def-time calls rooted at a same-module name execute an unchecked body
+    # (its mutation of the registry is invisible to static extraction).
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def _wrap(f):\n    return f\n"
+    "def dec():\n"
+    "    REVIEWED_FILES.update({'x.py': {}})\n"
+    "    return _wrap\n"
+    "@dec()\n"
+    "def g():\n    return 1\n",
+    "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+    "def _m():\n"
+    "    REVIEWED_FILES.update({'x.py': {}})\n"
+    "    return 1\n"
+    "def g(q=_m()):\n    return q\n",
 ])
+
+
 def test_malformed_present_registry_fails_closed(tmp_path, registry):
     root, sha = _git_repo_with_registry(tmp_path, registry)
     with pytest.raises(SmokeUnqualified, match="REGISTRY"):
         _reviewed_registries(root, sha)
+
+
+def test_parametrize_style_decorator_on_test_function_still_parses(tmp_path):
+    """The real registry chain uses @pytest.mark.parametrize at import time."""
+    root, sha = _git_repo_with_registry(
+        tmp_path,
+        "import pytest\n"
+        "REVIEWED_FILES = {'app/main.py': {'sha256': 'a' * 64}}\n"
+        "@pytest.mark.parametrize('name', ['a', 'b'])\n"
+        "def test_pins(name):\n"
+        "    assert name\n",
+    )
+    assert _reviewed_registries(root, sha)[0][0] == frozenset({"app/main.py"})
 
 
 def test_benign_top_level_class_parses_without_crashing(tmp_path):

@@ -184,9 +184,11 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
     fails closed: control flow including ``match``, any call other than the
     update gate (bare-name, attribute, exec/eval, calls inside assigned or
     merged expressions), class definitions (whose bodies execute), def-time
-    decorators/defaults/annotations that mention the registry, alias or
-    multi-target assignment, dynamic subscript keys, exact string-constant
-    lookups, and any reuse of a tracked helper name after its binding.
+    decorators/defaults/annotations that mention the registry or call a name
+    defined in the same module, alias or multi-target assignment, dynamic
+    subscript keys, exact string-constant lookups, relative or shadowing
+    ``REVIEWED_FILES`` imports, and any reuse of a tracked helper name after
+    its binding.
     Registry files sit on CRITICAL review paths, and imports are parsed,
     not executed; mutation hiding in an imported module's own import side
     effects is the one residual outside this parser's reach.
@@ -202,6 +204,7 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
     keys: set[str] | None = None
     literals: dict[str, set[str]] = {}
     imports: dict[str, str] = {}
+    module_defs: set[str] = set()
 
     def merge(argument: ast.expr, chain: frozenset[str]) -> None:
         nonlocal keys
@@ -230,11 +233,15 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
             # (including bases, decorators and the body) is refused.
             if _mentions_name(node, "REVIEWED_FILES") or _contains_call(node):
                 raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            module_defs.add(node.name)
             continue
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # Function bodies run only when called and nothing at module
             # level may call them (see the call gate below), so only the
-            # def-time expressions are checked.
+            # def-time expressions are checked. A def-time call rooted at a
+            # name defined in this module executes an unchecked body; calls
+            # rooted at imported names stay under the documented import
+            # residual.
             edges: list[ast.expr] = [*node.decorator_list]
             args = node.args
             edges.extend(args.defaults)
@@ -249,13 +256,26 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
                     edges.append(edge)
             if node.returns is not None:
                 edges.append(node.returns)
-            if any(_mentions_name(edge, "REVIEWED_FILES") for edge in edges):
-                raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            for edge in edges:
+                if _mentions_name(edge, "REVIEWED_FILES"):
+                    raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+                for call in (sub for sub in ast.walk(edge)
+                             if isinstance(sub, ast.Call)):
+                    root = call.func
+                    while isinstance(root, ast.Attribute):
+                        root = root.value
+                    if isinstance(root, ast.Name) and root.id in module_defs:
+                        raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
+            module_defs.add(node.name)
             continue
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "REVIEWED_FILES":
-                    if node.module is None or alias.asname is None:
+                    if (node.module is None or alias.asname is None or node.level
+                            or alias.asname in literals or alias.asname in imports):
+                        # Relative imports resolve differently, and an alias
+                        # that shadows an earlier helper or registry binding
+                        # makes the tracked mapping stale.
                         raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
                     imports[alias.asname] = node.module.replace(".", "/") + ".py"
                 elif alias.asname is not None and alias.asname in literals:
@@ -263,7 +283,8 @@ def _registry_keys(repo: pathlib.Path, base: str, path: str, text: bytes,
                     raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
             continue
         if isinstance(node, ast.Import):
-            if any(alias.asname is not None and alias.asname in literals
+            if any(alias.asname is not None
+                   and (alias.asname in literals or alias.asname in imports)
                    for alias in node.names):
                 raise SmokeUnqualified("SMOKE_REVIEWED_REGISTRY_MALFORMED")
             continue
