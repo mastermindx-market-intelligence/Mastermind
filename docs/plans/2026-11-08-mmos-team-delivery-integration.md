@@ -1,10 +1,10 @@
 # Mastermind OS: Team, T3 Code, Hermes and Capacity Fabric integration
 
-> **Current design amendment — 9 November 2026:** Sections 14–15 record the Chairman's design-only refinement continuation. Section 15 governs the current frame map, Resources terminology, Teamlink contracts, two distinct T3 execution paths and interaction targets wherever earlier design assumptions differ. Earlier implementation packets remain unexecuted by this session.
+> **Current design amendment — 9 November 2026:** Sections 14–15 retain the accepted Team/Capacity/conversation refinement. Sections 16–18 record the Chairman's expanded T3 donor-integration commission; Section 18 is the current complete Code/settings frame map and integration contract. It covers all eight T3 tool surfaces and all 22 settings families, with Hermes, Teamlink, Capacity Fabric and DSH ownership preserved. Earlier implementation packets remain unexecuted by this session.
 
 Date: 2026-11-08 (America/Vancouver); research and design session continued into 2026-11-09 UTC.
 Operation: `t3-hermes-os-team-design-20261108-c3`.
-Status: **architecture and Paper design package complete; application implementation and runtime activation pending**.
+Status: **expanded donor study and 38-board native Paper design package complete; application implementation, runtime activation and measured consumer/performance proof pending**.
 
 - [Product designs](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-O-0)
 - [Maintenance and recovery states](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-P-0)
@@ -533,7 +533,9 @@ The final source update stays in PR #2345 on sol/t3-hermes-os-team-design-202611
 
 **DO_NOT_REDO:** the six added boards, refined primary journey, retained references and accepted visual fixes. Reopen them only for a material source/product change or concrete feedback. The current design-only DONE_WHEN is met. Broader application, installed Teamlink return, consumer qualification, performance measurements and release acceptance remain with the incumbent implementation programme and its original proof requirements.
 
-## 16. Expanded T3 donor integration — active Paper commission
+## 16. Expanded T3 donor integration — commissioned scope
+
+> Completion amendment: the design ruler below is satisfied by Section 18. This section preserves the expanded assignment and its original acceptance.
 
 Chairman continuation, 9 November 2026 (America/Vancouver): study T3's actual UI, backend, settings and open-source implementation, then design the complete T3 workspace living inside Mastermind OS. This combines Mastermind OS, Hermes and T3 into one product. The earlier Section 15 design result is accepted prior work, not completion of this newly expanded scope.
 
@@ -561,7 +563,7 @@ Settings need a visible concrete scope, not a universal global form. Preserve T3
 **Next safe phase:** complete the donor feature/settings map, author the Code and unified Settings pages, verify each meaningful design group, persist the exact native frame map here, and continue through final coverage audit.
 
 
-## 17. Full donor study and first native workspace milestone — active continuation
+## 17. Full donor study and first native workspace milestone — historical checkpoint
 
 This section supersedes older census assumptions where named below. It is a saved/read-back milestone within Section 16, **not** completion of the expanded design commission. Principal remains the sole canvas/source writer; the three bounded reasoning advisors completed their source studies. No runtime work was launched.
 
@@ -591,12 +593,271 @@ This section supersedes older census assumptions where named below. It is a save
 | US02 · Settings · Projects and sessions | 1BR6-0 | p-V-0 | Project/environment/checkout scope, inherited/overridden session and workspace defaults |
 | US03 · Settings · Runtimes and models | 1C3W-0 | p-V-0 | Environment-owned coding runtime, DSH ACP command, model catalog, Fabric route and app helpers |
 
-Code page: [17 · Code workspace · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0). Settings page: [18 · Unified settings · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0). New states/build pages p-W-0 and p-X-0 are reserved for this owned expansion and remain to be authored.
+Code page: [17 · Code workspace · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0). Settings page: [18 · Unified settings · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0). At this milestone, states/build pages p-W-0 and p-X-0 were reserved; their complete authored map and verification now appear in Section 18.
 
 ### Transport reconciliation
 
 Operation mmos-t3-full-design-20261109-c4-cw06-clone lost its connection response. No automatic replay or cross-carrier Paper write occurred. Three successful full enumerations of the original p-U-0 page on the original Mastermind Paper carrier showed exactly the five acknowledged IDs (19K7-0, 19VK-0, 1A6U-0, 1AGU-0, 1ASS-0), with no unacknowledged clone. After connection recovery and explicit target-state reconciliation, the missing frame was created on that same carrier as 1B49-0 and visually checked. Read-only transport diagnosis changed no service, config, runtime, credentials or application state.
 
-### Remaining authorized design frontier
+### Milestone design frontier — completed in Section 18
 
-Complete all eight tool surfaces and queue/steer/restart, native-session adoption, portable context/history and checkpoint states; complete all 22 T3 settings families plus Hermes teammate/capability/routine scope; add tablet/mobile views, operational/unsupported/partial-save states and source-to-frame build maps. Verify every resulting native board, reconcile the old directory/build links, save/read back final coverage, then release only owned working indicators. Continue in the same healthy turn.
+At this milestone, the next phase was to complete all eight tool surfaces and queue/steer/restart, native-session adoption, portable context/history and checkpoint states; complete all 22 T3 settings families plus Hermes teammate/capability/routine scope; add tablet/mobile views, operational/unsupported/partial-save states and source-to-frame build maps. Verify every resulting native board, reconcile the old directory/build links, save/read back final coverage, then release only owned working indicators. Continue in the same healthy turn.
+
+## 18. Complete embedded T3 design — verified native Paper expansion
+
+**Outcome: PROVEN_OUTCOME for the expanded design commission in Section 16.** The new 38-board package is authored in the existing Mastermind OS Paper file, visually inspected and natively enumerated. It builds on the accepted Today, Team, Capacity and conversation work in Section 15. This closes the design frontier recorded at the Section 17 milestone; application integration and real runtime/performance qualification remain unexecuted.
+
+The product is one Mastermind OS shell with an embedded Code workspace, a persistent team and one searchable settings experience. This is a donor-integration design: reuse the depth and contracts of the open-source applications while preserving original Mastermind presentation and the incumbent owners of execution, identity, routing, credentials, scheduling and result delivery.
+
+### 18.1 Navigation and native frame map
+
+| Destination | Native page | Boards |
+|---|---|---:|
+| [Code workspace](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0) | `p-U-0` · 17 · Code workspace · Product | 14 |
+| [Unified settings](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0) | `p-V-0` · 18 · Unified settings · Product | 17 |
+| [Execution, settings and recovery states](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-W-0) | `p-W-0` · 17A · Code workspace · States | 4 |
+| [Integration and interaction contract](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-X-0) | `p-X-0` · 17B · Code integration · Build | 3 |
+
+The Start here directory `A2Q-0` retains its accepted content and now includes native entry `1MKF-0` for pages 17–18, all four destinations and Section 18 of this guide. Directory heading/footer text includes the new current pages. The Code and Settings product pages follow Team conversations in the page list. The new state/build pages sit with the existing current state/build pages; all 33 existing page/divider IDs were preserved exactly once.
+
+Desktop boards are 1600×1040. CW11 is 768×1024. CW12, CW13 and US14 are 390×844. The mobile work is deliberately composed for a single focused task; CW13 is Chinese/light and CW12 is English/dark. The accepted Noir Atelier tokens, neutral borders, quiet status colors and selective champagne action accents remain the visual system.
+
+
+#### Code workspace
+
+Page: [p-U-0](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0).
+
+| Frame | Native ID | Designed workflow |
+|---|---|---|
+| CW01 · Work inbox | `19K7-0` | Work inbox; Pinned, Needs you, Working and Settled; selected work, environment and original conversation. |
+| CW02 · Embedded workbench | `19VK-0` | Embedded thread list, conversation, Next-turn composer, retained terminal and browser preview. |
+| CW03 · New thread and workspace | `1A6U-0` | Project and environment; new/existing/root workspace; base branch and remote start; permission, runtime/model and return destination. |
+| CW04 · Files and changes | `1AGU-0` | File tree; Turn/Branch/Commits changes; inline review context; checkpoint entry and PR continuation. |
+| CW05 · Pull request inbox | `1ASS-0` | Company pull-request inbox; search/filter/sort, host/repository identity, checks, review and originating thread. |
+| CW06 · Pull request review | `1B49-0` | Pull-request review; Summary/Code/Activity/Guide navigation, viewed files, draft comments, checks and release controls. |
+| CW07 · Surfaces and device preview | `1CFT-0` | Eight-surface chooser and device preview; viewer attachment separate from agent control and paid/device readiness. |
+| CW08 · Queue, steer and side chat | `1CRG-0` | Pending approval with child attribution; queue edit/hold/remove; explicit Queue/Steer/Restart; stop and side chat. |
+| CW09 · Adopt a native session | `1EV1-0` | Environment/provider-scoped native-session discovery/adoption; already imported opens existing thread; mismatched project retained visibly. |
+| CW10 · Context and history | `1F4U-0` | Selected full-message context; configurable history budget, estimated tokens and source references; new provider session with source workspace retained. |
+| CW11 · Tablet focused surface | `1IQU-0` | 768×1024 tablet; focused Browser surface with originating thread, draft and queue preserved. |
+| CW12 · Mobile workbench EN | `1IVC-0` | 390×844 English dark mobile; workbench, active work, contextual tools and deliberate sticky composer. |
+| CW13 · Mobile inbox ZH light | `1J4C-0` | 390×844 Chinese light mobile; Code inbox, work states and selected destination. |
+| CW14 · Linked PRs and stacks | `1KJ0-0` | Linked pull requests versus ordered stack; relationship provenance, dismissed links, per-PR checks/review/hold and selected action environment. |
+
+#### Unified settings
+
+Page: [p-V-0](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-V-0).
+
+| Frame | Native ID | Designed workflow |
+|---|---|---|
+| US01 · One searchable system | `1BFO-0` | One searchable settings system, grouped by Personal/Code/Team/System, with return to the retained workspace. |
+| US02 · Projects and sessions | `1BR6-0` | Concrete project/environment/checkout scope; sessions and worktrees; inherited versus overridden values and project actions. |
+| US03 · Runtimes and models | `1C3W-0` | Provider driver/instance and runtime/model separation; DeepSeek harness ACP command and arguments, native Fabric route and helper entry. |
+| US04 · Persistent teammate | `1D2L-0` | Persistent Hermes Engineering profile on Ubuntu 1; role, instructions, working folder, model, approval and distinct memory/context. |
+| US05 · Capabilities and connectors | `1DEW-0` | Skills, plugins, connectors and toolsets; installed, enabled, authenticated and tool-permitted states remain distinct. |
+| US06 · Environments and access | `1DQW-0` | Environment connections, exact grants, device placement preference, company placement and linked team gateway readiness. |
+| US07 · Source control and review | `1E2O-0` | Version-control and forge accounts; project merge/writing defaults; device review preferences; actual repository requirements. |
+| US08 · Routines and run history | `1FJX-0` | Unified projection of owned routines; Code and Hermes examples; schedule/timezone, target, prompt/model, webhook deliveries and run history. |
+| US09 · Conversation and voice | `1FW2-0` | Notifications, grouping, chat/send behavior and voice; microphone, language, personal/project dictionary and cleanup. |
+| US10 · Appearance and capture | `1G8M-0` | Appearance, keyboard/focus and native SnapShots capture; separate system permissions and capture versus code checkpoint. |
+| US11 · Browser and devices | `1GL6-0` | Browser profiles/preferences/data/access; device sources, agent access, readiness and cloud lease prerequisites. |
+| US12 · Secrets and privacy | `1GX9-0` | Environment-owned secrets and references; dependency impact; privacy and credential-owner boundaries. |
+| US13 · Maintenance and cleanup | `1HMN-0` | Maintenance and diagnostics; cleanup preview; active/shared work retained; per-target outcomes. |
+| US14 · Mobile scope and recovery | `1J2C-0` | 390×844 mobile scoped settings; offline target stays selected, draft preserved and reconnect action. |
+| US15 · Archive and restoration | `1HYM-0` | Archive, read-only history and restore; explicit delete impact; archive distinct from Settled. |
+| US16 · About and experiments | `1I96-0` | About, installed version/update channel/CLI/mobile/privacy/notices; Labs with supported, unavailable and prerequisite states. |
+| US17 · Accounts and app helpers | `1J6D-0` | Provider authentication and sign-out impact on shared credentials; distinct title/writing/review-guide/voice helper consumers. |
+
+#### Recovery and states
+
+Page: [p-W-0](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-W-0).
+
+| Frame | Native ID | Designed workflow |
+|---|---|---|
+| CS01 · Execution and return | `1JO4-0` | Preparation, queue, limited capacity with unknown reset, expired approval, uncertain send and provider-finished/changes-preparing states. |
+| CS02 · Scope, saves and resets | `1JXD-0` | Mixed values, partial save, unavailable selection, read-only grants, device reset and removing a project override. |
+| CS03 · Setup and capability limits | `1K6T-0` | Expired auth, unavailable catalog, unsupported steering, signed-in connector without tools, unsupported surface and Teamlink setup. |
+| CS04 · History and consequential actions | `1KFX-0` | Checkpoint/rollback limits, competing writer, already imported native session, unavailable device quote, environment reset and lifecycle distinctions. |
+
+#### Build contract
+
+Page: [p-X-0](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-X-0).
+
+| Frame | Native ID | Designed workflow |
+|---|---|---|
+| CB01 · Full donor composition | `1LSJ-0` | Existing-owner composition and the authenticated T3 UI boundary; Hermes, Teamlink, Executive, Capacity Fabric, DSH/ACP and GitHub. |
+| CB02 · Interaction and responsiveness | `1M0G-0` | Interaction targets, retained state, responsive behavior, keyboard/accessibility and explicit future performance proof. |
+| CB03 · Source and consumer acceptance | `1M93-0` | Donor pins, installed/research-clone distinction, licence/adoption boundary and seven-step future consumer acceptance. |
+
+### 18.2 Every T3 surface has a place inside Code
+
+| T3 surface | Mastermind location | Integration contract |
+|---|---|---|
+| Browser | CW02, CW07, CW11; US11 | Preserve environment, thread, browser profile, runtime/preview URL and viewport. Settings presentation and agent access have separate scopes. Unsupported devices retain the thread and explain the unavailable action. |
+| Terminal | CW02; surface chooser CW07 | Attach to the existing server PTY and retained output. Reveal/attach, restart, close and terminate are different actions. Navigation never creates a replacement terminal implicitly. |
+| Files | CW04; chooser CW07 | Read the exact environment/workspace. File selection, prompt attachments/context and local changes retain their project/thread association. |
+| Diff | CW04, CW06; US07 | Keep Turn, Branch and Commits context, file navigation, viewed state and comment drafts. Hidden-ref checkpoints are not user commits. |
+| Pull request | CW05, CW06 | Search and review the actual host/repository/number. Checks, required review, merge permission and release holds come from the existing forge. |
+| Linked pull requests | CW14; entry CW06 | Related PR collection is distinct from an ordered stack. Preserve relationship source, dismissed links, stack layer and per-PR checks/holds. Selected action and trusted execution environment stay explicit. |
+| Device | CW07; US11 | Distinguish viewing a device from granting agent control. Keep source/lease identity; unsupported sources and unavailable quotes remain useful states. Paid launch needs the actual applicable quote/authorization flow. |
+| Side chat | CW08; chooser CW07 | Retain the parent thread and attached context while a secondary conversation is open. A side chat does not silently change runtime, approvals or original return destination. |
+
+Source: [surface taxonomy](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/RightPanelTabs.tsx), [panel layout](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/rightPanelLayout.ts), [terminal ownership](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/terminal-runtime.md), [preview contract](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/preview.ts), [device ownership](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/devices.md) and [PR relationships](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/threadPullRequest.ts). The upstream narrow-panel behavior informs the focused-pane composition; the 1600/768/390 designs are the proposed Mastermind responsive contract, not measured application behavior.
+
+### 18.3 Complete T3 settings-family reconciliation
+
+The pinned donor navigation/search taxonomy contains **22 settings families**, including Voice, SnapShots, Secrets and Archive that are easy to omit when working only from the supplied screenshots. Every family is mapped below. This is comprehensive Paper design and integration-contract coverage with retained donor detail contracts; it does not mean every nested dialog has been independently redrawn. Unified navigation groups them for the user; it does not collapse their different save scopes or discard their detail dialogs. US04–05 add persistent Hermes profile/capability controls, and US14 shows scope recovery on mobile.
+
+| Donor family | Native designs | Controls and retained detail | Scope / owner |
+|---|---|---|---|
+| General | US09 | Notifications; in-app alerts; repository grouping and order; Working section; confirmations, quit behavior and time preferences. | Device/client |
+| Appearance | US10 | Theme/contrast; UI, chat and code fonts/sizes; chat width; math/wrapping; effort visibility, motion and environment identification. | Device/client |
+| Chat | US09, CW08 | Rich text, send behavior, slash/skill affordances, follow-up delivery mode and tool visibility; approvals/errors remain visible. | Client preferences plus capability-qualified thread actions |
+| Diffs & pull requests | US07, CW04–06 | Diff palette, whitespace, expansion and stacked/split views; proactive in-app PR experience and retained review drafts. | Device review preferences; PR/repository state stays with its owner |
+| Keybindings | US10 | Rebind supported actions; visible focus; composer IME safety; command palette and pane traversal. | Device/client |
+| Voice | US09, US17 | Microphone/dictation language; personal and project dictionaries; cleanup consumer; model download, test, hardware and unload states. | Device microphone/model; project dictionary and supported helper owner |
+| SnapShots | US10 | Window/screen capture to composer; screen-recording and accessibility permissions; shortcut, flash, sound and animation. | Native device permissions and preferences; separate from code checkpoints |
+| Providers | US03, US17, CW09 | Manifest/driver, instance, executable/args/env references, health/version, auth, dynamic catalog, custom/favorite models, native session adoption and helpers. | One execution environment; provider-management grants checked separately |
+| Threads | US02, CW01/03/08/10 | Default runtime/permission/workspace; streaming/title, snooze/resume/settlement, starting folder/clone and idle-compaction behaviors. | Environment defaults with supported project overrides; existing thread lifecycle |
+| Browser | US11, CW02/07/11 | Profiles, import/data reset, viewport/zoom/theme/FPS, input visualization, link/search/floating behavior and agent browser access. | Client presentation versus environment/project access and native profile owner |
+| Devices | US11, CW07 | Local simulator, SSH, EAS and Simlock sources; readiness, view/control distinction and lease/quote requirements. | Execution environment and source capability; no implied universal desktop availability |
+| Scheduled tasks | US08 | Create/edit, pause/delete/run-now, time/timezone, target, prompt/runtime/model, webhook filter/delivery and run history. | Existing T3 scheduler or Hermes cron owner, shown explicitly |
+| Projects | US02 | Name/icon/pin/archive, concrete checkouts, actions/scripts and inherited or overridden defaults. | Exact project/environment/checkout |
+| Source control | US07, CW05/06/14 | VCS/forge CLI/account health; auto-pull and merge method; writing instructions/templates; helper and review-guide selections. | Owning environment/account and project; actual forge requirements remain binding |
+| Worktrees | US02, US13, CW03 | Folder, start-from-remote, submodules, branch naming, cleanup and retention of local changes. | Existing environment worktree owner; shared/live writers remain protected |
+| Environments | US06 | Local/linked peers, connection routes, diagnostics, placement preferences and PR action routing. | Connection/auth owner; placement preferences are client-local |
+| Sharing & access | US06, CS02/03 | LAN/Tailscale/WSL and supported relay/tunnel routes; pairing, authorized clients/revocation, webhook/guest-link/published-activity access. | Exact environment grants and observed connection readiness |
+| Secrets | US12 | Feature-gated named references, providers/consumers, dependencies and impact of removal. | One selected environment and existing credential owner |
+| Maintenance | US13 | Provider updates, background continuation/activity, storage/cleanup with partial results, diagnostics and telemetry/export controls. | Concrete environment/client owner per operation |
+| Labs | US16 | Alternate inbox, guest links, linked-environment suggestions, extra-request actions, Simlock and fast Mac worktree options. | Installed-build and environment capability gates; experiments are not promises |
+| About | US16 | Installed version, update track, CLI command, mobile entry, privacy and open-source notices. | Existing updater/installation owner and device |
+| Archive | US15 | Archived project/thread inventory, read-only history, restore and explicit delete impact. | Existing project/thread owner; separate from working/settled state |
+
+Taxonomy evidence: [settings search inventory](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/settingsSearch.ts) and [settings navigation](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/SettingsSidebarNav.tsx). Aliases such as Integrations → Browser, Storage → Maintenance and Beta → Labs should resolve through this same search/navigation model. Diagnostics and open-source-licence details remain reachable within Maintenance/About. T3 Connect is an account/connection footer capability, not a twenty-third family or a replacement Mastermind human identity.
+
+The concrete donor panels remain the control inventory for implementation: [settings components](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings). Preserve provider manifests, environment capabilities and upstream visibility gates when building controls, rather than treating fixture model names, device sources or experiment states in these boards as an available live catalog.
+
+### 18.4 Settings scope, save and reset rules
+
+1. **Retain the concrete owner.** T3 client preferences stay on the device; environment settings stay with the selected execution environment; supported project overrides stay with the exact project/checkout; Hermes settings stay pinned to the displayed connection and profile. UI labels and API keys must agree.
+2. **Keep unavailable selections.** An offline environment, missing checkout or removed project stays visibly selected with its last known identity. It must never silently become All projects or All environments. The mobile example US14 retains the draft and reconnects to that owner.
+3. **All is a bounded target set.** All environments means the explicitly connected and loaded targets selected for that operation. It does not promise future/offline synchronization. Mixed values remain mixed until the user changes them. Show successful and failed targets separately after a partial save.
+4. **Inheritance is specific to each setting.** Preserve project overrides and the donor's designated t3.json-backed fallback when the effective value is null. Do not invent a universal environment → project file → project ladder for every setting. Remove override means inherit again, not write a duplicate default.
+5. **Management access is distinct.** Provider installation/update/auth and secret management can require grants different from ordinary settings writes or thread use. Disable the exact operation with the reason; do not turn a provider capability into a generic Full access toggle.
+6. **Reset by owner.** Reset this device, Reset selected environment settings and Remove project override are distinct actions with separate target/impact review. The donor's broad restore helper is not imported behind a misleading device-only label.
+7. **Keep credentials at their existing owner.** US17 shows provider-confirmed sign-in status and shared native-account impact before sign-out. US12 uses references and dependency impact. No new Mastermind secret copy or universal credential is proposed.
+8. **Preserve the working thread.** Opening settings, changing tabs or closing settings retains the thread, draft, cursor/focus, scroll, queue and selected tool. An owner change invalidates only owner-bound data and pending actions; it never carries credentials or stale grants to the new target.
+
+Source: [scope resolver](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/settingsScope.ts), [scoped settings](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/useScopedSettings.ts), [project inheritance](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/shared/src/projectSettings.ts), [restore helper](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/components/settings/SettingsPanels.tsx), [Hermes profile pinning](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/store/settings-scope.ts) and [retained chat route](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/web/src/routes/_chat.tsx).
+
+### 18.5 Donor composition and existing owners
+
+| Responsibility | Existing owner to retain | Mastermind design integration |
+|---|---|---|
+| Product navigation and human identity | Mastermind OS | One shell, global navigation/search, company project/task context and original conversation links. |
+| Full coding UI connection/domain state | T3 client-runtime with authenticated typed RPC/subscriptions | Reuse/adapt the donor client runtime and surface components in Code; retain connection, snapshot/event cursor and environment identity. |
+| Files, Git, PTY, browser/device and provider instances | T3 execution environment and existing native owners | Bind every surface/action to the same environment/project/thread/workspace. Grouping repositories in the UI does not migrate execution. |
+| Thread/run events, command receipts, effects and completion | Existing T3 orchestration | Project current state and reconcile existing receipts. No new run ledger, queue or replay engine. |
+| Persistent teammate, Bot Chat, profile memory/skills/routines | Existing Hermes profile/gateway | Profile-pinned Team and settings views. A viewer does not start another gateway/runtime. |
+| Company work admission and placement | Existing Executive authority | Join company tasks to admitted work; retain reservation, budget and execution binding. |
+| Model/account selection and fallback | Existing Capacity Fabric | Display eligible routes, allowance and observed limits. Keep model routing distinct from T3's client-local environment placement preferences. |
+| DSH or Hermes ACP coding engine | Existing provider/ACP adapter | Select and configure the supported runtime. T3 owns coding workspace/thread/checkpoint; provider owns its tools, skills and credentials. |
+| Cross-application messages and result return | Existing Teamlink transport/envelope | Carry original room/message/task/thread/result references and return to the same parent. No second message bus or delivery identity. |
+| Recurring work | Existing T3 scheduler or Hermes cron | One Routines UI with explicit owner and per-owner history; no new scheduler or duplicate watcher. |
+| PR checks, review and release | Existing GitHub/forge | Inspect actual head and requirements; returned work, approved review, merge and parent acceptance remain different facts. |
+
+**Full-UI auth boundary:** an outside-agent `mcp-client` subject accepted for `/mcp` is not a normal workspace HTTP/WebSocket login. Embedding the full workspace requires the donor's authenticated RPC/subscription path and its method grants. Project identity is organizational context, not a filesystem sandbox. Preserve existing environment/client trust and Mastermind human identity.
+
+Source: [T3 architecture](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/overview.md), [client-runtime](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/client-runtime), [typed RPC contract](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/rpc.ts), [environment auth](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/internals/environment-auth.md), [orchestration](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/orchestration-v2), [T3 schedule owner](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/scheduledTasks/ScheduledTaskService.ts) and [Hermes routine API](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/api/cron.ts).
+
+The existing Section 15 native Capacity Fabric provider and DSH/ACP paths remain separate. DSH's documented executable is `dsh`, with ordered arguments `--profile`, `acp`; the design does not invent a T3 launch daemon or replace provider-native tools. The previously pinned Mastermind Capacity/Teamlink source seams and exact source receipts in Sections 14–15 remain applicable; this upstream donor study does not overwrite them.
+
+### 18.6 Runtime distinctions that affect the UI
+
+**Send and intervention.** T3 supports auto/queue/steer/restart delivery; auto may steer when the runtime and state permit. CW08 names the requested action, separates Stop, allows editing/removing/holding queued input and reports the actual returned outcome. Steering can interrupt an active tool for some providers; attachment support and steering availability vary. Fresh context never silently joins the active turn. A rejected/expired approval must open the current request, not replay the old answer. Child requests remain attributable in the parent thread.
+
+**Completion and receipts.** Sending, delivery, started/running, provider finished, checkpoint/diff finalization, returned result, review/merge and parent acceptance remain separate. A provider-finished state can still prepare changes. Reconnect restores the snapshot/event cursor and reconciles receipts; uncertainty is not permission to resend a command or duplicate a return message.
+
+**Native adoption.** CW09 discovers sessions within the chosen environment/provider/workspace. Already imported sessions open the existing T3 thread; they do not launch another run. Validate the project again if selection changes between discovery and adoption. A provider's native-session identity remains distinct from the T3 thread ID.
+
+**Portable context.** CW10 selects full messages within a configurable 1,024–64,000 token budget; 16,000 is the shown/default selection, and token counts are estimates. Omitted history retains source references. It starts a new provider session; it does not clone hidden reasoning, files, attachments, tool state, credentials, approvals or execution authority. The source workspace remains identified and accessible. This is not a universal short-summary format.
+
+**Code checkpoints and rollback.** Inspect the target checkpoint/diff and the filesystem impact before restore. The checkpoint store uses hidden Git refs distinct from user commits. Provider conversation rollback is capability-dependent; an unsupported path is refused before filesystem effects, and an active/shared writer blocks the conflicting restore. Native SnapShots capture into the composer is a different workflow.
+
+**PR relationships.** CW14 preserves host/repository/number, relationship source, selected stack layer, dismissed relationships and per-PR checks/review/release holds. Related links do not imply a stack or permission for a bulk action. A selected PR action uses its trusted execution/account route; stack-wide actions must explicitly choose their target layers.
+
+Sources: [sendToThread and thread management](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/orchestration-v2/ThreadManagementService.ts), [orchestration contract](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/orchestrationV2.ts), [provider capability adapter](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/provider-acp-registry/src/server/adapter.ts), [native session identity](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/agentSessions.ts), [context handoff](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/orchestration-v2/ContextHandoffService.ts), [portable handoff behavior](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/docs/user/portable-handoffs.md), [checkpoint store](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/apps/server/src/checkpointing/CheckpointStore.ts) and [linked PR contract](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/packages/contracts/src/threadPullRequest.ts).
+
+### 18.7 Hermes persistent team and capability reconciliation
+
+US04 pins Engineering to its existing Ubuntu 1 profile/connection. US06 names the linked team gateway separately from a selected coding environment such as M2 Studio. Installed profiles and gateway-served profiles are distinct; a connected gateway alone does not establish cross-host Teamlink readiness or an original-parent return.
+
+The persistent Bot Chat, ordinary Hermes session, Hermes ACP coding session and T3 coding thread retain separate identities. Profile configuration owns instructions, authentication, memory, skills, sessions and routines. Memory is not the same as the active context window or Agent OS continuity. The UI must pin profile-sensitive requests to the displayed connection/profile and reject or reconcile ambiguous ownership.
+
+Hide changes presentation; Pause affects execution; Archive preserves history; Delete has an explicit target and impact. Canonical Bot Chat compact/reset behavior is distinct from ordinary session reset and T3 thread settlement. Opening or closing a viewer does not create/stop the persistent teammate.
+
+Capabilities includes Skills, Plugins, Connectors and Toolsets. Installed, enabled, authenticated, tool-discovered and permitted are independent states. A signed-in GitHub connector can have no available tools. Model controls distinguish main/fallback/auxiliary/delegation or supported aggregate modes. Hermes manual/smart/off, ACP ask/workspace_session/session and T3 permission modes must keep their own semantics; no lossy shared slider is proposed.
+
+Group conversations retain per-member capability and failure state. Desktop relay and gateway peer routes have different lifetimes and prerequisites. Upstream source capability is not proof that the installed Teamlink route is qualified; CS03 retains that setup-required state.
+
+Sources: [profiles](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/user-guide/profiles.md), [persistent Bot Chat](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/user-guide/bot-mode.md), [gateway sessions](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/developer-guide/gateway-local-sessions.md), [ACP internals](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/website/docs/developer-guide/acp-internals.md), [profile settings](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/plugins/hermes-bots/profile-config.tsx), [capabilities UI](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/app/capabilities/index.tsx), [Hermes approval modes](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/apps/desktop/src/store/approval-mode.ts) and [ACP modes](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/acp_adapter/modes.py).
+
+### 18.8 Designed negative states
+
+| Board | Explicit variants | Required behavior |
+|---|---|---|
+| CS01 | Workspace preparation; next turn queued; capacity limited with reset unknown; expired approval; message status unknown; provider finished while changes prepare | Preserve the original target and distinguish actual lifecycle receipts. Do not fabricate availability, replay expired actions or promote a return to acceptance. |
+| CS02 | Mixed values; partial save; unavailable checkout; read-only permission; reset this device; remove project override | Retain exact scope, report per-target outcomes and keep reset/inheritance operations distinct. |
+| CS03 | Runtime auth expired; model catalog unavailable; steering unsupported; authorized connector without tools; unavailable device surface; Teamlink setup required | Preserve useful independent paths; no invented model list, full-access bypass, host substitution or assumed route readiness. |
+| CS04 | Checkpoint/rollback inspection; competing live writer; native session already imported; cloud-device quote unavailable; environment reset; hide/pause/archive/delete | Explain concrete effect and owner, block conflicting/destructive effects appropriately and avoid duplicate execution. |
+
+These 24 variants are native design studies. They do not claim the underlying error, recovery or action has been executed in the installed application.
+
+### 18.9 Interaction, responsiveness and future proof
+
+| Interaction | Proposed design target | Implementation proof owed |
+|---|---|---|
+| Typing and local feedback | At or below 100 ms p95 | Measure on the target device while the thread streams; keep typing and selection responsive during tool/event updates. |
+| Warm thread/tool reveal | At or below 200 ms p95 | Reuse retained caches/subscriptions and measure warm navigation; report cold loading separately. |
+| Panel transitions | Short opacity/transform transitions | Avoid width/height animation in the active path; respect reduced motion and interrupt transitions without losing state. |
+| Settings open/close | Keep the coding thread mounted | Restore draft, cursor/focus, scroll, queue and tool selection. |
+| Large histories and PR lists | Bound the rendered window | Preserve current donor pagination/virtualization, stable identity and scroll anchors. |
+| Reconnect | Restore snapshot and event cursor | Reconcile command/message receipts before further effects; no automatic resend. |
+| Target change | Invalidate owner-bound data | Key state by environment/thread or connection/profile; avoid stale forms, secrets and pending approvals. |
+| Keyboard | Command palette, pane traversal, Escape and surface keys | Visible focus, safe IME composition/send and return focus after overlays. |
+| Accessibility | 44 px primary touch controls; readable status text | Semantic labels/states, contrast, reduced motion and keyboard operation in the actual app. |
+| Narrow layout | One focused pane with original thread attached | Preserve inactive pane state across desktop/tablet/mobile changes and soft keyboard appearance. |
+
+These are design budgets and acceptance conditions, **not performance measurements or implementation claims**. Desktop can display conversation and tools together; tablet focuses one surface; mobile uses a single-column task and contextual controls. Do not shrink the entire desktop workbench into the phone viewport.
+
+### 18.10 Concrete implementation acceptance path
+
+The eventual implementation must prove the joined consumer journey with real data and applicable authorization:
+
+1. Start from an existing Hermes teammate or team conversation. Retain exact profile, room, originating message and company project/task.
+2. Admit the work through existing Executive authority and Capacity Fabric eligibility. Keep its execution binding and actual route/capacity evidence.
+3. Enter the embedded Code workspace attached to the owning environment, project, thread, worktree and provider session. Open/close settings and switch surfaces without losing the draft or identity.
+4. Exercise real files, retained terminal, browser/device where supported, a queued follow-up and a parent-visible approval. Observe the actual command outcome and reconcile a reconnect without duplicate work.
+5. Review the actual resulting diff/PR at its exact head. Show checks, required review/release holds and linked/stack identity. Retain draft review state and source-control account routing.
+6. Return one result through Teamlink to the original conversation, with original-parent receipt and source/PR evidence. Demonstrate lost-response reconciliation and avoid a duplicate message or substitute room.
+7. Record the parent's actual acceptance or follow-up work separately from runtime completion, returned result, green checks and merge.
+
+Also prove offline/partial settings saves, unavailable provider/model capabilities, expired approval, shared-worktree custody, reduced-motion and keyboard behavior. Measure cold and warm navigation, streaming plus typing, long histories and actual supported device surfaces. A Paper screenshot, service health check, green CI or delivered message alone cannot satisfy this future consumer acceptance.
+
+### 18.11 Source, adoption and verification receipts
+
+**Inputs.** Twelve Chairman-supplied T3 screenshots; read-only installed T3 Code (Beta) 0.1.7 observation; clean engineering research clone `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`; pinned upstream T3 `c6ca6056309904f89b90b6055d797973be0a0939`; pinned upstream Hermes `109fd8161a509db5a00942152ba48882e446e8b0`; existing Mastermind procedure/product/source pins in Sections 15–16. The research clone is not proven to be the source of the installed binary. New upstream capabilities require installed-environment discovery before an enabled control is shown.
+
+**Adoption.** Both examined donor repositories carry MIT licences: [T3 licence](https://github.com/pingdotgg/t3code/blob/c6ca6056309904f89b90b6055d797973be0a0939/LICENSE) and [Hermes licence](https://github.com/NousResearch/hermes-agent/blob/109fd8161a509db5a00942152ba48882e446e8b0/LICENSE). When implementation adopts code, retain required donor notices and dependency licences. Reuse capability and architecture with original Mastermind branding/presentation; no proprietary assets or unverified code provenance is imported by this design work.
+
+**Visual verification.** Every one of the 38 new native boards was inspected at full screenshot scale by the principal or a bounded design/source advisor. The principal corrected actual text-fit issues in device/settings cards, a capability-state annotation, mobile light background, duplicate selector arrows and ambiguous control copy. Final readbacks verified the corrected US04 working-folder helper, explicit US09 personal-dictionary action and CS03 auth annotation. US17's complete provider setup card and helper Save action fit within the final frame. CW14 preserves link/stack distinctions; CW10 preserves estimated budget and source-workspace semantics. Advisory visual review is not GitHub approval or a new independent-review gate.
+
+**Native census.** Final `get_basic_info` reads returned exactly 14, 17, 4 and 3 artboards on p-U-0, p-V-0, p-W-0 and p-X-0 respectively, with every ID in Section 18.1 matching. The current CW13 root is `1J4C-0`; its superseded intermediate root is not part of the design map. Page order was read back equal to the requested 33-ID order. Directory entry `1MKF-0` was visually inspected and its heading/footer text read back.
+
+**Carrier reconciliation.** All final writes were confirmed on the original Mastermind Paper carrier with a fresh snapshot per mutation. The earlier CW06 lost response was reconciled as recorded in Section 17 before same-carrier creation; no unresolved Paper mutation remains. Slower state-board operations returned confirmed results and were not replayed.
+
+**Working-indicator release.** Operation `mmos-t3-full-design-20261109-c4-finish-owned` targeted the 38 current new artboard IDs plus directory `A2Q-0` (39 owned targets). The original carrier returned `APPLIED_RESPONSE_OBSERVED` and `OK`. No unrelated working indicators were cleared.
+
+**Durability and scope.** Native Paper is the editable design owner. This existing guide and PR #2345 remain the canonical source/build handoff; the owned Git diff remains the one design-guide path. Documentation self-check covers source/frame mappings, exact counts, conflict markers, whitespace and scoped claims. No app tests, runtime writes, provider calls, bot/scheduler launches, external messages, repository merge or deployment are part of this design result.
+
+**Reassessment.** The expanded Section 16 design ruler is met: donor study, all eight surfaces, all 22 settings families, Hermes/Fabric/Teamlink/DSH reconciliation, responsive layouts, negative states, native visual/readback proof and owned-indicator release are complete. The next different deliverable is implementation and real consumer qualification against this contract; it is not silently claimed as completed by the Paper work.
