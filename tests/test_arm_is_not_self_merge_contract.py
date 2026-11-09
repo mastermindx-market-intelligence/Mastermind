@@ -62,11 +62,15 @@ class ArmIsNotSelfMergeContractTests(unittest.TestCase):
                 with self.subTest(f=name, clause=clause):
                     self.assertIn(clause, contract)
 
-    def test_clarification_does_not_authorize_direct_protected_merge(self) -> None:
+    def test_clarification_still_forbids_bypass_paths(self) -> None:
         for name in ("AGENTS.md", "CLAUDE.md"):
-            contract = _extract_contract(ROOT / name).lower()
-            self.assertIn("never push directly to protected", contract)
-            self.assertIn("never self-approve", contract)
+            contract = _extract_contract(ROOT / name)
+            self.assertIn("admin-bypassed merge of protected `master`", contract)
+            self.assertIn("Never self-approve or self-merge", contract)
+        workflow = " ".join(
+            (ROOT / "docs" / "DELIVERY_WORKFLOW.md").read_text(encoding="utf-8").split()
+        )
+        self.assertIn("Do not use `--admin`, REST direct merge", workflow)
 
 
 if __name__ == "__main__":
