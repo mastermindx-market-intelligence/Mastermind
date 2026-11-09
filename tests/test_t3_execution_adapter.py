@@ -1067,6 +1067,74 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(adapter.result_ledger_entry("run-1"))
 
 
+def _import_live_proof_harness(name: str):
+    """Import one A2/A3 live-proof harness module from its directory."""
+    import importlib
+    import sys
+
+    harness_dir = str(
+        Path(__file__).resolve().parent.parent / "integrations" / "t3" / "live_proof"
+    )
+    added = harness_dir not in sys.path
+    if added:
+        sys.path.insert(0, harness_dir)
+    try:
+        return importlib.import_module(name)
+    finally:
+        if added:
+            sys.path.remove(harness_dir)
+
+
+class T3LiveProofHarnessTests(unittest.IsolatedAsyncioTestCase):
+    """The harness edits forced by the A3 API change (no live call made)."""
+
+    def test_live_proof_port_is_the_reference_port_with_typed_transport(self) -> None:
+        import socket
+        import urllib.error
+        from unittest import mock
+
+        harness = _import_live_proof_harness("t3_live_proof")
+        self.assertTrue(issubclass(harness.LiveT3McpPort, _t3m.T3McpToolPort))
+        self.assertEqual(
+            Path(harness.REPO).resolve(), Path(__file__).resolve().parent.parent
+        )
+        mcp = harness.McpHttp("unused-token")
+        port = harness.LiveT3McpPort(mcp, _session_token())
+        self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
+        cases = [
+            (urllib.error.URLError(ConnectionRefusedError()), "pre_send", None),
+            (urllib.error.URLError(socket.gaierror()), "pre_send", None),
+            (urllib.error.URLError(TimeoutError()), "after_send", None),
+            (TimeoutError("read timed out"), "after_send", None),
+            (ConnectionResetError("reset"), "after_send", None),
+        ]
+        for raised, phase, status in cases:
+            with self.subTest(raised=type(raised).__name__):
+                with mock.patch.object(harness.urllib.request, "urlopen", side_effect=raised):
+                    with self.assertRaises(_t3m.T3McpTransportError) as ctx:
+                        mcp.call_tool("t3_thread_launch", {})
+                self.assertEqual(ctx.exception.phase, phase)
+                self.assertEqual(ctx.exception.http_status, status)
+
+    async def test_canary_crash_hook_store_forwards_the_launch_claim(self) -> None:
+        canary = _import_live_proof_harness("t3_durable_canary")
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("T3_CANARY_CRASH_MODE", None)
+            store = canary.CrashHookStore(
+                _t3m.SQLiteT3AdapterStateStore(Path(tmp) / "state.sqlite3"),
+                Path(tmp) / "side.json", [],
+            )
+            adapter = T3ExecutionAdapter(
+                FakeT3Port(), lambda spec: _binding(), FakeInspector(),
+                clock=_clock, state_store=store,
+            )
+            ref = await adapter.start(_launch_spec())
+            self.assertEqual(adapter.retained_original_ref("run-1"), ref)
+
+
 def _neutral_ref_for(run_id: str) -> WorkerProcessRef:
     """A neutral ref shaped like the T3 adapter's, for mismatch tests."""
     from control_plane.t3_execution_adapter import _T3_REMOTE_BINARY_PLACEHOLDER
