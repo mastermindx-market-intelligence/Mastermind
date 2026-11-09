@@ -18,6 +18,11 @@ impl Inner {
         self.initial_sign_in_transaction_for(SignInIntent::PrimaryAccount)
     }
 
+    #[cfg(test)]
+    pub(super) fn begin_primary_for_test(&mut self) -> Result<String> {
+        self.begin_primary_sign_in()
+    }
+
     pub(super) fn primary_exchange_current(&mut self, pending: &Pending, client: &str) -> Result<()> {
         if pending.intent != SignInIntent::PrimaryAccount
             || !matches!(pending.resource, Resource::Acquisition | Resource::Content)

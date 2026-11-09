@@ -140,7 +140,9 @@ impl Inner {
             && self.token(Resource::Content).is_none()
             && self.content.is_none()
             && self.executive.is_none()
-            && matches!(self.executive_reason, ExecutiveReason::NotEstablished)
+            && (matches!(self.executive_reason, ExecutiveReason::NotEstablished)
+                || (anchor.intent == SignInIntent::PrimaryAccount
+                    && self.executive_reason == ExecutiveReason::AuthorizationRefused))
             && self.token(Resource::Acquisition).is_some_and(|token| {
                 token.value == anchor.acquisition
                     && token.expires == anchor.acquisition_expires
@@ -574,6 +576,81 @@ mod tests {
         assert!(pending.intent == SignInIntent::PrimaryAccount);
         assert!(inner.continuation_exchange_guard(&pending).is_ok());
         assert!(inner.executive.is_none());
+    }
+    fn held_primary_content() -> (Inner, String) {
+        let mut inner=Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        inner.executive_reason=ExecutiveReason::AuthorizationRefused;
+        inner.begin_primary_for_test().unwrap();
+        let a_state=inner.pending.as_ref().unwrap().state.clone();
+        let (a,_,_)=inner.consume(&format!("{CALLBACK}?state={a_state}&code=inert-primary-a")).unwrap();
+        inner.finish_exchange(&a,Ok(token("inert-primary-acquisition"))).unwrap();
+        let c_state=inner.pending.as_ref().unwrap().state.clone();
+        assert!(inner.pending.as_ref().unwrap().intent==SignInIntent::PrimaryAccount);
+        (inner,c_state)
+    }
+    fn held_primary_timeout() -> (Inner, String) {
+        let (mut inner,state)=held_primary_content();
+        let expired=Instant::now()-Duration::from_secs(1);
+        inner.pending.as_mut().unwrap().expires=expired;
+        assert!(inner.expire_transaction(inner.generation,expired,Instant::now()));
+        (inner,state)
+    }
+    #[test]
+    fn held_executive_refusal_primary_content_timeout_can_continue_content_only() {
+        let (mut inner,_)=held_primary_timeout();
+        assert!(inner.token(Resource::Acquisition).is_some());
+        assert_eq!(inner.continuation_status().state,"ELIGIBLE");
+        let anchor=inner.begin_continuation_check().unwrap();
+        assert!(anchor.intent==SignInIntent::PrimaryAccount);
+        let proof=account(Resource::Acquisition,anchor.acquisition_wall,&"a".repeat(64));
+        inner.open_content_continuation(&anchor,proof).unwrap();
+        let c_state=inner.pending.as_ref().unwrap().state.clone();
+        let (pending,_,_)=inner.consume(&format!("{CALLBACK}?state={c_state}&code=inert-primary-c")).unwrap();
+        let witness=pending.continuation.as_ref().unwrap();
+        assert!(pending.intent==SignInIntent::PrimaryAccount);
+        inner.continuation_exchange_guard(&pending).unwrap();
+        inner.finish_content_continuation(pending.generation,witness,Ok((token("inert-content"),
+            account(Resource::Acquisition,anchor.acquisition_wall,&"a".repeat(64)),
+            account(Resource::Content,anchor.acquisition_wall,&"a".repeat(64))))).unwrap();
+        assert!(inner.token(Resource::Content).is_some() && inner.executive.is_none() && inner.pending.is_none());
+        assert_eq!(inner.executive_reason,ExecutiveReason::AuthorizationRefused);
+    }
+    #[test]
+    fn held_executive_refusal_never_reopens_actual_content_denial() {
+        for late in [false,true] {
+            let (mut inner,state)=if late {held_primary_timeout()} else {held_primary_content()};
+            assert!(inner.consume(&format!("{CALLBACK}?state={state}&error=access_denied")).is_err());
+            assert_eq!(inner.continuation_status().state,"INELIGIBLE");
+            assert!(inner.begin_continuation_check().is_err());
+            if late {inner.reason=Some("AUTH_TRANSACTION_EXPIRED");assert!(inner.begin_continuation_check().is_err());}
+            assert_eq!(inner.executive_reason,ExecutiveReason::AuthorizationRefused);
+            assert!(inner.executive.is_none());
+        }
+    }
+    #[test]
+    fn held_executive_refusal_legacy_purpose_remains_ineligible() {
+        let mut inner=Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        inner.executive_reason=ExecutiveReason::AuthorizationRefused;
+        inner.acquisition=Some(token("inert-acquisition"));
+        inner.transaction_for(Resource::Content,SignInIntent::LegacyFull).unwrap();
+        let expired=Instant::now()-Duration::from_secs(1);inner.pending.as_mut().unwrap().expires=expired;
+        inner.expire_transaction(inner.generation,expired,Instant::now());
+        assert!(inner.content_timeout.is_none());assert_eq!(inner.continuation_status().state,"INELIGIBLE");
+        assert!(inner.begin_continuation_check().is_err());
+    }
+    #[test]
+    fn held_executive_refusal_does_not_bypass_any_retained_anchor_guard() {
+        for fault in 0..6 {
+            let (mut inner,_)=held_primary_timeout();
+            match fault {0=>inner.acquisition.as_mut().unwrap().expires=Instant::now(),
+                1=>inner.acquisition=Some(token("foreign-acquisition")),2=>inner.generation+=1,
+                3=>inner.client_id=Some("foreign-client".into()),4=>inner.executive=Some(token("foreign-executive")),
+                _=>inner.executive_reason=ExecutiveReason::TokenExchangeFailed}
+            assert_eq!(inner.continuation_status().state,"INELIGIBLE");
+            assert!(inner.begin_continuation_check().is_err());
+        }
     }
     fn account(resource: Resource, wall: SystemTime, digest: &str) -> AccountIdentity {
         let kind = if resource == Resource::Acquisition {
