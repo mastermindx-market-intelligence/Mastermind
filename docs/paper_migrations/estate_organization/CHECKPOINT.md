@@ -4,23 +4,23 @@ Operation: `paper-estate-organization-20261108-c1`.
 
 ## Current outcome and frontier
 
-Chairman asks for estate-wide organization for AI workers learning designs, editing Paper and preparing implementation. Make exact source scope, roles and next reading action explicit; preserve historical requirements and live writers. MISSION_COMPLETE: false. 36 of 50 planned file-local guides are readback-verified. Current mixed-time metadata snapshot: 83 resources, 80 readable design files, 600 pages, 19 dividers. Each record carries freshness; metadata is not adoption proof.
+Chairman asks for estate-wide organization for AI workers learning designs, editing Paper and preparing implementation. Make exact source scope, roles and next reading action explicit; preserve historical requirements and live writers. MISSION_COMPLETE: false. 50 of 50 planned file-local guides are readback-verified. Current mixed-time metadata snapshot: 83 resources, 80 readable design files, 611 pages, 19 dividers. Each record carries freshness; metadata is not adoption proof.
 
-Next exact action: continue the existing guide plan for **Bonds · Decision Workspace · Source Revisions**, file `01M6Y3RNXNXP3YX0NFBT0YEXS4`, prefix `peo-20261109-c1-local-37`. Inspect for pre-existing/partial content before any edit.
+Next exact action: complete estate-wide link/source-role and consumer navigation proof; correct remaining misleading source-selection routes, then qualify and deliver the existing source PR.
 
 ## Authority and carriers
 
-Current outer Chairman instruction resumes this same operation. Protected law pin `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09`, compatible skillpack 1.0.1; Macro design pin `cf07e7a73334c646a09c043647c43e43ee6e4060`. Source branch `sol/paper-estate-organization-20261108-c1`, PR [#2364](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364), parent before this save `61099a107c66754c707b64af98d9d65998118dd2`. Same GitHub-native expected-head CAS and Mastermind Paper edit carrier. No local worktree or new runtime/queue/watcher. The assigned principal owns recovery; native advisers do bounded navigation reasoning only. Direct reasons: PRINCIPAL_JUDGMENT / UNIQUE_APPROVED_ACCESS / LOWER_TOTAL_OVERHEAD. WHY NOT FABLE: no separate scarce principal needed for these bounded judgments.
+Current outer Chairman instruction resumes this same operation. Protected law pin `9e6659c4a49ee6f11a6f6ee690d222ce81d67b09`, compatible skillpack 1.0.1; Macro design pin `cf07e7a73334c646a09c043647c43e43ee6e4060`. Source branch `sol/paper-estate-organization-20261108-c1`, PR [#2364](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2364), parent before this save `054e2d56da34f5f067a1917a1589ff571802e599`. Same GitHub-native expected-head CAS and Mastermind Paper edit carrier. No local worktree or new runtime/queue/watcher. The assigned principal owns recovery; native advisers do bounded navigation reasoning only. Direct reasons: PRINCIPAL_JUDGMENT / UNIQUE_APPROVED_ACCESS / LOWER_TOTAL_OVERHEAD. WHY NOT FABLE: no separate scarce principal needed for these bounded judgments.
 
 ## Applied and recovered progress
 
 - Preserve the previous 20-guide checkpoint and all original organization work.
 - Three complete guides beyond that checkpoint were recovered read-only: Hub `p-1-0 / 8MN-0`, Intraday `p-2-0 / I6-0`, Breadth `p-9-0 / 4RX-0`. No original effects were replayed or fabricated. See [recovery receipt](effects/agent-navigation-resume-recovery.json).
 - Ontology's existing empty `p-9-0` was completed at `BDU-0`, preserving the page ID. All new/completed guide targets are in FILE_INDEX.json `agent_entry` and [continuation verification](effects/agent-navigation-resume-verification.json).
-- Owned continuation effects: 156 applied-response operations, all on the same carrier, with bounded source chunks listed by EFFECTS.json. Every completed guide has JSX content/route readback, original page preservation and finished exact-target working indicator. No unresolved owned mutation.
+- Owned continuation effects: 288 applied-response operations, all on the same carrier, with bounded source chunks listed by EFFECTS.json. Every completed guide has JSX content/route readback, original page preservation and finished exact-target working indicator. No unresolved owned mutation.
 - Native screenshot of Ontology `BDU-0` is readable without clipping/overlap. Other visual observations remain scoped to their recorded targets; no blanket visual or runtime acceptance.
 - Consumer reasoning found and prompted corrections: Intraday's central-directory dead end is replaced by explicit draft scan/evidence targets and unresolved source selection; Hub's guide-to-parent instruction is explicit and missing AP-0 remains visibly unresolved while empty held 157-0 is preserved; Ontology identifies 4SA-0 as the board and 4T3-0 as text.
-- Current structured validation: 83 unique resource identities; 196 exact file/page routes; 36 local guide entries; original baseline pages retained. Source/role and visual verification continue.
+- Current structured validation: 83 unique resource identities; 196 exact file/page routes; 50 local guide entries; original baseline pages retained. Source/role and visual verification continue.
 
 ## Prior work and remaining boundaries
 

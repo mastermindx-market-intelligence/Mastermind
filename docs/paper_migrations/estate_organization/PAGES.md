@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T12:56:11.186Z. 600 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T13:05:37.333Z. 611 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
@@ -676,10 +676,11 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M38EVF74SJWG1G
 
 Role: retained_reference. Retained Bonds source revisions include more than R1. Keep individual revision identity and compare by workflow with R33.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-3-0) | — |
 | `p-1-0` | [Bonds · Decision workspace · Retained revisions](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-1-0) | Bonds · Decision Workspace · R1 · 2026-09-26 |
 | `p-2-0` | [Build · Source coverage & recovery](https://app.paper.design/file/01M6Y3RNXNXP3YX0NFBT0YEXS4/p-2-0) | — |
 
@@ -687,10 +688,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Bonds R33/transmission start1-0 and implementation map11G-0. Recorded candidate#9578 BUILT_NOT_PROVEN; bounded interactive reference verification is not production acceptance.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-3-0) | — |
 | `p-1-0` | [Bonds · Decision & Credit Studies · Revision index](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0) | — |
 | `p-2-0` | [Cross-Asset · Bonds × Forex Transmission & Confluence · Studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-2-0) | — |
 
@@ -745,10 +747,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-3-0) | — |
 | `p-1-0` | [Forex · Advanced Movement & Decision Studies · R17–R24](https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-1-0) | — |
 | `p-2-0` | [REFERENCE · Forex Alternate R19–R21 Studies](https://app.paper.design/file/01M6Y3PVKKXC83MRGJYCX77959/p-2-0) | — |
 
@@ -756,20 +759,22 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Existing decisions1-0, source mappingU-0 and return contract2H-0. Preserve currency/pair direction, measure basis and gated watches.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-2-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-2-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-2-0) | — |
 | `p-1-0` | [Forex · Guided intelligence · Source revisions](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0) | Forex · Guided Intelligence · R1 · 2026-09-26 |
 
 ## Bot Paper Portfolio · V3 Design · 01M6Y3AT0XJBWTM3AVCMBJQ8TE
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-3-0) | — |
 | `p-1-0` | [Bot Paper Portfolio · V3 Upgrade · 2026-10-09](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0) | — |
 | `p-2-0` | [R4 · Account and navigation contract](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-2-0) | — |
 
@@ -798,10 +803,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-3-0) | — |
 | `p-1-0` | [Returns Calendar · Terminal + Dossier](https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-1-0) | — |
 | `p-2-0` | [R4 · Build contracts](https://app.paper.design/file/01M6Y39WH7QVTH07RTWHTSRP65/p-2-0) | — |
 
@@ -822,11 +828,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. WORKING SOURCE: original Terminal remains authoritative for each family until a recorded family-specific cutover. STAGING: #2357 records two verified pages (Builder and Personal Desk) in Portfolio file 01M6Z6PYK9BAV3ECXFC575JYT7; Objects and Returns are pending, with no family cutover. Refresh #2357 and C9 for current transfer status; the 2c0ff415 map and older F03 action count are separate dated records. Preserve held p-1-0 / 189S-0 (#770) and empty p-Q-0 / 1B5H-0 (#804); ordinary family routing does not clear their holds.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-R-0` | [00 · TERMINAL · Start Here · Product Directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0) | — |
+| `p-R-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0) | 00 · TERMINAL · Start Here · Product Directory |
 | `p-1G-0` | Divider | — |
 | `p-X-0` | [Terminal Portfolio · Builder + Acceptance References](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) | — |
 | `p-Y-0` | [Terminal · Portfolio · Personal Desk · 2026-10-11](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0) | — |
@@ -890,23 +896,24 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. R1 desktop and some mobile baseline; source-qualified owning contracts on p-3-0. Preserve later mobile amendments separately.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-3-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0) | Build · Origin & interaction contracts |
 | `p-1-0` | [W1 · Sector origin → Exposure → Change · 2026-10-21](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0) | — |
 | `p-4-0` | [User help · Methods & behavior](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-4-0) | — |
-| `p-3-0` | [Build · Origin & interaction contracts](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-3-0) | — |
 | `p-2-0` | [W3 · Flow → Volatility → Watch & review · 2026-10-21](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-2-0) | — |
 
 ## Options · Mobile Studies · R1 · 2026-10-21 · 01M5FNCKAND6CBSJNYM5FZWR8Y
 
 Role: retained_reference. Substantive watch/review amendments p-2/p-3 and Flow/volatility amendments p-4/p-5. Original U08 study remains p-1; not merely resized screenshots.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-6-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-6-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-6-0) | — |
 | `p-1-0` | [U08 · Watch & review · Mobile study](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-1-0) | — |
 | `p-2-0` | [Amendment · Watch & review](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-2-0) | — |
 | `p-3-0` | [Build · Review amendment](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-3-0) | — |
@@ -917,20 +924,22 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: retained_reference. Macro options.html dated research workspace; distinct from Terminal D08 candidates and planning owners. Source binding 1ZN-0.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-2-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-2-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-2-0) | — |
 | `p-1-0` | [Options · Research Desk · R1 · 2026-11-02](https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-1-0) | — |
 
 ## PROPHET · 01M3NT5Y3G5HTJHVR0K5W2MDJM
 
 Role: working_design. D03 build contract p-D-0 remains explicitly DRAFT. Flagship workspace p-F-0 is a newly observed Turn 2 candidate, not an accepted replacement inferred by this index. Inspect both scope/contract and candidate for the assigned work; preserve original ZE5-0 effect custody.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-G-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-G-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-G-0) | — |
 | `p-D-0` | [00 · Start here · D03 build contract · DRAFT](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0) | — |
 | `p-C-0` | [01 · Opportunity studies · R7–R8 · DRAFT](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0) | — |
 | `p-F-0` | [02 · Flagship workspace · Turn 2 candidate](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-F-0) | — |
@@ -951,10 +960,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. Reuse R10 workbench directory1ZA-0, Save/Resume p-8-0 and Buildp-9-0; preserve interrupted-response recovery.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-C-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
+| `p-C-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-C-0) | — |
 | `p-1-0` | [00 · R10 · Chat workbench · Start here](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0) | — |
 | `p-B-0` | [Proposed · Draft mention context](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-B-0) | — |
 | `p-8-0` | [R10 · Save + Resume · Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0) | — |
@@ -971,12 +981,13 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. CURRENT DESIGN ENTRY: p-D-0 / KSB-0 (AT00). Follow the exact product screen to its states/build page. The protected-master workflow audit and #2345 plan are linked from KSB-0 / Q9I-0 / ZM6-0; each retains its own acceptance status. New Code/Settings designs and simulated interactions do not establish runtime adoption. Preserve source-reader custody at p-D-0 / SPU-0 and STU-0, and text node T0J-0 inside SXU-0 on p-E-0. Earlier workflow/recovery pages and source-only archives do not override current Atelier design scope. Keep Atelier's own theme.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-1-0` | [00 · Start here · OS design map](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0) | — |
+| `p-1-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-1-0) | 00 · Start here · OS design map |
 | `p-D-0` | [12 · Canonical Atelier · Mastermind OS](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0) | — |
+| `p-J-0` | [12C · Company · Always-on team](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-J-0) | 12C · Meta-CEO & Supervision · Canonical Atelier |
 | `p-O-0` | [15 · Team & Delivery · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-O-0) | — |
 | `p-R-0` | [16 · Team conversations · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-R-0) | — |
 | `p-U-0` | [17 · Code workspace · Product](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-U-0) | — |
@@ -985,7 +996,6 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 | `p-P-0` | [15A · Team & Delivery · States](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-P-0) | — |
 | `p-H-0` | [12A · Projects & Evidence · Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0) | — |
 | `p-I-0` | [12B · Decisions & Plans · Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-I-0) | — |
-| `p-J-0` | [12C · Meta-CEO & Supervision · Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-J-0) | — |
 | `p-K-0` | [12D · Sessions & Access · Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-K-0) | — |
 | `p-T-0` | [16B · Team conversations · Build](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-T-0) | — |
 | `p-S-0` | [16A · Team conversations · States](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-S-0) | — |
@@ -994,6 +1004,7 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 | `p-E-0` | [13 · Daily Experience · Flow + Builder Notes](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0) | — |
 | `p-N-0` | [UX08 · Source availability](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-N-0) | — |
 | `p-L-0` | Divider | — |
+| `p-Y-0` | [REF · 12C office and control contracts · Superseded UI](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-Y-0) | — |
 | `p-C-0` | [11 · Chat Atelier · Interaction references](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-C-0) | — |
 | `p-F-0` | [14 · Market design redirects · Reference](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-F-0) | — |
 | `p-G-0` | [ARCHIVE · Market Shell References · Not for OS Build](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-G-0) | — |
@@ -1013,11 +1024,11 @@ Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G
 
 Role: working_design. R5 has recorded release lineage; later R7–R9 adoption is unestablished. Use local design/build map p-A-0.
 
-Agent guide: [estate protocol](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0).
+Agent guide: [local Agent README](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
-| `p-A-0` | [Start here / Design & build map](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0) | — |
+| `p-A-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-A-0) | Start here / Design & build map |
 | `p-3-0` | [00 / Foundations and components](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-3-0) | — |
 | `p-9-1` | [08 / R9 / Solutions · Editorial + Professional](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-9-1) | — |
 | `p-8-0` | [07 / R7 / Consumer flagship + business](https://app.paper.design/file/01M6JNN71ZN4867VJZ83PPXQZ0/p-8-0) | — |

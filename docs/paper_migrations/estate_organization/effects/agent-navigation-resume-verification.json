@@ -1,12 +1,12 @@
 {
   "schema": "paper.estate.guide_verification.v1",
-  "observed_at": "2026-11-09T12:56:11.204Z",
+  "observed_at": "2026-11-09T13:05:37.348Z",
   "validation": {
     "passed": true,
     "failures": [],
     "files": 83,
     "routes": 196,
-    "guides": 36
+    "guides": 50
   },
   "guide_verifications": [
     {
@@ -200,6 +200,216 @@
         "product_excluded": true
       },
       "observed_at": "2026-11-09T12:45:18.278Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+      "page_id": "p-3-0",
+      "node_id": "3PD-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:56:50.238Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
+      "page_id": "p-3-0",
+      "node_id": "3ST-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:57:16.681Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
+      "page_id": "p-3-0",
+      "node_id": "3AW-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:57:51.629Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "page_id": "p-2-0",
+      "node_id": "B7Q-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:58:49.088Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+      "page_id": "p-3-0",
+      "node_id": "2F7-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:59:24.049Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+      "page_id": "p-3-0",
+      "node_id": "1D1-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T12:59:51.070Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "page_id": "p-R-0",
+      "node_id": "28UR-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:00:47.247Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "page_id": "p-3-0",
+      "node_id": "18L-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:01:29.103Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "page_id": "p-6-0",
+      "node_id": "MU-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:02:06.098Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "page_id": "p-2-0",
+      "node_id": "1ZT-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:02:49.004Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "page_id": "p-G-0",
+      "node_id": "1FD3-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:03:20.689Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "page_id": "p-C-0",
+      "node_id": "7KD-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:03:46.398Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "page_id": "p-1-0",
+      "node_id": "1QJZ-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:04:48.539Z",
+      "original_page_ids_preserved": true,
+      "original_guide_children_preserved": true
+    },
+    {
+      "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "page_id": "p-A-0",
+      "node_id": "6ND-0",
+      "checks": {
+        "title": true,
+        "routes": true,
+        "qualification": true,
+        "footer": true,
+        "product_excluded": true
+      },
+      "observed_at": "2026-11-09T13:05:29.895Z",
       "original_page_ids_preserved": true,
       "original_guide_children_preserved": true
     }

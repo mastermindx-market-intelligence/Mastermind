@@ -332,18 +332,18 @@
     }
   },
   "agent_navigation_continuation": {
-    "observed_at": "2026-11-09T12:56:11.199Z",
-    "source_parent": "61099a107c66754c707b64af98d9d65998118dd2",
-    "guide_count": 36,
+    "observed_at": "2026-11-09T13:05:37.343Z",
+    "source_parent": "054e2d56da34f5f067a1917a1589ff571802e599",
+    "guide_count": 50,
     "planned": 50,
     "validation": {
       "passed": true,
       "failures": [],
       "files": 83,
       "routes": 196,
-      "guides": 36
+      "guides": 50
     },
-    "own_operation_count": 156,
+    "own_operation_count": 288,
     "guide_evidence": "effects/agent-navigation-resume-verification.json",
     "recovered_evidence": "effects/agent-navigation-resume-recovery.json",
     "consumer_repairs": true,
