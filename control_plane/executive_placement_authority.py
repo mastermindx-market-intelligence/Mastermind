@@ -567,7 +567,6 @@ def issue_execution_binding(*, spec: Mapping[str, Any], decision: PlacementDecis
                             lease_expires_at_ms: int) -> ExecutionBinding:
     request = child_request_of(spec)
     route = spec["route"]
-    expiry = datetime.fromtimestamp(lease_expires_at_ms / 1000, tz=timezone.utc)
     decision_ref = ("routing-decision:" + _digest(request.routing_decision.to_dict())
                     if request.routing_decision is not None else "")
     return ExecutionBinding(
@@ -594,5 +593,23 @@ def issue_execution_binding(*, spec: Mapping[str, Any], decision: PlacementDecis
         host_boot_id=decision.boot_id,
         assignment_generation=attempt_number,
         fence_counter=fence_counter,
-        lease_expiry=expiry.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+        lease_expiry=_lease_expiry(lease_expires_at_ms),
     )
+
+
+def _lease_expiry(lease_expires_at_ms: int) -> str:
+    expiry = datetime.fromtimestamp(lease_expires_at_ms / 1000, tz=timezone.utc)
+    return expiry.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def reissue_execution_binding(binding: ExecutionBinding, *, fence_counter: int,
+                              lease_expires_at_ms: int) -> ExecutionBinding:
+    """The same assignment under a rotated fence (supervisor adoption).
+
+    Only ``fence_counter`` and ``lease_expiry`` move; every identity, route,
+    host and quota field is the claim-time value.
+    """
+    if fence_counter <= binding.fence_counter:
+        raise ValueError("re-issued ExecutionBinding must advance the fence")
+    return dataclasses.replace(binding, fence_counter=fence_counter,
+                               lease_expiry=_lease_expiry(lease_expires_at_ms))
