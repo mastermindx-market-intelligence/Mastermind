@@ -1376,6 +1376,103 @@ _R10_KEEP_COMMAND_POSITION = frozenset({
     "!", "{", "do", "elif", "else", "if", "then", "time", "until", "while",
 })
 
+# --- r11 (REVIEW6 N5/N6/N7) additions to the r10 reading ---------------------
+#
+# N5 — arithmetic. Inside ``$((…))``, a ``((…))`` command and ``for ((…))``
+# neither bash 3.2 nor zsh reads ``#`` as a comment or ``<<`` as a
+# here-document (measured: ``echo $(( 1 # 2⏎)) after`` → "operator expected
+# at `# 2`" in both; ``echo $(( 1 << 2 ))⏎2`` prints 4 then runs ``2``);
+# r10 read the text as a subshell, so ``(( 1 # $($(…)ool …) ))`` was a
+# comment and ``(( y = 1 << 2 ))`` opened a here-document. r11 reads an
+# ARITHMETIC CONTEXT (``_R10Text.arith``): ``#`` and ``<<`` are literal,
+# parentheses nest, constructs are read (their bodies as script) and the
+# words between them are still judged (an over-read: a shell that falls
+# back to a subshell would run them). Fail closed (in scope) where the two
+# shells' readings can part: a quote at the arithmetic level (zsh ignores
+# quotes for the extent, bash honours them: ``$(( ")" ))``) — except a
+# double-quoted span holding none of ``( ) { } ' ` \`` (``(( "$n" > 3 ))``,
+# the same extent in both); ``$'``/``$"``;
+# a quote inside a ``${…}`` there; a ``)`` closing the context that is not
+# ``))`` (both shells fall back to a subshell/command substitution, by
+# different rules); an unterminated context; a ``#`` at a word start (after
+# a blank, newline or operator character) whose rest of line holds
+# ``( ) ' " ` $ \`` (a shell reading it as a comment could end the context
+# elsewhere; ``16#ff``, zsh ``[##36]`` are not word starts). Only a ``((``
+# in command position (not glued, not inside an uncertain group, see N8)
+# or after ``for`` is read this way; ``$((`` always is.
+#
+# N6 — ``${…}``. Inside double quotes BOTH shells end ``${`` at the FIRST
+# ``}`` (measured: ``"[${x:-{}]"`` and ``"[${x:-{a}b}]"`` print ``[{]`` and
+# ``[{ab}]`` in both); r10 counted braces there. Unquoted, bash ends at the
+# first ``}`` and zsh counts: once bash's end is passed, any character but
+# ``}`` fails closed at once (r10 read on and an unterminated quote there
+# raised a resync that DROPPED the word). An unterminated quote/backtick
+# inside any construct (``${…}``, ``$[…]``, ``$(…)``, ``$((…))``, ``<(…)``)
+# is in scope (``_R10Fail``), never a silent resync.
+#
+# N7 — words as deferred script. A word is judged whole (r10) AND in
+# FRAGMENTS: its literal parts split at blanks/newlines/operators (once as
+# written, once with quotes and backslashes deleted), each fragment run
+# through the r8 spelling DP — ``eval "$(…)ool run …"`` /
+# ``bash -c "$(…)ool …"`` is the script ``<value>ool run …``. The deferred
+# re-reading of a word holding a quoted ``$``/backtick now reads the WHOLE
+# word once, a placeholder standing for each computed part (read as a
+# computed item wherever it lands), instead of literal runs cut at each
+# computed part (``"x=\$(cat ${F}); echo \$x"`` left ``x=$(cat `` open —
+# an availability refusal — and a cut run never saw a construct glued to
+# the literal text after it).
+#
+# N8 (found by Director C10) — parentheses that are not a subshell. zsh
+# reads a ``(`` in argument position, glued to a word (also a here-document
+# delimiter word), in a case pattern or as a redirection target as a GLOB
+# GROUP: ``#`` is literal there, blanks and newlines do not end it, every
+# construct in it runs, and ``;``/``&``/``<``/``>`` end the WORD, dropping
+# the open group (measured: ``echo (1 # $(…))``, ``echo a(1 # $(…))``,
+# ``case x in (x # $(…)) …``, ``for x in (a # $(…))``, ``: > (x # $(…))``,
+# ``noglob (x # $(…)⏎)``; ``$(: a( "(" & printf p)`` ends at the ``)``);
+# zsh AND bash read ``[[ a =~ (a # $(…)) ]]`` the same way. r10 read every
+# ``(`` as a subshell, so the ``#`` hid the rest of the line. r11 keeps the
+# subshell reading only for a ``(`` that is surely one: command position,
+# not glued (no word in progress and no word character just before), not
+# a redirection target, not inside ``[[ … ]]``, not inside such a group.
+# Every other ``(`` opens an UNCERTAIN group, where a word-start ``#`` is
+# read BOTH ways: the rest of the line is read on its own as script with
+# every ``#`` in it literal, then skipped as the comment it is in a
+# subshell. When that skipped region holds a paren, quote or backtick (zsh
+# counts it, this reading did not: ``echo (a # (⏎)⏎(b # $(…))``) — or a
+# ``;``/``&``/``<``/``>`` ends zsh's word inside an uncertain group — the
+# structure past it may differ from zsh's: inside a ``$(…)``/``<(…)`` that
+# fails closed (zsh may end the substitution elsewhere:
+# ``$(printf p; : "("; : (a # )⏎)ool …; : (b # (⏎))`` runs ``pool``); at the
+# top level every later ``(`` is uncertain and every later word-start ``#``
+# is read both ways (sticky). A ``((`` in an uncertain position that is not
+# glued may be arithmetic (zsh: ``repeat 1 ((``, ``coproc ((``, ``>f ((``;
+# both shells: a case arm after ``(pattern)``, ``f() ((``): ``<<`` inside
+# it fails closed (a shift there, a here-document in a subshell). Case
+# patterns: after ``case WORD in`` and after a case terminator (``;;``,
+# ``;&``, ``;;&``, zsh ``;|``) a pattern follows, also across newlines and
+# ``;`` (zsh accepts ``;; ;`` and ``;;⏎(…)``), until a bare ``pattern)``
+# (then a case arm: command position) or ``(pattern)``'s ``)`` (an arm,
+# left uncertain); after a group's ``)`` an operator follows. Inside
+# ``[[ … ]]`` no position is a command position (``[[ a =~ ⏎(…) ]]``).
+#
+# Line continuations: a backslash-newline joins ``$`` to ``(``/``{``
+# (``$\⏎(…)ool`` runs in both shells; r10 missed it). The text is also read
+# with every ``\⏎`` removed (union; an over-read inside single quotes).
+
+#: Stands for a computed part inside re-read deferred text (never in
+#: text a shell runs: argv cannot hold NUL); read as a computed item.
+_R11_PLACEHOLDER = "\x00"
+_R11_FRAGMENT_SPLIT_RE = re.compile(r"[ \t\n;&|<>()]+")
+_R11_QUOTES_RE = re.compile(r"[\"'\\]")
+_R11_FRAGMENT_TRIGGER_RE = re.compile(r"[ \t\n;&|<>()\"'\\]")
+_R11_ARITH_PLAIN_RE = re.compile(r"[^ \t\n()\\'\"`$#;&|<>]+")
+_R11_ARITH_COMMENT_RISK_RE = re.compile(r"[()'\"`$\\]")
+#: A skipped comment region holding one of these makes uncertainty sticky.
+_R11_REGION_STRUCTURE_RE = re.compile(r"[()'\"`]")
+#: Characters that make a double-quoted span in arithmetic not inert.
+_R11_ARITH_DQ_RISK_RE = re.compile(r"[(){}'`\\]")
+
 
 class _R10Found(Exception):
     """A word can spell a wrapper: in scope."""
@@ -1394,37 +1491,44 @@ class _R10Stop(Exception):
 
 
 class _R10Word:
-    """Items of one shell word, and the literal runs between its computed
-    parts. A run is re-read as script when a QUOTED or escaped piece of it
-    holds ``$`` or a backtick (deferred text: ``bash -c '$(…)'``); an
-    unquoted literal ``$`` (``${`` with no ``}`` after it) was already read
-    as script here and is not re-read."""
+    """Items of one shell word, and its text as deferred script. The word
+    is re-read as script when a QUOTED or escaped piece of it holds ``$`` or
+    a backtick (deferred text: ``bash -c '$(…)'``); an unquoted literal
+    ``$`` (``${`` with no ``}`` after it) was already read as script here
+    and does not make it live. r11 (REVIEW6 N7): the re-read text is the
+    WHOLE word, each computed part replaced by ``_R11_PLACEHOLDER`` (r10 cut
+    it into literal runs at each computed part)."""
 
-    __slots__ = ("items", "runs", "run", "live", "quoted")
+    __slots__ = ("items", "parts", "live", "quoted", "mixed")
 
     def __init__(self) -> None:
         self.items: list = []
-        self.runs: list[str] = []
-        self.run: list[str] = []
+        self.parts: list[str] = []
         self.live = False
         self.quoted = False
+        #: holds a computed item (fragment judging applies)
+        self.mixed = False
 
     def lit(self, text: str, *, deferred: bool = True) -> None:
         if text:
-            self.items.append(("lit", text.lower()))
-            self.run.append(text)
+            if _R11_PLACEHOLDER in text:
+                # a computed part of re-read deferred text: a computed item
+                for number, piece in enumerate(text.split(_R11_PLACEHOLDER)):
+                    if number:
+                        self.items.append(("any", ""))
+                        self.mixed = True
+                    if piece:
+                        self.items.append(("lit", piece.lower()))
+            else:
+                self.items.append(("lit", text.lower()))
+            self.parts.append(text)
             if deferred and ("$" in text or "`" in text):
                 self.live = True
 
-    def flush(self) -> None:
-        if self.run and self.live:
-            self.runs.append("".join(self.run))
-        self.run = []
-        self.live = False
-
     def computed(self, items: list) -> None:
         self.items.extend(items)
-        self.flush()
+        self.parts.append(_R11_PLACEHOLDER)
+        self.mixed = True
 
     def plain(self) -> str:
         """The word's text when it is wholly unquoted literal (else "")."""
@@ -1433,8 +1537,9 @@ class _R10Word:
         return "".join(text for _, text in self.items)
 
 
-def _r10_read(text: str, depth: int) -> None:
-    """Read ``text`` as a script (raises ``_R10Found``/``_R10Fail``)."""
+def _r10_read(text: str, depth: int, *, comments: bool = True) -> None:
+    """Read ``text`` as a script (raises ``_R10Found``/``_R10Fail``);
+    ``comments=False`` (r11): a word-start ``#`` is literal."""
     if "$" not in text and "`" not in text:
         return  # nothing computed: literal and glob words are read elsewhere
     if depth > _R10_MAX_DEPTH:
@@ -1443,32 +1548,66 @@ def _r10_read(text: str, depth: int) -> None:
     position = 0
     for _ in range(_R10_MAX_RESYNCS + 1):
         try:
-            reader.script(position, depth, None)
+            reader.script(position, depth, None, comments=comments)
             return
         except _R10Stop as stop:
             position = stop.position + 1
     raise _R10Fail()
 
 
+def _r10_items_name_wrapper(items: list) -> bool:
+    """r10's word rule over one item sequence: a wholly literal sequence
+    whose basename is a wrapper, or a sequence with a computed item that can
+    spell one using ≥ 1 fixed literal (a wholly computed one names nothing)."""
+    if not items:
+        return False
+    if all(kind == "lit" for kind, _ in items):
+        value = "".join(text for _, text in items)
+        return value.rsplit("/", 1)[-1] in _R6_WRAPPER_BASENAMES
+    compact: list = []
+    for item in items:
+        if not (item[0] == "any" and compact and compact[-1][0] == "any"):
+            compact.append(item)
+    return not all(kind == "any" for kind, _ in compact) and any(
+        _r8_items_spell(compact, name) for name in _R6_WRAPPER_BASENAMES
+    )
+
+
+def _r11_fragments_name_wrapper(items: list) -> bool:
+    """r11 (REVIEW6 N7): the word's items split at blanks/newlines/operators
+    inside its literal parts — once as written, once with quotes and
+    backslashes deleted (the script a shell re-reads joins them) — and each
+    fragment judged by r10's word rule. ``eval "$(…)ool run …"`` → the
+    fragment ``<any>ool``."""
+    for strip in (False, True):
+        fragment: list = []
+        for kind, payload in items:
+            if kind != "lit":
+                fragment.append((kind, payload))
+                continue
+            text = _R11_QUOTES_RE.sub("", payload) if strip else payload
+            for number, piece in enumerate(_R11_FRAGMENT_SPLIT_RE.split(text)):
+                if number:
+                    if _r10_items_name_wrapper(fragment):
+                        return True
+                    fragment = []
+                if piece:
+                    fragment.append(("lit", piece))
+        if _r10_items_name_wrapper(fragment):
+            return True
+    return False
+
+
 def _r10_judge(word: _R10Word, depth: int) -> None:
-    word.flush()
     items = word.items
-    if items:
-        if all(kind == "lit" for kind, _ in items):
-            value = "".join(text for _, text in items)
-            if value.rsplit("/", 1)[-1] in _R6_WRAPPER_BASENAMES:
-                raise _R10Found()
-        else:
-            compact: list = []
-            for item in items:
-                if not (item[0] == "any" and compact and compact[-1][0] == "any"):
-                    compact.append(item)
-            if not all(kind == "any" for kind, _ in compact) and any(
-                _r8_items_spell(compact, name) for name in _R6_WRAPPER_BASENAMES
-            ):
-                raise _R10Found()
-    for run in word.runs:
-        _r10_read(run, depth + 1)
+    if _r10_items_name_wrapper(items):
+        raise _R10Found()
+    if word.mixed and any(
+        kind == "lit" and _R11_FRAGMENT_TRIGGER_RE.search(text) for kind, text in items
+    ) and _r11_fragments_name_wrapper(items):
+        raise _R10Found()
+    if word.live:
+        _r10_read("".join(word.parts), depth + 1)
 
 
 class _R10Text:
@@ -1484,9 +1623,13 @@ class _R10Text:
         self.last_paren = text.rfind(")")
 
     # -- script -----------------------------------------------------------
-    def script(self, index: int, depth: int, closer: str | None) -> int:
+    def script(
+        self, index: int, depth: int, closer: str | None, *, comments: bool = True
+    ) -> int:
         """Read script text from ``index``; with ``closer`` ``")"`` return the
-        index just past the ``)`` that closes the substitution."""
+        index just past the ``)`` that closes the substitution. With
+        ``comments=False`` a word-start ``#`` is a literal character (the
+        rest of a line inside a zsh glob group, r11)."""
         if depth > _R10_MAX_DEPTH:
             raise _R10Fail()
         text, size = self.text, self.size
@@ -1494,12 +1637,34 @@ class _R10Text:
         paren = 0
         command_position = True
         target_next = False
+        after_for = False  # r11: ``for ((`` opens an arithmetic context
+        last_command = False  # r11: the last word was a command word
+        # r11 (N8): paren levels opened where a shell may NOT read a
+        # subshell — zsh reads a glob group (``#`` literal) there, a shell
+        # may read arithmetic (``<<`` a shift); 0 = no such level open.
+        uncertain_from = 0
+        arith_from = 0
+        # r11 (N8): a skipped comment region held a paren/quote — zsh, for
+        # which that ``#`` was literal, may count the text differently from
+        # here on: every later ``(`` is uncertain, every ``#`` read both ways
+        sticky = False
+        # r11 (N8): a case header (2 after ``case``, 1 after its subject) and
+        # pattern position (after ``case … in`` and a case terminator, kept
+        # across newlines and ``;`` — zsh reads ``(`` there as a glob group)
+        case_header = 0
+        pattern_position = False
+        pattern_group = 0
+        # r11 (N8): inside ``[[ … ]]`` no position is a command position
+        # (``[[ a =~ ⏎(a # $(…)) ]]`` — the ``(`` is a regex group)
+        in_condition = False
         pending: list[tuple[str, bool, bool]] = []
 
         def finish() -> None:
-            nonlocal word, command_position, target_next
+            nonlocal word, command_position, target_next, after_for, last_command
+            nonlocal case_header, pattern_position, in_condition
             if word is None:
                 return
+            after_for = last_command = False
             done, word = word, None
             _r10_judge(done, depth)
             if target_next:
@@ -1508,7 +1673,23 @@ class _R10Text:
             plain = done.plain()
             if closer and command_position and plain == "case":
                 raise _R10Fail()  # pattern ``)`` would close the substitution
+            if command_position and plain == "case":
+                case_header = 2
+            elif case_header:
+                case_header -= 1
+                if not case_header and plain == "in":
+                    pattern_position = True
+                    command_position = False
+                    return
+            if pattern_position and plain == "esac":
+                pattern_position = False
+            if command_position and plain == "[[":
+                in_condition = True
+            elif in_condition and plain == "]]":
+                in_condition = False
             if command_position:
+                after_for = plain == "for"
+                last_command = True
                 command_position = (
                     plain in _R10_KEEP_COMMAND_POSITION
                     or bool(_R6_ASSIGNMENT_RE.match(plain))
@@ -1522,7 +1703,8 @@ class _R10Text:
                 continue
             if char == "\n":
                 finish()
-                command_position = True
+                command_position = not (pattern_position or in_condition)
+                after_for = last_command = False
                 index += 1
                 if pending:
                     index = self.heredoc_bodies(index, depth, pending)
@@ -1538,37 +1720,119 @@ class _R10Text:
                 word.lit(text[index + 1:index + 2] or "\\")
                 index += 2
                 continue
-            if char == "#" and word is None:
+            if char == "#" and word is None and comments:
                 newline = text.find("\n", index)
-                index = size if newline < 0 else newline
+                end = size if newline < 0 else newline
+                if uncertain_from or sticky:
+                    # r11 (N8): inside a zsh glob group ``#`` is literal (the
+                    # rest of the line is read too, every ``#`` in it
+                    # literal); a subshell skips it
+                    _r10_read(text[index + 1:end], depth + 1, comments=False)
+                    if _R11_REGION_STRUCTURE_RE.search(text, index + 1, end):
+                        if closer:
+                            # zsh may end the substitution elsewhere
+                            raise _R10Fail()
+                        sticky = True
+                index = end
                 continue
             if char in ";&|<>()":
+                # glued: a word is in progress, or the character before is a
+                # word character (a here-document delimiter just read)
+                glued = word is not None or (
+                    index > 0 and text[index - 1] not in " \t\n;&|<>()"
+                )
                 finish()
+                if uncertain_from and char in ";&<>":
+                    # r11 (N8): zsh ends the word here, dropping the open glob
+                    # group — its paren count leaves this reading's
+                    if closer:
+                        raise _R10Fail()  # zsh may end the substitution elsewhere
+                    sticky = True
                 if char in "<>" and text.startswith("(", index + 1):
                     word = _R10Word()  # process substitution: a computed word
-                    index = self.substitution(index + 2, depth)
+                    try:
+                        index = self.substitution(index + 2, depth)
+                    except _R10Stop:
+                        raise _R10Fail() from None  # r11 (N6): never resync inside
                     word.computed([("any", "")])
                     continue
                 if char == "(":
+                    if text.startswith(")", index + 1):
+                        # ``name()`` / zsh ``() {…}``: a function body follows
+                        command_position = command_position or last_command
+                        after_for = last_command = False
+                        index += 2
+                        continue
+                    certain = (
+                        command_position and not glued and not target_next
+                        and not uncertain_from and not sticky and not in_condition
+                    )
+                    if text.startswith("(", index + 1) and (certain or after_for):
+                        # r11 (REVIEW6 N5): a ``((`` command / ``for ((``:
+                        # an arithmetic context
+                        try:
+                            index = self.arith(index + 2, depth)
+                        except _R10Stop:
+                            raise _R10Fail() from None
+                        command_position = after_for = last_command = False
+                        continue
+                    after_for = last_command = False
+                    if pattern_position and not pattern_group:
+                        pattern_group = paren + 1  # ``(pattern)``
+                    if not certain:
+                        # r11 (N8): argument position, glued to a word, a
+                        # case pattern, a redirection target: zsh reads a
+                        # glob group; a ``((`` there that is not glued may be
+                        # arithmetic (zsh: ``repeat 1 ((``, ``coproc ((``,
+                        # ``>f ((``; both: a case arm, ``f() ((``)
+                        if not uncertain_from:
+                            uncertain_from = paren + 1
+                        if text.startswith("(", index + 1):
+                            if not glued and not arith_from:
+                                arith_from = paren + 1
+                            paren += 1
+                            index += 1
                     paren += 1
                     command_position = True
                     index += 1
                     continue
+                after_for = last_command = False
                 if char == ")":
                     index += 1
                     if paren:
                         paren -= 1
+                        if paren < uncertain_from:
+                            uncertain_from = 0
+                        if paren < arith_from:
+                            arith_from = 0
+                        if paren < pattern_group:
+                            pattern_group = 0
+                            pattern_position = False
+                        # r11 (N8): after a group an operator follows — or,
+                        # after a ``(pattern)``, a case arm (left uncertain)
+                        command_position = False
                     elif closer:
                         return index
+                    else:
+                        command_position = True  # ``pattern)``: a case arm
+                        pattern_position = False
                     continue
                 if text.startswith("<<", index) and not text.startswith("<<<", index):
+                    if arith_from:
+                        raise _R10Fail()  # r11 (N5): a shift if this ``((`` is arithmetic
                     strip = text.startswith("<<-", index)
                     index = self.heredoc_word(index + (3 if strip else 2), pending, strip)
                     continue
                 operator = next(op for op in _R6_OPERATORS if text.startswith(op, index))
                 index += len(operator)
-                if operator in _R6_LIST_OPERATORS or operator in _R6_PIPE_OPERATORS:
-                    command_position = True
+                if operator == ";" and text.startswith("|", index):
+                    operator = ";|"  # zsh case terminator
+                    index += 1
+                if operator in (";;", ";&", ";;&", ";|"):
+                    command_position = False  # r11 (N8): a case pattern follows
+                    pattern_position = True
+                elif operator in _R6_LIST_OPERATORS or operator in _R6_PIPE_OPERATORS:
+                    command_position = not (pattern_position or in_condition)
                 else:
                     target_next = True  # a redirection target follows
                 continue
@@ -1733,27 +1997,41 @@ class _R10Text:
         _r10_read(body, depth + 1)
         return found.end()
 
-    def dollar(self, index: int, depth: int, word: _R10Word, *, quoted: bool) -> int:
+    def dollar(
+        self, index: int, depth: int, word: _R10Word, *, quoted: bool, arith: bool = False
+    ) -> int:
         text = self.text
         following = text[index + 1:index + 2]
-        if following == "(":
-            end = self.substitution(index + 2, depth)
-            word.computed([("any", "")])
-            return end
-        if following == "{":
-            if index + 2 > self.last_brace:
-                word.lit("${", deferred=False)  # no ``}`` after: both shells refuse it
-                return index + 2
-            end = self.brace(index + 2, depth + 1, in_dq=quoted)
-            word.computed(_r8_construct_items(text[index:end]))
-            return end
-        if following == "[":
-            if index + 2 > self.last_bracket:
-                word.lit("$[", deferred=False)
-                return index + 2
-            end = self.bracket(index + 2, depth + 1)
-            word.computed([("any", "")])
-            return end
+        try:
+            if following == "(":
+                if text.startswith("(", index + 2):
+                    # r11 (REVIEW6 N5): ``$((`` — an arithmetic context
+                    end = self.arith(index + 3, depth + 1)
+                else:
+                    end = self.substitution(index + 2, depth)
+                word.computed([("any", "")])
+                return end
+            if following == "{":
+                if index + 2 > self.last_brace:
+                    word.lit("${", deferred=False)  # no ``}`` after: both shells refuse it
+                    return index + 2
+                end = self.brace(index + 2, depth + 1, in_dq=quoted, strict=arith)
+                construct = text[index:end].replace(_R11_PLACEHOLDER, "$_")
+                word.computed(_r8_construct_items(construct))
+                return end
+            if following == "[":
+                if index + 2 > self.last_bracket:
+                    word.lit("$[", deferred=False)
+                    return index + 2
+                end = self.bracket(index + 2, depth + 1)
+                word.computed([("any", "")])
+                return end
+        except _R10Stop:
+            # r11 (REVIEW6 N6): an unterminated quote/backtick INSIDE a
+            # construct is in scope — a resync would drop the word
+            raise _R10Fail() from None
+        if arith and following in ("'", '"'):
+            raise _R10Fail()  # ``$'…'``/``$"…"`` in arithmetic: shells differ
         if following == "'" and not quoted:
             found = _R10_ANSI_BODY_RE.match(text, index + 2)
             if not found:
@@ -1774,29 +2052,36 @@ class _R10Text:
         word.lit("$", deferred=quoted)
         return index + 1
 
-    def brace(self, index: int, depth: int, *, in_dq: bool) -> int:
+    def brace(self, index: int, depth: int, *, in_dq: bool, strict: bool = False) -> int:
         """Index just past the ``}`` closing a ``${`` whose body starts at
-        ``index``; nested constructs are read on the way."""
+        ``index``; nested constructs are read on the way. ``strict`` (inside
+        arithmetic): any quote fails closed."""
         if depth > _R10_MAX_DEPTH:
             raise _R10Fail()
         text, size = self.text, self.size
         opening = index - 2
         scratch = _R10Word()
-        # Bare braces: bash 3.2 ends ``${`` at the FIRST unquoted ``}``, zsh
-        # counts them. Where the two ends differ only by ``}`` characters
-        # (``${{ github.token }}``, ``${CONFIG:-{}}``) the shells continue at
-        # the same place and the zsh extent is read; any other text between
-        # them (``x=p; ${x:-{}ool …`` — bash runs ``pool``) fails closed.
+        # Bare braces: bash 3.2 ends an UNQUOTED ``${`` at the FIRST unquoted
+        # ``}``, zsh counts them. Where the two ends differ only by ``}``
+        # characters (``${{ github.token }}``, ``${CONFIG:-{}}``) the shells
+        # continue at the same place and the zsh extent is read; any other
+        # character after bash's end (``x=p; ${x:-{}ool …`` — bash runs
+        # ``pool``) fails closed AT ONCE (r11, REVIEW6 N6: r10 read on, and
+        # an unterminated quote there resynced past the word). Inside
+        # double quotes both shells end at the first ``}`` (r11: measured
+        # ``"[${x:-{a}b}]"`` → ``[{ab}]`` in both).
         bare = 0
         first_close = -1
         while index < size:
             run = _R10_BRACE_PLAIN_RE.match(text, index)
             if run:
+                if first_close >= 0:
+                    raise _R10Fail()  # text between bash's end and zsh's
                 index = run.end()
                 continue
             char = text[index]
             if char == "}":
-                if not bare:
+                if in_dq or not bare:
                     if first_close >= 0 and text[first_close:index].strip("}"):
                         raise _R10Fail()
                     return index + 1
@@ -1805,10 +2090,15 @@ class _R10Text:
                 bare -= 1
                 index += 1
                 continue
+            if first_close >= 0:
+                raise _R10Fail()  # text between bash's end and zsh's
             if char == "{":
-                bare += 1
+                if not in_dq:
+                    bare += 1
                 index += 1
                 continue
+            if strict and char in "'\"":
+                raise _R10Fail()  # a quote in ``${…}`` inside arithmetic
             if char == "\\":
                 index += 2
             elif char == "'":
@@ -1823,10 +2113,10 @@ class _R10Text:
             elif char == "`":
                 index = self.backtick(index, depth, scratch, in_dq=in_dq)
             else:
-                index = self.dollar(index, depth, scratch, quoted=in_dq)
+                index = self.dollar(index, depth, scratch, quoted=in_dq, arith=strict)
         if first_close >= 0:
             raise _R10Fail()  # bash closed it, zsh never does: they disagree
-        raise _R10Stop(opening)  # resync: the rest is read as script
+        raise _R10Stop(opening)  # r11: ``dollar`` turns this into _R10Fail
 
     def bracket(self, index: int, depth: int) -> int:
         """Index just past the ``]`` closing a ``$[`` (brackets counted)."""
@@ -1860,12 +2150,112 @@ class _R10Text:
                 index = self.dollar(index, depth, scratch, quoted=True)
         raise _R10Stop(opening)
 
+    def arith(self, index: int, depth: int) -> int:
+        """r11 (REVIEW6 N5): read an arithmetic context starting at
+        ``index`` (just after ``$((``/``((``) and return the index just past
+        the ``))`` that closes it (see the r11 block comment): ``#`` and
+        ``<<`` are literal, parentheses nest, constructs are read, the words
+        between them are judged; where bash and zsh may part, fail closed."""
+        if depth > _R10_MAX_DEPTH:
+            raise _R10Fail()
+        text, size = self.text, self.size
+        level = 0
+        word: _R10Word | None = None
+
+        def finish() -> None:
+            nonlocal word
+            if word is not None:
+                done, word = word, None
+                _r10_judge(done, depth)
+
+        while index < size:
+            run = _R11_ARITH_PLAIN_RE.match(text, index)
+            if run:
+                if word is None:
+                    word = _R10Word()
+                word.lit(run.group(0), deferred=False)
+                index = run.end()
+                continue
+            char = text[index]
+            if char in " \t\n":
+                finish()
+                index += 1
+                continue
+            if char == "(":
+                finish()
+                level += 1
+                index += 1
+                continue
+            if char == ")":
+                finish()
+                if level:
+                    level -= 1
+                    index += 1
+                    continue
+                if text.startswith(")", index + 1):
+                    return index + 2
+                # not arithmetic: bash and zsh fall back to a subshell /
+                # command substitution by different rules (``$((a) + (b))``
+                # is arithmetic to bash only) — fail closed
+                raise _R10Fail()
+            if char == "<" and text.startswith("<<", index):
+                finish()  # a shift (``((`` here is surely arithmetic)
+                index += 2
+                continue
+            if char in ";&|<>":
+                finish()
+                index += 1
+                continue
+            if char == "'":
+                raise _R10Fail()  # zsh ignores quotes for the extent, bash does not
+            if word is None:
+                word = _R10Word()
+            if char == '"':
+                # zsh ignores quotes for the extent, bash honours them: they
+                # agree only on an inert span (``(( "$n" > 3 ))``)
+                close = text.find('"', index + 1)
+                if close < 0 or _R11_ARITH_DQ_RISK_RE.search(text, index + 1, close):
+                    raise _R10Fail()
+                word.quoted = True
+                if self.double(index + 1, depth, word) != close + 1:
+                    raise _R10Fail()
+                index = close + 1
+                continue
+            if char == "#":
+                # a shell comment starts only at a word start (after a
+                # blank/newline/operator; ``16#ff``, zsh ``[##36]`` are not)
+                if text[index - 1] in " \t\n;&|()<>":
+                    newline = text.find("\n", index)
+                    end = size if newline < 0 else newline
+                    if _R11_ARITH_COMMENT_RISK_RE.search(text, index + 1, end):
+                        raise _R10Fail()  # read as a comment, the context could end elsewhere
+                word.lit("#", deferred=False)
+                index += 1
+                continue
+            if char == "\\":
+                if text.startswith("\n", index + 1):
+                    index += 2  # line continuation
+                    continue
+                word.quoted = True
+                word.lit(text[index + 1:index + 2] or "\\")
+                index += 2
+                continue
+            if char == "`":
+                index = self.backtick(index, depth, word, in_dq=False)
+                continue
+            index = self.dollar(index, depth, word, quoted=False, arith=True)
+        raise _R10Fail()  # unterminated arithmetic context
+
 
 def _r10_lexed_reading(raw: str) -> bool:
     """r10 (REVIEW5 N1): True when the quote-aware scanner finds a word that
     can spell a wrapper, or fails closed (see the block comment above)."""
     try:
         _r10_read(raw, 0)
+        if "\\\n" in raw:
+            # r11: also with every line continuation removed — ``$\⏎(…)``
+            # is ``$(…)`` (an over-read inside single quotes; union)
+            _r10_read(raw.replace("\\\n", ""), 0)
     except (_R10Found, _R10Fail):
         return True
     except RecursionError:
@@ -1939,6 +2329,9 @@ def r6_names_wrapper(raw: str) -> bool:
     # r10 (REVIEW5 N1): the quote-aware lexer reading of the RAW text —
     # construct extents that quoted/escaped/commented brackets cannot throw
     # off, here-documents and ``bash -c`` bodies read (union: never narrower).
+    # r11 (REVIEW6 N5–N7, C10 N8): arithmetic contexts, ``${…}`` ends in
+    # double quotes, word fragments / whole-word deferred text, uncertain
+    # (glob-group) parentheses — see the r11 block comment.
     return _r10_lexed_reading(raw)
 
 

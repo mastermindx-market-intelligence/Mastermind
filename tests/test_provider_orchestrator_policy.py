@@ -5550,3 +5550,577 @@ def test_r10_unarmed_scope_state_drives_the_watchdog_decision(
         "tool_input": {"model": "opus", "prompt": "x"},
     })
     assert capsys.readouterr().out == "" and time.monotonic() - started < 4.0
+
+
+# --- r11: arithmetic, ``${…}`` in double quotes, words as deferred script ---
+#
+# Distinct re-check #6 (REVIEW6) found three seams in the r10 scanner, each
+# reopening the armed-unbound bypass (sealed zsh/bash RUN a wrapper, the
+# armed guard ALLOWED bound and unbound): N5 — ``#`` and ``<<`` inside
+# ``$((…))``/``((…))``/``for ((…))`` read as a comment / here-document
+# (neither shell does); N6 — ``${…}``: an unterminated quote inside the
+# counted extent resynced past the word, and inside double quotes both
+# shells end ``${`` at the FIRST ``}``; N7 — a double-quoted ``eval``/``-c``
+# string gluing a construct to literal text was never read as a script.
+# Director C10 found N8 while fixing N5: an argument-position ``(`` is a zsh
+# glob group (bash: also a ``[[ =~ (…) ]]`` regex group) in which ``#`` is
+# literal and every construct runs. See the guard's r11 block comment.
+#
+# (id, template, shells that RUN it (ground truth), origin); ``{a}`` = the
+# launch arguments (or a ground-truth marker tag).
+
+_R11_ESCAPES = [
+    ("n5-dparen-comment", '(( 1 # $($(: "("; printf p)ool {a}) ))', "zsh bash", "REVIEW6 N5"),
+    ("n5-dparen-hash-x", '(( #x + $($(: "("; printf p)ool {a}) ))', "zsh bash", "REVIEW6 N5"),
+    ("n5-arith-hash-x-nl", 'x=a; echo $((#x + $($(: "("; printf p)ool {a})\n))', "zsh bash", "REVIEW6 N5"),
+    ("n5-arith-comment-nl", 'echo $(( 1 # $($(: "("; printf p)ool {a})\n))', "zsh bash", "REVIEW6 N5"),
+    ("n5-dparen-sub-sh", '(( 1 # $($(: "("; printf s)ub.sh {a}) ))', "zsh bash", "REVIEW6 N5"),
+    ("n5-dparen-slot-py", '(( 1 # $($(: "("; printf sl)ot.py {a}) ))', "zsh bash", "REVIEW6 N5"),
+    ("n5-dparen-and-escaped", "(( x = 1 )) && (( 1 # $($(: \\(; printf p)ool {a}) ))", "zsh bash", "REVIEW6 N5"),
+    ("n5-for-dparen", 'for (( i=0 # $($(: "("; printf p)ool {a}); i<1; i++ )); do :; done', "zsh", "REVIEW6 N5"),
+    ("n5b-dparen-shift", '(( y = 1 << 2 ))\necho "\n2\n"; $(: "("; printf p)ool {a} #"', "zsh bash", "REVIEW6 N5b"),
+    ("n5b-for-shift",
+     'for (( i = 1 << 2; i < 0; i++ )); do :; done\necho "\n2\n"; $(: "("; printf p)ool {a} #"',
+     "zsh bash", "REVIEW6 N5b"),
+    ("n6-dq-brace-default", 'x=p; "${x:-{}"ool {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-dq-brace-sub-sh", 'x=s; "${x:-{}"ub.sh {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-dq-brace-dash", 'x=p; "${x-{}"ool {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-dq-brace-hash", 'x=p; "${x#{}"ool {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-env", 'x=p; env "${x:-{}"ool {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-exec", 'x=p; exec "${x:-{}"ool {a}', "zsh bash", "REVIEW6 N6"),
+    ("n6-backtick", 'x=p; `"${x:-{}"ool {a}`', "zsh bash", "REVIEW6 N6"),
+    ("n6-eval-sq", "x=p; eval '\"${x:-{}\"ool {a} # '", "zsh bash", "REVIEW6 N6"),
+    ("n6-bare-nl-dq", 'x=p; ${x:-{}ool {a}\n: "', "bash", "REVIEW6 N6"),
+    ("n6-bare-hash-dq", 'x=p; ${x:-{}ool {a} #"', "bash", "REVIEW6 N6"),
+    ("n6-bare-hash-backtick", "x=p; ${x:-{}ool {a} # `", "bash", "REVIEW6 N6"),
+    ("n6-bare-nl-sq", "x=p; ${x:-{}ool {a}\n: '", "bash", "REVIEW6 N6"),
+    ("n7-eval-dq", 'eval "$(: "("; printf p)ool {a}"', "zsh bash", "REVIEW6 N7"),
+    ("n7-bash-c-dq", 'bash -c "$(: "("; printf p)ool {a}"', "zsh bash", "REVIEW6 N7"),
+    ("n7-sh-c-escaped", 'sh -c "$(: \\(; printf p)ool {a}"', "zsh bash", "REVIEW6 N7"),
+    ("n7-zsh-fc-sub-sh", 'zsh -fc "$(: "("; printf s)ub.sh {a}"', "zsh bash", "REVIEW6 N7"),
+    # siblings found by Director C10 (r10 out of scope; sealed shells run them):
+    ("n8-argument-group", 'echo (1 # $($(: "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-glued-group", 'echo a(1 # $($(: "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-case-pattern-group", 'case x in a) :;; (x # $($(: "("; printf p)ool {a})) :;; esac', "zsh", "C10 N8"),
+    ("n8-for-in-group", 'for x in (a # $($(: "("; printf p)ool {a})); do :; done', "zsh", "C10 N8"),
+    ("n8-redirect-target-group", ': > (x # $($(: "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-regex-group", '[[ a =~ (a # $($(: "("; printf p)ool {a})) ]] && echo m', "zsh bash", "C10 N8"),
+    ("n8-noglob-group", 'noglob (x # $($(: "("; printf p)ool {a})\n)', "zsh", "C10 N8"),
+    ("n5-function-body-dparen", 'f() (( 1 # $($(: "("; printf p)ool {a}) )); f', "zsh bash", "C10 N5"),
+    # the comment region a subshell reading skips holds a paren zsh counts:
+    ("n8-region-paren-group", 'echo (a # (\n)\n(b # $($(: "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-region-paren-line-comment", 'echo (a # (\n) \n x # $($(: "("; printf p)ool {a})', "zsh", "C10 N8"),
+    ("n8-region-paren-cmdsub-end", '$(printf p; : "("; : (a # )\n)ool {a}; : (b # (\n))', "zsh", "C10 N8"),
+    # found by C10's mutation fuzz (r10 out of scope; sealed shells run them):
+    ("n8-region-double-hash", 'echo (1 # #$($(: "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-case-terminator-semicolon", 'case x in a) :;; ; (x # $($(: "("; printf p)ool {a})) :;; esac', "zsh", "C10 N8"),
+    ("n8-case-terminator-newline", 'case x in a) :;;\n(x # $($(: "("; printf p)ool {a})) :;; esac', "zsh", "C10 N8"),
+    ("n8-case-in-newline", 'case x in\n(x # $($(: "("; printf p)ool {a})) :;; esac', "zsh", "C10 N8"),
+    ("n8-heredoc-delimiter-group", 'echo (1 # $($(<<:a( "("; printf p)ool {a}))', "zsh", "C10 N8"),
+    ("n8-condition-newline", '[[ a =~ \n(a # $($(: "("; printf p)ool {a})) ]] && echo m', "zsh", "C10 N8"),
+    ("n1-continuation-cmdsub", '$\\\n(: "("; printf p)ool {a}', "zsh bash", "C10 N1"),
+    ("n1-continuation-brace", '$\\\n{x:-p${y#"}"}}ool {a}', "zsh bash", "C10 N1"),
+]
+
+
+def _r11_launch_args(row: tuple) -> str:
+    if "ub.sh" in row[1]:
+        return "glm-memory a"
+    if "ot.py" in row[1]:
+        return "glm a /tmp glm-5.3"
+    return "run grok a /tmp grok-4"
+
+
+def _r11_escape_command(row: tuple, args: str | None = None) -> str:
+    return row[1].replace("{a}", args or _r11_launch_args(row))
+
+
+def test_r11_escape_table_covers_every_review6_shape() -> None:
+    """Every shape the re-check #6 brief lists is a row, verbatim."""
+    a = "run grok a /tmp grok-4"
+    n1 = '$(: "("; printf p)ool ' + a
+    reviewer = [
+        # N5 (8)
+        '(( 1 # $($(: "("; printf p)ool ' + a + ") ))",
+        '(( #x + $($(: "("; printf p)ool ' + a + ") ))",
+        'x=a; echo $((#x + $($(: "("; printf p)ool ' + a + ")\n))",
+        'echo $(( 1 # $($(: "("; printf p)ool ' + a + ")\n))",
+        '(( 1 # $($(: "("; printf s)ub.sh glm-memory a) ))',
+        '(( 1 # $($(: "("; printf sl)ot.py glm a /tmp glm-5.3) ))',
+        "(( x = 1 )) && (( 1 # $($(: \\(; printf p)ool " + a + ") ))",
+        'for (( i=0 # $($(: "("; printf p)ool ' + a + "); i<1; i++ )); do :; done",
+        # N5b (2)
+        '(( y = 1 << 2 ))\necho "\n2\n"; ' + n1 + ' #"',
+        'for (( i = 1 << 2; i < 0; i++ )); do :; done\necho "\n2\n"; ' + n1 + ' #"',
+        # N6 (12: the dq forms, the wrappers, the bash-only forms)
+        'x=p; "${x:-{}"ool ' + a,
+        'x=s; "${x:-{}"ub.sh glm-memory a',
+        'x=p; "${x-{}"ool ' + a,
+        'x=p; "${x#{}"ool ' + a,
+        'x=p; env "${x:-{}"ool ' + a,
+        'x=p; exec "${x:-{}"ool ' + a,
+        'x=p; `"${x:-{}"ool ' + a + "`",
+        "x=p; eval '\"${x:-{}\"ool " + a + " # '",
+        "x=p; ${x:-{}ool " + a + '\n: "',
+        "x=p; ${x:-{}ool " + a + ' #"',
+        "x=p; ${x:-{}ool " + a + " # `",
+        "x=p; ${x:-{}ool " + a + "\n: '",
+        # N7 (4)
+        'eval "$(: "("; printf p)ool ' + a + '"',
+        'bash -c "$(: "("; printf p)ool ' + a + '"',
+        'sh -c "$(: \\(; printf p)ool ' + a + '"',
+        'zsh -fc "$(: "("; printf s)ub.sh glm-memory a"',
+    ]
+    commands = {_r11_escape_command(row) for row in _R11_ESCAPES}
+    assert [command for command in reviewer if command not in commands] == []
+    origins = [row[3] for row in _R11_ESCAPES]
+    assert (origins.count("REVIEW6 N5"), origins.count("REVIEW6 N5b")) == (8, 2)
+    assert (origins.count("REVIEW6 N6"), origins.count("REVIEW6 N7")) == (12, 4)
+
+
+@pytest.mark.parametrize("row", _R11_ESCAPES, ids=[row[0] for row in _R11_ESCAPES])
+def test_r11_escapes_are_judged_and_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    command = _r11_escape_command(row)
+    assert guard.r6_names_wrapper(command), command
+    assert guard._r10_lexed_reading(command), command
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny"), (bound_reason, nobind_reason)
+    assert "R6_" in bound_reason and "R6_" in nobind_reason, (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+    assert "guard budget exceeded" not in bound_reason + nobind_reason
+
+
+def test_r11_rows_are_read_by_the_lexer_reading_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-before: with the lexer reading switched off (the r6–r9 readers,
+    unchanged since r9) no row is in scope — r10 (8cc4ce4ca), whose readers
+    are those plus the r10 lexer, ALLOWED every row armed, bound and
+    unbound (C10 ledger, measured through the real hook command line)."""
+    commands = [_r11_escape_command(row) for row in _R11_ESCAPES]
+    assert all(guard._r10_lexed_reading(command) for command in commands)
+    monkeypatch.setattr(guard, "_r10_lexed_reading", lambda _raw: False)
+    assert [command for command in commands if guard.r6_names_wrapper(command)] == []
+
+
+@pytest.mark.parametrize("row_id", [
+    "n5-dparen-comment", "n5b-dparen-shift", "n6-dq-brace-default", "n6-bare-nl-dq",
+    "n7-eval-dq", "n8-argument-group",
+])
+@pytest.mark.parametrize("bound", [True, False], ids=["bound", "unbound"])
+def test_r11_rows_through_the_real_hook_command_line(
+    tmp_path: Path, row_id: str, bound: bool
+) -> None:
+    """Armed, the registered hook command line (bound: the owner-channel
+    shim, every binding check reachable): DENY by shape, the gate unreached."""
+    row = next(row for row in _R11_ESCAPES if row[0] == row_id)
+    elapsed, code, out = _r8_hook_cli(tmp_path, _r11_escape_command(row), bound=bound, owner=bound)
+    assert code == 0 and out, out
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    reason = decision["permissionDecisionReason"]
+    assert reason.startswith("Mastermind shared-placement guard: unobservable launch"), reason
+    assert "R6_" in reason and "missing binding" not in reason, reason
+    assert "guard budget exceeded" not in reason
+    assert elapsed < 4.0, elapsed
+
+
+def _r11_sealed_shells(tmp_path: Path):
+    """SEALED zsh (``env -i``, ``zsh -f``) and bash (``env -i``,
+    ``--norc --noprofile``); PATH = FAKE wrappers that only touch a marker,
+    then /usr/bin:/bin (the real wrappers are unreachable). Returns
+    ``run(command, shell) -> marker names``."""
+    import shutil
+    import subprocess
+
+    zsh = shutil.which("zsh")
+    bash = "/bin/bash" if Path("/bin/bash").exists() else shutil.which("bash")
+    if zsh is None or bash is None:
+        pytest.skip("no zsh/bash")
+    bin_dir, ran, home = tmp_path / "bin", tmp_path / "ran", tmp_path / "home"
+    for directory in (bin_dir, ran, home):
+        directory.mkdir()
+    for name in guard._R6_WRAPPER_BASENAMES:
+        fake = bin_dir / name
+        fake.write_text(f'#!/bin/sh\ntouch "{ran}/{name}-$1"\n', encoding="utf-8")
+        fake.chmod(0o755)
+    sealed_env = ["/usr/bin/env", "-i", f"PATH={bin_dir}:/usr/bin:/bin", f"HOME={home}"]
+    argvs = {"zsh": [zsh, "-f", "-c"], "bash": [bash, "--norc", "--noprofile", "-c"]}
+
+    def run(command: str, shell: str) -> list[str]:
+        for marker in ran.iterdir():
+            marker.unlink()
+        try:
+            subprocess.run(
+                sealed_env + argvs[shell] + [command], cwd=home, capture_output=True,
+                stdin=subprocess.DEVNULL, timeout=20, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pass  # whatever it started before the timeout still counts
+        return sorted(marker.name for marker in ran.iterdir())
+
+    return run
+
+
+def test_r11_sealed_shells_run_each_escape(tmp_path: Path) -> None:
+    """Ground truth for _R11_ESCAPES: every shape EXECUTES a fake wrapper in
+    each shell its row names."""
+    run = _r11_sealed_shells(tmp_path)
+    checked = 0
+    for row in _R11_ESCAPES:
+        for shell_name in row[2].split():
+            tag = "r11" + shell_name + row[0].replace("-", "")
+            command = _r11_escape_command(row, tag)
+            markers = [name for name in run(command, shell_name) if name.endswith("-" + tag)]
+            assert markers, (row[0], shell_name, command)
+            assert guard.r6_names_wrapper(command), command
+            checked += 1
+    assert checked == sum(len(row[2].split()) for row in _R11_ESCAPES) == 70
+
+
+#: Honest forms: the reviewer's (REVIEW6) not already in _R10_HONEST_OUT,
+#: then C10's — arithmetic with ``#``/``<<``/inert quotes, ``${…}`` in
+#: double quotes, case/array/function parens, code in a here-document.
+_R11_HONEST_OUT = [
+    "git commit -m \"$(cat <<'EOF'\nFix: don't break (scope) when it's (nested)\n\n"
+    "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nEOF\n)\"",
+    'echo "${CONFIG:-{}}"',
+    "awk '{print $(NF)}' f",
+    "printf '%s' \"$(date +%s)\"",
+    "x=$(( 1 << 2 ))\necho \"$x\"",
+    "(( n = 1 << 2 ))\necho \"$n (done)\"",
+    "(( i++ )) # it's (",
+    "echo $((16#ff)) $((10#$m))",
+    "echo $(([##16]255))",
+    "for (( i = 0; i < 3; i++ )); do echo \"$i\"; done",
+    "echo $(( (1 + 2) << 3 ))",
+    "x=$(( $(wc -l < f) + 1 ))",
+    '(( "$n" > 3 )) && echo big',
+    'echo $(( "1" + 1 ))',
+    'case "$x" in a) (( n = 1 << 2 ));; esac',
+    'echo "${x:-{}}" "$(date)"',
+    'echo "${x:-{a}b}" "$y"',
+    'case "$x" in (a|b) echo "$x";; esac',
+    'arr=(a b # comment\nc); echo "${arr[@]}"',
+    'f() { echo "$1"; }; f x',
+    'echo "$(date) - wrote $n files to $dir/out.json"',
+    "cat > a.py <<'EOF'\nprint((\"a\", 1 << 2), (1 << 2))\nx = (1 << 2)\nprint(f\"{x}$\")\nEOF",
+    'ssh h "cd ${DIR} && ls \\$(pwd)"',
+]
+
+
+@pytest.mark.parametrize("command", _R11_HONEST_OUT)
+def test_r11_honest_forms_stay_out_of_scope(command: str) -> None:
+    assert not guard._r10_lexed_reading(command), command
+    assert not guard.r6_names_wrapper(command), command
+
+
+#: REVIEW6 MINOR: an escaped ``\$(`` holding a local ``${VAR}`` was refused
+#: armed by r10 (its deferred run was cut at ``${F}``, leaving ``$(`` open);
+#: r11 re-reads the whole word with a placeholder for ``${F}``.
+_R11_ESCAPED_CMDSUB_LOCAL_BRACES = [
+    'ssh h "x=\\$(cat ${F}); echo \\$x"',
+    'bash -c "n=\\$(wc -l < ${F}); echo \\$n"',
+]
+
+
+@pytest.mark.parametrize("command", _R11_ESCAPED_CMDSUB_LOCAL_BRACES)
+def test_r11_escaped_cmdsub_with_a_local_brace_is_admitted_armed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    assert not guard._r10_lexed_reading(command)
+    assert not guard.r6_names_wrapper(command)
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("allow", "allow"), (bound_reason, nobind_reason)
+    assert (bound_gate, nobind_gate) == (False, False)
+
+
+def test_r11_deferred_word_is_read_whole_with_placeholders() -> None:
+    """The placeholder stands for a computed part wherever it lands, so a
+    deferred word still spells across it — and the closing ``)`` after a
+    local ``${F}`` is seen (the MINOR above)."""
+    assert guard._r10_lexed_reading('bash -c "\\$(: \\"(\\"; printf p)o${q}ol run grok a /tmp grok-4"')
+    assert guard._r10_lexed_reading("bash -c '\"p'\"$q\"'ool run grok a /tmp grok-4\"'")
+    assert not guard._r10_lexed_reading('bash -c "x=\\$(cat ${F} ${G}); y=\\$(wc -l < $H)"')
+
+
+@pytest.mark.parametrize("command, code", [
+    # a double-quoted span in arithmetic holding ``{ }``: the shells may part
+    ('(( "${n}" > 3 ))', "R6_EXPANSION"),
+    # ``$((…)…)`` that is not ``))``: bash may read arithmetic, zsh a
+    # command substitution — fail closed
+    ("out=$((cd a && make) 2>&1)", "R6_EXPANSION"),
+    # a ``((`` after a ``(pattern)`` (uncertain position) with ``<<``
+    ('case "$x" in (a) (( n = 1 << 2 ));; esac', "R6_HEREDOC"),
+    # an uncertain group's comment region holding a paren, inside ``$(…)``
+    ("x=$(echo (a # it is) ok)", "R6_"),
+])
+def test_r11_known_over_refusals_are_pinned(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    code: str,
+) -> None:
+    """PINS KNOWN LIMITS (C10 ledger), not desired properties: newly IN
+    SCOPE, refused in ARMED sessions only."""
+    assert guard._r10_lexed_reading(command)
+    (bound, bound_reason, _), (nobind, nobind_reason, _) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind) == ("deny", "deny")
+    assert code in bound_reason and code in nobind_reason, (bound_reason, nobind_reason)
+
+
+# --- r11: the structured fuzz (sealed ground truth) -------------------------
+#
+# Wrapper-spelling glue (computed head + literal tail) × execution contexts
+# (arithmetic, ``((``/``for ((``, groups, case patterns, ``eval``/``-c``
+# strings, here-documents, process substitution, …) × quote-parity
+# disruptors before and after. Every candidate the guard leaves OUT of scope
+# is run in sealed zsh AND bash; one that runs a fake wrapper is an escape.
+# Default: a fixed seed and 3 000 candidates (a few seconds); opt in to more
+# with MASTERMIND_GUARD_FUZZ_N=<count> (and MASTERMIND_GUARD_FUZZ_SEED).
+
+_R11_FUZZ_WRAPPERS = [
+    ("p", "ool", " run grok a /tmp grok-4"),
+    ("s", "ub.sh", " glm-memory a"),
+    ("sl", "ot.py", " glm a /tmp glm-5.3"),
+]
+#: (glue template — ``{h}`` computed head, ``{t}`` literal tail —, needs ``x={h}``)
+_R11_FUZZ_GLUE = [
+    ('$(: "("; printf {h}){t}', False), ("$(: ')'; printf {h}){t}", False),
+    ("$(: \\(; printf {h}){t}", False), ("$(printf {h} # (\n){t}", False),
+    ("${{x:-{{}}{t}", True), ('"${{x:-{{}}"{t}', True), ('${{x:-{h}${{y#"}}"}}}}{t}', False),
+    ("`printf {h}`{t}", False), ("$(case x in x) printf {h};; esac){t}", False),
+    ('"$(printf {h})"{t}', False), ("${{x:+{h}}}{t}", True), ('${{x#"("}}{t}', True),
+    ('$x"{t}"', True), ('$(printf {h})"{t}"', False), ('"$(: "("; printf {h})"{t}', False),
+    ('$(: "$(: ")")"; printf {h}){t}', False), ("$(printf {h} # it's \n){t}", False),
+    ("$(cat <<'E'\n{h}\nE\n){t}", False), ('$(printf %s "${{y:-{h}}}"){t}', False),
+    ("$(printf {h}; (( 1 << 2 )) ){t}", False), ("$(: $(( 1 # 2\n)); printf {h}){t}", False),
+    ('"${{x-{{}}"{t}', True), ('"${{x#{{}}"{t}', True), ("$(printf {h} #)\n){t}", False),
+    ('$(: "${{z:-{{}}"; printf {h}){t}', False), ("$((0))$(printf {h}){t}", False),
+    ('$(: `echo "("`; printf {h}){t}', False), ("$(: $'\\x28'; printf {h}){t}", False),
+    ("$(: <<<'('; printf {h}){t}", False), ("$( (: ')') ; printf {h}){t}", False),
+    ("$(printf {h}; : (a # )\n){t}", False), ('$(printf {h}; : "("; : (a # )\n){t}', False),
+    ('$\\\n(: "("; printf {h}){t}', False), ('$\\\n{{x:-{h}${{y#"}}"}}}}{t}', False),
+    ('$(<<:a( "("; printf {h}){t}', False),
+]
+_R11_FUZZ_CONTEXTS = [
+    "{P}", "echo $({P})", "echo `{P}`", "eval '{P}'", 'eval "{P}"', "bash -c '{P}'",
+    'bash -c "{P}"', 'sh -c "{P}"', "zsh -fc '{P}'", "(( 1 # $({P}) ))",
+    "echo $(( 1 # $({P})\n))", "(( x = $({P}) ))", "for (( i=0 # $({P}); i<1; i++ )); do :; done",
+    '(( y = 1 << 2 ))\necho "\n2\n"; {P} #"', "(( y = 1 << 2 ))\necho '\n2\n'; {P} #'",
+    'for (( i = 1 << 2; i < 0; i++ )); do :; done\necho "\n2\n"; {P} #"',
+    "case x in x) {P};; esac", "case x in x) (( 1 # $({P}) ));; esac", "if true; then {P}; fi",
+    "{{ {P}; }}", "( {P} )", "! {P}", "time {P}", "env {P}", "exec {P}", "command {P}",
+    "nohup {P}", "x=1 {P}", "{P} | cat", "true && {P}", "false || {P}",
+    "cat <<E >/dev/null\n$(\nE\n{P}", ": <<'Q'\nit's (\nQ\n{P}", "f() {{ {P}; }}; f",
+    "[[ -n a ]] && {P}", "[[ 1 -eq 1 # $({P}) ]]", "echo ${{a[ $({P}) ]}}", "a[$({P})]=1",
+    "let x=$({P})", ": $[ 1 # $({P}) ]", "cat <({P})", "x=$( {P} )",
+    "cat <<E >/dev/null\n$({P})\nE", ': "${{x:-$({P})}}"', ": ${{x:-$({P})}}", ': "$(( $({P}) ))"',
+    "while false; do :; done; {P}", "for i in 1; do {P}; done", "x=$(( 1 << 2 )); {P}",
+    "echo $(( (1) + (2) )); {P}", "(( 1 )) && (( 1 # $({P}) ))", "echo $((#x + $({P})\n))",
+    "(( #x + $({P}) ))", 'echo "$(( 1 # $({P})\n))"', "$(( 1 ))\n{P}", "x=( $({P}) )",
+    "echo ${{x:-$(( 1 # $({P})\n))}}", 'echo "${{x:-{{}}" "$({P})"', 'eval "x=1; {P}"',
+    "eval 'x=1; '\"{P}\"", "{P} &\nwait", "echo (1 # $({P}))", "echo a(1 # $({P}))",
+    "case x in (x # $({P})) :;; esac", "case x in a) :;; (x # $({P})) :;; esac",
+    "for x in (a # $({P})); do :; done", "echo $(echo (1 # $({P})))", ": > (x # $({P}))",
+    "echo x(a)(b # $({P}))", "echo ( # $({P})\n)", "echo (1 #) $({P})", "echo [(] # $({P})",
+    "f() (( 1 # $({P}) )); f", "repeat 1 (( 1 # $({P}) ))", "coproc (( 1 # $({P}) ))",
+    ">/dev/null (( 1 # $({P}) ))", 'f() (( y = 1 << 2 ))\necho "\n2\n"; {P} #"',
+    "a=(1 # x )\n$({P})\n)", "cat =({P})", "echo ((1) # $({P}))",
+    "case x in a) :;| (x # $({P})) :;; esac", "echo $(( $({P}) ))", "[[ a =~ (a # $({P})) ]]",
+    "noglob (x # $({P})\n)", "[[ a =~ a(b # $({P})) ]]",
+    'case x in (x) (( y = 1 << 2 ))\necho "\n2\n"; {P} #"\n;; esac', "x=( a # $({P})\n)",
+    "f () (( 1 # $({P}) )); f", "echo (a # (\n)\n(b # $({P}))", "echo (a # (\n) \n x # $({P})",
+    "echo a(b # (\n)\n( c # $({P}))", "{P}; : (b # (\n))", "echo (a # '\n) \n x '; {P}",
+    "echo (1 # #$({P}))", "case x in a) :;; ; (x # $({P})) :;; esac", "case x in a) :;;\n(x # $({P})) :;; esac",
+    "case x in\n(x # $({P})) :;; esac", "[[ a =~ \n(a # $({P})) ]]", "echo (1 # $({P}))",
+]
+_R11_FUZZ_PRE = [
+    "", "x={h}; ", "x={h}\n", ": \"${{q:-'}}\"; ", ": ${{q:-{{}}}}; ", "cat <<E >/dev/null\nE\n",
+    "(( y = 1 << 2 ))\n", ": $(( 2 #\n)); ", 'echo "${{q:-{{a}}b}}" >/dev/null; ',
+    "x={h}; : \\\n; ", "echo $(( 1 << 2 )) >/dev/null; ",
+]
+_R11_FUZZ_POST = [
+    "", "\n", ' #"', " # '", " # `", '\n: "', "\n: '", " ))", ")", '"', "'", "`", " }", ";; esac",
+    "\n)", " # (\n", " #)\n)", "\n2",
+]
+
+
+def _r11_fuzz_candidates(seed: int, count: int) -> list[str]:
+    import random
+
+    rng = random.Random(seed)
+    seen: set[str] = set()
+    out: list[str] = []
+    while len(out) < count:
+        glue, needs_x = rng.choice(_R11_FUZZ_GLUE)
+        head, tail, args = rng.choice(_R11_FUZZ_WRAPPERS)
+        payload = glue.format(h=head, t=tail) + args
+        pre = rng.choice(_R11_FUZZ_PRE)
+        if needs_x and "x=" not in pre:
+            pre = "x={h}; " + pre
+        command = (
+            pre.format(h=head) + rng.choice(_R11_FUZZ_CONTEXTS).format(P=payload)
+            + rng.choice(_R11_FUZZ_POST)
+        )
+        if command not in seen:
+            seen.add(command)
+            out.append(command)
+    return out
+
+
+def test_r11_structured_fuzz_has_no_sealed_shell_escape(tmp_path: Path) -> None:
+    """Every candidate the guard leaves out of scope runs NO wrapper in
+    sealed zsh or bash (fixed seed). The generator is live: a sample of the
+    in-scope candidates does run wrappers (r10's counts on this seed are in
+    the C10 ledger)."""
+    count = int(os.environ.get("MASTERMIND_GUARD_FUZZ_N", "3000"))
+    seed = int(os.environ.get("MASTERMIND_GUARD_FUZZ_SEED", "20261113"))
+    run = _r11_sealed_shells(tmp_path)
+    candidates = _r11_fuzz_candidates(seed, count)
+    out_of_scope = [command for command in candidates if not guard.r6_names_wrapper(command)]
+    escapes = [
+        (command, shell) for command in out_of_scope for shell in ("zsh", "bash")
+        if run(command, shell)
+    ]
+    assert escapes == [], escapes[:5]
+    assert len(out_of_scope) < count // 10  # most candidates are judged
+    import random
+
+    in_scope = [command for command in candidates if command not in set(out_of_scope)]
+    sample = random.Random(seed).sample(in_scope, min(40, len(in_scope)))
+    live = sum(1 for command in sample if run(command, "zsh") or run(command, "bash"))
+    assert live >= len(sample) // 5, live  # measured ~47% at 200 samples
+
+
+#: Mutation tokens: structure that moves quote/paren/comment parity.
+_R11_MUTATION_TOKENS = [
+    '"', "'", "(", ")", "#", " # ", "\n", "<<", "<< 2", "\\", "`", "$(", "((", "))", "{", "}", "$((",
+    " ", ";", "|", "&&", "${x:-{}", '"${x:-{}"', "x=p; ", "(a # (\n)\n", "case x in x) ", ";; esac",
+    "eval ", "bash -c ", "$'", "\\\n", ")\n", ' #"', "for ((", "[[ a =~ (", " ]]", "noglob ", "echo (",
+    "a(", "f() ", "!", "{ ", " }", "(( y = 1 << 2 ))\n",
+]
+
+
+def _r11_mutations(seed: int, count: int) -> list[str]:
+    """``count`` distinct mutations (1–3 token insertions/deletions) of every
+    r10/r11 escape row."""
+    import random
+
+    rng = random.Random(seed)
+    bases = [_r11_escape_command(row) for row in _R11_ESCAPES]
+    bases += [_r10_escape_command(row) for row in _R10_N1_ESCAPES]
+    seen: set[str] = set()
+    out: list[str] = []
+    while len(out) < count:
+        command = rng.choice(bases)
+        for _ in range(rng.randint(1, 3)):
+            at = rng.randint(0, len(command))
+            if rng.random() < 0.7:
+                command = command[:at] + rng.choice(_R11_MUTATION_TOKENS) + command[at:]
+            else:
+                command = command[:at] + command[min(len(command), at + rng.randint(1, 4)):]
+        if command not in seen:
+            seen.add(command)
+            out.append(command)
+    return out
+
+
+def test_r11_mutation_fuzz_has_no_sealed_shell_escape(tmp_path: Path) -> None:
+    """Mutations of every known escape: each one the guard leaves out of
+    scope runs NO wrapper in sealed zsh or bash (fixed seed; default 800,
+    opt in to more with MASTERMIND_GUARD_MUTATIONS_N / _SEED)."""
+    count = int(os.environ.get("MASTERMIND_GUARD_MUTATIONS_N", "800"))
+    seed = int(os.environ.get("MASTERMIND_GUARD_MUTATIONS_SEED", "20261114"))
+    run = _r11_sealed_shells(tmp_path)
+    out_of_scope = [
+        command for command in _r11_mutations(seed, count) if not guard.r6_names_wrapper(command)
+    ]
+    escapes = [
+        (command, shell) for command in out_of_scope for shell in ("zsh", "bash")
+        if run(command, shell)
+    ]
+    assert escapes == [], escapes[:5]
+    assert len(out_of_scope) < count // 3
+
+
+# --- r11: budget rows for the new paths (real hook command line) ------------
+
+_R11_BUDGET_ROWS = [
+    # (id, prefix, unit, suffix, bound, owner channel, verdict fragment)
+    ("r11-dparen-comment-glue-shift-lines", '(( 1 # $($(: "("; printf p)ool run grok a /tmp grok-4) ))\n',
+     "(( x = 1 << 2 ))\n", "", False, False, "R6_"),
+    ("r11-dq-brace-glue-run", 'x=p; "${x:-{}"ool run grok a /tmp grok-4 ', '"${x:-{}}" ', "", False, False, "R6_"),
+    ("r11-eval-dq-glue-fragments", 'eval "$(: "("; printf p)ool run grok a /tmp grok-4 ', "$(a) b ", '"',
+     False, False, "R6_"),
+    ("r11-argument-group-glue-lines", 'echo (1 # $($(: "("; printf p)ool run grok a /tmp grok-4))\n',
+     "echo (a # $x)\n", "", False, False, "R6_"),
+    ("r11-arith-long-no-wrapper", "echo $(( ", "1 + ", "1 ))", False, False, "allow"),
+    ("r11-dparen-shift-lines-no-wrapper", "", "(( n = 1 << 2 ))\n", "", False, False, "allow"),
+    ("r11-dollar-arith-cmdsub-no-wrapper", "", "$(( $(a) + 1 )) ", "", False, False, "allow"),
+    ("r11-for-arith-no-wrapper", "", "for (( i=0; i<1; i++ )); do :; done\n", "", False, False, "allow"),
+    ("r11-dq-brace-no-wrapper", "", '"${x:-{}}" ', "", False, False, "allow"),
+    ("r11-dq-word-fragments-no-wrapper", 'echo "', "$(a) b ", '"', False, False, "allow"),
+    ("r11-deferred-joined-no-wrapper", 'bash -c "', "x=\\$(cat ${F}); ", '"', False, False, "allow"),
+    ("r11-argument-group-comment-lines-no-wrapper", "", "echo (a # $x)\n", "", False, False, "allow"),
+    ("r11-case-pattern-groups-no-wrapper", "case $x in ", "(a|b) :;; ", "esac", False, False, "allow"),
+    ("r11-case-terminators-no-wrapper", "case $x in ", "a) :;; (b) :;& (c) :;| ", "esac", False, False, "allow"),
+    ("r11-arith-base-no-wrapper", "", "$((16#ff + 10#$m)) ", "", False, False, "allow"),
+    ("r11-uncertain-dparen-no-wrapper", "echo $x ", "((a)) ", "", False, False, "allow"),
+    ("r11-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" ', "", False, False, "allow"),
+    ("r11-continuation-dq-param-cmdsub-no-wrapper", "", '"${x:-$(a)}" \\\n', "", False, False, "allow"),
+    ("r11-bound-launch-quoted-arith-args", "pool run glm a /tmp glm-5.3 ", '"(( 1 << 2 ))" ', "", True, True, "allow"),
+]
+
+
+@pytest.mark.parametrize("row", _R11_BUDGET_ROWS, ids=[row[0] for row in _R11_BUDGET_ROWS])
+def test_r11_budget_rows_finish_through_the_real_hook_command_line(
+    tmp_path: Path, row: tuple
+) -> None:
+    row_id, prefix, unit, suffix, bound, owner, fragment = row
+    prefix += " " * ((_R8_CAP - len(prefix) - len(suffix)) % len(unit))  # whole units
+    command = _r8_filled(prefix, unit, _R8_CAP, suffix)
+    assert len(command) == _R8_CAP
+    elapsed, code, out = _r8_hook_cli(tmp_path, command, bound=bound, owner=owner)
+    assert code == 0
+    if fragment == "allow":
+        assert out == "", out[:300]
+    else:
+        decision = json.loads(out)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny", out[:300]
+        assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
+        assert "guard budget exceeded" not in decision["permissionDecisionReason"]
+    assert elapsed < 4.0, (row_id, elapsed)
+
+
+def test_r11_armed_budget_denial_stdout_is_byte_identical_to_r8(tmp_path: Path) -> None:
+    """REVIEW6 N2 ACCEPT kept: the armed budget-DENY stdout (REVIEW4 F4
+    text, an injected 30 s step, budget 1.5 s) is byte-identical to r8–r10."""
+    import hashlib
+
+    inject = "import time\ndef _slow(*a, **k):\n    time.sleep(30)\nm.guard_fabric_launch = _slow\n"
+    elapsed, code, out = _r8_hook_cli(
+        tmp_path, _R6_L, bound=True, owner=True, inject=inject,
+        extra_env={"MASTERMIND_GUARD_BUDGET_S": "1.5"},
+    )
+    assert code == 0
+    assert hashlib.sha256((out + "\n").encode()).hexdigest() == (
+        "9c651f8f3ce0b6fff6e10c458de8bd2de55ef509558b635cb62b3fe1f307ac11"
+    )
+    assert elapsed < 4.0, elapsed
