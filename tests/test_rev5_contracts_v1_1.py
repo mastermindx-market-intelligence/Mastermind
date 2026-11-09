@@ -340,10 +340,22 @@ def test_incomplete_descriptor_reports_problems():
 
 
 def test_rev5_lane_seams_are_registered_named_not_implemented():
+    """The lane seams are REGISTERED (one reviewed id each, runtime kind
+    declared, capability map present) but implemented=False until the
+    lane's full composition is reviewed — naming selects nothing.
+
+    Deliberately does NOT pin ``descendant_policy``: each Rev 5 lane owns
+    flipping its own seam's policy (e.g. DSH moving ``dsh-acp`` to
+    ``bounded_native_fanout`` with a named native enforcement once its
+    hook is proven) — that is the lane's charter, not this contract's
+    invariant.  The invariants here are the ones the shared contract
+    owns: reviewed registration, declared runtime kind, a capability
+    map, and no live binding before review."""
     for lane_id in ("t3-native", "dsh-acp"):
         descriptor = ADAPTER_DESCRIPTORS[lane_id]
         assert descriptor.runtime_kind == lane_id
         assert not descriptor.implemented
-        assert descriptor.descendant_policy == "native_fanout_disabled"
+        assert descriptor.descendant_policy in DESCENDANT_POLICIES
+        assert descriptor.capabilities
         # naming the route selects nothing and launches nothing
-        assert capability_status(lane_id, "launch") == "UNKNOWN"
+        assert capability_status(lane_id, "launch") in ("UNKNOWN", "UNSUPPORTED")
