@@ -166,7 +166,7 @@
     "ext/fabric_participant_owner.py": "1619505962de4c73f415312871cc407777bf6c04ba6d02fb9be62c9d54a5545c",
     "ext/fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
     "ext/fabric_stop_return.py": "58456d8a6ce3e94dcff79bdabd70282ea05c5a86ecce88f7a12009976fa2313c",
-    "ext/fabric_task.py": "10f3b62a5631595bf2e743e5448f8586eb47ef9104ab859c168887c38e7866a4",
+    "ext/fabric_task.py": "b487c422dc70742f2ec302bbf0cc416acd17d49f62ba33b0cae9a20d8fe06550",
     "ext/fs_security.py": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
     "ext/glm_bound_claude.py": "7eece47bce1fa3e5701cd7d152b95e2674da7bc2d9e1b9669320fe9811e4d363",
     "ext/glm_codex_exec.sh": "fbb6558d4963e0dc7c1aea00a3171757f1e167eba61d276bd02ae6fe2baf7743",
@@ -189,7 +189,7 @@
     "ext/host_pull_launchd.plist.template": "160e322306f197149c2bf5343c08f00bd38e46768ed21cf3dd35d077869c4ac3",
     "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
     "ext/lane_runtime.py": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
-    "ext/lease_broker.py": "f96282d13c89dee3cb8877275b5709ee851d7875f2a5ef17d21d9bdf4a51834f",
+    "ext/lease_broker.py": "9ef3415eb79714646f6f7f024c9b3c4bda303fbc6e8681b21fddc856b1a75af1",
     "ext/linux_process_identity.py": "11a0771d7f8fb8c8288303b3d182100341413098c1ee31d12339330dd869e71e",
     "ext/mac_policy_return.py": "407ab7d80d1ffc1064eada25aa1a5d447e11a41ee4873d8980f9e68ebb4dfa0a",
     "ext/mm_codex_exec.sh": "0c31ceaa0467e4eb82f5220adb59328677e28e48a9ea7786a09bb0d78f1919f4",
@@ -241,7 +241,7 @@
     "ext/quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
     "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
     "ext/recovery_artifacts.py": "c67db5c395403b34b2095380fd5f68dcc547c01fcce1ae85c6e78accbd8ad28f",
-    "ext/remote_sub.sh": "d400fb3cd1902d5754ec053531a62c38f1615e409545fc25cd3a79ecbfe0a5d0",
+    "ext/remote_sub.sh": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
     "ext/remote_sub_exec.py": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
     "ext/remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
     "ext/run_observation.py": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
@@ -249,35 +249,35 @@
     "ext/slot.py": "32809dd831e20711d30e07b956aa843de85edde5dc3965c002e522b4824d6ea7",
     "ext/studio_mcp_projection.sh": "098bd6d97a1375e5b7304cd85eadbe82a2d1519a334679d1d7dec39d987f97ec",
     "ext/sub.sh": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
-    "ext/support_bundle.py": "6c8ea69cb0d207679a99e3e9c5079dc5eb126092851d67f5ca477069dac72ef3",
+    "ext/support_bundle.py": "2a7e4beba3317f3defc81915fc3057ef31c244508f56eb362e3b76fbf9e412c5",
     "ext/support_policy_status.py": "463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058",
     "ext/yes": "b4f5e5353392e8ff4adc4158e1064243d0d7241333e9a891e05c1866b421813a",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679"
   },
   "patches": {
     "ext/fabric_task.py": {
-      "after": "10f3b62a5631595bf2e743e5448f8586eb47ef9104ab859c168887c38e7866a4",
+      "after": "b487c422dc70742f2ec302bbf0cc416acd17d49f62ba33b0cae9a20d8fe06550",
       "before": "6b451369bfa217366bf101abcc3e75c2af7c87abe9c8cf2e6da0291cf8d9b774",
       "patch": "fleet_launch_repair/fabric_task.py.patch",
-      "patch_sha256": "cd1e9e85b32fd06962b8320cc0ae66ea6b9bdbf82e66ef6533bfb17e971247df"
+      "patch_sha256": "e9df6bfc4e9c2fe8da654d445b67b156e30b993fb92e0980bd57152fcfb440c5"
     },
     "ext/lease_broker.py": {
-      "after": "f96282d13c89dee3cb8877275b5709ee851d7875f2a5ef17d21d9bdf4a51834f",
+      "after": "9ef3415eb79714646f6f7f024c9b3c4bda303fbc6e8681b21fddc856b1a75af1",
       "before": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
       "patch": "fleet_launch_repair/lease_broker.py.patch",
-      "patch_sha256": "68c06aa4b289d8f9b3351129e906230c5a8c55974f438441d122447ccdd0b9cd"
+      "patch_sha256": "67923017f1e3fd2e8ee436e5afb77df4b8f456ca8e3f345231421d74458477da"
     },
     "ext/remote_sub.sh": {
-      "after": "d400fb3cd1902d5754ec053531a62c38f1615e409545fc25cd3a79ecbfe0a5d0",
+      "after": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
       "before": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
       "patch": "fleet_launch_repair/remote_sub.sh.patch",
-      "patch_sha256": "192f57833319bedde41ed1687e51c02c6c61a9cd742afa4b51830433aee1965a"
+      "patch_sha256": "66a35ad8b1f7ba0d1f4c252bdaba7e511ff324149397489a7c6882525b771052"
     },
     "ext/support_bundle.py": {
-      "after": "6c8ea69cb0d207679a99e3e9c5079dc5eb126092851d67f5ca477069dac72ef3",
+      "after": "2a7e4beba3317f3defc81915fc3057ef31c244508f56eb362e3b76fbf9e412c5",
       "before": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
       "patch": "fleet_launch_repair/support_bundle.py.patch",
-      "patch_sha256": "e397a00f9f8283a4330764f035201f9f43a59ab3e7d6e5e39e3287704bda3949"
+      "patch_sha256": "76a27a7e31624b43a4840b7419f301f440eaeb3d01602b238fbabf684ff0bb4a"
     }
   },
   "source_map": {}

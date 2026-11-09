@@ -7,17 +7,20 @@
 -from datetime import datetime, timezone
 +from datetime import date, datetime, timezone
  from typing import Any, Callable, Dict, List, Optional, Tuple
- 
+
  from commission_deadline import (CommissionDeadlineExpired, require_remaining,
-@@ -1047,6 +1047,25 @@
+@@ -1046,7 +1046,28 @@
+     except ValueError:
          return None
- 
- 
+
++
 +def _json_safe_time(value: Any) -> Any:
 +    """Render YAML-loaded timestamps for the JSON status snapshot.
-+
+
 +    PyYAML turns an unquoted `parked_until: 2026-11-09T03:30:00Z` into a
-+    datetime, which json.dump rejects. Aware values are written in UTC with Z.
++    datetime, which json.dump rejects; an unquoted date key does the same to
++    a mapping key. Aware values are written in UTC with Z. Naive values are
++    written exactly as recorded, with no zone invented.
 +    """
 +    if isinstance(value, datetime):
 +        if value.tzinfo is None:
@@ -26,7 +29,7 @@
 +    if isinstance(value, date):
 +        return value.isoformat()
 +    if isinstance(value, dict):
-+        return {key: _json_safe_time(item) for key, item in value.items()}
++        return {_json_safe_time(key): _json_safe_time(item) for key, item in value.items()}
 +    if isinstance(value, (list, tuple)):
 +        return [_json_safe_time(item) for item in value]
 +    return value
@@ -35,21 +38,21 @@
  def _load_yaml(path: str) -> Dict[str, Any]:
      with open(path, encoding="utf-8") as fh:
          try:
-@@ -1083,10 +1102,13 @@
+@@ -1083,10 +1104,13 @@
      orchestrator_id: str = ""
      pool: str = ""
      quota_blockade: Optional[Dict[str, Any]] = None
 +    detail: str = ""
- 
+
      def line(self) -> str:
          if self.ok:
              return f"LEASE={self.lease_id} ACCOUNT={self.account}"
 +        if self.detail:
 +            return f"WAIT reason={self.reason or 'unavailable'} detail={self.detail}"
          return f"WAIT reason={self.reason or 'unavailable'}"
- 
- 
-@@ -2397,12 +2419,17 @@
+
+
+@@ -2397,12 +2421,17 @@
              source_paths = {}
              if self.host_state_dir is not None: source_paths['state_dir'] = self.host_state_dir
              if self.host_validator_path is not None: source_paths['validator_path'] = self.host_validator_path
@@ -69,7 +72,7 @@
          if allowed_accounts is not None:
              available = self.grantable_accounts(pool) if compatible_accounts is None else compatible_accounts
              compatible_accounts = [a for a in available if a.get("name") in allowed_accounts
-@@ -3484,9 +3511,9 @@
+@@ -3484,9 +3513,9 @@
                          "effective_cap": eff,
                          "held": self._account_held(conn, name, aname),
                          "parked": self._parked(acct, now),

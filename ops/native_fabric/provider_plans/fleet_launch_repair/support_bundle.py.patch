@@ -3,16 +3,16 @@
 @@ -1,7 +1,7 @@
  #!/usr/bin/env python3
  """support_bundle: pure file publication helper, Python3 stdlib only."""
- 
+
 -import os, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
 +import os, re, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
  from pathlib import Path
- 
+
  # Fixed public source closure (no credentials or controller-only helpers)
-@@ -308,37 +308,173 @@
+@@ -308,37 +308,219 @@
              time.sleep(min(0.02, remaining))
- 
- 
+
+
 -def _is_retained_settlement_metadata(path):
 -    """Classify retained metadata; never settle a run or remove a lane marker.
 +_RETAINED_METADATA_NAME = (r"\.([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\.(preexec-settlement|"
@@ -24,6 +24,14 @@
 +_SPARSE_VERIFIED = ("verified_no_git_worktree_registration", "verified_no_live_original_pid",
 +                    "verified_no_matching_git_ref", "verified_no_mint_session",
 +                    "verified_no_worker_receipt", "verified_no_workspace")
++_RETAINED_ADMISSION = {"active_count", "allowed", "cpu_count", "json_locked_count",
++                       "legacy_count", "load1", "load_ratio_limit", "max_active", "reasons",
++                       "stale_reaped"}
++_SEAT_PROOF_REQUIRED = {"process", "worktree_registered", "lane_workspace_dirs"}
++_SEAT_PROOF_OPTIONAL = {"donor_base_type_now", "executor_staging_without_git",
++                        "lane_branch_present", "mint", "original_pid_alive"}
++_SEAT_MINT_REQUIRED = {"census_proven", "ended_at", "residual_count", "returncode",
++                       "stderr_bytes"}
 +_PHYSICAL_COMMON = {"schema", "run_id", "kind", "host", "evidence", "original_marker",
 +                    "original_marker_device", "original_marker_inode",
 +                    "original_marker_sha256", "original_task_state"}
@@ -41,7 +49,7 @@
 +        "provider_result_accepted", "receipt_observed_utc", "results_retained_paths",
 +        "worker_may_have_performed_effects"},
 +}
- 
+
 -    Every non-metadata entry still blocks publication, including the original
 -    run marker if removal was interrupted. Do not ignore arbitrary dotfiles.
 -    """
@@ -72,7 +80,8 @@
 +            and lease["schema"] == _RETAINED_LEASE_SCHEMA
 +            and lease["key"] == run and lease["label"] == run
 +            and _retained_text(lease["host"]) and _retained_count(lease["pid"], 1)
-+            and _retained_time(lease["started_at"]) and type(lease["admission"]) is dict
++            and _retained_time(lease["started_at"])
++            and type(lease["admission"]) is dict and set(lease["admission"]) == _RETAINED_ADMISSION
 +            and lease["reconcile_unreleased"] is True
 +            and (lease["source_sha256"] is None or _retained_hex(lease["source_sha256"])))
 +
@@ -86,22 +95,57 @@
 +            and _retained_lease(hold["original_lease"], run))
 +
 +
++def _retained_same_entry(recorded, expected):
++    """True when a recorded absolute path names `expected` through any spelling of its directory."""
++    if type(recorded) is not str or not os.path.isabs(recorded):
+         return False
++    recorded = Path(recorded)
++    if recorded.name != expected.name:
++        return False
+     try:
+-        from lane_runtime import LaneRuntimeError, validate_preexec_settlement_receipt
+-    except ImportError:
++        left, right = os.stat(recorded.parent), os.stat(expected.parent)
++    except OSError:
+         return False
++    return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
++
++
++def _retained_seat_proof(proof):
++    """The no-live-worker proof shapes recorded by seat settlements; any other key blocks."""
++    if (type(proof) is not dict
++            or not _SEAT_PROOF_REQUIRED <= set(proof) <= _SEAT_PROOF_REQUIRED | _SEAT_PROOF_OPTIONAL):
++        return False
++    staging, mint = proof.get("executor_staging_without_git", []), proof.get("mint")
++    return (proof["process"] is False and proof["worktree_registered"] is False
++            and proof["lane_workspace_dirs"] == []
++            and proof.get("original_pid_alive", False) is False
++            and proof.get("lane_branch_present", False) is False
++            and ("donor_base_type_now" not in proof or _retained_text(proof["donor_base_type_now"]))
++            and type(staging) is list and len(staging) <= 64
++            and all(_retained_text(item) for item in staging)
++            and ("mint" not in proof
++                 or (type(mint) is dict
++                     and _SEAT_MINT_REQUIRED <= set(mint) <= _SEAT_MINT_REQUIRED | {"started_at"}
++                     and mint["census_proven"] is True
++                     and type(mint["residual_count"]) is int and mint["residual_count"] == 0
++                     and type(mint["returncode"]) is int and _retained_count(mint["stderr_bytes"])
++                     and _retained_time(mint["ended_at"])
++                     and ("started_at" not in mint or _retained_time(mint["started_at"])))))
++
++
 +def _retained_seat_settlement(value, run, path):
 +    required = {"schema", "run_id", "host", "hold", "marker_sha256", "proof", "remote_rc",
 +                "remote_signal", "worker_started", "settled_at", "settled_by", "note"}
 +    if not required <= set(value) <= required | {"lease_released", "marker_moved_to"}:
-         return False
--    try:
--        from lane_runtime import LaneRuntimeError, validate_preexec_settlement_receipt
--    except ImportError:
++        return False
 +    proof, released = value["proof"], value.get("lease_released")
 +    return (value["schema"] == "mastermind.seat_hold_settlement.v1"
 +            and value["run_id"] == run and value["worker_started"] is False
 +            and type(value["remote_rc"]) is int and value["remote_rc"] == 76
 +            and value["remote_signal"] == "FABRIC_SPARSE_MINT_UNVERIFIED"
 +            and _retained_hex(value["marker_sha256"]) and _retained_hold(value["hold"], run)
-+            and type(proof) is dict and proof.get("process") is False
-+            and proof.get("worktree_registered") is False
++            and _retained_seat_proof(proof)
 +            and all(_retained_text(value[k]) for k in ("host", "settled_by", "note"))
 +            and _retained_time(value["settled_at"])
 +            and ("lease_released" not in value
@@ -109,7 +153,8 @@
 +                     and released["ok"] is True and released["via"] == "lease_broker.py release"
 +                     and _retained_hex(released["lease"], 12)))
 +            and ("marker_moved_to" not in value
-+                 or value["marker_moved_to"] == str(path.with_name("." + run + ".held-marker.json"))))
++                 or _retained_same_entry(value["marker_moved_to"],
++                                         path.with_name("." + run + ".held-marker.json"))))
 +
 +
 +def _retained_sparse_settlement(value, run):
@@ -137,7 +182,7 @@
 +def _retained_physical_settlement(value, run):
 +    extra = _PHYSICAL_KINDS.get(value.get("kind")) if type(value.get("kind")) is str else None
 +    if extra is None or set(value) != _PHYSICAL_COMMON | extra:
-         return False
++        return False
 +    if not (value["schema"] == "mastermind.original_lane_physical_cleanup_settlement.v1"
 +            and value["run_id"] == run
 +            and value["original_task_state"] == "EFFECT_UNKNOWN_PRESERVED_NOT_REPLAYED"
@@ -197,7 +242,7 @@
          def unique_pairs(pairs):
              result = {}
              for key, value in pairs:
-@@ -347,17 +483,58 @@
+@@ -347,17 +529,58 @@
                  result[key] = value
              return result
          value = json.loads(raw, object_pairs_hook=unique_pairs)
@@ -211,8 +256,8 @@
      finally:
          if descriptor is not None:
              os.close(descriptor)
- 
- 
+
+
 +def _is_retained_settlement_metadata(path):
 +    """Classify retained metadata; never settle a run or remove a lane marker.
 +
@@ -252,7 +297,7 @@
 +        seat_path = path.with_name("." + run + ".seat-settlement.json")
 +        seat = _read_retained_metadata(seat_path)
 +        return (seat is not None and _retained_seat_settlement(seat[1], run, seat_path)
-+                and seat[1].get("marker_moved_to") == str(path)
++                and _retained_same_entry(seat[1].get("marker_moved_to"), path)
 +                and seat[1]["marker_sha256"] == hashlib.sha256(raw).hexdigest()
 +                and seat[1]["hold"] == value)
 +    except (OSError, ValueError, TypeError, UnicodeError, RecursionError, LaneRuntimeError):

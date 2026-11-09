@@ -11,14 +11,22 @@ CURRENT sequence42) and changes exactly four members:
   match its exact writer shape. A held marker counts only when a valid sibling seat
   settlement names it (`marker_moved_to`, `marker_sha256`, `hold`). Anything else,
   including a non-dot lane marker, still refuses with
-  `SUPPORT_POLICY_STALE_ACTIVE_REFUSED`.
+  `SUPPORT_POLICY_STALE_ACTIVE_REFUSED`. Seat no-live-worker proofs and lease
+  admission blocks use the closed key sets seen on the fleet, so an extra or live
+  key blocks. `marker_moved_to` must be absolute and name the same directory entry
+  (device/inode of its parent), so a symlinked lanes root still matches.
 - `ext/fabric_task.py`: the `support-policy-status` qualified-source pin follows
   the new `support_bundle.py` hash.
 - `ext/lease_broker.py`: `pool status` renders YAML timestamps (`parked_until`,
-  usage) as UTC `Z` strings instead of crashing `json.dump`; a
+  usage, and date mapping keys) as strings instead of crashing `json.dump`; aware
+  values become UTC `Z`, naive values keep their recorded text. A
   `host_account_unavailable` refusal carries a closed snake_case detail.
 - `ext/remote_sub.sh`: `LEASE_REFUSED rc=75` logs the broker's closed
-  `reason=`/`detail=` tokens.
+  `reason=`/`detail=` tokens, taken from the first line that carries a `reason=`.
+
+`provenance.json` records the read-only census of `ext/active` on triage0-3 under
+the repaired classifier. triage0, triage2 and triage3 hold only retained records;
+triage1's group-writable seat settlements and their held markers still block.
 
 ```sh
 python3 ops/native_fabric/provider_plans/compose.py --profile terminal119-fleet-launch-repair --base <owned-exact-8404cb15-source> --output <fresh-owned-source-output>
