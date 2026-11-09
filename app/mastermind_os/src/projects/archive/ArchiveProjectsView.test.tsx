@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type { ArchivedProject } from "./project-archive";
@@ -89,12 +89,12 @@ describe("ArchiveProjectsView", () => {
 
   it("reads archive evidence from the header action only when enabled", () => {
     const onRead = vi.fn();
-    const view = render(<ArchiveProjectsView {...props({ onRead, status: "unread" })} />);
+    const view = render(<ArchiveProjectsView {...props({ onRead, status: "unread", mode: "archived" })} />);
     const read = screen.getByRole("button", { name: "Refresh archived projects" }) as HTMLButtonElement;
     expect(read.disabled).toBe(false);
     fireEvent.click(read);
     expect(onRead).toHaveBeenCalledTimes(1);
-    view.rerender(<ArchiveProjectsView {...props({ onRead, status: "loading" })} />);
+    view.rerender(<ArchiveProjectsView {...props({ onRead, status: "loading", mode: "archived" })} />);
     expect((screen.getByRole("button", { name: "Refresh archived projects" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Reading archive evidence…")).toBeTruthy();
   });
@@ -161,12 +161,14 @@ describe("ArchiveProjectsView", () => {
     render(<ArchiveProjectsView {...props({ canRead: false })} />);
     expect(document.body.textContent).not.toContain("Live program");
     expect(document.body.textContent).not.toContain("WS:LIVE-1");
-    expect(screen.getByText("Open archive records in an authorized current project context.")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Refresh archived projects" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Refresh archived projects" })).toBeNull();
+    expect(screen.getByRole("button", {name:"Archived projects"})).toBeTruthy();
     cleanup();
     render(<ArchiveProjectsView {...props({ canRead: false, mode: "archived" })} />);
     expect(document.body.textContent).not.toContain("Legacy billing");
     expect(document.body.textContent).not.toContain("WS:ARCH-1");
+    expect(screen.getByText("Open archive records in an authorized current project context.")).toBeTruthy();
+    expect((screen.getByRole("button",{name:"Refresh archived projects"}) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("reports unread and unavailable archive states truthfully", () => {
@@ -232,7 +234,8 @@ it("preserves the caller-owned New project control only in the normal Projects h
   const view = render(<ArchiveProjectsView {...shared} />);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(create).toHaveBeenCalledTimes(1); expect(read).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Refresh archived projects" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Refresh archived projects" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Archived projects" })).toBeTruthy();
   view.rerender(<ArchiveProjectsView {...shared} mode="archived" locale="zh-CN" />);
   expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
   expect(screen.getByRole("button", { name: "刷新归档项目" })).toBeTruthy();
@@ -287,11 +290,74 @@ it.each(["en","zh-CN"] as const)("distinguishes current catalogue pending/unavai
   const read=vi.fn();const v=render(<ArchiveProjectsView {...props({locale,currentProjectsState:state,projects:[],canRead:false,onRead:read})}/>);
   expect(screen.getByText(messages[state])).toBeTruthy();
   if(state!=="ready")expect(screen.queryByText(messages.ready)).toBeNull();
-  expect(document.body.textContent).not.toMatch(/0 projects|公司.*0/);expect(read).not.toHaveBeenCalled();v.unmount();
+  if(state!=="ready")expect(document.body.textContent).not.toMatch(/0 projects|公司.*0/);
+  else expect(screen.getByRole("status").textContent).toBe(locale==="en"?"0 projects in this view":"此视图中有 0 个项目");
+  expect(read).not.toHaveBeenCalled();v.unmount();
  }
 });
 it("shows a qualified current row without granting an archive read",()=>{
  const read=vi.fn(),open=vi.fn();render(<ArchiveProjectsView {...props({currentProjectsState:"ready",canRead:false,onRead:read,onOpenProject:open})}/>);
- expect(screen.getByText("Live program")).toBeTruthy();expect((screen.getByRole("button",{name:"Refresh archived projects"}) as HTMLButtonElement).disabled).toBe(true);
+ expect(screen.getByText("Live program")).toBeTruthy();expect(screen.queryByRole("button",{name:"Refresh archived projects"})).toBeNull();
  fireEvent.click(screen.getByRole("button",{name:"Open project Live program"}));expect(open).toHaveBeenCalledWith("WS:LIVE-1");expect(read).not.toHaveBeenCalled();
+});
+
+
+it("composes the current catalogue as a counted table with honest owner and recorded state", () => {
+ render(<ArchiveProjectsView {...props({currentProjectsState:"ready",projects:[live,unknownCard],canRead:false,onOpenProject:vi.fn()})}/>);
+ expect(screen.getByRole('heading',{level:1,name:'Projects'})).toBeTruthy();
+ expect(screen.getByText('Choose a project to view its plan, sources and conversations.')).toBeTruthy();
+ expect(screen.getByRole('status').textContent).toBe('2 projects in this view');
+ const table=within(screen.getByRole('table',{name:'Current projects'}));
+ expect(table.getAllByRole('columnheader').map(n=>n.textContent)).toEqual(['Project','Next step','Owner','Recorded state','Open project']);
+ expect(table.getAllByText('Not supplied')).toHaveLength(2);
+ expect(table.getByText('In review')).toBeTruthy();
+ expect(table.getByText('Unknown')).toBeTruthy();
+ expect(screen.queryByText('Continue working')).toBeNull();
+ expect(screen.queryByRole('button',{name:'Refresh archived projects'})).toBeNull();
+ expect(screen.getByRole('button',{name:'Archived projects'}).hasAttribute('disabled')).toBe(false);
+ expect((screen.getByText('Archive status comes only from checked source records. It does not indicate whether work is running.').closest('details') as HTMLDetailsElement).open).toBe(false);
+});
+it("reports filtered loaded counts, clears the filter, and keeps the exact explicit project target", () => {
+ const open=vi.fn();render(<ArchiveProjectsView {...props({currentProjectsState:'ready',projects:[live,unknownCard],onOpenProject:open})}/>);
+ fireEvent.change(screen.getByRole('searchbox',{name:'Find a project'}),{target:{value:'LIVE-2'}});
+ expect(screen.getByRole('status').textContent).toBe('1 of 2 projects match this search');
+ fireEvent.click(screen.getByRole('button',{name:'Open project WS:LIVE-2'}));expect(open).toHaveBeenCalledExactlyOnceWith('WS:LIVE-2');
+ fireEvent.change(screen.getByRole('searchbox'),{target:{value:'absent'}});
+ expect(screen.getByRole('status').textContent).toBe('0 of 2 projects match this search');
+ expect(screen.getByText('No supplied projects match this search.')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Clear search'}));
+ expect(screen.getByRole('searchbox')).toHaveProperty('value','');
+ expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+ expect(screen.getByRole('status').textContent).toBe('2 projects in this view');
+});
+it("withholds stale rows and counts while pending or unavailable, then distinguishes qualified empty", () => {
+ const v=render(<ArchiveProjectsView {...props({currentProjectsState:'pending',projects:[live]})}/>);
+ expect(screen.queryByText(live.title!)).toBeNull();expect(screen.queryByRole('table')).toBeNull();
+ expect(screen.queryByText(/0 projects/)).toBeNull();expect(screen.getByText('Reading projects…')).toBeTruthy();
+ v.rerender(<ArchiveProjectsView {...props({currentProjectsState:'unavailable',projects:[live]})}/>);
+ expect(screen.queryByText(live.title!)).toBeNull();expect(screen.queryByRole('table')).toBeNull();
+ expect(screen.getByText('Projects are unavailable right now. The current project list could not be confirmed.')).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Archived projects'})).toBeTruthy();
+ v.rerender(<ArchiveProjectsView {...props({currentProjectsState:'ready',projects:[]})}/>);
+ expect(screen.getByRole('status').textContent).toBe('0 projects in this view');
+ expect(screen.getByText('No projects were supplied by the current read.')).toBeTruthy();
+});
+it("uses a bounded initial list and reveals only the actual remaining supplied rows", () => {
+ const cards=Array.from({length:11},(_,i)=>({...live,workRef:`WS:REAL-${i}`,title:`Supplied ${i}`}));
+ render(<ArchiveProjectsView {...props({currentProjectsState:'ready',projects:cards})}/>);
+ expect(screen.getAllByRole('row')).toHaveLength(9);
+ fireEvent.click(screen.getByRole('button',{name:'See all 11 projects'}));
+ expect(screen.getAllByRole('row')).toHaveLength(12);
+ fireEvent.click(screen.getByRole('button',{name:'Show fewer projects'}));expect(screen.getAllByRole('row')).toHaveLength(9);
+});
+it("localizes current-list hierarchy and filter feedback without rewriting authored source content", () => {
+ render(<ArchiveProjectsView {...props({locale:'zh-CN',currentProjectsState:'ready',projects:[live],onOpenProject:vi.fn()})}/>);
+ expect(screen.getByText('选择项目，查看计划、来源和对话。')).toBeTruthy();
+ expect(screen.getByRole('table',{name:'当前项目'})).toBeTruthy();
+ expect(screen.getByRole('columnheader',{name:'负责人'})).toBeTruthy();expect(screen.getByText('未提供')).toBeTruthy();
+ expect(screen.getByRole('columnheader',{name:'记录状态'})).toBeTruthy();expect(screen.getByText('In review')).toBeTruthy();
+ fireEvent.change(screen.getByRole('searchbox',{name:'查找项目'}),{target:{value:'unmatched'}});
+ expect(screen.getByRole('status').textContent).toBe('匹配 0 个项目，共 1 个');
+ expect(screen.getByRole('button',{name:'清除搜索'})).toBeTruthy();
+ expect(screen.queryByText('Owner')).toBeNull();expect(screen.queryByText('Recorded state')).toBeNull();
 });
