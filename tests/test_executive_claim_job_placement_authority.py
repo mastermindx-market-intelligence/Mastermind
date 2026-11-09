@@ -378,6 +378,152 @@ def test_started_attempt_cannot_use_pre_start_release(tmp_path):
     assert _commitments(runtime)[0]["state"] == "EFFECT_MAY_HAVE_BEGUN"
 
 
+# --- REVIEW_2314 M-1: supervisor adoption re-issues the binding --------------------
+
+def _record_process(runtime: Runtime, attempt_id: str) -> None:
+    with runtime.store.transaction() as connection:  # what a supervisor START records
+        connection.execute(
+            "UPDATE attempts SET pid=4242,pgid=4242,process_start_identity='probe',"
+            "boot_id='boot-probe' WHERE attempt_id=?", (attempt_id,))
+
+
+def _settle_events(runtime: Runtime) -> list:
+    return [e for e in runtime.store.list_events()
+            if e.command_id and e.command_id.startswith("physical:placement:")
+            and e.command_id.endswith(":settle")]
+
+
+def test_adopted_attempt_settlement(tmp_path):
+    runtime, _ = _runtime(tmp_path)
+    _worker(runtime, "worker-a", "ubuntu0")
+    job = _job(runtime, "child-1")
+    lease = runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    attempt_id = lease.attempt.attempt_id
+    claimed = ExecutionBinding.from_dict(runtime.attempts.execution_binding(attempt_id))
+    _record_process(runtime, attempt_id)
+
+    adopted = runtime.attempts.adopt_attempt(
+        attempt_id, expected_fence_generation=lease.attempt.fence_generation,
+        lease_owner="supervisor-2")
+
+    assert adopted.attempt.fence_generation == lease.attempt.fence_generation + 1
+    current = ExecutionBinding.from_dict(runtime.attempts.execution_binding(attempt_id))
+    # Re-issued atomically at adoption: only the fence (and lease expiry) move.
+    assert current.fence_counter == adopted.attempt.fence_generation
+    assert current.fence_counter == _quota_row(runtime, "worker-a")["fence_counter"]
+    assert current.lease_expiry
+    assert {k: v for k, v in current.to_dict().items()
+            if k not in {"fence_counter", "lease_expiry"}} == {
+        k: v for k, v in claimed.to_dict().items()
+        if k not in {"fence_counter", "lease_expiry"}}
+    adoption = [e for e in runtime.store.list_events(job_id=job.job_id)
+                if e.event_type == "ATTEMPT_ADOPTED"]
+    assert len(adoption) == 1
+    assert adoption[0].payload["execution_binding"] == current.to_dict()
+    # The pre-restart owner is stale at both settlement verbs; nothing settles.
+    with pytest.raises(StateConflict):
+        runtime.attempts.complete_attempt(
+            attempt_id, fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token, payload={"summary": "zombie"})
+    with pytest.raises(StateConflict):
+        runtime.attempts.fail_attempt(
+            attempt_id, fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token, payload={"error": "zombie"})
+    assert _commitments(runtime)[0]["state"] == "EFFECT_MAY_HAVE_BEGUN"
+
+    runtime.attempts.complete_attempt(
+        attempt_id, fence_generation=adopted.attempt.fence_generation,
+        lease_token=adopted.lease_token, payload={"summary": "done"})
+
+    assert runtime.attempts.get_attempt(attempt_id).status is AttemptStatus.COMPLETED
+    assert _commitments(runtime)[0]["state"] == "SETTLED"
+    assert _charges(runtime, host_slot_pool("ubuntu0"), root_concurrency_pool(job.job_id),
+                    shared_quota_pool(QUOTA)) == {
+        host_slot_pool("ubuntu0"): 0, root_concurrency_pool(job.job_id): 0,
+        shared_quota_pool(QUOTA): 0}
+    with pytest.raises(StateConflict):  # exactly once
+        runtime.attempts.fail_attempt(
+            attempt_id, fence_generation=adopted.attempt.fence_generation,
+            lease_token=adopted.lease_token, payload={"error": "again"})
+    assert len(_settle_events(runtime)) == 1
+
+    # A second restart chains the re-issue; fail_attempt settles exactly once.
+    other = _job(runtime, "child-2")
+    lease2 = runtime.attempts.claim_job(other.job_id, placement_observations=_observations())
+    _record_process(runtime, lease2.attempt.attempt_id)
+    first = runtime.attempts.adopt_attempt(
+        lease2.attempt.attempt_id, expected_fence_generation=lease2.attempt.fence_generation,
+        lease_owner="supervisor-2")
+    second = runtime.attempts.adopt_attempt(
+        lease2.attempt.attempt_id, expected_fence_generation=first.attempt.fence_generation,
+        lease_owner="supervisor-3")
+    binding = ExecutionBinding.from_dict(runtime.attempts.execution_binding(lease2.attempt.attempt_id))
+    assert binding.fence_counter == second.attempt.fence_generation
+    with pytest.raises(StateConflict):
+        runtime.attempts.fail_attempt(
+            lease2.attempt.attempt_id, fence_generation=first.attempt.fence_generation,
+            lease_token=first.lease_token, payload={"error": "superseded adopter"})
+    runtime.attempts.fail_attempt(
+        lease2.attempt.attempt_id, fence_generation=second.attempt.fence_generation,
+        lease_token=second.lease_token, payload={"error": "failed"})
+    assert [r["state"] for r in _commitments(runtime)] == ["SETTLED", "SETTLED"]
+    assert len(_settle_events(runtime)) == 2
+
+
+# --- REVIEW_2314 M-2: cancel + lease expiry settles the placement ----------------
+
+def test_cancel_after_lease_expiry_settles_placement(tmp_path):
+    runtime, clock = _runtime(tmp_path)
+    _worker(runtime, "worker-a", "ubuntu0")
+    job = _job(runtime, "child-1")
+    lease = runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    runtime.jobs.cancel_job(job.job_id)
+    clock.value = NOW + 10 * 60_000  # past the lease
+
+    runtime.attempts.reconcile_expired()
+
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.CANCELLED
+    assert runtime.attempts.get_attempt(lease.attempt.attempt_id).status is AttemptStatus.LOST
+    assert _quota_row(runtime, "worker-a")["held_attempt_id"] is None
+    row = _commitments(runtime)[0]
+    assert row["state"] == "SETTLED" and row["settlement_event_id"] is not None
+    with runtime.store.read() as connection:
+        settle = json.loads(connection.execute(
+            "SELECT payload_json FROM events WHERE event_id=?",
+            (row["settlement_event_id"],)).fetchone()[0])
+    assert settle["receipt"]["evidence"]["placement_release"] == "LEASE_EXPIRED"
+    assert _charges(runtime, host_slot_pool("ubuntu0"), root_concurrency_pool(job.job_id),
+                    shared_quota_pool(QUOTA)) == {
+        host_slot_pool("ubuntu0"): 0, root_concurrency_pool(job.job_id): 0,
+        shared_quota_pool(QUOTA): 0}
+    # Exactly once: a second reconcile pass and the dead verbs settle nothing more.
+    runtime.attempts.reconcile_expired()
+    with pytest.raises(Exception):
+        runtime.jobs.requeue_job(job.job_id)
+    assert len(_settle_events(runtime)) == 1
+    # The freed host slot admits new work (worker-a's quota class is ERROR).
+    _worker(runtime, "worker-b", "ubuntu0")
+    fresh = _job(runtime, "child-2")
+    assert runtime.attempts.claim_job(
+        fresh.job_id, placement_observations=_observations(now=clock.value)) is not None
+
+
+def test_lost_after_lease_expiry_holds_placement_until_requeue(tmp_path):
+    """m-1: the non-cancel expiry branch keeps quota custody, so the placement
+    commitment stays held too; requeue_job is the single release owner."""
+    runtime, clock = _runtime(tmp_path)
+    _worker(runtime, "worker-a", "ubuntu0")
+    job = _job(runtime, "child-1")
+    runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    clock.value = NOW + 10 * 60_000
+    runtime.attempts.reconcile_expired()
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.LOST
+    assert _commitments(runtime)[0]["state"] == "EFFECT_MAY_HAVE_BEGUN"
+    runtime.jobs.requeue_job(job.job_id)
+    assert _commitments(runtime)[0]["state"] == "SETTLED"
+    assert len(_settle_events(runtime)) == 1
+
+
 # --- OQ-1: the deployed lease broker is an observation source only -----------------
 
 def _lease_db(path) -> None:
