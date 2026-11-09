@@ -34,9 +34,8 @@ import {
 import { readLaunchBindingConfig } from "./launch-config";
 import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
 import { Today } from "./today/Today";
-import { TeamWorkspace } from "./team/TeamWorkspace";
+import { TeamRoute } from "./team/TeamRoute";
 import { HermesNativePanel } from "./hermes-native/HermesNativePanel";
-import { readTeamRoster } from "./team/team-roster-contract";
 import { CodeWorkspace } from "./code/CodeWorkspace";
 import { ProjectDeliveryPanel, type DeliveryTrailStep } from "./projects/ProjectDeliveryPanel";
 import { AuthEntry } from "./auth-entry/AuthEntry";
@@ -3165,7 +3164,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
               : active === "Team"
-                ? locale === "zh-CN" ? "团队名册来源未连接。不推断任何成员状态。" : "Team roster source not connected. No teammate state is inferred."
+                ? locale === "zh-CN" ? "团队名册在打开此视图时通过本地原生 team_roster 操作读取一次；未观测的成员状态保持未知。" : "The team roster is read once through the local native team_roster operation; unobserved teammate state stays unknown."
                 : active === "Code"
                   ? locale === "zh-CN" ? "T3 线程投影来源未连接。不推断任何线程状态。" : "T3 thread projection source not connected. No thread state is inferred."
                   : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
@@ -5899,11 +5898,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Team")
     // Team roster (TD01/TS01) + bot entry (TD02/HC04). The conversation
     // surface below is the EXISTING hermes-native panel; never a second
-    // transport. The roster is read fail-closed from the mission host.
+    // transport. The roster is read once through the existing native port's
+    // read-only team_roster operation (Director B's authoritative contract).
     content = (
-      <TeamWorkspace
+      <TeamRoute
+        key={`team:${authRevision}`}
         locale={locale}
-        roster={readTeamRoster(window.MastermindMissionHost)}
         conversationPanel={<HermesNativePanel key={`team-hermes:${authRevision}`} locale={locale}/>}
         delegatedTask={null}
         onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}

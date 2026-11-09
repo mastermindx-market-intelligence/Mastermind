@@ -3,28 +3,34 @@ import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TeamWorkspace, classifyGatewayState } from "./TeamWorkspace";
-import type { TeamRosterEntry, TeamRosterRead } from "./team-roster-contract";
+import type { TeamRosterRead } from "./team-roster";
+// Fixtures are built through Director B's REAL fail-closed parser, so every
+// rendered roster is contract-valid by construction (no second parser here).
+import { parseTeamRoster } from "../hermes-native/team-roster-contract";
 import type { DelegatedTask } from "./delegated-task";
 afterEach(cleanup);
 
-function bot(extra: Partial<TeamRosterEntry> = {}): TeamRosterEntry {
-  return {
-    botId: "bot-alpha",
-    displayName: "Alpha Bot",
-    role: "Research lead",
-    profile: null,
-    gatewayInstance: "gw-1",
-    host: "m2studio",
-    readiness: "ready",
-    readinessReason: null,
-    lastActivity: "2026-11-09T00:00:00Z",
-    activitySummary: "Reading regime data",
-    ...extra,
-  };
-}
-const available = (bots: TeamRosterEntry[]): TeamRosterRead => ({
+const observedGateway = (over: Record<string, unknown> = {}) => ({
+  observed: true, source: "control_socket_identify", instanceId: "gw-1",
+  authorityEpoch: 4, codeVersion: "0.23.0", pid: 1234, state: "ready", ...over,
+});
+const unobservedGateway = {
+  observed: false, source: "none", instanceId: null, authorityEpoch: null,
+  codeVersion: null, pid: null, state: null,
+};
+const botJson = (over: Record<string, unknown> = {}) => ({
+  id: "bot-alpha", displayName: "Alpha Bot", role: "Research lead",
+  profilePath: "/Users/operator/.hermes/profiles/alpha", managed: true,
+  host: "m2studio", gateway: observedGateway(), readiness: "ready",
+  readinessReason: "GATEWAY_IDENTIFY_READY", lastActivity: "2026-11-09T00:00:00Z",
+  activitySummary: "Reading regime data", ...over,
+});
+const available = (bots: unknown[]): TeamRosterRead => ({
   kind: "AVAILABLE",
-  roster: { schema: "mastermind.team_roster.v1", bots },
+  roster: parseTeamRoster({
+    schema: "mastermind.team_roster/v1", generatedAt: "2026-11-09T12:00:00Z",
+    host: "m2studio", bots,
+  }),
 });
 const task: DelegatedTask = {
   taskId: "task-1",
@@ -66,60 +72,63 @@ describe("classifyGatewayState — distinct conversation states per HS01", () =>
   });
 });
 
-describe("TeamWorkspace roster (TD01/TS01)", () => {
-  it("renders the roster table with honest unknowns, never an invented company", () => {
+describe("TeamWorkspace roster (TD01/TS01) on Director B's contract", () => {
+  it("renders honest ready/degraded/unknown rows with visible reason codes", () => {
     render(
       <TeamWorkspace
         roster={available([
-          bot(),
-          bot({
-            botId: "bot-beta",
+          botJson(),
+          botJson({
+            id: "bot-beta",
             displayName: "Beta",
             role: "Ops",
+            managed: false,
+            gateway: { ...observedGateway({ source: "gateway_lock", state: "lock_only", instanceId: "gw-2" }) },
             readiness: "degraded",
-            readinessReason: "gateway reconnecting",
+            readinessReason: "GATEWAY_PID_NOT_RUNNING",
             lastActivity: null,
             activitySummary: null,
-            host: null,
+            activityReason: "NO_STATE_DB",
           }),
-          bot({
-            botId: "bot-gamma",
+          botJson({
+            id: "bot-gamma",
             displayName: "Gamma",
             role: "Review",
+            host: "unknown",
+            gateway: unobservedGateway,
             readiness: "unknown",
-            readinessReason: "no reading in 48h",
-            gatewayInstance: null,
+            readinessReason: "NO_GATEWAY_LOCK",
+            lastActivity: null,
+            activitySummary: null,
+            activityReason: "NO_SESSIONS",
           }),
         ])}
       />,
     );
     expect(screen.getByRole("table", { name: "Team roster" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open Alpha Bot" })).toBeTruthy();
-    expect(screen.getByText("Alpha Bot")).toBeTruthy();
     expect(screen.getByText("Ready")).toBeTruthy();
-    expect(
-      document.querySelector(".mm-roster-state[data-readiness='degraded']")
-        ?.textContent,
-    ).toContain("Degraded");
-    expect(
-      document.querySelector(".mm-roster-state[data-readiness='degraded']")
-        ?.textContent,
-    ).toContain("gateway reconnecting");
-    expect(
-      document.querySelector(".mm-roster-state[data-readiness='unknown']")
-        ?.textContent,
-    ).toContain("Unknown");
-    expect(
-      document.querySelector(".mm-roster-state[data-readiness='unknown']")
-        ?.textContent,
-    ).toContain("no reading in 48h");
-    // A teammate with no observed focus shows unknown, and never a fabricated summary.
+    const degraded = document.querySelector(
+      ".mm-roster-state[data-readiness='degraded']",
+    )!;
+    expect(degraded.textContent).toContain("Degraded");
+    // Human-readable phrase AND the closed reason code stay visible.
+    expect(degraded.textContent).toContain("GATEWAY_PID_NOT_RUNNING");
+    expect(degraded.textContent).toContain("Locked gateway process is not running");
+    const unknown = document.querySelector(
+      ".mm-roster-state[data-readiness='unknown']",
+    )!;
+    expect(unknown.textContent).toContain("Unknown");
+    expect(unknown.textContent).toContain("NO_GATEWAY_LOCK");
+    expect(unknown.textContent).not.toContain("Ready");
+    // Unobserved activity carries its typed reason, never a fabricated summary.
     const rows = document.querySelectorAll(".mm-roster tbody tr");
-    expect(rows[1]!.textContent).toContain("Unknown"); // Beta has no activity summary
-    expect(rows[1]!.textContent).not.toContain("No activity observed"); // detail-view fact only
-    expect(rows[2]!.textContent).toContain(
-      "Last activity 2026-11-09T00:00:00Z",
-    );
+    expect(rows[0]!.textContent).toContain("Last activity 2026-11-09T00:00:00Z");
+    expect(rows[1]!.textContent).toContain("NO_STATE_DB");
+    expect(rows[1]!.textContent).not.toContain("No activity observed");
+    // host:"unknown" is a sentinel, never rendered as an observed hostname.
+    expect(rows[0]!.querySelector(".mm-roster-host")!.textContent).toBe("m2studio");
+    expect(rows[2]!.querySelector(".mm-roster-host")).toBeNull();
     expect(screen.queryByText(/Team needs a connection/i)).toBeNull();
   });
 
@@ -129,7 +138,7 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
       <TeamWorkspace
         roster={{
           kind: "UNAVAILABLE",
-          reason: "TEAM_ROSTER_SOURCE_NOT_CONNECTED",
+          reason: "NATIVE_PLATFORM_UNAVAILABLE",
         }}
         onOpenConversations={onOpenConversations}
       />,
@@ -145,6 +154,8 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
         /An unavailable source is never shown as an empty company/i,
       ),
     ).toBeTruthy();
+    // The port's closed reason code stays visible, never paraphrased away.
+    expect(screen.getByText("NATIVE_PLATFORM_UNAVAILABLE")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     fireEvent.click(
       screen.getByRole("button", { name: "Open recent conversations" }),
@@ -155,7 +166,7 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
   it("says the source is unverifiable when data fails the contract", () => {
     render(
       <TeamWorkspace
-        roster={{ kind: "UNAVAILABLE", reason: "TEAM_ROSTER_SOURCE_INVALID" }}
+        roster={{ kind: "UNAVAILABLE", reason: "NATIVE_RESPONSE_INVALID" }}
       />,
     );
     expect(
@@ -163,14 +174,25 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
         /returned data this surface could not verify\. Nothing is shown from it/i,
       ),
     ).toBeTruthy();
+    expect(screen.getByText("NATIVE_RESPONSE_INVALID")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("opens a bot detail with honest facts, PREVIEW authority and the existing conversation panel", () => {
+  it("renders an honest PENDING state — never an empty roster table", () => {
+    render(<TeamWorkspace roster={{ kind: "PENDING" }} />);
+    expect(screen.getByText("Reading the team roster…")).toBeTruthy();
+    expect(
+      screen.getByText(/read once from the local native runtime/i),
+    ).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText(/Team needs a connection/i)).toBeNull();
+  });
+
+  it("opens a bot detail with B's richer facts, PREVIEW authority and the existing conversation panel", () => {
     const conversationPanel = <div data-testid="existing-hermes-panel" />;
     render(
       <TeamWorkspace
-        roster={available([bot()])}
+        roster={available([botJson()])}
         conversationPanel={conversationPanel}
         gateway={{ state: "UNAVAILABLE", code: "NATIVE_BUSY" }}
       />,
@@ -183,8 +205,13 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
     expect(screen.queryByText(/never creates a second transport/i)).toBeNull();
     const facts = document.querySelector(".mm-team-bot-facts")!.textContent!;
     expect(facts).toContain("Ready");
+    expect(facts).toContain("GATEWAY_IDENTIFY_READY");
     expect(facts).toContain("Last activity 2026-11-09T00:00:00Z");
     expect(facts).toContain("gw-1");
+    expect(facts).toContain("ready"); // gateway.state when observed
+    expect(facts).toContain("control_socket_identify"); // gateway.source stays visible
+    expect(facts).toContain("Yes"); // managed: true
+    expect(facts).toContain("/Users/operator/.hermes/profiles/alpha");
     expect(screen.getByRole("status").textContent).toBe("Gateway busy");
     expect(
       screen.getByText(/team gateway is handling one operation/i),
@@ -196,6 +223,34 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "← Team" }));
     expect(screen.getByRole("table", { name: "Team roster" })).toBeTruthy();
+  });
+
+  it("keeps unobserved detail facts honest (unknown gateway, managed null, activity reason)", () => {
+    render(
+      <TeamWorkspace
+        roster={available([
+          botJson({
+            id: "bot-gamma",
+            displayName: "Gamma",
+            host: "unknown",
+            managed: null,
+            gateway: unobservedGateway,
+            readiness: "unknown",
+            readinessReason: "NO_GATEWAY_LOCK",
+            lastActivity: null,
+            activitySummary: null,
+            activityReason: "NO_STATE_DB",
+          }),
+        ])}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Gamma" }));
+    const facts = document.querySelector(".mm-team-bot-facts")!.textContent!;
+    expect(facts).toContain("Unknown"); // readiness label + managed null
+    expect(facts).toContain("NO_GATEWAY_LOCK");
+    expect(facts).toContain("No activity observed");
+    expect(facts).toContain("NO_STATE_DB");
+    expect(facts).toContain("none"); // gateway.source
   });
 
   it("labels the four distinct non-live gateway states (HS01)", () => {
@@ -228,7 +283,7 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
     ];
     for (const { gateway, label, note } of cases) {
       const { unmount } = render(
-        <TeamWorkspace roster={available([bot()])} gateway={gateway} />,
+        <TeamWorkspace roster={available([botJson()])} gateway={gateway} />,
       );
       fireEvent.click(screen.getByRole("button", { name: "Open Alpha Bot" }));
       expect(screen.getByRole("status").textContent).toBe(label);
@@ -245,9 +300,9 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
     render(
       <TeamWorkspace
         roster={available([
-          bot(),
-          bot({ botId: "bot-beta", displayName: "Beta Bot" }),
-          bot({ botId: "bot-gamma", displayName: "Gamma Bot" }),
+          botJson(),
+          botJson({ id: "bot-beta", displayName: "Beta Bot" }),
+          botJson({ id: "bot-gamma", displayName: "Gamma Bot" }),
         ])}
       />,
     );
@@ -270,27 +325,26 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
   });
 
   it("shows the delegated coding task on the bot detail when one is projected", () => {
-    render(<TeamWorkspace roster={available([bot()])} delegatedTask={task} />);
+    render(<TeamWorkspace roster={available([botJson()])} delegatedTask={task} />);
     fireEvent.click(screen.getByRole("button", { name: "Open Alpha Bot" }));
     expect(screen.getByText("Delegated coding work")).toBeTruthy();
     expect(screen.getByText("Repair launch refusal")).toBeTruthy();
     expect(screen.getByText("EFFECT·NONE")).toBeTruthy();
   });
 
-  it("renders the honest zh-CN roster and unavailable copy", () => {
+  it("renders the honest zh-CN roster, pending and unavailable copy", () => {
     const { unmount } = render(
-      <TeamWorkspace roster={available([bot()])} locale="zh-CN" />,
+      <TeamWorkspace roster={available([botJson()])} locale="zh-CN" />,
     );
     expect(screen.getByRole("table", { name: "团队名册" })).toBeTruthy();
     expect(screen.getByText("就绪")).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开 Alpha Bot" })).toBeTruthy();
+    expect(screen.getByText("GATEWAY_IDENTIFY_READY")).toBeTruthy();
+    expect(screen.getByText("控制套接字 identify 已验证网关")).toBeTruthy();
     unmount();
     render(
       <TeamWorkspace
-        roster={{
-          kind: "UNAVAILABLE",
-          reason: "TEAM_ROSTER_SOURCE_NOT_CONNECTED",
-        }}
+        roster={{ kind: "UNAVAILABLE", reason: "NATIVE_PLATFORM_UNAVAILABLE" }}
         locale="zh-CN"
       />,
     );
@@ -298,5 +352,10 @@ describe("TeamWorkspace roster (TD01/TS01)", () => {
     expect(screen.getByText("名册未验证")).toBeTruthy();
     expect(screen.getByText("未验证")).toBeTruthy();
     expect(screen.getByText(/来源不可用时，绝不显示为空公司。/)).toBeTruthy();
+    expect(screen.getByText("NATIVE_PLATFORM_UNAVAILABLE")).toBeTruthy();
+    unmount();
+    render(<TeamWorkspace roster={{ kind: "PENDING" }} locale="zh-CN" />);
+    expect(screen.getByText("正在读取团队名册…")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });

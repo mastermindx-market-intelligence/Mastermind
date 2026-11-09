@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import type { TeamRosterEntry, TeamRosterRead } from "./team-roster-contract";
+import type { TeamBot, TeamRosterRead } from "./team-roster";
 import { DelegatedTaskCard } from "./DelegatedTaskCard";
 import type { DelegatedTask } from "./delegated-task";
 import "./team.css";
@@ -7,7 +7,7 @@ import "./team.css";
 /** Distinct conversation gateway states (HS01 + D2). A code-based classifier
  *  keeps labels honest: unknown codes stay unknown, never "healthy". */
 export type TeamGatewayState =
-  "live" | "viewer-disconnected" | "gateway-busy" | "quota" | "unknown";
+  | "live" | "viewer-disconnected" | "gateway-busy" | "quota" | "unknown";
 
 const VIEWER_DISCONNECTED = new Set([
   "NATIVE_PLATFORM_UNAVAILABLE",
@@ -28,6 +28,64 @@ export function classifyGatewayState(
   return "unknown";
 }
 
+/** Human-readable copy for the producer's CLOSED reason vocabulary
+ * (bridge.py team_roster / control_plane/team_roster_projection.py). The code
+ * itself always stays visible; an unmapped code renders as the code alone —
+ * never a guessed explanation. */
+const REASON_COPY: Record<string, { en: string; zh: string }> = {
+  GATEWAY_IDENTIFY_READY: {
+    en: "Gateway verified by control-socket identify",
+    zh: "控制套接字 identify 已验证网关",
+  },
+  GATEWAY_LOCK_PID_VERIFIED: {
+    en: "Gateway verified by lock file and running process",
+    zh: "锁文件与运行进程已验证网关",
+  },
+  NO_GATEWAY_LOCK: {
+    en: "No gateway lock observed",
+    zh: "未观察到网关锁",
+  },
+  GATEWAY_PID_NOT_RUNNING: {
+    en: "Locked gateway process is not running",
+    zh: "锁定的网关进程未在运行",
+  },
+  GATEWAY_PID_RECYCLED: {
+    en: "Locked pid now runs another process",
+    zh: "锁定的 pid 已被其他进程占用",
+  },
+  GATEWAY_PID_START_MISMATCH: {
+    en: "Locked pid start time does not match",
+    zh: "锁定的 pid 启动时间不匹配",
+  },
+  NO_STATE_DB: {
+    en: "No state database on disk",
+    zh: "磁盘上没有状态数据库",
+  },
+  STATE_DB_UNREADABLE: {
+    en: "State database could not be read",
+    zh: "状态数据库无法读取",
+  },
+  NO_SESSIONS: {
+    en: "No sessions recorded yet",
+    zh: "尚无已记录的会话",
+  },
+  ACTIVITY_TIMESTAMP_INVALID: {
+    en: "Recorded activity timestamp is invalid",
+    zh: "记录的活动时间戳无效",
+  },
+};
+
+function ReasonCode({ code, locale }: { code: string; locale: "en" | "zh-CN" }) {
+  const copy = REASON_COPY[code];
+  const phrase = copy ? (locale === "zh-CN" ? copy.zh : copy.en) : code;
+  return (
+    <>
+      {phrase !== code ? `${phrase} ` : null}
+      <code>{code}</code>
+    </>
+  );
+}
+
 const STRINGS = {
   en: {
     heading: "Team roster",
@@ -46,6 +104,10 @@ const STRINGS = {
     activityNever: "No activity observed",
     host: (value: string) => `Host ${value}`,
     gateway: (value: string) => `Gateway ${value}`,
+    rosterPendingChip: "Reading roster",
+    rosterPendingTitle: "Reading the team roster…",
+    rosterPendingBody:
+      "The roster is read once from the local native runtime when this view opens. Nothing is shown or inferred until it returns.",
     rosterUnavailableTitle: "Team needs a connection",
     rosterUnavailableChip: "Roster not verified",
     rosterUnavailableBody:
@@ -62,6 +124,7 @@ const STRINGS = {
       "An unavailable source is never shown as an empty company.",
     rosterInvalidNote:
       "The roster source returned data this surface could not verify. Nothing is shown from it.",
+    rosterReadLabel: "Native roster read",
     conversationHeading: "Conversation",
     conversationSectionNote:
       "The existing persistent conversation surface. This view never creates a second transport.",
@@ -85,8 +148,12 @@ const STRINGS = {
     roleLabel: "Role",
     hostLabel: "Host",
     gatewayLabel: "Gateway instance",
+    managedLabel: "Managed profile",
+    managedYes: "Yes",
+    managedNo: "No",
     readinessLabel: "Readiness",
     activityLabel: "Last activity",
+    gatewaySourceLabel: "Gateway source",
   },
   "zh-CN": {
     heading: "团队名册",
@@ -105,6 +172,10 @@ const STRINGS = {
     activityNever: "未观察到活动",
     host: (value: string) => `主机 ${value}`,
     gateway: (value: string) => `网关 ${value}`,
+    rosterPendingChip: "正在读取名册",
+    rosterPendingTitle: "正在读取团队名册…",
+    rosterPendingBody:
+      "打开此视图时从本地原生运行时读取一次名册；在返回之前，不显示也不推断任何内容。",
     rosterUnavailableTitle: "团队需要连接",
     rosterUnavailableChip: "名册未验证",
     rosterUnavailableBody: "连接团队来源，以确认谁已登记、谁可用。",
@@ -118,6 +189,7 @@ const STRINGS = {
     rosterUnavailableNote: "来源不可用时，绝不显示为空公司。",
     rosterInvalidNote:
       "名册来源返回的数据无法通过验证，因此不显示其中任何内容。",
+    rosterReadLabel: "原生名册读取",
     conversationHeading: "对话",
     conversationSectionNote:
       "既有的持久对话界面。此视图绝不创建第二个传输通道。",
@@ -138,8 +210,12 @@ const STRINGS = {
     roleLabel: "角色",
     hostLabel: "主机",
     gatewayLabel: "网关实例",
+    managedLabel: "受管资料",
+    managedYes: "是",
+    managedNo: "否",
     readinessLabel: "就绪状态",
     activityLabel: "最近活动",
+    gatewaySourceLabel: "网关来源",
   },
 };
 
@@ -153,12 +229,18 @@ function initials(name: string): string {
   );
 }
 
-function readinessLabel(entry: TeamRosterEntry, t: typeof STRINGS.en): string {
-  return entry.readiness === "ready"
+function readinessLabel(bot: TeamBot, t: typeof STRINGS.en): string {
+  return bot.readiness === "ready"
     ? t.stateReady
-    : entry.readiness === "degraded"
+    : bot.readiness === "degraded"
       ? t.stateDegraded
       : t.stateUnknown;
+}
+
+/** B's contract keeps `host: "unknown"` for an unobserved host — never render
+ *  the literal sentinel as if it were an observed hostname. */
+function observedHost(bot: TeamBot): string | null {
+  return bot.host !== "unknown" ? bot.host : null;
 }
 
 export function TeamWorkspace({
@@ -201,11 +283,14 @@ export function TeamWorkspace({
           <p className="mm-eyebrow">{t.rosterUnavailableChip}</p>
           <h2>{t.rosterUnavailableTitle}</h2>
           <p>
-            {roster.reason === "TEAM_ROSTER_SOURCE_INVALID"
+            {roster.reason === "NATIVE_RESPONSE_INVALID"
               ? t.rosterInvalidNote
               : t.rosterUnavailableBody}
           </p>
           <p className="muted">{t.rosterUnavailableBody2}</p>
+          <p className="muted">
+            {t.rosterReadLabel}: <code>{roster.reason}</code>
+          </p>
           <dl>
             <div>
               <dt>{t.rosterSizeLabel}</dt>
@@ -238,8 +323,27 @@ export function TeamWorkspace({
     );
   }
 
-  const bots = roster.kind === "AVAILABLE" ? roster.roster.bots : [];
-  const selected = bots.find((bot) => bot.botId === selectedBotId) ?? null;
+  if (roster.kind === "PENDING") {
+    return (
+      <section
+        className="mm-team mm-team-unavailable"
+        aria-labelledby="mm-team-heading"
+        aria-busy="true"
+      >
+        <h1 id="mm-team-heading" tabIndex={-1}>
+          {t.heading}
+        </h1>
+        <div className="card mm-team-connect">
+          <p className="mm-eyebrow">{t.rosterPendingChip}</p>
+          <h2>{t.rosterPendingTitle}</h2>
+          <p>{t.rosterPendingBody}</p>
+        </div>
+      </section>
+    );
+  }
+
+  const bots = roster.roster.bots;
+  const selected = bots.find((bot) => bot.id === selectedBotId) ?? null;
   const gatewayState = classifyGatewayState(
     gateway?.state ?? null,
     gateway?.code ?? null,
@@ -266,6 +370,7 @@ export function TeamWorkspace({
   };
 
   if (selected) {
+    const host = observedHost(selected);
     return (
       <section
         className="mm-team mm-team-detail"
@@ -291,7 +396,7 @@ export function TeamWorkspace({
                 <h2>{selected.displayName}</h2>
                 <p className="muted">
                   {selected.role}
-                  {selected.host ? ` · ${selected.host}` : ""}
+                  {host ? ` · ${host}` : ""}
                 </p>
               </div>
               {previewAuthority ? (
@@ -302,10 +407,11 @@ export function TeamWorkspace({
               <div>
                 <dt>{t.readinessLabel}</dt>
                 <dd data-readiness={selected.readiness}>
-                  {readinessLabel(selected, t)}
-                  {selected.readinessReason
-                    ? ` — ${selected.readinessReason}`
-                    : ""}
+                  {readinessLabel(selected, t)} —{" "}
+                  <ReasonCode
+                    code={selected.readinessReason}
+                    locale={locale}
+                  />
                 </dd>
               </div>
               <div>
@@ -314,16 +420,50 @@ export function TeamWorkspace({
                   {selected.lastActivity
                     ? t.activity(selected.lastActivity)
                     : t.activityNever}
+                  {!selected.lastActivity && selected.activityReason ? (
+                    <>
+                      {" "}
+                      —{" "}
+                      <ReasonCode
+                        code={selected.activityReason}
+                        locale={locale}
+                      />
+                    </>
+                  ) : null}
                 </dd>
               </div>
               <div>
                 <dt>{t.gatewayLabel}</dt>
-                <dd>{selected.gatewayInstance ?? t.stateUnknown}</dd>
+                <dd>
+                  {selected.gateway.instanceId ?? t.stateUnknown}
+                  {selected.gateway.observed && selected.gateway.state
+                    ? ` · ${selected.gateway.state}`
+                    : ""}
+                </dd>
               </div>
-              {selected.profile ? (
+              <div>
+                <dt>{t.gatewaySourceLabel}</dt>
+                <dd>
+                  <code>{selected.gateway.source}</code>
+                  {selected.gateway.authorityEpoch !== null
+                    ? ` · epoch ${selected.gateway.authorityEpoch}`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>{t.managedLabel}</dt>
+                <dd>
+                  {selected.managed === null
+                    ? t.stateUnknown
+                    : selected.managed
+                      ? t.managedYes
+                      : t.managedNo}
+                </dd>
+              </div>
+              {selected.profilePath ? (
                 <div>
                   <dt>{t.profileLabel}</dt>
-                  <dd>{selected.profile}</dd>
+                  <dd>{selected.profilePath}</dd>
                 </div>
               ) : null}
             </dl>
@@ -395,7 +535,7 @@ export function TeamWorkspace({
         </thead>
         <tbody>
           {bots.map((bot, index) => (
-            <tr key={bot.botId} data-readiness={bot.readiness}>
+            <tr key={bot.id} data-readiness={bot.readiness}>
               <td className="mm-col-teammate">
                 <button
                   type="button"
@@ -405,14 +545,14 @@ export function TeamWorkspace({
                   }}
                   aria-label={t.openEntry(bot.displayName)}
                   onKeyDown={(event) => onRosterKeyDown(event, index)}
-                  onClick={() => setSelectedBotId(bot.botId)}
+                  onClick={() => setSelectedBotId(bot.id)}
                 >
                   <span className="mm-avatar" aria-hidden="true">
                     {initials(bot.displayName)}
                   </span>
                   <span className="mm-roster-name">{bot.displayName}</span>
-                  {bot.host ? (
-                    <span className="mm-roster-host">{bot.host}</span>
+                  {observedHost(bot) ? (
+                    <span className="mm-roster-host">{observedHost(bot)}</span>
                   ) : null}
                 </button>
               </td>
@@ -422,9 +562,9 @@ export function TeamWorkspace({
                   data-readiness={bot.readiness}
                 >
                   {readinessLabel(bot, t)}
-                  {bot.readinessReason ? (
-                    <small>{bot.readinessReason}</small>
-                  ) : null}
+                  <small>
+                    <ReasonCode code={bot.readinessReason} locale={locale} />
+                  </small>
                 </span>
               </td>
               <td className="mm-col-focus">
@@ -434,6 +574,10 @@ export function TeamWorkspace({
                 {bot.lastActivity ? (
                   <small className="mm-roster-activity">
                     {t.activity(bot.lastActivity)}
+                  </small>
+                ) : bot.activityReason ? (
+                  <small className="mm-roster-activity">
+                    <ReasonCode code={bot.activityReason} locale={locale} />
                   </small>
                 ) : null}
               </td>
