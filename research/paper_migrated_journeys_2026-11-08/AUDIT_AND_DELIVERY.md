@@ -396,9 +396,62 @@ Operation receipts:
 - `paper-breadth-contract-board-split-names-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
 - `paper-breadth-evidence-continuation-finish-20261109-c4-sd` — APPLIED_RESPONSE_OBSERVED
 
+## Verified Catalyst manual-review entry — 2026-11-09
+
+[Current Catalyst file/page](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0). The existing save-condition specimen `BU-0` already explicitly supports a manual research condition and local-save design only: no monitoring of future closes, notifications or automatic case return. Four foreground entry buttons nevertheless said “Watch the next change.”
+
+Root changed only those four labels to **Save a review level**: desktop dark `US-0` on `1-0`, phone `VX-0` on `3F-0`, desktop light `WZ-0` on `6F-0`, and Government shared shell `Y7-0` on `EV-0`. This aligns entry wording with the existing manual-review destination without asserting local-storage implementation or introducing a monitoring feature. The price levels, fictional-company labels, broader navigation and p-2 integration contract were retained.
+
+Root inspected the complete390px phone and all four theme/context button readbacks; the new text fits. The save-condition specimen was inspected before editing. Operations `paper-catalyst-manual-review-entry-copy-20261109-c4-sd` and `paper-catalyst-manual-review-entry-finish-20261109-c4-sd` returned APPLIED_RESPONSE_OBSERVED. Finish targeted only the four affected boards.
+
+## Verified D06 timing, illustration and classification meaning — 2026-11-09
+
+[Current Market Structure / Stages file/page](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0). The accepted predecessor's D06 work concerned Terminal handoffs and directory references; this increment addresses the distinct migrated Market and Stage specimens.
+
+### Market range timing and first-reading qualification
+
+Desktop `GG-0` and Chinese phone `K5-0` displayed a weekly estimate locked on2026-07-11 beside a separate dealer observation dated2026-10-30, but supplied no covered-week start/end. The phone called the estimate “this week,” and both claimed a generic Friday lock. The fixture does not justify either a current or expired phase.
+
+- `IO-0` is now **Dated weekly range**; `IP-0` explicitly says week timing is unverified, reference only, and the estimate is not a price boundary.
+- `MN-0` is now **周度参考区间**; `MO-0` says **时间未核实 · 模型估算，并非价格边界。**
+- `GI-0` and `KH-0` put the illustrative-design qualification in the opening reading. `KJ-0` no longer calls the range “this week.”
+- Dealer-chart captions `IM-0`/`ML-0`, modeled-position captions `J2-0`/`N1-0`, and correlation captions `JK-0`/`NJ-0` identify the schematic shapes at the point of interpretation.
+
+All financial fixture values and clocks remain: inner band7,364–7,662; lock close7,513.1; lock date2026-07-11; unavailable outer band; independent dealer observation2026-10-30. No missing SPX, switch-level or covered-week value was synthesized from the lock close or diagram.
+
+### Stage currentness and idealized arc
+
+Desktop `O4-0` now labels table header `RP-0` **Classification recency** and DELT cell `TL-0` **Week unverified**. The prior “Unresolved” label could imply no stage value, although the source discriminator means classification currentness is neither true nor false. DELT's stage and all five illustrative rows remain intact.
+
+The opening `O6-0` now says illustrative design; arc title `OC-0` explicitly says **idealized stage sketch**. The existing classified population remains1,300 with its original300/580/240/180 split and proportions. The arc is not relabeled as a historical price series or forecast.
+
+### Exact source and preserved holds
+
+Root re-read Macro [#10734](https://github.com/mastermindx-market-intelligence/macro/pull/10734), Open/Draft/unarmed at `4690c9e9e3bd32943f4d551318210165147a4eb9`:
+- [market_structure.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/templates/market_structure.html.j2), blob `c2f3a4f2d2bd58d5fb2bedd4b4d5ef87d968480d`, distinguishes expired/upcoming/current/unverified weekly timing and uses supplied start/end/expiry metadata. Missing bands remain unavailable.
+- [stage_analysis.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/4690c9e9e3bd32943f4d551318210165147a4eb9/templates/stage_analysis.html.j2), blob `6f78d601b974288204b5d186b3cb728344221ae4`, defines unresolved currentness as stage_current neither true nor false and builds an idealized stage arc.
+
+Root also read coordination [#10655](https://github.com/mastermindx-market-intelligence/macro/pull/10655), head `927fe4b0ba806fe472cb2dcaa0ad7564c1f04318`. It explicitly records improved first-reading/timing/exact-values source work with Paper mirroring incomplete and preserves separate implementation, security, migration, browser/auth and foundation/effect holds. This design increment releases none of those holds and does not claim deployment.
+
+The existing S&P incomplete-migration references `WB-0`/`WG-0` and the completed Terminal p-18 studies remain untouched. The candidate source's fuller SPX/switch and exact-values/CSV experience is a remaining Paper-parity opportunity, not a completed feature of this increment.
+
+### Verification and receipts
+
+Root inspected full native screenshots of1440×1723 Market desktop,390×1802 Market phone and1440×1443 Stage desktop. The additional copy fits without extending the existing phone panels; all financial figures, five rows, population counts and final footers remain visible. Operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-d06-week-timing-fixture-recurrency-20261109-c4-sd`
+- `paper-d06-stage-arc-example-qualification-20261109-c4-sd`
+- `paper-d06-meaning-clarity-finish-20261109-c4-sd`
+
+Explicit finish targeted only `GG-0`, `K5-0` and `O4-0`.
+
+## Successor native delivery
+
+[PR #2337](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2337) was opened ready, authored by `mastermidx4`, with exactly one changed report path. Creation head `08975c8fd95c5a3c4f639b010d23a70021e786ef` had the normal CI run42542660165 in progress when observed. Native metadata reported mergeable/behind, no requested reviewers and no auto-merge. The basic protected-branch read exposed required check `test`; the detailed branch-protection endpoint returned403 integration access denied and was not retried or bypassed. No self-approval, merge, hold clearing or alternate-account operation was attempted. Later report increments retain this same owned PR and require their own head-specific native check evidence.
+
 ## Active continuation
 
-Portfolio mobile, Bonds source recovery, Government Revenue320px returns, Forex review/account gallery and current My watches desktop/mobile integration, and the bounded Breadth selected-session continuation are verified as static designs. Preserve their accepted work. Save/read back this phase, prepare the single owned successor report PR, then continue a fresh, disjoint Paper audit where current source and writer custody permit. Exact-session runtime readers, authenticated account behavior, keyboard/focus operation and production acceptance are not discharged by these screenshots.
+The five original migrated-file phases, Catalyst manual-review entry and D06 timing/meaning corrections are verified as static designs. Continue the disjoint current-R2 Confluence protected-list failure state using its existing hydration and entitlement owners; preserve governed p-1 references and existing success/zero specimens. The source candidate's fuller D06 data-inspection parity remains a separate useful design phase. Preserve native PR controls, source limits and previous accepted work.
 
 ## Acceptance boundary
 
