@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import json
 from collections.abc import Mapping
 
@@ -350,7 +351,20 @@ def test_hs256_public_key_confusion_is_refused_before_jwks(rsa_key) -> None:
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    token = _token(public_der, policy, algorithm="HS256")
+    # Build the attack token directly: PyJWT correctly refuses to use an RSA
+    # public key as an HMAC signing secret.
+    header = _base64url_bytes(
+        json.dumps(
+            {"alg": "HS256", "kid": KID, "typ": "at+jwt"},
+            separators=(",", ":"),
+        ).encode("ascii")
+    )
+    payload = _base64url_bytes(
+        json.dumps(_claims(policy), separators=(",", ":")).encode("ascii")
+    )
+    signing_input = f"{header}.{payload}"
+    signature = hmac.digest(public_der, signing_input.encode("ascii"), "sha256")
+    token = f"{signing_input}.{_base64url_bytes(signature)}"
 
     with pytest.raises(AuthError) as caught:
         _run(authenticator.verify_token(token, now=NOW))

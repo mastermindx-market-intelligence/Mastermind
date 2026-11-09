@@ -1739,12 +1739,13 @@ def compose(
     regime = _load_regime(vendor_root)
     insider_signals = _load_insider_signals(vendor_root)
 
-    # Load SPY once for RS z computation
+    # SPY is only consumed by position composition; empty input needs no price IO.
     spy_df: pd.DataFrame | None = None
-    if price_loader is not None:
-        spy_df = price_loader("SPY")
-    else:
-        spy_df = _load_ohlcv("SPY", vendor_root, data_root=data_root)
+    if positions:
+        if price_loader is not None:
+            spy_df = price_loader("SPY")
+        else:
+            spy_df = _load_ohlcv("SPY", vendor_root, data_root=data_root)
 
     # Market regime is shared across all positions
     market_regime_lane = _lane_market_regime(regime, run_date)

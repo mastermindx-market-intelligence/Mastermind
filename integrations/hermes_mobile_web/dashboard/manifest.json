@@ -1,0 +1,8 @@
+{
+  "name": "mastermind-mobile",
+  "label": "Mastermind Mobile",
+  "description": "Authenticated home-screen installation metadata; the UI lives in the native Desktop/Webapp plugin.",
+  "version": "0.1.0",
+  "tab": { "path": "/mastermind-mobile", "hidden": true },
+  "api": "plugin_api.py"
+}

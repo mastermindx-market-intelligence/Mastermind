@@ -1,0 +1,36 @@
+{
+  "source_head": "887b7d5df575e8c6492513161f3cb921995fbef5",
+  "h1": {
+    "path": "tests/test_h1_native100_packaging.py",
+    "old_blob": "1ec2c14b5d0330702d9b81340696d344915ecc3e",
+    "new_blob": "394e98d8aca9004c3f17899ee72431a3d4b7a545",
+    "sha256": "7555800c5a45d3642c147a0da1e03a80370bf3c741d828792ed0f41519497457",
+    "diff": "--- current/tests/test_h1_native100_packaging.py\n+++ completed/tests/test_h1_native100_packaging.py\n@@ -46,8 +46,15 @@\n         assert hashlib.sha256(raw).hexdigest() == manifest['ext/' + name] == expected\n         assert row['sha256'] == expected and row['bytes'] == len(raw)\n         assert row['source'] == 'candidate/' + name\n-    historical = m.normalize_application_carrier_base_manifest(manifest)\n-    assert {key for key in manifest if historical[key] != manifest[key]} == {\n+    # Undo only the separately qualified host-pull successor before traversing\n+    # the existing APPLICATION history. Actual-byte checks keep the current image.\n+    before_host = m.before_host_pull_integrity(manifest)\n+    assert set(before_host) == set(manifest)\n+    assert {key for key in manifest if before_host[key] != manifest[key]} == set(\n+        m.HOST_PULL_INTEGRITY_DIGESTS\n+    )\n+    historical = m.normalize_application_carrier_base_manifest(before_host)\n+    assert {key for key in before_host if historical[key] != before_host[key]} == {\n         'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS\n     } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.APPLICATION_POOL_COMPOSITION_DIGESTS)\n     for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():\n"
+  },
+  "d8": {
+    "path": "tests/executive_fabric_release_identity_review.py",
+    "old_blob": "09eca69694633254825517c1ab992ddc38c70804",
+    "new_blob": "af002e2344691bd6b74298ae6a8e13d50d9bc275",
+    "sha256": "cf712faebb16d291cb328020526fbd1002981bc91021b6a7d1983d3b7a3993b2",
+    "exact_additive_record_lines": 9,
+    "all_existing_registry_bytes_preserved": true,
+    "evidence_sha256": "ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33",
+    "exact_completed_record_preserved": true,
+    "production_and_guard_unchanged": true
+  },
+  "qualification": {
+    "returncode": 0,
+    "seconds": 22.792,
+    "cases": {
+      "total": 212,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "log_sha256": "c4d9fac641a8489062536a4671a8dd82ba095ac230f7de7af466774598786b8f",
+    "issues": [],
+    "tail": "........................................................................ [ 33%]\n........................................................................ [ 67%]\n....................................................................     [100%]\n"
+  },
+  "scope": "Completed source-test/retained-evidence corrections only; production bytes and guards unchanged.",
+  "postcommit_gate": "Exact seven original packaging, actual-HEAD D8 and positive/drift-negative record cases required before push; result recorded on original PR."
+}

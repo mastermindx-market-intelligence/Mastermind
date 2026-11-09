@@ -1,0 +1,8 @@
+node_modules/
+work/
+state/
+*.local.json
+*.env
+*.log
+
+__pycache__/

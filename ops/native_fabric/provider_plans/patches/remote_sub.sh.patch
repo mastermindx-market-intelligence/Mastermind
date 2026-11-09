@@ -1,0 +1,15 @@
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -835,6 +835,12 @@
+     exit "$RC"
+   fi
+   LOCAL_SUB_CMD=${REMOTE_SUB_LOCAL_CMD:-bash}
++  if [ "$MODE" = byteplus ] || [ "$MODE" = experiential ]; then
++    RC=0
++    "$REMOTE_SUB_PYTHON" "$HERE/native_plan_worker.py" local-controller \
++      "$MODE" "$MODEL" "$REMOTE_CWD" "$PACKET" "$LOCAL_OUT" "$LOG_FILE" "$LOCAL_SUB_CMD" || RC=$?
++    exit "$RC"
++  fi
+   if [ -n "$MODEL" ]; then
+     RC=0
+     if [ "$MODE" = byteplus ] || [ "$MODE" = experiential ]; then

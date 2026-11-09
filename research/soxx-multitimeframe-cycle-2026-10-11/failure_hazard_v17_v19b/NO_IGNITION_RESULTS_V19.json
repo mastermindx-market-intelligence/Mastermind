@@ -1,0 +1,709 @@
+{
+  "schema": "soxx.no_ignition_exact_3h.frozen.v19",
+  "original_precommit": "86bf2c4c5ce9507e6045e224a9fe011b01d27519f8d3d523183065370c78f18e",
+  "source_inventory": [
+    {
+      "symbol": "SOXX",
+      "original_parent_episodes": 11,
+      "resolved": 11,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "SOXX",
+        "source15_sha256": "9b475e94fae6a92bb4bddfa0987097ea08dbdb60ec943fafcb100326440cdf71",
+        "source15_rows": 8596,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "96c230426f6be2900011d861d4596b3b5857045f8a3f4aa7b3d2342db9a4a7f6",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00476047,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "SMH",
+      "original_parent_episodes": 8,
+      "resolved": 8,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "SMH",
+        "source15_sha256": "5e2e7c98b9ffad22ef800dec82c060241a3f5d4f7f2316f670c0d6547f505652",
+        "source15_rows": 8596,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "225312fa6480c79436eaa30d5407831237b9b466eb2c093b42f601559ac4b363",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00426812,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "QQQ",
+      "original_parent_episodes": 7,
+      "resolved": 7,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "QQQ",
+        "source15_sha256": "5bafcbc03fe94a944b25b0adb2583f3f12cbfa1c7beb624e46a4fc0686defed9",
+        "source15_rows": 8114,
+        "study_days": 251,
+        "excluded_partial_warmup": [
+          {
+            "day": "2025-07-14",
+            "partial_rows": 24
+          }
+        ]
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "55a2d5cecd115aee6bad691bfa07c46531c55a7e6f73144da508c51f9920d8e2",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00096981,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "AMD",
+      "original_parent_episodes": 8,
+      "resolved": 8,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "AMD",
+        "source15_sha256": "ce19c53b2199bc4a7ffe650c1f047e7e7e1b656ab0229bbb06570fe6023dc26c",
+        "source15_rows": 8270,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "f84884c3ccb1439519dfb2f4669696316bfa4f21b0ddfa3d38d4a76911d95f28",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00124392,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "NVDA",
+      "original_parent_episodes": 6,
+      "resolved": 6,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "NVDA",
+        "source15_sha256": "95fe09312e86d6641afe94b30051cd33fd9d905b6ea0f1c4da6f41808c265619",
+        "source15_rows": 8114,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "cabcb9cf15469c1dfcc89ba1a867dd065369300a3aff1be03ef568dc5c5a0c73",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00016639,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "MU",
+      "original_parent_episodes": 8,
+      "resolved": 8,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "MU",
+        "source15_sha256": "db95708ee259684aa462d9f09d5e83e0f2535550277405702e707a89854cc642",
+        "source15_rows": 8270,
+        "study_days": 251,
+        "excluded_partial_warmup": [
+          {
+            "day": "2025-07-03",
+            "partial_rows": 13
+          }
+        ]
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "1ff0903520dbad6c92c1dfd01f7000a31e19d8515445810d647407c3ed49b51f",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00080951,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "INTC",
+      "original_parent_episodes": 8,
+      "resolved": 8,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "INTC",
+        "source15_sha256": "d8af2d150b47617d0ce68a7d77688bc44e7384687469b6ef0fa85b85554705a3",
+        "source15_rows": 8140,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "c1e2fdc528f0ab84a88c04eaa92f423a8f4f48fb0c9e8e5d7abf11588db3eb4c",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00018641,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "AMAT",
+      "original_parent_episodes": 9,
+      "resolved": 9,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "AMAT",
+        "source15_sha256": "65f9d1db393a796c3a24c6514acf06ffe49d4792090cbe3c31b7dc2d7d700671",
+        "source15_rows": 8856,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "1bf4dc87dd4b717b4880eca3d4abab21966441ffcd986db1a8769ca583678657",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00386114,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "LRCX",
+      "original_parent_episodes": 6,
+      "resolved": 6,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "LRCX",
+        "source15_sha256": "449121b343ca56e35d8a09a4f2e44cc459b7e7f17b7348f5554bc5faee1bc5cd",
+        "source15_rows": 8856,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "8cecf61b86124e8373be3594044210025ba401e157b0a1a0c6fec977b9c87b79",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00325891,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "XLV",
+      "original_parent_episodes": 4,
+      "resolved": 4,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "XLV",
+        "source15_sha256": "6fc2397a6cff804771e291e296ccb1cd5b549d7bf96f9f45fa7203b8a5e2266a",
+        "source15_rows": 8596,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "4c60db2a668fa0d77fce3b117edc9f2cd524e5137b658e76ae4906e2c99e7195",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00371901,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    },
+    {
+      "symbol": "XLE",
+      "original_parent_episodes": 6,
+      "resolved": 6,
+      "omitted_due_to_source_or_right_censor": 0,
+      "source15": {
+        "symbol": "XLE",
+        "source15_sha256": "038437a2c55598b3219b60e95bf5e99c47e3e247137d8de0eb619253fbc11cdb",
+        "source15_rows": 8596,
+        "study_days": 251,
+        "excluded_partial_warmup": []
+      },
+      "source5": {
+        "source5_rows": 20000,
+        "source5_sha256": "34799b1948dc40ae185c138ef37486f7f802f011f1e11b1aa091e8eb3d1e30c9",
+        "compared_OHLC_price_bars": 6502,
+        "volume_only_disagreement_bars": 286,
+        "maximum_volume_discrepancy_pct": 0.00063989,
+        "covered_days": 251,
+        "exact_history_source_basis_proven": false
+      }
+    }
+  ],
+  "unavailable": [
+    {
+      "symbol": "AVGO",
+      "missing_15m": true,
+      "missing_5m": false
+    },
+    {
+      "symbol": "KLAC",
+      "error": "AssertionError",
+      "message": "('KLAC', '2025-10-13', 77)"
+    }
+  ],
+  "group_summary": [
+    {
+      "label": "inspected",
+      "symbols": [
+        "AMD",
+        "QQQ",
+        "SMH",
+        "SOXX"
+      ],
+      "resolved": 34,
+      "source_episodes": 34,
+      "mean_base": 4.00841,
+      "mean_no_ignition": 4.2175,
+      "mean_difference": 0.2091,
+      "median_base": -1.59925,
+      "average_lift_without_best": 0.14893,
+      "check_eligible": 26,
+      "stopped_before_3h": 8,
+      "no_ignition_exits": 8,
+      "earlier_losses_helped": 6,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 7.47577,
+      "week_blocks": 14,
+      "block_bootstrap95": [
+        0.0,
+        0.44039
+      ]
+    },
+    {
+      "label": "unseen_names",
+      "symbols": [
+        "AMAT",
+        "AVGO",
+        "INTC",
+        "KLAC",
+        "LRCX",
+        "MU",
+        "NVDA"
+      ],
+      "resolved": 37,
+      "source_episodes": 37,
+      "mean_base": 0.57053,
+      "mean_no_ignition": 0.3618,
+      "mean_difference": -0.20873,
+      "median_base": -1.59925,
+      "average_lift_without_best": -0.27019,
+      "check_eligible": 15,
+      "stopped_before_3h": 22,
+      "no_ignition_exits": 6,
+      "earlier_losses_helped": 4,
+      "earlier_winners_harmed": 1,
+      "new_winners": 0,
+      "lost_winners": 1,
+      "winner_sacrifice_total": 11.64071,
+      "losers_avoided_total": 4.24393,
+      "week_blocks": 21,
+      "block_bootstrap95": [
+        -0.87546,
+        0.2443
+      ]
+    },
+    {
+      "label": "sector_controls",
+      "symbols": [
+        "XLE",
+        "XLV"
+      ],
+      "resolved": 10,
+      "source_episodes": 10,
+      "mean_base": 0.95432,
+      "mean_no_ignition": 0.71133,
+      "mean_difference": -0.24299,
+      "median_base": 0.03576,
+      "average_lift_without_best": -0.42478,
+      "check_eligible": 10,
+      "stopped_before_3h": 0,
+      "no_ignition_exits": 4,
+      "earlier_losses_helped": 2,
+      "earlier_winners_harmed": 2,
+      "new_winners": 0,
+      "lost_winners": 2,
+      "winner_sacrifice_total": 5.20131,
+      "losers_avoided_total": 2.77137,
+      "week_blocks": 10,
+      "block_bootstrap95": [
+        -1.08703,
+        0.55131
+      ]
+    },
+    {
+      "label": "all_including_inspected",
+      "symbols": [
+        "AMAT",
+        "AMD",
+        "AVGO",
+        "INTC",
+        "KLAC",
+        "LRCX",
+        "MU",
+        "NVDA",
+        "QQQ",
+        "SMH",
+        "SOXX",
+        "XLE",
+        "XLV"
+      ],
+      "resolved": 81,
+      "source_episodes": 81,
+      "mean_base": 2.06097,
+      "mean_no_ignition": 2.02339,
+      "mean_difference": -0.03758,
+      "median_base": -1.59925,
+      "average_lift_without_best": -0.06548,
+      "check_eligible": 51,
+      "stopped_before_3h": 30,
+      "no_ignition_exits": 18,
+      "earlier_losses_helped": 12,
+      "earlier_winners_harmed": 3,
+      "new_winners": 0,
+      "lost_winners": 3,
+      "winner_sacrifice_total": 16.84202,
+      "losers_avoided_total": 14.49107,
+      "week_blocks": 25,
+      "block_bootstrap95": [
+        -0.34893,
+        0.22749
+      ]
+    }
+  ],
+  "asset_summary": [
+    {
+      "label": "SOXX",
+      "symbols": [
+        "SOXX"
+      ],
+      "resolved": 11,
+      "source_episodes": 11,
+      "mean_base": 4.51349,
+      "mean_no_ignition": 4.77484,
+      "mean_difference": 0.26135,
+      "median_base": -0.72469,
+      "average_lift_without_best": 0.06804,
+      "check_eligible": 9,
+      "stopped_before_3h": 2,
+      "no_ignition_exits": 3,
+      "earlier_losses_helped": 2,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 3.14111,
+      "week_blocks": 11,
+      "block_bootstrap95": [
+        -0.04841,
+        0.68455
+      ]
+    },
+    {
+      "label": "SMH",
+      "symbols": [
+        "SMH"
+      ],
+      "resolved": 8,
+      "source_episodes": 8,
+      "mean_base": 3.05993,
+      "mean_no_ignition": 3.29212,
+      "mean_difference": 0.23219,
+      "median_base": -1.59925,
+      "average_lift_without_best": -0.01431,
+      "check_eligible": 6,
+      "stopped_before_3h": 2,
+      "no_ignition_exits": 2,
+      "earlier_losses_helped": 1,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 1.95773,
+      "week_blocks": 8,
+      "block_bootstrap95": [
+        -0.03757,
+        0.73415
+      ]
+    },
+    {
+      "label": "QQQ",
+      "symbols": [
+        "QQQ"
+      ],
+      "resolved": 7,
+      "source_episodes": 7,
+      "mean_base": 0.39921,
+      "mean_no_ignition": 0.54173,
+      "mean_difference": 0.14252,
+      "median_base": -1.59925,
+      "average_lift_without_best": 0.0,
+      "check_eligible": 6,
+      "stopped_before_3h": 1,
+      "no_ignition_exits": 1,
+      "earlier_losses_helped": 1,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 0.99761,
+      "week_blocks": 7,
+      "block_bootstrap95": [
+        0.0,
+        0.42755
+      ]
+    },
+    {
+      "label": "AMD",
+      "symbols": [
+        "AMD"
+      ],
+      "resolved": 8,
+      "source_episodes": 8,
+      "mean_base": 7.42044,
+      "mean_no_ignition": 7.59285,
+      "mean_difference": 0.17241,
+      "median_base": -0.72469,
+      "average_lift_without_best": 0.09246,
+      "check_eligible": 5,
+      "stopped_before_3h": 3,
+      "no_ignition_exits": 2,
+      "earlier_losses_helped": 2,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 1.37932,
+      "week_blocks": 8,
+      "block_bootstrap95": [
+        0.0,
+        0.41512
+      ]
+    },
+    {
+      "label": "NVDA",
+      "symbols": [
+        "NVDA"
+      ],
+      "resolved": 6,
+      "source_episodes": 6,
+      "mean_base": -1.61904,
+      "mean_no_ignition": -1.17961,
+      "mean_difference": 0.43943,
+      "median_base": -1.59925,
+      "average_lift_without_best": 0.12654,
+      "check_eligible": 3,
+      "stopped_before_3h": 3,
+      "no_ignition_exits": 2,
+      "earlier_losses_helped": 2,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 2.63657,
+      "week_blocks": 6,
+      "block_bootstrap95": [
+        0.0,
+        1.10738
+      ]
+    },
+    {
+      "label": "MU",
+      "symbols": [
+        "MU"
+      ],
+      "resolved": 8,
+      "source_episodes": 8,
+      "mean_base": -1.43245,
+      "mean_no_ignition": -1.43245,
+      "mean_difference": 0.0,
+      "median_base": -1.59925,
+      "average_lift_without_best": 0.0,
+      "check_eligible": 2,
+      "stopped_before_3h": 6,
+      "no_ignition_exits": 0,
+      "earlier_losses_helped": 0,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 0,
+      "week_blocks": 8,
+      "block_bootstrap95": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "label": "INTC",
+      "symbols": [
+        "INTC"
+      ],
+      "resolved": 8,
+      "source_episodes": 8,
+      "mean_base": 3.04923,
+      "mean_no_ignition": 3.07797,
+      "mean_difference": 0.02873,
+      "median_base": -1.59925,
+      "average_lift_without_best": 0.0,
+      "check_eligible": 4,
+      "stopped_before_3h": 4,
+      "no_ignition_exits": 1,
+      "earlier_losses_helped": 1,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 0.22987,
+      "week_blocks": 8,
+      "block_bootstrap95": [
+        0.0,
+        0.0862
+      ]
+    },
+    {
+      "label": "AMAT",
+      "symbols": [
+        "AMAT"
+      ],
+      "resolved": 9,
+      "source_episodes": 9,
+      "mean_base": -0.08432,
+      "mean_no_ignition": 0.03248,
+      "mean_difference": 0.1168,
+      "median_base": -1.59925,
+      "average_lift_without_best": -0.04078,
+      "check_eligible": 4,
+      "stopped_before_3h": 5,
+      "no_ignition_exits": 2,
+      "earlier_losses_helped": 1,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 1.37749,
+      "week_blocks": 9,
+      "block_bootstrap95": [
+        -0.10875,
+        0.45916
+      ]
+    },
+    {
+      "label": "LRCX",
+      "symbols": [
+        "LRCX"
+      ],
+      "resolved": 6,
+      "source_episodes": 6,
+      "mean_base": 3.10806,
+      "mean_no_ignition": 1.16794,
+      "mean_difference": -1.94012,
+      "median_base": -1.59925,
+      "average_lift_without_best": -2.32814,
+      "check_eligible": 2,
+      "stopped_before_3h": 4,
+      "no_ignition_exits": 1,
+      "earlier_losses_helped": 0,
+      "earlier_winners_harmed": 1,
+      "new_winners": 0,
+      "lost_winners": 1,
+      "winner_sacrifice_total": 11.64071,
+      "losers_avoided_total": 0.0,
+      "week_blocks": 6,
+      "block_bootstrap95": [
+        -5.82036,
+        0.0
+      ]
+    },
+    {
+      "label": "XLV",
+      "symbols": [
+        "XLV"
+      ],
+      "resolved": 4,
+      "source_episodes": 4,
+      "mean_base": 0.38076,
+      "mean_no_ignition": -0.22672,
+      "mean_difference": -0.60749,
+      "median_base": -1.59925,
+      "average_lift_without_best": -1.27434,
+      "check_eligible": 4,
+      "stopped_before_3h": 0,
+      "no_ignition_exits": 4,
+      "earlier_losses_helped": 2,
+      "earlier_winners_harmed": 2,
+      "new_winners": 0,
+      "lost_winners": 2,
+      "winner_sacrifice_total": 5.20131,
+      "losers_avoided_total": 2.77137,
+      "week_blocks": 4,
+      "block_bootstrap95": [
+        -2.60065,
+        1.38569
+      ]
+    },
+    {
+      "label": "XLE",
+      "symbols": [
+        "XLE"
+      ],
+      "resolved": 6,
+      "source_episodes": 6,
+      "mean_base": 1.33669,
+      "mean_no_ignition": 1.33669,
+      "mean_difference": 0.0,
+      "median_base": 0.03576,
+      "average_lift_without_best": 0.0,
+      "check_eligible": 6,
+      "stopped_before_3h": 0,
+      "no_ignition_exits": 0,
+      "earlier_losses_helped": 0,
+      "earlier_winners_harmed": 0,
+      "new_winners": 0,
+      "lost_winners": 0,
+      "winner_sacrifice_total": 0.0,
+      "losers_avoided_total": 0.0,
+      "week_blocks": 6,
+      "block_bootstrap95": [
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "all_signal_count": 81,
+  "all_resolved": 81,
+  "PIT_qualified": false,
+  "raw_vendor_rows_exported": false,
+  "unseen_market_year": false,
+  "no_winning_threshold_selected_after_test": true,
+  "reliable_historical_fills_proven": false,
+  "rights_scope": "Existing read-only Terminal consumer, research publication aggregate only"
+}

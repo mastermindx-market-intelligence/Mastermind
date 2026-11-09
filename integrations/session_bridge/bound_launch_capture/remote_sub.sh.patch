@@ -1,0 +1,88 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -303,0 +304,33 @@
++# Only the trusted embedding owner supplies this optional correlation file.
++# It is not Runtime admission, a credential, or safe-to-retry evidence.
++bound_input = os.environ.get('REMOTE_SUB_START_BINDING_FILE')
++correlation_input = os.environ.get('REMOTE_SUB_START_CORRELATION_FILE')
++if bound_input or correlation_input:
++    sys.path.insert(0, sys.argv[8])
++    try:
++        from fabric_launch_reservation import load_binding, reserve_bound_log
++        if bound_input and correlation_input:
++            raise ValueError('ambiguous_binding_version')
++        if correlation_input:
++            from pathlib import Path
++            from fabric_launch_reservation import load_correlation, reserve_correlation_log
++            from fabric_launch_transport import prepare_snapshot
++            scope = dict(run_id=sys.argv[2], routing_root_id=os.environ.get('POOL_ORCHESTRATOR_ID'),
++                         routing_parent_run_id=os.environ.get('POOL_PARENT_RUN_ID'))
++            correlation = load_correlation(correlation_input, **scope)
++            reserve_correlation_log(sys.argv[1], correlation, **scope)
++            prepare_snapshot(correlation_input, sys.argv[1],
++                             Path(sys.argv[1]).with_suffix('.launch-correlation.json'), **scope)
++        else:
++            binding = load_binding(bound_input, run_id=sys.argv[2],
++                                   root_id=os.environ.get('POOL_ORCHESTRATOR_ID'))
++            reserve_bound_log(sys.argv[1], binding, run_id=sys.argv[2],
++                              root_id=os.environ.get('POOL_ORCHESTRATOR_ID'))
++    except FileExistsError:
++        print(f"RUN_EXISTS id={sys.argv[2]}", file=sys.stderr)
++        raise SystemExit(75)
++    except Exception:
++        print("BOUND_LOG_RESERVATION_REFUSED before_lease=1 before_launch=1", file=sys.stderr)
++        raise SystemExit(73)
++    raise SystemExit(0)
++
+@@ -340,0 +374,3 @@
++  if [ -n "${REMOTE_SUB_START_CORRELATION_FILE:-}" ]; then
++    RC=78; log "BOUND_LAUNCH_REQUIRES_REMOTE_OWNER"; exit "$RC";
++  fi
+@@ -679 +715 @@
+-  pools.yaml fabric_policy_snapshot.py remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
++  pools.yaml fabric_policy_snapshot.py fabric_launch_reservation.py fabric_launch_transport.py remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
+@@ -706,0 +743,8 @@
++  if [ -n "${REMOTE_SUB_START_CORRELATION_FILE:-}" ]; then
++    # One new private directory for this original run. Existing names refuse;
++    # no chmod/chown or reuse of shared/foreign output directories.
++    "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
++      "mkdir -m 700 \"\$HOME/lanes/tmp/${ID}.launch-bound\"" || return $?
++    "$SCP_CMD" -p -q "$LOG_DIR/${ID}.launch-correlation.json" \
++      "$SSH_ALIAS:~/lanes/tmp/${ID}.launch-bound/correlation.json" || return $?
++  fi
+@@ -921,0 +966,22 @@
++BOUND_LAUNCH_ENV=""
++if [ -n "${REMOTE_SUB_START_CORRELATION_FILE:-}" ]; then
++  if [ "$DRY_RUN" -eq 1 ]; then
++    BOUND_LAUNCH_SHA="<source-only-snapshot-digest>"
++  else
++    BOUND_LAUNCH_SHA=$("$REMOTE_SUB_PYTHON" - "$LOG_DIR/${ID}.launch-correlation.json" "$LOG_FILE" "$HERE" "$ID" <<'PY_BOUND_SHA'
++import os,sys
++sys.path.insert(0, sys.argv[3])
++from fabric_launch_transport import reserved_snapshot_digest
++try:
++    print(reserved_snapshot_digest(sys.argv[1], sys.argv[2], run_id=sys.argv[4],
++        routing_root_id=os.environ.get('POOL_ORCHESTRATOR_ID'),
++        routing_parent_run_id=os.environ.get('POOL_PARENT_RUN_ID')))
++except Exception:
++    print('BOUND_SNAPSHOT_RESERVATION_MISMATCH', file=sys.stderr)
++    raise SystemExit(78)
++PY_BOUND_SHA
++    ) || { RC=78; log "BOUND_SNAPSHOT_UNAVAILABLE"; exit "$RC"; }
++    [[ "$BOUND_LAUNCH_SHA" =~ ^[a-f0-9]{64}$ ]] || { RC=78; exit "$RC"; }
++  fi
++  BOUND_LAUNCH_ENV="FABRIC_LAUNCH_SNAPSHOT_SHA256='$BOUND_LAUNCH_SHA'"
++fi
+@@ -923 +989 @@
+-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
++LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $BOUND_LAUNCH_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+@@ -1046,0 +1113,9 @@
++  fi
++fi
++
++if [ -n "${REMOTE_SUB_START_CORRELATION_FILE:-}" ]; then
++  if "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/tmp/${ID}.launch-bound/launch.json" \
++      "$LOG_DIR/${ID}.launch.json"; then
++    log "BOUND_LAUNCH_RECEIPT_RETAINED validation_and_authority_unproven=1"
++  else
++    log "BOUND_LAUNCH_RECEIPT_UNAVAILABLE remote_artifact_preserved=1 retry_authorized=0"

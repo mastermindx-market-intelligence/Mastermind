@@ -1,0 +1,71 @@
+{
+  "schema": "persistent_sector_implementation_evidence/v1",
+  "mission": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/1202",
+  "base_sha": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "operation_id": "persistent-sector-leadership-mastermind-20261107-c4",
+  "worker_return": {
+    "commit": "b188dd2143615b43f380b72048c1ec3a49dad57b",
+    "tree": "aa0da1272fe81caade52e186eab0f0c0bd6df268",
+    "response_sha256": "253a46a5449106ff7f4f4dc0614cbd704f06857fdd02b29fad3635547a7f87e6",
+    "accepted": false,
+    "reason": "Assigned parent corrected concrete source gaps; original candidate is not the published postimage."
+  },
+  "sources": {
+    "brain/portfolio_intelligence.py": {
+      "bytes": 116161,
+      "sha256": "8c22b953c81107887a2ed3e9d07cc1f5ce71ea94452ebd3f8df6f1c159672d91"
+    },
+    "brain/autonomous_mcp.py": {
+      "bytes": 17491,
+      "sha256": "d45d8edb5941d56eed365c1d9dc783262f429d4181719317bec69dfe014c82ed"
+    },
+    "tests/test_portfolio_sector_dossiers.py": {
+      "bytes": 90013,
+      "sha256": "8438ce60b6abaff3c47a95bb7cdf81220f2c2930f6e537789ff448acc1012b8d"
+    },
+    "tests/fixtures/sector_window_measurements.complete.v1.json": {
+      "bytes": 14961,
+      "sha256": "6b33895711742dee8cb1366baab5572a6aef31d6ca9ca6d0f81e32ab879e6dae"
+    },
+    "tests/fixtures/sector_window_measurements.unavailable.v1.json": {
+      "bytes": 15421,
+      "sha256": "e4419e3a4d7dabce4ad4fd760c1fc37d05b8fe1111102ac5b0bb13b1a980f17e"
+    }
+  },
+  "behavior": [
+    "Existing get_sector_rotation selector sector_windows; explicit one native ETF selection; all eleven identities retained.",
+    "Exact 5/20/63 values, owner spans, clocks, reasons and coverage; no arithmetic reconstruction, ranking or trade authority.",
+    "Preflight exact builtin finite JSON before detachment; owner receipt ASCII byte/depth/node/per-container bounds.",
+    "Common benchmark dependency, field/global refusal consistency, percentage floor, strict integer/date checks and nested coverage relationships.",
+    "Legacy and closed 21/63 dossier paths remain unchanged; bounded response refuses whole overbudget result before existing transport serializer."
+  ],
+  "qualification": {
+    "actual_imported_handler_tests": 179,
+    "focused_suite_exit": 0,
+    "focused_log_sha256": "b1851057fd7aad6a86f4621298b3dea93ef03f8387d45d1663e8dbd40c3fe7c9",
+    "initial_parent_counterexamples": {
+      "failed_before": 18,
+      "log_sha256": "110afb1f25bd8b99503bb0628b738578b7b311d42f8b7db33c32820954bf6a61"
+    },
+    "nested_coverage_counterexamples": {
+      "failed_before": 4,
+      "already_refused": 4,
+      "log_sha256": "8034bc7d1e0cf706b886192ddb80a5a2663d38caa51ec3cc91ce1c6fee7d5b4b"
+    },
+    "genuine_owner_oracle_sha256": "507d656611f7d35366a499c941bd1f1a9edfec3c0f3a1556e61d399231ed4f06",
+    "producer_sha256": "43b1cf3a19d3f73dc6a29a319bcc81f3745cda153c3419e492396b48b9068c61",
+    "transport_max_characters": 7200,
+    "transport_max_bytes": 7200,
+    "diff_check_exit": 0,
+    "interpreter": "isolated qualification environment using repository-declared claude-agent-sdk and jsonschema dependencies",
+    "initial_environment_attempt": "Collection failed before tests because SDK was absent; no pass claim attributed to that attempt."
+  },
+  "delivery": {
+    "runtime_installed": false,
+    "protected_merged": false,
+    "production_path_proven": false,
+    "point_in_time_admitted": false,
+    "trade_authority": false
+  },
+  "next": "Publish through the original managed parent workspace, qualify required CI and normal protected release, then join the incumbent runtime and authenticated original product path."
+}

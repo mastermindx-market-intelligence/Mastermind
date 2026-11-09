@@ -146,6 +146,8 @@ def test_transport_capability_digest_binds_probe_and_instance_config_contracts()
         "package_version": wsp.WEB_SOL_PACKAGE_VERSION,
         "roles": ["client", "extension"],
         "actions": sorted(action.value for action in wsp.SurfaceAction),
+        "browser_actions": sorted(["status", "tabs", "snapshot", "screenshot", "diagnostics",
+            "click", "fill", "select", "press", "scroll", "open", "navigate", "reload", "back", "forward", "close", "focus"]),
         "schemas": sorted(
             [
                 wsp.ACTION_SCHEMA,
@@ -155,6 +157,8 @@ def test_transport_capability_digest_binds_probe_and_instance_config_contracts()
                 "mastermind.web_sol_census_request.v1",
                 "mastermind.web_sol_census_receipt.v1",
                 "mastermind.web_sol_census_table.v1",
+                "mastermind.web_sol_browser_request.v1",
+                "mastermind.web_sol_browser_receipt.v1",
                 wsp.PROBE_SCHEMA,
                 wsp.RECEIPT_SCHEMA,
             ]
@@ -424,9 +428,9 @@ const config = {
   instanceId: INSTANCE,
   nativeHost: `com.mastermind.web_sol_surface.${INSTANCE.slice(0, 24)}`,
   protocolMajor: 1,
-  clientPackageVersion: "0.2.0",
-  nativePackageVersion: "0.2.0",
-  extensionPackageVersion: "0.2.0",
+  clientPackageVersion: "0.3.0",
+  nativePackageVersion: "0.3.0",
+  extensionPackageVersion: "0.3.0",
   capabilityDigest,
 };
 

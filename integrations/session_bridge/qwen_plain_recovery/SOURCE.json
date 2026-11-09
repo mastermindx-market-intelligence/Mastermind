@@ -1,0 +1,68 @@
+{
+  "base_sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+  "candidate_sha256": "89b9acd36608742b62baa4e2366f810f8c1071a51510c3d17d14cdb64dc6e534",
+  "state": "LOCAL_DIAGNOSTIC_CORRECTION_UNINSTALLED",
+  "original_root": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+  "no_remote_reads": true,
+  "dependencies": {
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "fabric_task.py": "ca2eda17c76fb7af899501c40f2fa0450391079612d6d56c7d138eb2914624c2",
+    "remote_sub.sh": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
+    "lane_runtime.py": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937"
+  },
+  "checks": {
+    "local_integration_and_ci_guidance": 36,
+    "baseline_failures": 5,
+    "source_only": true
+  },
+  "historical_source_qualification": "e126 and 0be qualified using existing installed original_validator_context; both original packets parse as plaintext; no collect invoked",
+  "review": {
+    "run": "fabric-qwen-plain-recovery-review-01a11e90-v1",
+    "state": "CONSUMED_SOURCE_PASS_CHILD_NOT_ACCEPTED_OUTPUT_BOUND",
+    "reviewed_candidate": "cce1cb6837f6fc4efddccd0f9037d9b2ac139365a4a0875f8f212adc2aaca9da",
+    "result_sha256": "5569aed720e409fc36f60dcd5e24911d24cff0a9502828255bd53d4a716ed3bb",
+    "result_bytes": 4559,
+    "response_limit_chars": 3000,
+    "findings": {
+      "F1": "Applied recommended projection of remote scope metadata; added discriminating generated-code check",
+      "F2": "SCOPES and binding files are hash-listed here; runtime normative pins remain source constants, supplied bindings untrusted"
+    },
+    "process_sha256": "141932491d736e0fa160451ff62f5819debf4455c696287b0fbefff0885a17e4",
+    "started_at": "2026-10-15T10:50:04.207Z",
+    "ended_at": "2026-10-15T10:58:43.084Z",
+    "rc": 0,
+    "residual": 0,
+    "route": "qwen3.8-max/mb",
+    "reported_tokens": 46446,
+    "accept_called": false,
+    "controller_closed": 58155,
+    "two_line_delta": {
+      "reviewer": "01a12a08-42a5-7f22-8286-b5d81b2ada3f",
+      "verdict": "PASS_SOURCE_ONLY",
+      "candidate": "d9093e882c6347b9286959e34a7e419c965566ed320148374f49d390cb5bb8a8",
+      "basis": "reversing the two conditions reconstructs cce1; existing closed c0/e126/0be fixed hash-qualified source, reader and support digest seam preserved;105 accepted inert checks reused"
+    },
+    "final_derivation": "d909 + exact recommended F1 privacy projection + F2 package pin documentation;106 focused tests PASS"
+  },
+  "package_pins": {
+    "SCOPES.json": "336d11462e8c49af0d389ddde098e64d316bfbb1e42f3a2743592888ac8847a1",
+    "rf-archive-order-review-01a1333c-v1.binding.json": "46f6ba41973dc9b7185fc489a057fa8aa0c36dc89d3ce43ec1dfea2d720cb899",
+    "rf-mountinfo-review-01a1333c-v1.binding.json": "04a7d7a80ebc90b153a67fa8501786c3bc309b0326a3401ef4efca5061cf6eba"
+  },
+  "qualified_at": "2026-10-15T11:02:46.831220+00:00",
+  "historical_1520_qualification": {
+    "candidate_sha256": "efc8aff10458a57d92c649e4785b95704f5092af0268b2d1a8ab66ce4fba4e56",
+    "checks": {
+      "baseline_red": 3,
+      "candidate": 106,
+      "failures": 0,
+      "skips": 0
+    },
+    "protected_merge": "170241b2f878d521db075fad1d00d505852989db",
+    "installed_at": "2026-10-15T12:24:05.588763Z",
+    "original_parent_collection": "two original calls refused local binding; no result consumed"
+  },
+  "diagnostic_correction": "Only first load_binding errors get sanitized phase original_local_binding; false retry/terminal/delivery flags preserved. Shared0775 ancestor remains refused. No retry authority or historical remote effect inferred."
+}

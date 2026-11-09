@@ -1,0 +1,50 @@
+{
+  "schema": "mastermind.finite_definition_release_correction/v1",
+  "at": "2026-10-14T04:02:35.644102+00:00",
+  "base": "6d6c0f6f2c1f4045c3863edabb7c8498a2b09fa7",
+  "source_sha256": {
+    "ops/executive_os/attended_control_staging.py": "fbcbe57922bca9783d0ac7b9e3188fcf08e0c3ec37f80e6e5b8bad2c79900aa8",
+    "tests/test_attended_control_staging.py": "d69e9819d15bd234fc6d7d7955164405220a1eb8d37c49ed9b7fb5bb193bb7d6",
+    "tests/executive_finite_identity_review.py": "07ef2cf282821e77d77df4ea4052418ee1877b99ebc86a51582b7fd61af31e29",
+    "tests/executive_identity_review.py": "6d707d5ab8ed1e29bfa3a680584f4f9b8b42fd1ca63cd3574b28d44173057f82",
+    "tests/test_ceo_submit_armed_composition.py": "d59f2dc9d44fd91e24bba21bffbecb210760018641970e6fe19506ec7891cce2",
+    "tests/executive_fabric_release_identity_review.py": "33210a9ca693afe5c5f7e881aa3eaece32a5df6e3008fd42475750e00194ff6a",
+    "tests/test_executive_fabric_release_identity_review.py": "d5e39782ee6ab9c3b6a32265ef9557ccf667e345891f70e49020d66e164a2cea"
+  },
+  "review": {
+    "metadata_join": "SCOPED_SOURCE_PASS /root/native_activation_adjudication: exact root:wheel0444 nonsecret definitions join publisher7f95; binary receipt root4700440 unaffected; seven literal sites unchanged",
+    "class_ast_sha256": "0be2f0114d253d2af161c41095cf56528d2aab54f43b184c06a8a3eb85285b0c",
+    "release_guard_24_sites": "SourceOS root-adjudication637d9890a0cfbef0f7640a707e096c5e550722d4a64a700fdd7fb0e30417b766",
+    "release_guard_10_sites_and_mechanism": "SCOPED_SOURCE_PASS /root/native_activation_adjudication; exact path/full file digest/literal coordinates only; changed bytes stay visible",
+    "canonical_event_loop": "SCOPED_SOURCE_PASS /root/native_activation_adjudication on test d59f2dc9; exact production749377f2 plus serve_installed_control AST060525ac; all forbidden imports/calls retained."
+  },
+  "host_negative_sha256": "c09c336e7c3f35c6c5b91348fa7b483493e5e615686f86882fada73921282a2b",
+  "tests": {
+    "FINITE_DEFINITION_MODE_RED.xml": {
+      "tests": 5,
+      "failures": 5,
+      "sha256": "3bc78dee35cfebd2fb20668ba43eb055c50957a985845c6d66a0321828b1c0ca"
+    },
+    "FINITE_DEFINITION_MODE_GREEN.xml": {
+      "tests": 21,
+      "failures": 0,
+      "sha256": "e2d9cac0a3b43185b872485db21d8794f556c7549dee68b4094fb277c1a99f6e"
+    },
+    "FINITE_D8_QUALIFIED_SUCCESSOR.xml": {
+      "sha256": "b3bb84e1720c6c56c396e92f643c6bc1a2ad7dc1ec4d730b280c17c16a34ef3d",
+      "tests": 176,
+      "failures": 2,
+      "errors": 0,
+      "skips": 0
+    },
+    "FINITE_D7_EVENT_LOOP.xml": {
+      "sha256": "103ca5e6f8a97b15cce0ce2c3a4216ee59bec388b0e789d70bd7b5f99b19b8cc",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "effects": "Source only. No installation, host permission change, enrollment, Runtime eligibility, native Submit or retry.",
+  "retained_failures": "Composition176 had174PASS and2FAIL: D7 flagged reviewed asyncio entry (subsequently12affectedPASS); D8 read historical HEAD6d6 staging with new working-tree AST pin (must rerun once after corrected commit). No branch PASS asserted here."
+}

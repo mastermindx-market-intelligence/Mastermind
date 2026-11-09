@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "target": "ES2024", "lib": ["ES2024", "DOM"] },
+  "include": [
+    ".cache/mcp-donor/index.ts",
+    ".cache/mcp-donor/tools.ts",
+    ".cache/mcp-donor/connection.ts"
+  ]
+}

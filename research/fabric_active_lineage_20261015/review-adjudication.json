@@ -1,0 +1,27 @@
+{
+  "run_id": "fabric-active-lineage-review-01a11e90-v1",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "pool": "bailian",
+  "host": "ubuntu0",
+  "result_sha256": "c450c9a469bc0aa295ff73336ab99d0b0e0ed4f14ad3670aa1c132a3e5bbf478",
+  "bytes": 2759,
+  "characters": 2741,
+  "contract_characters": 2500,
+  "worker_verdict": "NOT_ACCEPTED_OUTPUT_BOUND",
+  "accept_called": false,
+  "source_findings_adjudicated": true,
+  "adjudication": {
+    "F1": "Added post-binding uncertainty refusal with three inert cases; no lifecycle state rewrite.",
+    "F2": "Refuted: existing local reader rejects st_size over limit and requires complete equal bytes; oversized conflicting record negative passes. No arbitrary reject of complete exact-limit file.",
+    "F3": "Refuted: actual RUN_ID_RE is generic bounded token syntax, not UUID; actual producer model/account fixture passes. Metadata remains correlation only.",
+    "F4": "Added ImportError fallback for optional evidence reader; real json/re/path constants are imported/defined. Do not mask arbitrary programming defects with except Exception.",
+    "F5": "Confirmed actual native facade treats top-level root as verified. Repaired by separate controller_lineage object; actual facade test proves root_verified=false and retained result denied."
+  },
+  "final_source_verification": {
+    "fabric_task.py": "b8cb82fbf919562b6a49d9d402bfa58fb111c411781d9c20bea2715c2cebb78d",
+    "run_observation_delivery.py": "b05f1f8c57c6eac1da102d13075ee90e8402918a8f0a10a0726d38bfb3048e6b"
+  },
+  "independent_final_pass_claimed": false,
+  "runtime_effect": null
+}
