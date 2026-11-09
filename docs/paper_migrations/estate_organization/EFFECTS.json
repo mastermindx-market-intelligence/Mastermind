@@ -2,7 +2,7 @@
   "schema": "paper.estate.effects.v2",
   "operation": "paper-estate-organization-20261108-c1",
   "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
-  "count": 679,
+  "count": 700,
   "note": "Original receipts are preserved in bounded chunks. EFFECT_UNKNOWN rename responses were reconciled by later exact-file reads, with no replay. Five post-head follow-through records are preserved by exact PR comment references. AI-worker continuation receipts use separate bounded chunks in the same evidence store.",
   "operations": [
     {
@@ -6929,6 +6929,195 @@
       "before_snapshot": "a21765b177d2c6e8d981cf286592ccf23f2761876faaabf08c97e83c8becd9dd",
       "after_snapshot": "a21765b177d2c6e8d981cf286592ccf23f2761876faaabf08c97e83c8becd9dd",
       "receipt_path": "effects/agent-navigation-resume-03.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-intraday-text",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "after_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-intraday-names",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "after_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-intraday-route-3",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "after_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-intraday-order",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "after_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-intraday-finish",
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "after_snapshot": "7c100239ee4fab7d5a3866ba056fe75d95e8179c9549ebc6bd6a3157fa961148",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-text",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "a022cbae3c63993ed608888a888292ef34d2c162df1c503e23ea2c29e4e00132",
+      "after_snapshot": "e3ae5ee9bdeea11a7b4b1a76bde1d500842f2fa218714bcc25b21428ee5d86f7",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-names",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "e3ae5ee9bdeea11a7b4b1a76bde1d500842f2fa218714bcc25b21428ee5d86f7",
+      "after_snapshot": "e3ae5ee9bdeea11a7b4b1a76bde1d500842f2fa218714bcc25b21428ee5d86f7",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-route-6",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "e3ae5ee9bdeea11a7b4b1a76bde1d500842f2fa218714bcc25b21428ee5d86f7",
+      "after_snapshot": "21caab9cac085a9c5088b26ba523560f24fbc585939f6b26c4dc59ff1f254786",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-route-7",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "21caab9cac085a9c5088b26ba523560f24fbc585939f6b26c4dc59ff1f254786",
+      "after_snapshot": "d307272a38d0229cf666587e65ef252e737c8765e2474577015826531edf1640",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-route-8",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "d307272a38d0229cf666587e65ef252e737c8765e2474577015826531edf1640",
+      "after_snapshot": "78ba80440f6b47242e93461d276f66c2f1354bee1f334fffc3d2cff93c27b500",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-order",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "78ba80440f6b47242e93461d276f66c2f1354bee1f334fffc3d2cff93c27b500",
+      "after_snapshot": "78ba80440f6b47242e93461d276f66c2f1354bee1f334fffc3d2cff93c27b500",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-sector-finish",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "78ba80440f6b47242e93461d276f66c2f1354bee1f334fffc3d2cff93c27b500",
+      "after_snapshot": "78ba80440f6b47242e93461d276f66c2f1354bee1f334fffc3d2cff93c27b500",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-text",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-names",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "rename_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-route-5",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-route-6",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-route-7",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "write_html",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-order",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "move_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-fresh-catalyst-finish",
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "after_snapshot": "ca8d6cb706c835b9b7d839dc671728add78e3e9c6ee8f889115e642e1bf7f895",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-current-start-source",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
+    },
+    {
+      "operation_id": "peo-20261109-c1-current-start-finish",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "original_state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "receipt_path": "effects/agent-navigation-resume-04.json"
     }
   ]
 }

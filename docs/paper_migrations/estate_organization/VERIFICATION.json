@@ -332,18 +332,18 @@
     }
   },
   "agent_navigation_continuation": {
-    "observed_at": "2026-11-09T13:05:37.343Z",
-    "source_parent": "054e2d56da34f5f067a1917a1589ff571802e599",
+    "observed_at": "2026-11-09T13:25:44.598Z",
+    "source_parent": "c81ab602ee34d252a64979c2b818073dfb114b7a",
     "guide_count": 50,
     "planned": 50,
     "validation": {
       "passed": true,
       "failures": [],
       "files": 83,
-      "routes": 196,
+      "routes": 203,
       "guides": 50
     },
-    "own_operation_count": 288,
+    "own_operation_count": 309,
     "guide_evidence": "effects/agent-navigation-resume-verification.json",
     "recovered_evidence": "effects/agent-navigation-resume-recovery.json",
     "consumer_repairs": true,
@@ -352,5 +352,17 @@
       "Pre-existing complete guides are observed content, not invented original effect receipts",
       "Metadata snapshot is non-atomic across active writers"
     ]
+  },
+  "final_navigation": {
+    "source": "effects/agent-navigation-final-verification.json",
+    "guides": 50,
+    "resources": 83,
+    "files": 80,
+    "pages": 617,
+    "dividers": 19,
+    "routes": 203,
+    "explicit_board_targets": 61,
+    "board_pages": 32,
+    "status": "NAVIGATION_PROVEN_DELIVERY_PENDING"
   }
 }

@@ -1,11 +1,11 @@
 {
   "schema": "paper.estate.guide_verification.v1",
-  "observed_at": "2026-11-09T13:05:37.348Z",
+  "observed_at": "2026-11-09T13:25:44.602Z",
   "validation": {
     "passed": true,
     "failures": [],
     "files": 83,
-    "routes": 196,
+    "routes": 203,
     "guides": 50
   },
   "guide_verifications": [

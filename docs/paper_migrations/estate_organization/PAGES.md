@@ -1,6 +1,6 @@
 # Paper estate · Every observed page
 
-Navigation updated 2026-11-09T13:05:37.333Z. 611 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
+Navigation updated 2026-11-09T13:25:44.588Z. 617 pages and 19 dividers across 80 readable design files. Former labels remain lookup aliases. Labels are navigation observations, not acceptance decisions.
 
 Read [AGENT_README.md](AGENT_README.md) first. Resolve file ID before page or board ID; page IDs repeat across files.
 
@@ -289,7 +289,7 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M2VWK62FA5S4VV
 
 ## Intraday Flow · R1 Draft · 01M6Y2QK8TQZRN8T4BHG10CJXT
 
-Role: proposal. PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.
+Role: proposal. R5 is a design candidate on p-3-0, with its build contract at p-4-0 / W6-0. The existing readers and classifier remain the owners. Recorded classifications, approximate options direction and reference levels do not establish current confirmation, a historical snapshot service or deployed behavior. Earlier R1–R4 studies remain on p-1-0. The file's R1 Draft title is retained history; choose the exact route and source qualification, not a version number.
 
 Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0).
 
@@ -297,6 +297,8 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2QK8TQZRN8T
 | --- | --- | --- |
 | `p-2-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-2-0) | — |
 | `p-1-0` | [Intraday Flow · R1 · Discovery workspace · DRAFT](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0) | — |
+| `p-4-0` | [04 · Build · Basis, freshness and states](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-4-0) | — |
+| `p-3-0` | [01 · Product · Recorded scan and evidence](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-3-0) | — |
 
 ## Market Breadth · Command Center R1 · 01M6Y3CRMC345RTB3ZDP3XSYRP
 
@@ -383,13 +385,16 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y3Z73MXTN3MD
 
 ## Sector Intelligence · R4 · Working Design · 01M6FAXA774QT1VRDMAG7DFQ2W
 
-Role: working_design. Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.
+Role: working_design. Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.
 
 Agent guide: [local Agent README](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0).
 
 | Page ID | Current page or divider | Former labels |
 | --- | --- | --- |
 | `p-9-0` | [00 · AGENT README · Scope & routes](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0) | 00 · Start here · Scope & retained requirements |
+| `p-B-0` | [06 · Shared Shell · Product · Round 2](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-B-0) | — |
+| `p-C-0` | [07 · Shared Shell · States & help · Round 2](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-C-0) | — |
+| `p-D-0` | [08 · Shared Shell · Build & design map · Round 2](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-D-0) | — |
 | `p-3-0` | [01 · D05 journey & contract · Provisional](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-3-0) | 00 · D05 journey & contract · Provisional |
 | `p-4-0` | [02 · R4 Explore & compare](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0) | 01 · R4 Explore & compare · Design |
 | `p-2-0` | [03 · R4 native suite · M1](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0) | R4 · M1 |
@@ -414,7 +419,7 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y34XE4JKS3A4
 
 ## Catalyst Intelligence · Decision Desk and Integration · 01M6Y2VTQBVC9NA39HNG1DYWFH
 
-Role: retained_reference. Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.
+Role: retained_reference. R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.
 
 Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0).
 
@@ -422,6 +427,7 @@ Agent guide: [local Agent README](https://app.paper.design/file/01M6Y2VTQBVC9NA3
 | --- | --- | --- |
 | `p-5-0` | [00 · AGENT README · Read first](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-5-0) | — |
 | `p-1-0` | [Catalyst Intelligence · Decision Desk · R1 · 2026-10-18](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0) | — |
+| `p-8-0` | [04A · Build · R3 workflow contract](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-8-0) | — |
 | `p-7-0` | [02A · Review · Case, evidence & conditions](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-7-0) | — |
 | `p-6-0` | [01 · Product · Catalyst review desk](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-6-0) | — |
 | `p-4-0` | [R2 · Manual review condition flow](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-4-0) | — |

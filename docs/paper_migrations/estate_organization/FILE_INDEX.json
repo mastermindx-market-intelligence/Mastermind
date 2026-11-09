@@ -7,7 +7,7 @@
   "counts": {
     "resources": 83,
     "readable_design_files": 80,
-    "pages": 611,
+    "pages": 617,
     "dividers": 19
   },
   "entry_url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0",
@@ -122,7 +122,7 @@
         "guide"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:09.852Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -677,7 +677,7 @@
         "redirect"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:11.306Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -765,7 +765,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:15.447Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
@@ -880,7 +880,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:08.389Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
@@ -1026,7 +1026,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:13.433Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
@@ -1212,7 +1212,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:08.195Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M312VSDSZFVT45674GDVJVZN",
@@ -1331,7 +1331,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:07.009Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
@@ -1432,7 +1432,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:09.311Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
@@ -1532,7 +1532,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:37.050Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
@@ -1632,7 +1632,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:33.880Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
@@ -1744,7 +1744,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:37.575Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
@@ -1871,7 +1871,7 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:30.313Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
@@ -2021,7 +2021,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:38.900Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
@@ -2144,7 +2144,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:40.325Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -2209,7 +2209,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:33.933Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -2356,7 +2356,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
+      "metadata_observed_at": "2026-11-09T13:07:41.564Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
@@ -2471,7 +2471,7 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 2,
+      "page_count": 4,
       "divider_count": 0,
       "pages": [
         {
@@ -2490,9 +2490,23 @@
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0",
           "baseline_name": "Intraday Flow · R1 · Discovery workspace · DRAFT"
+        },
+        {
+          "type": "page",
+          "id": "p-4-0",
+          "name": "04 · Build · Basis, freshness and states",
+          "icon": "blueprint",
+          "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-4-0"
+        },
+        {
+          "type": "page",
+          "id": "p-3-0",
+          "name": "01 · Product · Recorded scan and evidence",
+          "icon": "design",
+          "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-3-0"
         }
       ],
-      "retention_note": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
+      "retention_note": "R5 is a design candidate on p-3-0, with its build contract at p-4-0 / W6-0. The existing readers and classifier remain the owners. Recorded classifications, approximate options direction and reference levels do not establish current confirmation, a historical snapshot service or deployed behavior. Earlier R1–R4 studies remain on p-1-0. The file's R1 Draft title is retained history; choose the exact route and source qualification, not a version number.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -2502,7 +2516,7 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
+      "metadata_observed_at": "2026-11-09T13:07:51.535Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
@@ -2522,32 +2536,50 @@
       },
       "read_next": [
         {
-          "task": "DRAFT_SCAN",
-          "question": "R1 desktop EN scan; inspect the same page for mobile and ZH variants",
+          "task": "CANDIDATE_PRODUCT",
+          "question": "R5 recorded scan and evidence candidates; desktop, phone and EN/ZH variants",
           "target": {
             "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
-            "page_id": "p-1-0",
+            "page_id": "p-3-0",
             "board_ids": [
-              "1-0"
+              "IK-0",
+              "MB-0",
+              "OD-0",
+              "PO-0"
             ],
-            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
+            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-3-0"
           },
-          "qualification": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
-          "evidence_basis": "Fresh exact node/page read and consumer navigation probe; no adoption inferred."
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R5 is a design candidate on p-3-0, with its build contract at p-4-0 / W6-0. The existing readers and classifier remain the owners. Recorded classifications, approximate options direction and reference levels do not establish current confirmation, a historical snapshot service or deployed behavior. Earlier R1–R4 studies remain on p-1-0. The file's R1 Draft title is retained history; choose the exact route and source qualification, not a version number."
         },
         {
-          "task": "DRAFT_EVIDENCE",
-          "question": "R4 recorded-evidence treatment; accepted implementation source remains unresolved",
+          "task": "BUILD_CONTRACT",
+          "question": "R5 basis, freshness, missing inputs and source-reader requirements",
+          "target": {
+            "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+            "page_id": "p-4-0",
+            "board_ids": [
+              "W6-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-4-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R5 is a design candidate on p-3-0, with its build contract at p-4-0 / W6-0. The existing readers and classifier remain the owners. Recorded classifications, approximate options direction and reference levels do not establish current confirmation, a historical snapshot service or deployed behavior. Earlier R1–R4 studies remain on p-1-0. The file's R1 Draft title is retained history; choose the exact route and source qualification, not a version number."
+        },
+        {
+          "task": "RETAINED_DRAFTS",
+          "question": "Earlier R1 scan and R4 recorded-evidence studies",
           "target": {
             "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
             "page_id": "p-1-0",
             "board_ids": [
+              "1-0",
               "FE-0"
             ],
             "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
           },
-          "qualification": "PROPOSAL: R1 scan, R3 source-detail and R4 recorded-evidence studies. This guide identifies no accepted build source. Read p-1-0 / 1-0 for the desktop draft and p-1-0 / FE-0 for recorded evidence. Current prices and current confirmation are not established by these specimens. Implementation-source selection remains unresolved; revision numbers do not resolve it.",
-          "evidence_basis": "Fresh exact node/page read and consumer navigation probe; no adoption inferred."
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R5 is a design candidate on p-3-0, with its build contract at p-4-0 / W6-0. The existing readers and classifier remain the owners. Recorded classifications, approximate options direction and reference levels do not establish current confirmation, a historical snapshot service or deployed behavior. Earlier R1–R4 studies remain on p-1-0. The file's R1 Draft title is retained history; choose the exact route and source qualification, not a version number."
         }
       ],
       "local_agent_guide_status": "present_verified",
@@ -2664,7 +2696,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
+      "metadata_observed_at": "2026-11-09T13:07:57.552Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
@@ -2801,7 +2833,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.984Z",
+      "metadata_observed_at": "2026-11-09T13:07:56.739Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
@@ -2918,7 +2950,7 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
+      "metadata_observed_at": "2026-11-09T13:07:58.835Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
@@ -3003,7 +3035,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:58.093Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -3101,7 +3133,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:52.902Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
@@ -3199,7 +3231,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:52.237Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
@@ -3282,7 +3314,7 @@
       "entry_page_id": "p-9-0",
       "entry_url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0",
       "entry_basis": "explicit scope/guide selection",
-      "page_count": 9,
+      "page_count": 12,
       "divider_count": 1,
       "pages": [
         {
@@ -3295,6 +3327,27 @@
             "00 · Start here · Scope & retained requirements"
           ],
           "baseline_name": "00 · Start here · Scope & retained requirements"
+        },
+        {
+          "type": "page",
+          "id": "p-B-0",
+          "name": "06 · Shared Shell · Product · Round 2",
+          "icon": "design",
+          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-B-0"
+        },
+        {
+          "type": "page",
+          "id": "p-C-0",
+          "name": "07 · Shared Shell · States & help · Round 2",
+          "icon": "info",
+          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-C-0"
+        },
+        {
+          "type": "page",
+          "id": "p-D-0",
+          "name": "08 · Shared Shell · Build & design map · Round 2",
+          "icon": "blueprint",
+          "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-D-0"
         },
         {
           "type": "page",
@@ -3366,7 +3419,7 @@
           "baseline_name": "Reference · Unbound timing fixtures"
         }
       ],
-      "retention_note": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+      "retention_note": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "entry_board_id": "HBU-0",
@@ -3377,7 +3430,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:07:58.376Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
@@ -3398,6 +3451,44 @@
       },
       "read_next": [
         {
+          "task": "SHARED_SHELL_BUILD",
+          "question": "Round 2 exact frame map, owner contracts and remaining Round 3/4 acceptance",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-D-0",
+            "board_ids": [
+              "MBQ-0",
+              "MHA-0",
+              "MIV-0"
+            ],
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-D-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof."
+        },
+        {
+          "task": "SHARED_SHELL_PRODUCT",
+          "question": "Round 2 desktop, tablet, phone and EN/ZH compositions; choose exact frame via MBQ-0",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-B-0",
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-B-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof."
+        },
+        {
+          "task": "SHARED_SHELL_STATES",
+          "question": "Save, access, availability, source-basis and analytical-depth states",
+          "target": {
+            "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "page_id": "p-C-0",
+            "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-C-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof."
+        },
+        {
           "task": "READ",
           "question": "Provisional D05 journey and build contract",
           "target": {
@@ -3408,7 +3499,7 @@
             ],
             "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-3-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3419,7 +3510,7 @@
             "page_id": "p-2-0",
             "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3433,7 +3524,7 @@
             ],
             "url": "https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-5-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3449,7 +3540,7 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3464,7 +3555,7 @@
             ],
             "url": "https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0"
           },
-          "qualification": "Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.",
+          "qualification": "Shared Shell Round 2 design map is p-D-0 / MBQ-0; contracts MHA-0 and MIV-0 preserve Macro #7646, all inherited capability rows, and remaining Round 3/4 gates. Product/state compositions are design specimens, not application or production acceptance. Retain older R2/R3/R4/GMI sources and the G4P-0 review canary; exclude guides/build maps/canaries from product extraction. Existing watch/save owners must reconcile R3 Produced versus R4 GAP claims. No Terminal composition retires before complete parity and return proof.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
@@ -3529,7 +3620,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
+      "metadata_observed_at": "2026-11-09T13:08:10.461Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
@@ -3592,7 +3683,7 @@
       "entry_page_id": "p-1-0",
       "entry_url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
       "entry_basis": "local start label or first listed page; inspect scope",
-      "page_count": 7,
+      "page_count": 8,
       "divider_count": 0,
       "pages": [
         {
@@ -3609,6 +3700,13 @@
           "icon": "design",
           "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
           "baseline_name": "Catalyst Intelligence · Decision Desk · R1 · 2026-10-18"
+        },
+        {
+          "type": "page",
+          "id": "p-8-0",
+          "name": "04A · Build · R3 workflow contract",
+          "icon": "blueprint",
+          "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-8-0"
         },
         {
           "type": "page",
@@ -3649,7 +3747,7 @@
           "baseline_name": "Catalyst-to-Opportunity · Source-bound integration · 2026-10-17"
         }
       ],
-      "retention_note": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+      "retention_note": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.",
       "coverage": "fresh exact-file metadata during organization",
       "build_acceptance": "not conferred by this organizational index",
       "aliases": [
@@ -3659,7 +3757,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
+      "metadata_observed_at": "2026-11-09T13:08:12.519Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
@@ -3679,6 +3777,42 @@
       },
       "read_next": [
         {
+          "task": "BUILD_CONTRACT",
+          "question": "R3 case, source identity, save/recovery and motion contract",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-8-0",
+            "board_ids": [
+              "2JD-0"
+            ],
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-8-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay."
+        },
+        {
+          "task": "CANDIDATE_DESK",
+          "question": "R3 desktop dark/light and phone decision desk candidates",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-6-0",
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-6-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay."
+        },
+        {
+          "task": "CANDIDATE_CASES",
+          "question": "Fictional case, source reader and source-version recovery specimens",
+          "target": {
+            "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+            "page_id": "p-7-0",
+            "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-7-0"
+          },
+          "evidence_basis": "Exact native page and current design contract read on 9 November 2026. Design navigation is not runtime or source adoption.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay."
+        },
+        {
           "task": "LEARN",
           "question": "R1 decision desk scope",
           "target": {
@@ -3686,7 +3820,7 @@
             "page_id": "p-1-0",
             "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3697,7 +3831,7 @@
             "page_id": "p-2-0",
             "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-2-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3708,7 +3842,7 @@
             "page_id": "p-3-0",
             "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-3-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         },
         {
@@ -3719,7 +3853,7 @@
             "page_id": "p-4-0",
             "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-4-0"
           },
-          "qualification": "Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.",
+          "qualification": "R3 candidate contract: p-8-0 / 2JD-0. The four company cases and prices are fictional; issuer-to-trial identity is unverified. Keep Save unavailable until the existing owner supplies an exact eligible binding. Reuse R2 manual-save/recovery and existing selection/return owners. Source-version change is separate from outcome change; saving creates no monitoring, alert or order. Designs do not prove deployed behavior. Existing release refusal remains binding; no release replay.",
           "evidence_basis": "Exact page metadata and the named native scope/contract. Navigation is not source adoption or runtime proof."
         }
       ],
@@ -3787,7 +3921,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
+      "metadata_observed_at": "2026-11-09T13:08:06.798Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
@@ -3919,7 +4053,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:35:07.985Z",
+      "metadata_observed_at": "2026-11-09T13:08:25.659Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3397SE03G626MJ72N90PF",
@@ -4008,7 +4142,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:08:30.703Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
@@ -4136,7 +4270,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:08:27.487Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
@@ -4253,7 +4387,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:40:50.796Z",
+      "metadata_observed_at": "2026-11-09T13:08:24.344Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
@@ -4377,7 +4511,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:08:08.665Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
@@ -4495,7 +4629,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:04.416Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
@@ -4593,7 +4727,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:01.641Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -4665,7 +4799,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:08.018Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -4730,7 +4864,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:09.062Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -4903,7 +5037,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:41:32.489Z",
+      "metadata_observed_at": "2026-11-09T13:08:58.748Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
@@ -5254,7 +5388,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:42:24.476Z",
+      "metadata_observed_at": "2026-11-09T13:09:05.127Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
@@ -5350,7 +5484,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:03.410Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -5422,7 +5556,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:42:52.426Z",
+      "metadata_observed_at": "2026-11-09T13:09:06.088Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
@@ -5542,7 +5676,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:43:54.585Z",
+      "metadata_observed_at": "2026-11-09T13:09:21.718Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
@@ -5650,7 +5784,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:44:26.091Z",
+      "metadata_observed_at": "2026-11-09T13:09:19.589Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
@@ -5799,7 +5933,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:45:18.274Z",
+      "metadata_observed_at": "2026-11-09T13:09:19.035Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M38EVF74SJWG1GANN5VP380Z",
@@ -5930,7 +6064,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:56:50.235Z",
+      "metadata_observed_at": "2026-11-09T13:09:18.385Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
@@ -6030,7 +6164,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:57:16.678Z",
+      "metadata_observed_at": "2026-11-09T13:09:20.099Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
@@ -6121,7 +6255,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:22.010Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -6205,7 +6339,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:20.714Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
@@ -6349,7 +6483,7 @@
         "proposal"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:20.382Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
@@ -6478,7 +6612,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:27.963Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -6558,7 +6692,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:57:51.624Z",
+      "metadata_observed_at": "2026-11-09T13:09:27.392Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
@@ -6651,7 +6785,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:58:49.084Z",
+      "metadata_observed_at": "2026-11-09T13:09:28.975Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
@@ -6771,7 +6905,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:59:24.045Z",
+      "metadata_observed_at": "2026-11-09T13:09:29.859Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
@@ -6856,7 +6990,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:30.198Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -6929,7 +7063,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:29.412Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -7009,7 +7143,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T12:59:51.066Z",
+      "metadata_observed_at": "2026-11-09T13:09:26.894Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
@@ -7115,7 +7249,7 @@
         "staging_copy"
       ],
       "resource_class": "staging_copy",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:28.355Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -7621,7 +7755,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:00:47.244Z",
+      "metadata_observed_at": "2026-11-09T13:09:37.636Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
@@ -7795,7 +7929,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:01:29.098Z",
+      "metadata_observed_at": "2026-11-09T13:09:37.915Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
@@ -7945,7 +8079,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:02:06.093Z",
+      "metadata_observed_at": "2026-11-09T13:09:39.987Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
@@ -8059,7 +8193,7 @@
         "retained_reference"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:02:49.001Z",
+      "metadata_observed_at": "2026-11-09T13:09:36.993Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
@@ -8261,7 +8395,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:03:20.685Z",
+      "metadata_observed_at": "2026-11-09T13:09:38.991Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
@@ -8450,7 +8584,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:03:46.395Z",
+      "metadata_observed_at": "2026-11-09T13:09:38.395Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
@@ -8792,7 +8926,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:04:48.536Z",
+      "metadata_observed_at": "2026-11-09T13:09:35.462Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M3NRCX55B452A12819WNE1RH",
@@ -9023,7 +9157,7 @@
         "working_design"
       ],
       "resource_class": "design_file",
-      "metadata_observed_at": "2026-11-09T13:05:29.890Z",
+      "metadata_observed_at": "2026-11-09T13:09:35.824Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
@@ -9414,7 +9548,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:48.807Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -9927,7 +10061,7 @@
         "recovery_snapshot"
       ],
       "resource_class": "recovery_snapshot",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:49.278Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10480,7 +10614,7 @@
         "recovery_snapshot"
       ],
       "resource_class": "recovery_snapshot",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:47.497Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10543,7 +10677,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:46.183Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10606,7 +10740,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:48.101Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10669,7 +10803,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:47.147Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10734,7 +10868,7 @@
         "retained_reference"
       ],
       "resource_class": "technical_specimen",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:47.811Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10799,7 +10933,7 @@
         "retained_reference"
       ],
       "resource_class": "technical_specimen",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:48.358Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10872,7 +11006,7 @@
         "retained_reference"
       ],
       "resource_class": "technical_specimen",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:56.225Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -10935,7 +11069,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:55.559Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11008,7 +11142,7 @@
         "retained_reference"
       ],
       "resource_class": "technical_specimen",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:53.830Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11071,7 +11205,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:54.779Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11142,7 +11276,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:54.320Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11207,7 +11341,7 @@
         "retained_reference"
       ],
       "resource_class": "technical_specimen",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:55.113Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11270,7 +11404,7 @@
       ],
       "navigation_roles": [],
       "resource_class": "empty_technical_candidate",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:54.059Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11335,7 +11469,7 @@
         "retained_reference"
       ],
       "resource_class": "preserved_reference_file",
-      "metadata_observed_at": "2026-11-09 11:03:44 UTC",
+      "metadata_observed_at": "2026-11-09T13:09:56.029Z",
       "metadata_observation": "Exact-file requested-page result; non-atomic estate snapshot. Not source/adoption/content-parity proof.",
       "agent_entry": {
         "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
@@ -11492,7 +11626,7 @@
     }
   ],
   "observed_at": "2026-11-09 11:03:44 UTC",
-  "organization_verified_at": "2026-11-09T13:05:37.333Z",
+  "organization_verified_at": "2026-11-09T13:25:44.588Z",
   "agent_navigation": {
     "schema": "paper.estate.agent_navigation.v1",
     "protocol": {
