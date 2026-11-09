@@ -32,7 +32,7 @@ class HermesSessionReceiptTests(unittest.TestCase):
 
     def fake_subprocess(self, *, output, diagnostics="", returncode=0):
         def invoke(cmd, **kwargs):
-            self.assertEqual(cmd[:2], ["hermes", "chat"])
+            self.assertEqual(cmd[:4], ["hermes", "--profile", "secretary", "chat"])
             self.assertIn("--query-file", cmd)
             self.assertIn("--oneshot", cmd)
             self.assertIn("-Q", cmd)
@@ -53,6 +53,20 @@ class HermesSessionReceiptTests(unittest.TestCase):
             ok, result, sid = gateway.dispatch("secretary", "Answer my question", None, 10)
         self.assertEqual((ok, result, sid), (True, "My response", session))
         self.assertEqual(list(Path(self.tmp.name).glob(".prompt-*")), [])
+
+    def test_distinct_role_specific_native_profile_launches(self):
+        command_lines = []
+        for profile in ("engineering", "secretary", "meta-ceo-uncensored"):
+            def invoke(cmd, **kwargs):
+                command_lines.append(list(cmd))
+                self.assertEqual(cmd[:4], ["hermes", "--profile", profile, "chat"])
+                self.assertEqual(kwargs["env"].get("HERMES_PROFILE"), profile)
+                self.assertNotIn("HERMES_HOME", kwargs["env"])
+                return subprocess.CompletedProcess(cmd, 0, "answer", "session_id: native-session-12345678\n")
+            with patch.object(gateway.subprocess, "run", side_effect=invoke):
+                self.assertEqual(gateway.dispatch(profile, "separate prompt", None, 10)[0], True)
+        self.assertEqual(len({x[2] for x in command_lines}), 3)
+        self.assertEqual(gateway.DEFAULT_CONF["agents"]["meta-ceo"]["profile"], "meta-ceo-uncensored")
 
     def test_resumed_id_forwarded_to_original_cli(self):
         sid = "abcd1234-1234-1234-1234-123456789012"
