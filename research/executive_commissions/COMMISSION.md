@@ -1,3 +1,11 @@
+# Archived commission — 3 October 2026
+
+Status recorded on 9 November 2026: this file preserves the historical read-only commission below. Its instructions describe that original commission; this archival record is not a current invocation, authority grant, admission, worker-start receipt, accepted result or proof of original-parent consumption. Those runtime outcomes remain unproven in this source record. Archiving the text neither cancels an original operation nor authorizes a retry.
+
+The original 16-line brief is preserved verbatim below, including its operation key, parent provenance, permissions and one-attempt limit. Its immutable source is [Mastermind commit e4be14201934e796a693fa59bf16f03e753f0b97](https://github.com/mastermindx-market-intelligence/Mastermind/blob/e4be14201934e796a693fa59bf16f03e753f0b97/research/executive_commissions/COMMISSION.md), Git blob `e77281802910a002ac94be69798f081c48e0ede6`, SHA-256 `658b997391ecd54dc99d63406e116866c897abee122c7337c9118d6afd509367`. Any subsequent execution or acceptance must be established through its existing canonical owners and actual current authorization; this source-only record supplies neither.
+
+---
+
 # Bounded exact-session interconnect SUMMON acceptance
 
 Operation key: interconnect-1143-summon-acceptance-research-20261003

@@ -653,7 +653,8 @@ def test_open_rejects_unknown_target_surface(tmp_path):
     assert "target_surface" in json.loads(body)["detail"]
 
 
-def test_open_claude_code_in_desktop_end_to_end_through_server(tmp_path):
+def test_open_claude_code_in_desktop_end_to_end_through_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_surface, "_has_multiple_parall_claude_wrappers", lambda: False)
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "claude-projects"
@@ -1622,9 +1623,13 @@ def test_superseded_background_refresh_never_overwrites_newer_explicit_recomposi
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:
@@ -1701,9 +1706,13 @@ def test_superseded_background_failure_does_not_mask_newer_explicit_success(tmp_
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:

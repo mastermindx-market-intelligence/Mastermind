@@ -320,3 +320,138 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
     ):
         issues.append(LifecycleIssue.STALE_AGE_ONLY)
     return _assessment(LifecycleVerdict.RECONCILE_REQUIRED, *issues)
+
+
+# Draft reviewability is a *separate advisory question* from closing/merging
+# a PR. It belongs to this existing lifecycle decision owner rather than to
+# another GitHub bot, watcher, queue, or release authority.
+DRAFT_READINESS_SCHEMA = "mastermind.github_pr_draft_readiness.v1"
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+class DraftReadinessVerdict(str, Enum):
+    READY_CANDIDATE = "READY_CANDIDATE"
+    KEEP_DRAFT = "KEEP_DRAFT"
+    RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
+    NO_ACTION = "NO_ACTION"
+
+
+class DraftReadinessIssue(str, Enum):
+    PR_NOT_OPEN = "PR_NOT_OPEN"
+    ALREADY_READY = "ALREADY_READY"
+    SOURCE_NOT_FULLY_READ = "SOURCE_NOT_FULLY_READ"
+    PREVIOUS_EFFECT_UNKNOWN = "PREVIOUS_EFFECT_UNKNOWN"
+    WORK_STATE_UNKNOWN = "WORK_STATE_UNKNOWN"
+    CURRENT_HEAD_UNVERIFIED = "CURRENT_HEAD_UNVERIFIED"
+    DRAFT_HOLD_UNVERIFIED = "DRAFT_HOLD_UNVERIFIED"
+    DRAFT_HELD = "DRAFT_HELD"
+    WRITER_STATE_UNKNOWN = "WRITER_STATE_UNKNOWN"
+    SOURCE_WRITER_ACTIVE = "SOURCE_WRITER_ACTIVE"
+    SCOPE_COMPLETENESS_UNKNOWN = "SCOPE_COMPLETENESS_UNKNOWN"
+    SCOPE_INCOMPLETE = "SCOPE_INCOMPLETE"
+    QUALIFICATION_MISSING = "QUALIFICATION_MISSING"
+    QUALIFICATION_STALE = "QUALIFICATION_STALE"
+    NEVER_MERGE = "NEVER_MERGE"
+    SOURCE_QUALIFIED = "SOURCE_QUALIFIED"
+
+
+@dataclasses.dataclass(frozen=True)
+class DraftReadinessFacts:
+    """Caller-verified, head-bound evidence; not PR-text or CI inference.
+
+    The source owner must supply full current-head and qualification evidence.
+    Unknown is distinct from false. A current local/affected-test qualification
+    is represented by its immutable head SHA; never derive it from a green CI
+    checkbox, time-since-update, author prose, or review requests.
+    """
+
+    lifecycle: PullRequestLifecycleFacts
+    current_head_sha: str | None
+    qualified_head_sha: str | None
+    scope_complete: bool | None
+    explicit_draft_hold: bool | None
+    source_writer_active: bool | None
+
+
+@dataclasses.dataclass(frozen=True)
+class DraftReadinessAssessment:
+    schema: str
+    verdict: DraftReadinessVerdict
+    issues: tuple[DraftReadinessIssue, ...]
+
+
+def _draft_assessment(
+    verdict: DraftReadinessVerdict, issue: DraftReadinessIssue
+) -> DraftReadinessAssessment:
+    return DraftReadinessAssessment(
+        schema=DRAFT_READINESS_SCHEMA, verdict=verdict, issues=(issue,)
+    )
+
+
+def assess_draft_readiness(facts: DraftReadinessFacts) -> DraftReadinessAssessment:
+    """Advise a qualified Draft -> Ready transition; never perform that write.
+
+    Hosted CI may be pending or red: it is a *merge* gate and does not on its
+    own disqualify a stable candidate from review. A claimed Ready candidate
+    is not a review request, formal approval, merge-on-green opt-in, queue
+    admission, deployment, or proof of source qualification by this module.
+    """
+
+    if type(facts) is not DraftReadinessFacts:
+        raise LifecycleInputError("readiness facts must be exact DraftReadinessFacts")
+    _validate(facts.lifecycle)
+    for name, sha in (
+        ("current_head_sha", facts.current_head_sha),
+        ("qualified_head_sha", facts.qualified_head_sha),
+    ):
+        if sha is not None and (
+            type(sha) is not str or _SHA40_RE.fullmatch(sha) is None
+        ):
+            raise LifecycleInputError(f"{name} must be null or lowercase SHA40")
+    for name, value in (
+        ("scope_complete", facts.scope_complete),
+        ("explicit_draft_hold", facts.explicit_draft_hold),
+        ("source_writer_active", facts.source_writer_active),
+    ):
+        if value is not None and type(value) is not bool:
+            raise LifecycleInputError(f"{name} must be null or boolean")
+
+    pr = facts.lifecycle
+    if pr.state in (PullRequestState.CLOSED, PullRequestState.MERGED) or pr.merged:
+        return _draft_assessment(DraftReadinessVerdict.NO_ACTION, DraftReadinessIssue.PR_NOT_OPEN)
+    if pr.state is PullRequestState.UNKNOWN:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.WORK_STATE_UNKNOWN)
+    if not pr.draft:
+        return _draft_assessment(DraftReadinessVerdict.NO_ACTION, DraftReadinessIssue.ALREADY_READY)
+    if pr.source_coverage is not SourceCoverage.COMPLETE:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.SOURCE_NOT_FULLY_READ)
+    if pr.prior_effect_state is EffectState.EFFECT_UNKNOWN:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.PREVIOUS_EFFECT_UNKNOWN)
+    if pr.work_state is WorkState.UNKNOWN:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.WORK_STATE_UNKNOWN)
+    if pr.explicit_disposition in (ExplicitDisposition.NEVER_MERGE, ExplicitDisposition.CLOSE_UNMERGED):
+        return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.NEVER_MERGE)
+    if facts.current_head_sha is None:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.CURRENT_HEAD_UNVERIFIED)
+    if facts.explicit_draft_hold is None:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.DRAFT_HOLD_UNVERIFIED)
+    if facts.explicit_draft_hold:
+        return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.DRAFT_HELD)
+    if facts.source_writer_active is None:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.WRITER_STATE_UNKNOWN)
+    # WorkState.ACTIVE is live programme work, not an active source edit lease.
+    # A source-qualified Draft inside an ACTIVE programme stays reviewable, so
+    # only the distinct source_writer_active fact (or its unknown state, which
+    # is reconciled above) holds a Draft in place.  Requiring a terminal work
+    # state before Ready would recreate a Draft/release deadlock.
+    if facts.source_writer_active:
+        return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.SOURCE_WRITER_ACTIVE)
+    if facts.scope_complete is None:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.SCOPE_COMPLETENESS_UNKNOWN)
+    if not facts.scope_complete:
+        return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.SCOPE_INCOMPLETE)
+    if facts.qualified_head_sha is None:
+        return _draft_assessment(DraftReadinessVerdict.RECONCILE_REQUIRED, DraftReadinessIssue.QUALIFICATION_MISSING)
+    if facts.qualified_head_sha != facts.current_head_sha:
+        return _draft_assessment(DraftReadinessVerdict.KEEP_DRAFT, DraftReadinessIssue.QUALIFICATION_STALE)
+    return _draft_assessment(DraftReadinessVerdict.READY_CANDIDATE, DraftReadinessIssue.SOURCE_QUALIFIED)

@@ -14,6 +14,8 @@ from control_plane.session_targets import RuntimeBinding, SessionTarget
 
 _PROVIDER_TO_REASONING_SURFACE = {
     "chatgpt": "chatgpt-sol",
+    # Canonical ModelRouter/WorkerRegistry alias for the same OHF surface.
+    "codex": "codex",
     "openai-codex": "codex",
 }
 

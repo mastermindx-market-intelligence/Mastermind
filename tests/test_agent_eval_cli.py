@@ -403,3 +403,96 @@ def test_score_integrity_rejects_unresolvable_run(journey) -> None:
         f"scorer-pass:{uuid.uuid4()}",
     )
     assert r.returncode == 2
+
+
+# EVAL resource-accounting follow-on: existing CLI/test surfaces only.
+# Product acceptance remains separate from graph-verifiable usage observations.
+
+
+def test_resources_command_requires_an_existing_nonsymlink_store(tmp_path) -> None:
+    missing = tmp_path / "absent-store"
+    experiment_id = "experiment:11111111-1111-4111-8111-111111111111"
+    r = _run("resources", "--root", str(missing), "--experiment-id", experiment_id)
+    assert r.returncode == 2
+    assert not missing.exists()
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+    r = _run("resources", "--root", str(link), "--experiment-id", experiment_id)
+    assert r.returncode == 2
+    assert list(real.iterdir()) == []
+
+
+def test_resources_command_keeps_invalid_runs_and_store_bytes(journey) -> None:
+    root = str(journey["root"])
+    paths = journey["paths"]
+    for name in ("scenario", "config_a", "config_b", "experiment"):
+        r = _run("create", "--root", root, str(paths[name]))
+        assert r.returncode == 0, r.stderr
+    for name, expected_rc in (("draft_valid", 0), ("draft_invalid", 1)):
+        output = journey["files_dir"] / f"{name}_for_resources.json"
+        r = _run("finalize-run", "--root", root, "--draft", str(paths[name]),
+                 *VALIDATOR_ARGS, "--output", str(output))
+        assert r.returncode == expected_rc, r.stderr
+        created = _run("create", "--root", root, str(output))
+        assert created.returncode == 0, created.stderr
+    before = {str(path): path.read_bytes() for path in journey["root"].rglob("*") if path.is_file()}
+    r = _run("resources", "--root", root,
+             "--experiment-id", journey["experiment"]["experiment_id"])
+    assert r.returncode == 0, r.stderr
+    summary = json.loads(r.stdout)
+    assert summary["schema"] == "mastermind.agent_evaluation_resource_summary.v1"
+    assert summary["summary"]["run_count"] == 2
+    assert summary["observed_resource_field_coverage"] == "COMPLETE"
+    assert summary["summary"]["validity_status_counts"]["INVALID_CONFIGURATION"] == 1
+    assert summary["verification_scope"] == "EVALUATION_GRAPH_VERIFIED"
+    assert summary["external_content_verified"] is False
+    assert summary["runtime_changed"] is False
+    assert summary["cost_per_accepted_outcome"] is None
+    assert summary["all_expected_runs_observed"] is None
+    assert before == {str(path): path.read_bytes() for path in journey["root"].rglob("*") if path.is_file()}
+
+
+def test_resources_unit_math_preserves_missing_and_currency_partition() -> None:
+    from scripts.agent_eval.cli import _resource_usage
+
+    def observed(value, money, currency, validity):
+        return {
+            "resources": {
+                "input_tokens": value, "output_tokens": 0, "tool_calls": 0,
+                "elapsed_ms": 0, "estimated_marginal_cost": money,
+                "cost_currency": currency, "provider_usage_ref": None,
+            },
+            "execution": {"completion_status": "FAILED" if validity != "VALID" else "COMPLETED"},
+            "validity": {"status": validity},
+        }
+    result = _resource_usage([
+        observed(0, "0", "EUR", "VALID"),
+        observed(None, None, None, "INVALID_CONFIGURATION"),
+        observed(0, "0.125", "USD", "VALID"),
+    ])
+    assert result["input_tokens"]["known_sum"] == 0
+    assert result["input_tokens"]["total"] is None
+    assert result["input_tokens"]["missing_runs"] == 1
+    assert result["estimated_cost"]["missing_runs"] == 1
+    assert [item["currency"] for item in result["estimated_cost"]["by_currency"]] == ["EUR", "USD"]
+    assert result["estimated_cost"]["complete_single_currency"] is False
+    assert result["validity_status_counts"]["INVALID_CONFIGURATION"] == 1
+
+
+def test_resources_cli_unpopulated_experiment_reports_unknown_not_zero(journey) -> None:
+    root = str(journey["root"])
+    paths = journey["paths"]
+    for name in ("scenario", "config_a", "config_b", "experiment"):
+        r = _run("create", "--root", root, str(paths[name]))
+        assert r.returncode == 0, r.stderr
+    r = _run("resources", "--root", root,
+             "--experiment-id", journey["experiment"]["experiment_id"])
+    assert r.returncode == 1, r.stderr
+    report = json.loads(r.stdout)
+    assert report["observed_resource_field_coverage"] == "INCOMPLETE"
+    assert report["summary"]["run_count"] == 0
+    assert report["summary"]["total_tokens"]["total"] is None
+    assert report["summary"]["estimated_cost"]["complete_single_currency"] is False
+    assert report["all_expected_runs_observed"] is None

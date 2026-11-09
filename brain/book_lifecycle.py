@@ -54,6 +54,7 @@ Nothing here pins a live market state. Best-effort throughout — missing data d
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
 from pathlib import Path
 
@@ -125,18 +126,37 @@ def _ci(key: str, default: int) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 def _hac(series: list[float], lags: int) -> dict:
     """Newey-West mean/t over an active-return series, reusing the macro engine's validated helper.
-    Degrades to a plain mean with t=0 when the helper is unavailable (guard then fails closed → no
-    recommendation). Never raises."""
+    The optional-vendor fallback preserves the same estimator. Missing observations do not
+    count toward the sample; the existing fewer-than-two result shape is retained."""
     s = [float(x) for x in (series or []) if x is not None]
+    s = [x for x in s if not math.isnan(x)]
     if len(s) < 2:
         return {"n": len(s), "mean": (s[0] if s else None), "t": 0.0, "se": None}
     try:
         from engine.validation import newey_west_tstat
         return newey_west_tstat(list(s), lags=lags)
     except Exception:  # noqa: BLE001
+        # Keep the fallback statistically equivalent to engine.validation.newey_west_tstat.
+        # The vendor is intentionally optional at runtime; returning t=0 here used to turn a
+        # missing vendor checkout into a silent global disable of lifecycle loss escalation.
         n = len(s)
+        if n < 8:
+            return {"mean": None, "se": None, "t": None, "p": None, "n": n,
+                    "lags": None, "lags_requested": int(lags)}
         mean = sum(s) / n
-        return {"n": n, "mean": round(mean, 8), "t": 0.0, "se": None}
+        demeaned = [x - mean for x in s]
+        var = sum(x * x for x in demeaned) / n
+        effective_lags = min(int(lags), n - 1)
+        for lag in range(1, effective_lags + 1):
+            autocov = sum(demeaned[i] * demeaned[i - lag]
+                          for i in range(lag, n)) / n
+            var += 2.0 * (1.0 - lag / (effective_lags + 1)) * autocov
+        se = math.sqrt(max(var, 1e-18) / n)
+        t = mean / se if se else float("nan")
+        p_value = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t) / math.sqrt(2.0))))
+        return {"mean": round(mean, 5), "se": round(se, 5), "t": round(t, 3),
+                "p": round(p_value, 4), "n": n, "lags": effective_lags,
+                "lags_requested": int(lags)}
 
 
 def _loss_significance(active_series: list[float]) -> dict:
@@ -148,6 +168,7 @@ def _loss_significance(active_series: list[float]) -> dict:
     over threshold AND mean < 0). Pure; never raises. Each weekly review is treated as ONE independent
     observation — the caller feeds non-overlapping per-review increments (mirrors the governor)."""
     s = [float(x) for x in (active_series or []) if x is not None]
+    s = [x for x in s if not math.isnan(x)]
     min_n = _ci("min_effective_n", _MIN_EFFECTIVE_N)
     t_min = _cf("hac_t_min", _HAC_T_MIN)
     lags = _ci("hac_lag", _HAC_LAG)

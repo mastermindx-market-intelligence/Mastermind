@@ -1,5 +1,16 @@
 # Mastermind OS — Command Binding Spec v1 (item 3 · option 1: LAUNCH-only over the installed Web-CEO ingress)
 
+**2026-10-04 integration continuation (#1225):** the Chairman explicitly
+commissioned platform authentication, real persistence, and app composition.
+For that continuation, the historical unchanged-controller/synchronous-store
+and original stacked-branch restrictions below describe the completed V1
+binding commission, not the new integration scope. The current persistence
+contract is awaited `read`, atomic `reserve`, and atomic `clearIfEqual`;
+OwnerContext still comes only from verified authentication. See
+[the authenticated transport and integration contract](MASTERMIND_OS_EXECUTIVE_TRANSPORT_V1.md).
+The original-operation identity, no-resubmit, receipt, and SEND/STOP limits below
+remain in force. Qualified E1 compatibility is exactly 1.2.0 and 1.4.0.
+
 **Status:** FROZEN by the seat (op `mastermind-headless-control-closure-20261001-fable-001`, ruling R3, 2026-10-02). **Amended to V1.3 by ruling R5 (2026-10-02; consumes the late integration review on `#1150` — issuecomment-5950675533 blocker return + issuecomment-5951579629 owner-consumable patch, sha256 `d72f690ca549…`, adopted byte-for-byte as r3 commit `e15c5078`): the installed `web_ceo_v2` path is the authenticated App boundary — identity `req-*`→`auto-*` (never the legacy `mcp-*`), submit outcome `{ok,status,request_ref,receipt}`, status = closed E1 envelope, submit `backend_refused` → `unknown`; §§0/3/7/8/12/14 changed, §11 owned files unchanged, `operation-controller.ts` still untouched; the V1.1 pins in §3/§7.2/§8 that this supersedes are marked WITHDRAWN in place.** Amended to V1.1 by ruling R4; V1.2 editorial 2026-10-02 (§12 T11: `INVALID_PAYLOAD` per §6; example workstreams made §4-valid) (2026-10-02) carrying the counterpart REQUEST_REPAIR `#1046` issuecomment-5947637296 as D1 (status `not_found`/read failures retain the pointer), D2 (`workRef` from the pointer's original target, never current config), D3 (receipt `intent_id` authentication on submit AND status); §0/§4/§6/§7/§8/§12/§13/§14 changed, §11 owned files unchanged, `operation-controller.ts` still untouched.** Supersedes-in-part the `COMMAND_ROUTE_UNAVAILABLE` stub of `mastermindx-market-intelligence/Mastermind#1046` (head `089a745b9aa4`); adopts its contracts verbatim. Not a second command plane: the ONLY producer this binding touches is the installed, authenticated Web-CEO ingress (`submit_ceo_intent` → one QUEUED Job; `ceo_intent_status` → the durable receipt). SEND and STOP stay honestly `COMMAND_ROUTE_UNAVAILABLE` because master has no producer for SEND and exposes none for STOP (lane B, ledger §6). Option 2 (a `mastermind_os_command` MCP profile + closed command ingress) is RECORDED in §14 as an Executive-OS-owner commission, not built here.
 
 Companion ledger: `research/MASTERMIND_HEADLESS_CONTROL_CONTINUATION_HANDOFF_2026_10_02.md` (facts cited below as "ledger §n").

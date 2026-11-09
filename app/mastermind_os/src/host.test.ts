@@ -8,6 +8,9 @@ import {
 import current from "./fixtures/mission-v2-current-128c46f6.json";
 import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
 import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
+import workAvailable from "./fixtures/work-service-available.json";
+import workUnavailable from "./fixtures/work-service-unavailable.json";
+import compoundAvailable from "./meta-ceo/fixtures/mission-result-producer/actual-pair.json";
 const signed: AuthState = {
   status: "signed_in",
   reason: null,
@@ -36,6 +39,7 @@ function raw() {
     signIn: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
     readPrograms: vi.fn(async () => ({})),
+    readWork: vi.fn(async () => workAvailable),
     readMission: vi.fn(async () => current),
     readMissionV3: vi.fn(async () => v3Current17),
     readResult: vi.fn(async () => resultAvailable),
@@ -87,6 +91,23 @@ describe("installed typed host", () => {
       signal,
     });
   });
+  it("consumes one decoded Work document and preserves typed unavailability", async () => {
+    const e = raw(),
+      host = bindMissionHost(e.client),
+      signal = new AbortController().signal;
+    const ready = await host.readWork!({ signal });
+    expect(ready).toMatchObject({
+      schema: "mastermind.workspace_work_queue.v1",
+      availability: "AVAILABLE",
+    });
+    e.client.readWork = vi.fn(async () => workUnavailable);
+    const unavailable = await host.readWork!({ signal });
+    expect(unavailable).toMatchObject({
+      availability: "UNAVAILABLE",
+      reason_codes: ["projection_refused"],
+    });
+  });
+
   it("consumes the fixed readResult envelope and preserves source failure without mislabeling cancellation", async () => {
     const e = raw(),
       host = bindMissionHost(e.client);
@@ -135,8 +156,10 @@ describe("installed typed host", () => {
     expect(afterAuth).toBeGreaterThan(first ?? -1);
     const missionHold = deferred<unknown>();
     const windowHold = deferred<unknown>();
+    const workHold = deferred<unknown>();
     e.client.readMissionV3 = () => missionHold.promise;
     e.client.readCurrentWindow = () => windowHold.promise;
+    e.client.readWork = () => workHold.promise;
     const started = host.invalidationGeneration?.() ?? 0;
     const mission = host.readMissionV3!({
       workRef: "WS:B5",
@@ -147,6 +170,13 @@ describe("installed typed host", () => {
     missionHold.resolve(v3Current17);
     await expect(mission).rejects.toThrow("READ_CANCELLED");
     expect(host.invalidationGeneration?.()).not.toBe(started);
+    const workStarted = host.invalidationGeneration?.() ?? 0;
+    const workRead = host.readWork!({ signal: new AbortController().signal });
+    e.notify(out);
+    workHold.resolve(workAvailable);
+    await expect(workRead).rejects.toThrow("READ_CANCELLED");
+    expect(host.invalidationGeneration?.()).not.toBe(workStarted);
+    e.notify(signed);
     const windowStarted = host.invalidationGeneration?.() ?? 0;
     const windowRead = host.readCurrentWindow!({
       signal: new AbortController().signal,
@@ -198,7 +228,7 @@ describe("native fixed command adapter", () => {
     await signin;
     expect(client.getState()).toEqual(out);
     expect(invoke.mock.calls.map((c) => c[0])).toEqual([
-      "auth_status",
+      "executive_auth_status", "auth_status",
       "sign_in",
       "sign_out",
     ]);
@@ -207,7 +237,7 @@ describe("native fixed command adapter", () => {
     const pending = deferred<unknown>();
     let listener!: (e: { payload: unknown }) => void;
     const invoke = vi.fn(async (command: string) =>
-      command === "auth_status" ? signed : pending.promise,
+      command === "auth_status" ? signed : command === "executive_auth_status" ? { generation: 0, available: false } : pending.promise,
     );
     const client = await createNativeClient(
       invoke as never,
@@ -235,6 +265,7 @@ describe("native fixed command adapter", () => {
     let lastMissionV3: unknown, lastResult: unknown;
     const invoke = vi.fn(async (command: string, args: unknown) => {
       if (command === "auth_status") return signed;
+      if (command === "read_work") return workAvailable;
       if (command === "read_mission_v3") {
         lastMissionV3 = args;
         return v3Current17;
@@ -252,6 +283,11 @@ describe("native fixed command adapter", () => {
         return () => {};
       },
     );
+    const work = await client.readWork!({
+      signal: new AbortController().signal,
+    });
+    expect(work).toMatchObject({ availability: "AVAILABLE" });
+    expect(invoke).toHaveBeenCalledWith("read_work", undefined);
     const v3 = await client.readMissionV3!({
       workRef: "WS:B5",
       rootJobId: "JOB-100",
@@ -294,5 +330,134 @@ describe("native fixed command adapter", () => {
       }),
     ).rejects.toThrow("SELECTION_INVALID");
     expect(listener).toBeTypeOf("function");
+  });
+});
+
+describe("optional orchestrator command binding", () => {
+  const port = {
+    context: () => ({ principalScope: "owner-a", generation: "gen-1" }),
+    prepare: vi.fn(),
+    submit: vi.fn(),
+    readOperation: vi.fn(),
+  };
+  const store = { read: () => null, reserve: () => ({ reserved: true as const }), clearIfEqual: () => true };
+  const complete = {
+    port,
+    store,
+    getView: () => ({ projects: [], profiles: [], session: null }),
+    subscribe: () => () => {},
+    makeLaunchIntent: () => null,
+    makeMessageIntent: () => null,
+    makeStopIntent: () => null,
+  };
+
+  it("omits absent or incomplete bindings and never defaults a catalog", () => {
+    const e = raw();
+    expect(bindMissionHost(e.client).commandBinding).toBeUndefined();
+    expect(
+      bindMissionHost(e.client, { port, store, getView: complete.getView })
+        .commandBinding,
+    ).toBeUndefined();
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(e.client.readPrograms).not.toHaveBeenCalled();
+  });
+
+  it("exposes only a complete injected binding", () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    expect(host.commandBinding).toBe(complete);
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the five-field result selector on the same host", async () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    const signal = new AbortController().signal;
+    await host.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+    expect(e.client.readResult).toHaveBeenCalledWith({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+  });
+});
+
+
+describe("native compound Mission and Result acquisition", () => {
+  const selected = {
+    workRef: compoundAvailable.selection.work_ref,
+    rootJobId: compoundAvailable.selection.root_job_id,
+    jobId: compoundAvailable.selection.job_id,
+    attemptId: compoundAvailable.selection.attempt_id,
+    resultEnvelopeDigest: compoundAvailable.selection.result_envelope_digest,
+  };
+
+  it("feeds one fixed native acquisition into the existing typed compound decoder", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "auth_status") return signed;
+      if (command === "read_mission_result") return compoundAvailable;
+      return {};
+    });
+    const client = await createNativeClient(invoke as never, async () => () => {});
+    const host = bindMissionHost(client);
+    const result = await host.readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    });
+    expect(result.availability).toBe("AVAILABLE");
+    expect(result.mission?.schema).toBe("mastermind.mission_workspace.v3");
+    expect(result.roleResult?.schema).toBe("mastermind.workspace_role_result.v1");
+    expect(invoke).toHaveBeenCalledWith("read_mission_result", {
+      selection: compoundAvailable.selection,
+    });
+    expect(invoke.mock.calls.some(([command]) =>
+      command === "read_mission_v3" || command === "read_result")).toBe(false);
+    const calls = invoke.mock.calls.length;
+    await expect(client.readMissionResult!({
+      ...selected, jobId: "https://other.invalid", signal: new AbortController().signal,
+    })).rejects.toThrow("SELECTION_INVALID");
+    expect(invoke.mock.calls).toHaveLength(calls);
+  });
+
+  it("rejects a compound response associated with another selected result", async () => {
+    const mismatched = structuredClone(compoundAvailable);
+    mismatched.selection.result_envelope_digest = "0".repeat(64);
+    const invoke = vi.fn(async (command: string) =>
+      command === "auth_status" ? signed : command === "read_mission_result" ? mismatched : {});
+    const client = await createNativeClient(invoke as never, async () => () => {});
+    await expect(bindMissionHost(client).readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    })).rejects.toThrow("MISSION_RESULT_RESPONSE_INVALID");
+  });
+
+  it("discards a late compound response when native authentication changes", async () => {
+    const pending = deferred<unknown>();
+    let notify!: (event: { payload: unknown }) => void;
+    const invoke = vi.fn(async (command: string) =>
+      command === "auth_status" ? signed
+        : command === "read_mission_result" ? pending.promise : {});
+    const client = await createNativeClient(invoke as never, async (event, handler) => {
+      if (event === "mastermind-auth-state") notify = handler;
+      return () => {};
+    });
+    const read = bindMissionHost(client).readMissionResult!({
+      ...selected, signal: new AbortController().signal,
+    });
+    notify({ payload: out });
+    pending.resolve(compoundAvailable);
+    await expect(read).rejects.toThrow("READ_CANCELLED");
+    expect(invoke.mock.calls.filter(([command]) => command === "read_mission_result")).toHaveLength(1);
   });
 });

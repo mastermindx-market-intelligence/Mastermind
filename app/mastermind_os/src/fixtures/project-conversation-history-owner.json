@@ -1,0 +1,75 @@
+{
+  "evidence_scope": "Real signedJWT/OsSessionTransportApp + InstalledSessionBridgeClient with injected synthetic private peer; no live Runtime/provider",
+  "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+  "now_ms": 1800000000000,
+  "context": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "history_context",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.os.executive.project_history_context.v1",
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300,
+      "selection": {
+        "work_ref": "WS:WORKSPACE-AGENT-PROGRAM"
+      },
+      "capabilities": {
+        "references_read": true,
+        "reply_read": true
+      }
+    },
+    "error": null
+  },
+  "page": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "references",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.session_reply_references.v1",
+      "status": "COMPLETE",
+      "next_cursor": null,
+      "high_water": 12,
+      "references": [
+        {
+          "read_ref": "session-reply-1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e",
+          "operation_key": "session-continue-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_ref": "session-bridge-continue:1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e",
+          "request_event_id": 12,
+          "request_revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "requested_at": "2026-10-18T00:00:00Z",
+          "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+          "root_job_id": "JOB-100",
+          "target_ref": "fabric_attempt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "reference_only": true
+        }
+      ]
+    },
+    "error": null
+  },
+  "answer": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "reply",
+    "ok": true,
+    "effect": "CONTINUATION_COMMITTED",
+    "operation_key": "session-continue-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "data": {
+      "schema": "mastermind.native_reply_read.v1",
+      "read_ref": "session-reply-1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e",
+      "request_ref": "session-bridge-continue:1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e",
+      "in_reply_to": "asd-dot-continue-c81bfcc7ccadd7372a1b0d05bb610f9d147b43b9",
+      "message_key": "asd-native-reply-4310b611582e4d2fa8f7053ea19490441b3e3db1",
+      "fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "text": "The original durable reply.",
+      "next_step": "Review the result.",
+      "primary_ts": "1800000000.000002",
+      "reply_committed": true,
+      "parent_consumed": false,
+      "operation_key": "session-continue-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "error": null
+  }
+}

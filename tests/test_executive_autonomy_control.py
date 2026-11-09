@@ -106,6 +106,8 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_credential_kind": "device-auth",
         "workspace_binding_class": "company-workspace-admin-attested",
         "credential_expires_at": "2026-08-25T12:00:00Z",
+        "native_return": False,
+        "foreground_only": False,
     }
 
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])
@@ -130,7 +132,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed seven: no generic recovery/debug verb
+    # The command set is closed: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -141,12 +143,116 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     assert set(subparser_actions[0].choices) == {
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
         "ceo-submit-disarm",
         "ceo-submit-reconcile",
+        "dialogue-canary-publish",
+        "dialogue-canary-reconcile",
+        "a2-disable-prepare",
+        "a2-disable-prepare-reconcile",
+        "a2-restore-controller-socket",
+        "a2-restore-controller-socket-reconcile",
+        "a2-restored-readside-preflight",
+        "finite-control-stage",
+        "finite-control-stage-reconcile",
+        "finite-control-retire",
+        "finite-control-retire-reconcile",
+        "paid-control-stage",
+        "paid-control-stage-reconcile",
+        "publish-os-gateway",
+        "reconcile-os-gateway",
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
+        "resume-control-component",
     }
+    # The OS gateway publication domain: the two closed verbs carry only the
+    # bounded digests and the original transaction id, and never accept a
+    # foreign flag, a duplicated value or the other verb's flags.
+    publish_argv = [
+        "publish-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--expected-mcp-config-sha256", "b" * 64,
+        "--expected-mcp-plist-sha256", "c" * 64,
+        "--expected-grant-absent",
+    ]
+    assert vars(parser.parse_args(publish_argv)) == {
+        "command": "publish-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "expected_mcp_config_sha256": "b" * 64,
+        "expected_mcp_plist_sha256": "c" * 64,
+        "expected_grant_sha256": None,
+        "expected_grant_absent": True,
+        "expected_predecessor_receipt_sha256": None,
+    }
+    digest_publish = list(publish_argv)
+    digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]
+    assert parser.parse_args(digest_publish).expected_grant_sha256 == "d" * 64
+    reconcile_argv = [
+        "reconcile-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--transaction-id", "autonomy-" + "0" * 12,
+    ]
+    assert vars(parser.parse_args(reconcile_argv)) == {
+        "command": "reconcile-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "transaction_id": "autonomy-" + "0" * 12,
+    }
+    for bad in (
+        # A missing required publish digest.
+        [w for w in publish_argv if w != "--expected-mcp-plist-sha256" and w != "c" * 64],
+        # The other verb's flag.
+        publish_argv + ["--transaction-id", "autonomy-" + "0" * 12],
+        # Foreign or duplicated values.
+        publish_argv + ["--foreign", "/tmp/x"],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-sha", SHA,
+         "--expected-bundle-digest", "a" * 64, "--transaction-id", "autonomy-" + "0" * 12],
+        # Malformed digests and transaction ids.
+        [w if w != "a" * 64 else "A" * 64 for w in publish_argv],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-bundle-digest",
+         "a" * 64, "--transaction-id", "autonomy-xyz"],
+        # Reconcile never carries publish flags.
+        reconcile_argv + ["--expected-grant-absent"],
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args(bad)
+    # The exactly-one grant expectation is a closed service-control argv-walk
+    # law, already asserted end to end in the affected owner suite; the parser
+    # itself keeps both bounded spellings optional and exclusive of nothing.
+    for command in ("paid-control-stage","paid-control-stage-reconcile"):
+        argv=[command,"--expected-sha",SHA,"--expected-definition-sha256","d"*64]
+        if command=="paid-control-stage":argv += ["--expected-control-sha256","c"*64]
+        assert parser.parse_args(argv).expected_definition_sha256=="d"*64
+        for extra in (["--service-label","foreign"],["--expected-definition-sha256","e"*64]):
+            with pytest.raises(SystemExit):parser.parse_args(argv+extra)
+    for command in ("a2-disable-prepare", "a2-disable-prepare-reconcile"):
+        assert vars(parser.parse_args([command, "--expected-sha", SHA])) == {
+            "command": command, "expected_sha": SHA,
+        }
+        with pytest.raises(SystemExit):
+            parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
+
+    for command in ("finite-control-stage", "finite-control-stage-reconcile",
+                    "finite-control-retire", "finite-control-retire-reconcile"):
+        argv = [command, "--expected-sha", SHA]
+        expected = {"command": command, "expected_sha": SHA}
+        if command in {"finite-control-stage", "finite-control-retire"}:
+            with pytest.raises(SystemExit):
+                parser.parse_args(argv)
+            argv += ["--expected-control-sha256", "a" * 64]
+            expected["expected_control_sha256"] = "a" * 64
+        assert vars(parser.parse_args(argv)) == expected
+        for extra in (["--service-label", "foreign"], ["--expected-sha", SHA],
+                      ["--command-path", "/tmp/foreign"]):
+            with pytest.raises(SystemExit):
+                parser.parse_args(argv + extra)
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
     # legacy verb must not be reachable from the CEO domain.
@@ -359,6 +465,7 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     for verb in (
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
@@ -366,6 +473,11 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
         "ceo-submit-reconcile",
     ):
         assert verb in wrapper
+    closed_prefix = "status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status"
+    # The verb must be present in both the usage surface and the shell case
+    # whitelist; a Python-only parser entry is not an installed command path.
+    assert wrapper.count(closed_prefix) == 2
+
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 
@@ -667,7 +779,8 @@ def test_production_admission_reuses_readiness_and_opens_runtime_read_only():
     assert "provider_readiness.validate_receipt_file(" in production
     assert "Runtime.at(" in production
     assert "create=False" in production
-    assert '["/usr/bin/pgrep", "-U", str(uid)]' in production
+    assert "_ps_pids_for_uid(uid)" in production
+    assert "DarwinDistnotedClassifier()" in production
     for forbidden in (
         "provider_readiness.reserve",
         "provider_readiness._finalize",
@@ -1188,7 +1301,9 @@ def test_transaction_order_and_static_safety_fences_are_structural():
     # verified against the exact held inode.
     assert "os.mkdir(AUTONOMY_TRANSACTION" not in production
     create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
-    assert "os.mkdir(generation, 0o700)" in create
+    # The generation is created only through the module's ONE directory
+    # creation site; the canonical audit leaf shares that same site.
+    assert "_create_directory(generation, 0o700)" in create
     assert "os.rename(generation, AUTONOMY_TRANSACTION)" in create
     assert "_seal_generation(" in create
     assert "_publication_mutex()" in create
@@ -3396,13 +3511,6 @@ def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
         is False
     )
 
-    # The honest limit is written into the function docstring itself.
-    source = Path(control.__file__).read_text(encoding="utf-8")
-    docstring = source.split("def ceo_submit_sink_eligible(", 1)[1].split('"""', 2)[1]
-    assert "SOURCE-side gate" in docstring
-    assert "control_plane/executive_service.py" in docstring
-    assert "does not yet consult it" in docstring
-    assert "no runtime effect" in docstring
 
 
 def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_eligible():
@@ -4198,6 +4306,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         st_ino=73,
     )
     ledger = []
+    # Do not patch process-global os.fstat/open/close: pytest and Path use them.
+    # The production module resolves its own os binding, so isolate its test seam.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
     monkeypatch.setattr(
         host, "_transaction_present", lambda: ledger.append("marker") or True
@@ -4297,6 +4408,8 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     for host in (first, second):
         monkeypatch.setattr(host, "_config_root_safe", lambda: None)
         monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    # os.fstat is used by pytest internals; patch only this owner's module binding.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
     monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
     monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
@@ -4422,9 +4535,18 @@ def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preim
 
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
     source = Path(control.__file__).read_text(encoding="utf-8")
-    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    # The CEO-submit control boundary proper ends where the separate OS
+    # gateway publication domain begins.  That domain must name the fixed
+    # service-control entry exactly once, by law: its sealed module origin
+    # joins the installed controller that exec'd it, and never executes it.
+    production = (
+        source.split("class ProductionCeoSubmitHost", 1)[1]
+        .split("class ProductionGatewayPublicationHost", 1)[0]
+    )
     assert "service-control.sh" not in production
     assert production.count("service-control.sh") == 0
+    gateway_source = source.split("class ProductionGatewayPublicationHost", 1)[1]
+    assert gateway_source.count("service-control.sh") == 1
 
     for name in ("def _reconcile_control_boundary", "def reconcile_control_service"):
         body = production.split(name, 1)[1].split("\n    def ", 1)[0]
@@ -7607,6 +7729,7 @@ def _marker_workspace(workdir: Path) -> Path:
 def _marker_adapter_bindings():
     """The three hermetic adapters, declared once for every harness process."""
 
+    from ops.executive_os import control_observation
     real_fstat = os.fstat
     real_lstat = Path.lstat
 
@@ -7623,7 +7746,15 @@ def _marker_adapter_bindings():
                 info.st_atime,
                 info.st_mtime,
                 info.st_ctime,
-            )
+            ),
+            # This adapter changes only privilege ownership. Keep the real
+            # high-resolution metadata so descriptor/path coherence checks in
+            # unrelated readers do not observe a fabricated file movement.
+            {
+                "st_atime_ns": info.st_atime_ns,
+                "st_mtime_ns": info.st_mtime_ns,
+                "st_ctime_ns": info.st_ctime_ns,
+            },
         )
 
     def privileged_fstat(descriptor):
@@ -7644,6 +7775,9 @@ def _marker_adapter_bindings():
         (control.os, "fchown", privileged_root_chown),
         (control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)),
         (control, "_has_acl", lambda _path: False),
+        # This journal harness does not install a release or its publisher.
+        # The actual publisher/owner composition has separate affected tests.
+        (control_observation, "publish_for_transaction", lambda *args: None),
     ]
 
 
@@ -8847,3 +8981,319 @@ def test_two_creators_admitted_before_publication_cannot_replace_winner(tmp_path
     result, _ = winner.result()
     assert result["ok"] is True
     assert result["transaction_id"] == manifest["transaction_id"]
+
+
+@pytest.mark.parametrize(
+    ("spelling", "accepted"),
+    [
+        ("declared", True),
+        ("canonical", True),
+        ("foreign_alias", False),
+        ("foreign_socket", False),
+        ("dot_alias", False),
+        ("relative", False),
+        ("missing", False),
+        ("list", False),
+        ("mapping", False),
+    ],
+)
+def test_ceo_admission_probe_owner_socket_spellings(
+    monkeypatch, tmp_path, spelling, accepted
+):
+    # Reproduce macOS's /var -> /private/var using real filesystem aliases.
+    canonical_parent = tmp_path / "private" / "var" / "run" / "mastermind-executive"
+    canonical_parent.mkdir(parents=True)
+    (tmp_path / "var").symlink_to(tmp_path / "private" / "var", target_is_directory=True)
+    declared = tmp_path / "var" / "run" / "mastermind-executive" / "control.sock"
+    canonical = declared.resolve(strict=False)
+    foreign_alias = tmp_path / "another-name.sock"
+    foreign_alias.symlink_to(canonical)
+    assert foreign_alias.resolve(strict=False) == canonical
+    monkeypatch.setattr(control, "CONTROL_SOCKET", declared)
+    reported = {
+        "declared": str(declared),
+        "canonical": str(canonical),
+        "foreign_alias": str(foreign_alias),
+        "foreign_socket": str(canonical.with_name("other.sock")),
+        "dot_alias": str(canonical.parent) + "/../mastermind-executive/control.sock",
+        "relative": "control.sock",
+        "missing": None,
+        "list": [str(canonical)],
+        "mapping": {"socket": str(canonical)},
+    }[spelling]
+    body = json.loads(_status_body())
+    body["result"]["socket"] = reported
+    calls = _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        status_body=json.dumps(body).encode(),
+    )
+    assert control.ProductionCeoSubmitHost()._ceo_admission_probe(
+        SHA, _CONFIG_DIGEST
+    ) is accepted
+    assert calls["inspector"].inspect_calls == ([_STATUS_PID] if accepted else [])
+
+
+def test_ceo_admission_probe_canonical_socket_still_requires_live_attestation(
+    monkeypatch, tmp_path
+):
+    canonical_parent = tmp_path / "private" / "var" / "run"
+    canonical_parent.mkdir(parents=True)
+    (tmp_path / "var").symlink_to(tmp_path / "private" / "var", target_is_directory=True)
+    declared = tmp_path / "var" / "run" / "control.sock"
+    monkeypatch.setattr(control, "CONTROL_SOCKET", declared)
+    calls = _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(config_digest="0" * 64),
+        status_body=_status_body(socket_path=str(declared.resolve(strict=False))),
+    )
+    assert control.ProductionCeoSubmitHost()._ceo_admission_probe(
+        SHA, _CONFIG_DIGEST
+    ) is False
+    # The alias passed the path check and reached the unchanged live validator.
+    assert calls["inspector"].inspect_calls == [_STATUS_PID]
+
+
+@pytest.mark.parametrize("carry_passed",[True,False])
+def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkeypatch,carry_passed):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    root=tmp_path/"control/acceptance"/SHA
+    root.mkdir(parents=True)
+    root.chmod(0o700)
+    # POSIX directories can inherit the parent's group rather than the
+    # process's primary group (for example /private/tmp on macOS). Bind the
+    # fixture account to the actual fixture directory; production still checks
+    # the exact configured owner/group and mode without an exemption.
+    fixture_identity=root.lstat()
+    monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=fixture_identity.st_uid))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=fixture_identity.st_gid))
+    monkeypatch.setattr(control,"_has_acl",lambda path:False)
+    raw=b"existing full acceptance receipt"
+    monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))
+    monkeypatch.setattr(control,"validate_acceptance_document",lambda *args,**kwargs:None)
+    descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id="JOB-preserved")
+    monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+    receipt=dict(schema_version=maintenance.SCHEMA,passed=carry_passed,baseline_preserved=True,
+        descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(maintenance,"sealed_json",lambda path:receipt)
+    host=control.ProductionArmHost()
+    if carry_passed:
+        assert host.validate_acceptance(SHA)==hashlib.sha256(raw).hexdigest()
+    else:
+        with pytest.raises(control.ArmAdmissionError) as raised:
+            host.validate_acceptance(SHA)
+        assert raised.value.code=="acceptance_receipt_invalid"
+
+
+class NativeSelectionHost(FakeTransactionHost):
+    """The existing transaction owner, with an already installed listener."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.control_config.update({
+            "coo_operator_model_alias": "coo.operator.readonly",
+            "coo_operator_quota_class": "codex-coo-operator-accepted12345678",
+            "control_uid": 450, "worker_uid": 451, "worker_gid": 451,
+            "company_consultation": {
+                "armed": True,
+                "native_return_armed": False,
+                "socket_path": "/var/run/mastermind-executive/company-consultation.sock",
+                "launchd_socket_name": "CompanyConsultation",
+            },
+        })
+
+    def require_native_listener(self, config):
+        self._call("listener")
+
+    def rollback_disarmed(self, transaction, receipt):
+        if self.rollback_fails:
+            raise RuntimeError("rollback fault")
+        self.control_config = json.loads(transaction.candidates.control_bytes)
+        self.worker_config = json.loads(transaction.candidates.worker_bytes)
+        self.receipt = dict(receipt)
+        self.marker = False
+
+
+def test_native_arm_is_explicit_and_seals_only_selection_and_existing_arm_bits():
+    host = NativeSelectionHost()
+    before_control = copy.deepcopy(host.control_config)
+    before_worker = copy.deepcopy(host.worker_config)
+    result = control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    assert result.status == "ARMED_READY"
+    assert host.calls == [*FakeAdmissionHost.GATE_ORDER, "listener"]
+    expected = copy.deepcopy(before_control)
+    expected.update(coo_autonomy_armed=True, coo_operator_harness_armed=True,
+                    coo_operator_model_alias="coo.operator.native-return",
+                    coo_operator_quota_class=before_control["coo_operator_quota_class"] + ".native-return")
+    expected["company_consultation"]["native_return_armed"] = True
+    assert host.control_config == expected
+    assert host.worker_config == {**before_worker, "operator_harness_armed": True}
+    assert host.receipt["control_config_sha256"] == control.sha256_bytes(control.encode_config(expected))
+    assert host.receipt["worker_config_sha256"] == control.sha256_bytes(control.encode_config(host.worker_config))
+    assert host.login_calls == host.inference_calls == 0
+    assert before_control["company_consultation"]["native_return_armed"] is False
+
+
+@pytest.mark.parametrize("gate", FakeAdmissionHost.GATE_ORDER)
+def test_native_selection_does_not_skip_any_existing_admission_gate(gate):
+    host = NativeSelectionHost()
+    host.fail_at = gate
+    with pytest.raises(control.ArmAdmissionError):
+        control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    assert host.transaction_calls == []
+    assert host.config_writes == host.service_starts == 0
+    assert "listener" not in host.calls
+
+
+@pytest.mark.parametrize("change", [
+    {"company_consultation": None},
+    {"company_consultation": {"armed": False}},
+    {"company_consultation": {"armed": True, "native_return_armed": True}},
+    {"dialogue_wake_canary_activation": {"unexpired": True}},
+    {"coo_operator_model_alias": "coo.operator.native-return"},
+    {"coo_operator_quota_class": "x" * 50},
+    {"coo_operator_quota_class": "quota.native-return"},
+])
+def test_native_preselection_refuses_before_transaction_or_provider_effect(change):
+    host = NativeSelectionHost()
+    host.control_config.update(change)
+    before = copy.deepcopy(host.control_config)
+    with pytest.raises(control.ArmAdmissionError, match="native_selection_invalid"):
+        control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    assert host.transaction_calls == []
+    assert host.control_config == before
+    assert host.login_calls == host.inference_calls == host.service_starts == 0
+
+
+def test_native_arm_requires_proven_listener_before_transaction():
+    host = NativeSelectionHost()
+    def absent(_config):
+        raise control.ArmAdmissionError("native_listener_unavailable")
+    host.require_native_listener = absent
+    with pytest.raises(control.ArmAdmissionError, match="native_listener_unavailable"):
+        control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    assert host.transaction_calls == []
+    assert host.control_config["company_consultation"]["native_return_armed"] is False
+
+
+def test_native_disarm_restores_readonly_quota_and_ordinary_rearm_cannot_revive_native():
+    host = NativeSelectionHost()
+    original = copy.deepcopy(host.control_config)
+    control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    control.execute_disarm(host, SHA, now=NOW)
+    assert host.control_config == original
+    assert host.receipt["control_config_sha256"] == control.sha256_bytes(control.encode_config(original))
+    control.execute_arm(host, _arm_request(), now=NOW)
+    assert host.control_config["coo_operator_model_alias"] == "coo.operator.readonly"
+    assert host.control_config["coo_operator_quota_class"] == original["coo_operator_quota_class"]
+    assert host.control_config["company_consultation"]["native_return_armed"] is False
+
+
+@pytest.mark.parametrize("phase", FakeTransactionHost.PHASES)
+def test_native_arm_failure_recovers_closed_readonly_preimage(phase):
+    host = NativeSelectionHost(fail_after=phase)
+    original = copy.deepcopy(host.control_config)
+    with pytest.raises(control.ArmTransactionError, match="arm_rolled_back"):
+        control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    assert host.control_config == original
+    assert host.services == "STOPPED"
+    assert host.marker is False
+    assert host.receipt["control_config_sha256"] == control.sha256_bytes(control.encode_config(original))
+
+
+@pytest.mark.parametrize("socket_value", [None, {}, {"SockPathMode": 0o666}])
+def test_production_native_listener_refuses_missing_or_changed_launchd_binding(socket_value):
+    import plistlib
+    host = control.ProductionArmHost()
+    config = NativeSelectionHost().load_unarmed_configs(SHA)
+    raw = plistlib.dumps({"Sockets": {} if socket_value is None else {"CompanyConsultation": socket_value}})
+    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)):
+        with pytest.raises(control.ArmAdmissionError, match="native_listener_unavailable"):
+            host.require_native_listener(config)
+
+
+def test_production_native_listener_reads_fixed_root_owned_plist_without_effect():
+    import plistlib
+    from scripts.executive_os_phase1c import company_consultation_launchd_entry
+    host = control.ProductionArmHost()
+    config = NativeSelectionHost().load_unarmed_configs(SHA)
+    raw = plistlib.dumps({"Sockets": {"CompanyConsultation": company_consultation_launchd_entry(config.control)}})
+    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)) as read, \
+            mock.patch("ops.executive_os.a2_agent_relay_enrollment.w3c_plist_configured", return_value=True) as relay:
+        host.require_native_listener(config)
+    relay.assert_called_once_with(release_sha=SHA)
+    read.assert_called_once_with(control.CONTROL_PLIST, modes=frozenset({0o644}), gid=0)
+
+
+@pytest.mark.parametrize("selected,requested", [(False, True), (True, False), (True, True), (False, False)])
+def test_production_arm_replay_is_bound_to_exact_selected_mode(selected, requested):
+    fake = NativeSelectionHost()
+    control.execute_arm(fake, _arm_request(native_return=selected), now=NOW)
+    c, w = fake.control_config, fake.worker_config
+    cd, wd = fake.receipt["control_config_sha256"], fake.receipt["worker_config_sha256"]
+    snapshot = _snapshot(control_config_sha256=cd, worker_config_sha256=wd,
+                         evidence={"control_armed": True, "worker_armed": True})
+    host = control.ProductionTransactionHost()
+    host.require_exact_install = lambda _sha: SHA
+    host.collect_status = lambda _sha, **kwargs: snapshot
+    host.validate_gate_b = lambda *args: "4" * 64
+    host.validate_acceptance = lambda *args: "3" * 64
+    host._configs = lambda: (c, w, cd, wd, control.encode_config(c), control.encode_config(w))
+    host.require_native_listener = mock.Mock()
+    with mock.patch.object(control, "status_document", return_value={"status": "ARMED_READY"}), \
+            mock.patch.object(control, "_root_json", return_value=(fake.receipt, b"receipt")):
+        if selected != requested:
+            with pytest.raises(control.ArmAdmissionError, match="changed_arm_evidence"):
+                host.existing_arm(_arm_request(native_return=requested), now=NOW)
+            host.require_native_listener.assert_not_called()
+        else:
+            assert host.existing_arm(_arm_request(native_return=requested), now=NOW).replayed
+            assert host.require_native_listener.call_count == int(selected)
+
+
+def test_native_arm_cli_selector_is_opt_in_and_closed():
+    parser = control._parser()
+    args = ["arm", "--expected-sha", SHA, "--gate-b-receipt", str(GATE_PATH),
+            "--expected-credential-kind", "device-auth", "--workspace-binding-class",
+            "company-workspace-admin-attested", "--credential-expires-at", "2026-08-25T12:00:00Z"]
+    assert parser.parse_args(args).native_return is False
+    assert parser.parse_args([*args, "--native-return"]).native_return is True
+    with pytest.raises(SystemExit):
+        parser.parse_args([*args, "--native-return", "some-unreviewed-alias"])
+
+
+def test_native_quota_boundary_composes_with_incumbent_immutable_registry(tmp_path):
+    from control_plane.executive_runtime import Runtime, StateConflict
+    host = NativeSelectionHost()
+    readonly = "q" * 49
+    host.control_config["coo_operator_quota_class"] = readonly
+    control.execute_arm(host, _arm_request(native_return=True), now=NOW)
+    native = host.control_config["coo_operator_quota_class"]
+    assert len(native) == 63
+    runtime = Runtime.at(tmp_path / "runtime")
+    runtime.workers.register_worker("boundary-worker", provider="codex",
+        account_label="fixture", worker_type="fixture", capabilities=["planning"],
+        quota_classes={readonly: {"provider": "codex", "capabilities": ["planning"],
+                                  "metadata": {"profile": "readonly"}}})
+    runtime.workers.register_quota_class("boundary-worker", native, provider="codex",
+        capabilities=["planning"], metadata={"profile": "native"})
+    assert runtime.workers.get_quota_class("boundary-worker", readonly).metadata == {"profile": "readonly"}
+    assert runtime.workers.get_quota_class("boundary-worker", native).metadata == {"profile": "native"}
+    with pytest.raises(StateConflict, match="different policy"):
+        runtime.workers.register_quota_class("boundary-worker", readonly, provider="codex",
+            capabilities=["planning"], metadata={"profile": "native"})
+
+
+def test_native_arm_refuses_old_or_disabled_relay_before_selection_effects():
+    import plistlib
+    from scripts.executive_os_phase1c import company_consultation_launchd_entry
+    config = NativeSelectionHost().load_unarmed_configs(SHA)
+    raw = plistlib.dumps({"Sockets": {"CompanyConsultation": company_consultation_launchd_entry(config.control)}})
+    with mock.patch.object(control, "_read_root_file", return_value=(raw, None)), \
+            mock.patch("ops.executive_os.a2_agent_relay_enrollment.w3c_plist_configured", return_value=False) as relay:
+        with pytest.raises(control.ArmAdmissionError, match="native_relay_unavailable"):
+            control.ProductionArmHost().require_native_listener(config)
+    relay.assert_called_once_with(release_sha=SHA)

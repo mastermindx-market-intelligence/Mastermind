@@ -1,0 +1,515 @@
+/**
+ * Knowledge Library — KD01 shell.
+ *
+ * The parent shell owns the outer horizontal gutters; this root only centres
+ * itself inside the established 1272px container. Dark uses the shared noir
+ * aliases; light differs deliberately through hairlines and soft shadows, not
+ * through a parallel palette. The bright source document rebinds the existing
+ * --mx-light-* tokens locally.
+ */
+
+.knowledge-library {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1272px;
+  margin-inline: auto;
+  padding-inline: 0;
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.knowledge-library *,
+.knowledge-library *::before,
+.knowledge-library *::after {
+  box-sizing: border-box;
+}
+
+.knowledge-library button {
+  font-family: var(--font-ui);
+}
+
+.knowledge-library :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --- Heading --------------------------------------------------------- */
+
+.knowledge-library-heading {
+  margin: 0;
+  min-width: 0;
+}
+
+.knowledge-library-eyebrow {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 8px;
+}
+
+.knowledge-library-title {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 500;
+  font-stretch: semi-condensed;
+  line-height: 1.2;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Tabs / actions row ---------------------------------------------- */
+
+.knowledge-library-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.knowledge-library-toolbar-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.knowledge-library-tab,
+.knowledge-library-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding-inline: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.knowledge-library-tab[aria-selected='true'] {
+  background: var(--raised);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.knowledge-library-button--primary {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.knowledge-library-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Quiet canonical panels (files / records / memory) ---------------- */
+
+.knowledge-library-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: clip;
+  min-width: 0;
+}
+
+.knowledge-library-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.knowledge-library-row:last-child {
+  border-bottom: none;
+}
+
+.knowledge-library-row-main {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.knowledge-library-row-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library-row-meta {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library-row-kind {
+  color: var(--faint);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.knowledge-library-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 44px;
+  min-width: 64px;
+  padding-inline: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.knowledge-library-open:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Notices / empty states ------------------------------------------- */
+
+.knowledge-library-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 16px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library-note--quiet {
+  color: var(--faint);
+}
+
+.knowledge-library-empty {
+  padding: 28px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* --- Query / filters --------------------------------------------------- */
+
+.knowledge-library-query {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.knowledge-library-query label {
+  color: var(--faint);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.knowledge-library-query input {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding-inline: 14px;
+  min-width: 0;
+}
+
+.knowledge-library-query input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Closed diagnostics ------------------------------------------------ */
+
+.knowledge-library-details {
+  margin: 12px 0 0;
+}
+
+.knowledge-library-details summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--faint);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.knowledge-library-details pre {
+  margin: 8px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- Reader layout (KD01 row) ------------------------------------------ */
+
+.knowledge-library-reader {
+  display: grid;
+  grid-template-columns: minmax(0, 840fr) 408px;
+  gap: 24px;
+  align-items: start;
+  margin-top: 24px;
+}
+
+.knowledge-library-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.knowledge-library-aside-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.knowledge-library-aside-panel h2 {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+
+/* --- Bright paper document --------------------------------------------- */
+
+.knowledge-library-document {
+  /* Reuse the accepted bright-document aliases; no local palette. */
+  --bg: var(--mx-light-panel); --panel: var(--mx-light-panel2); --raised: var(--mx-light-panel2);
+  --text: var(--mx-light-text); --muted: var(--mx-light-muted); --faint: var(--mx-light-muted);
+  --border: var(--mx-light-line); --brass: var(--mx-light-ink-link); --focus: var(--mx-light-ink-link);
+  --red: var(--mx-light-ink-down); --green: var(--mx-light-ink-up);
+  background: var(--noir-text-primary);
+  color: var(--text);
+  border: 1px solid var(--mx-light-line);
+  border-radius: 18px;
+  padding: 40px;
+  box-shadow: 0 1px 0 var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library[data-knowledge-theme='light'] .knowledge-library-document {
+  background: var(--mx-light-panel);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--mx-light-text) 10%, transparent);
+}
+
+.knowledge-library[data-knowledge-theme='light'] .knowledge-library-panel {
+  border-color: var(--border);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--mx-light-text) 6%, transparent);
+}
+
+.knowledge-library-document h1 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library-document h2,
+.knowledge-library-document h3,
+.knowledge-library-document h4,
+.knowledge-library-document h5,
+.knowledge-library-document h6 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 24px 0 8px;
+}
+
+.knowledge-library-document p,
+.knowledge-library-document li {
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+
+.knowledge-library-document a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--mx-light-line);
+}
+
+.knowledge-library-document a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.knowledge-library-document code {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: var(--raised);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.knowledge-library-document pre {
+  margin: 12px 0 4px;
+  padding: 16px;
+  border: 1px solid var(--mx-light-line);
+  border-radius: 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-library-document .source-markdown blockquote {
+  margin: 12px 0;
+  padding-inline-start: 0;
+  border-inline-start: 0;
+  color: var(--text);
+  opacity: 0.8;
+  border: none;
+}
+
+.knowledge-library-document img {
+  max-width: 100%;
+}
+
+/* Plain text keeps the exact bytes, wrapped safely. */
+.knowledge-library-plaintext {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.6;
+  font-family: var(--font-ui);
+}
+
+/* --- Action rows after panels ------------------------------------------- */
+
+.knowledge-library-actions-after {
+  display: flex;
+  margin-top: 16px;
+}
+
+.knowledge-library-memory-value {
+  margin: 0;
+  padding: 0 20px 20px;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- Records view ------------------------------------------------------- */
+
+.knowledge-library-records-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+
+.knowledge-library-records-head h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* --- ZH tracking reset --------------------------------------------------- */
+
+.knowledge-library--zh .knowledge-library-eyebrow,
+.knowledge-library--zh .knowledge-library-row-kind,
+.knowledge-library--zh .knowledge-library-query label {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.knowledge-library--zh .knowledge-library-title,
+.knowledge-library--zh .knowledge-library-document h1 {
+  letter-spacing: normal;
+  font-stretch: normal;
+}
+
+/* --- Mobile: 390 shell / 24 gutters / 342 content ------------------------ */
+
+@media (max-width: 1100px) {
+  .knowledge-library-reader {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .knowledge-library-title {
+    font-size: 28px;
+  }
+
+  .knowledge-library-row,
+  .knowledge-library-query {
+    padding: 16px;
+  }
+
+  .knowledge-library-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .knowledge-library-row .knowledge-library-open {
+    width: 100%;
+  }
+
+  .knowledge-library-document {
+    padding: 24px;
+  }
+
+  .knowledge-library-aside {
+    gap: 16px;
+  }
+
+  .knowledge-library-document h1 {
+    font-size: 22px;
+  }
+
+  .knowledge-library-toolbar {
+    gap: 8px;
+  }
+}
+
+.knowledge-library-aside-panel { padding: 24px; }
+@media (max-width: 760px) { .knowledge-library-document h1 { font-size: 28px; } }

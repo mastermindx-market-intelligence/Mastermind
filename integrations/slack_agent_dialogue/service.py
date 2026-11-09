@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import contextlib
+import dataclasses
 import errno
 import inspect
 import json
@@ -277,10 +279,14 @@ class AgentDialogueService:
         engine: DialogueEngine,
         *,
         engine_v2: DialogueEngineV2 | None = None,
+        dot_canary_armed: bool = False,
     ) -> None:
         self.config = config
         self.engine = engine
         self.engine_v2 = engine_v2
+        if type(dot_canary_armed) is not bool or (dot_canary_armed and engine_v2 is None):
+            raise TypeError("explicit original A2 canary reader required")
+        self.dot_canary_armed = dot_canary_armed
         self._server: asyncio.AbstractServer | None = None
         self._bound_socket_identity: tuple[int, int] | None = None
         self._server_close_issued = False
@@ -789,6 +795,38 @@ class AgentDialogueService:
         if operation == "status":
             _exact_mapping(args, set())
             return engine.status()
+        if operation == "read_dot_canary":
+            if self.dot_canary_armed is not True:
+                raise DialogueServiceError("REQUEST_INVALID")
+            from integrations.slack_agent_dialogue.dot_canary_event import (
+                TrustedCanaryPolicy, canary_event_definition,
+            )
+            from integrations.slack_agent_dialogue.dot_canary_reader import (
+                ExistingA2CanaryReader, CanarySourceUnavailable,
+            )
+            fields = _exact_mapping(args, {
+                "thread_ts", "message_ts", "owner_slack_user_id",
+                "principal_digest", "not_before_ts",
+            })
+            try:
+                policy = TrustedCanaryPolicy(
+                    workspace_id=engine.policy.workspace_id,
+                    channel_id=engine.policy.channel_id,
+                    relay_bot_user_id=engine.policy.relay_bot_user_id,
+                    owner_slack_user_id=fields["owner_slack_user_id"],
+                    principal_digest=fields["principal_digest"],
+                    not_before_ts=fields["not_before_ts"], current=True,
+                )
+                canary_event_definition(policy)
+                observation = await ExistingA2CanaryReader(
+                    engine.client, policy,
+                ).observe(thread_ts=fields["thread_ts"],
+                          message_ts=fields["message_ts"])
+            except (CanarySourceUnavailable, ValueError, TypeError):
+                raise DialogueServiceError("THREAD_RECONCILIATION_INCOMPLETE") from None
+            if observation is None:
+                return {"state": "NOT_ELIGIBLE", "message": None}
+            return {"state": "OBSERVED", "message": dataclasses.asdict(observation)}
         if operation == "bind_or_verify_thread":
             values = _exact_mapping(args, {"context"})
             return self.engine_result(
@@ -805,6 +843,40 @@ class AgentDialogueService:
                 "thread_ts",
                 "parent_author_user_id",
                 "parent_fingerprint",
+            }:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {"attestation": RELAY_PARENT_ATTESTATION, **result}
+        if operation == "read_bound_parent":
+            values = _exact_mapping(args, {"context", "thread_ts"})
+            if not isinstance(values["thread_ts"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            result = self.engine_result(
+                await engine.read_bound_parent(
+                    context=_context_v2(values["context"]),
+                    thread_ts=values["thread_ts"],
+                )
+            )
+            if not isinstance(result, dict) or set(result) != {"thread_ts", "parent"}:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {"attestation": RELAY_PARENT_ATTESTATION, **result}
+        if operation == "read_exact_canonical_thread":
+            values = _exact_mapping(
+                args, {"context", "thread_ts", "expected_parent_fingerprint"}
+            )
+            if (
+                type(values["thread_ts"]) is not str
+                or type(values["expected_parent_fingerprint"]) is not str
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            result = self.engine_result(
+                await engine.read_exact_canonical_thread(
+                    context=_context_v2(values["context"]),
+                    thread_ts=values["thread_ts"],
+                    expected_parent_fingerprint=values["expected_parent_fingerprint"],
+                )
+            )
+            if type(result) is not dict or set(result) != {
+                "thread_ts", "parent", "thread"
             }:
                 raise DialogueServiceError("INTERNAL_ERROR")
             return {"attestation": RELAY_PARENT_ATTESTATION, **result}
@@ -903,6 +975,7 @@ async def call_service(
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     timeout_seconds: float = 30.0,
     before_write: Callable[[], Any] | None = None,
+    commit_fence: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     path = Path(socket_path)
     if (
@@ -928,6 +1001,8 @@ async def call_service(
         and args.get("send_protocol") == EXACT_SEND_PROTOCOL
     )
     exact_send_fingerprint = None
+    if commit_fence is not None and (not exact_send or not callable(commit_fence)):
+        raise DialogueServiceError("REQUEST_INVALID")
     if exact_send:
         message = args.get("message")
         exact_send_fingerprint = (
@@ -1042,11 +1117,20 @@ async def call_service(
         commit = _canonical_json(
             {"commit": "COMMIT", "fingerprint": expected_fingerprint}
         )
+        commit_started = False
         try:
-            writer.write(commit)
+            # The host's synchronous fence encloses the final ownership check
+            # and COMMIT handoff without yielding the event loop. Carrier reads
+            # and response waits stay outside any Runtime write transaction.
+            # This is a local COMMIT boundary, not proof of provider execution.
+            with (contextlib.nullcontext() if commit_fence is None else commit_fence()):
+                commit_started = True
+                writer.write(commit)
             await asyncio.wait_for(writer.drain(), timeout=timeout_seconds)
         except Exception:
-            raise DialogueServiceError("SEND_EFFECT_UNKNOWN") from None
+            raise DialogueServiceError(
+                "SEND_EFFECT_UNKNOWN" if commit_started else "SERVICE_UNAVAILABLE"
+            ) from None
         response = await read_frame(effect_code="SEND_EFFECT_UNKNOWN")
         terminal = terminal_response(response, effect_code="SEND_EFFECT_UNKNOWN")
         if terminal is None:

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mastermind — Browser control</title>
+  <link rel="stylesheet" href="census.css">
+</head>
+<body class="browser-settings">
+  <header><div><p class="eyebrow">MASTERMIND</p><h1>Browser control</h1></div></header>
+  <p class="scope">Let Hermes use pages in this browser profile. You choose which websites it can access.</p>
+  <div id="status" class="status" role="status" aria-live="polite">Checking permissions…</div>
+  <section aria-labelledby="controls-heading">
+    <h2 id="controls-heading">Page controls</h2>
+    <p>Read pages, fill forms, click, scroll, navigate, and open tabs on permitted websites.</p>
+    <button id="enable" type="button">Enable page controls</button>
+    <button id="pause" type="button">Pause all controls</button>
+  </section>
+  <section aria-labelledby="sites-heading">
+    <h2 id="sites-heading">Website access</h2>
+    <form id="site-form">
+      <label for="site">Website address</label>
+      <div class="site-entry"><input id="site" type="url" required placeholder="https://example.com" autocomplete="off" maxlength="2048"><button type="submit">Allow website</button></div>
+    </form>
+    <p class="scope">A website permission covers its pages and ports. Private browsing and Chrome settings pages are excluded.</p>
+    <details><summary>Allow access across websites</summary><p>Hermes can read and act on any normal HTTP or HTTPS tab in this profile.</p><button id="allow-all" type="button">Allow all websites</button></details>
+    <h3>Current website permissions</h3>
+    <ul id="sites"></ul>
+    <button id="clear-sites" type="button">Remove added websites</button>
+  </section>
+  <section aria-labelledby="visual-heading">
+    <h2 id="visual-heading">Screenshots and native keys</h2>
+    <p>Chrome requests debugger access when this version is installed or updated. It enables screenshots, native keyboard input, and checked back/forward navigation on permitted websites. Chrome displays an attached-debugger notice while these commands run.</p>
+    <p>Pause all controls above to stop these features along with page interactions.</p>
+  </section>
+  <footer><p>Hermes must inspect a page before interacting and refresh after an action. Sensitive form fields are excluded from page controls. A screenshot can include anything visible in the selected tab.</p><p id="profile" class="privacy"></p></footer>
+  <script src="instance_config.js"></script>
+  <script src="browser_settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -639,0 +640,30 @@
++
++def qualify_grok_output(request, terminal, process, stdout):
++    """Only a contemporaneous original producer binding admits transformed text."""
++    import artifact_production
++    b=terminal.get('output_binding')
++    keys={'schema','algorithm','root','parent','run_id','host','lease_id','account','support_digest',
++          'mode','model','raw_bytes','raw_sha256','normalized_bytes','normalized_sha256','contract','manifest'}
++    if (type(b) is not dict or set(b)!=keys or b['schema']!='mastermind.grok_normalized_output.v1'
++            or b['algorithm']!='grok_plaintext_and_usage_v1' or b['mode']!='grok' or b['model']!='grok-4.6'
++            or any(b[k]!=request[k] for k in ('root','parent','run_id','host'))
++            or any(b[k]!=terminal.get(k) for k in ('root','run_id','host','lease_id','account','mode','model'))
++            or b['support_digest']!=(terminal.get('launch_timing') or {}).get('support_digest')
++            or type(b['raw_bytes']) is not int or b['raw_bytes']!=process.get('stdout_bytes')
++            or type(b['raw_sha256']) is not str or not re.fullmatch('[a-f0-9]{64}',b['raw_sha256'])
++            or b['raw_sha256']!=process.get('stdout_sha256')
++            or type(b['normalized_bytes']) is not int or b['normalized_bytes']!=len(stdout)
++            or b['normalized_sha256']!=digest(stdout) or request['stdout_sha256']!=digest(stdout)):
++        raise ValueError('grok_normalized_output_unqualified')
++    contract=artifact_production.validate_contract(b['contract'])
++    if any(contract[k]!=b[k] for k in ('root','parent','run_id','support_digest')):
++        raise ValueError('grok_normalized_contract_scope')
++    manifest=artifact_production.manifest_from_stdout(stdout.decode('utf-8'),
++        root=request['root'],parent=request['parent'],run_id=request['run_id'],host=request['host'])
++    if (manifest!=b['manifest'] or manifest['request_sha256']!=digest(reader.canonical(contract))
++            or [f['path'] for f in manifest['files']]!=artifact_production.paths(contract)
++            or any(p not in artifact_production.paths(contract) for p in request['paths'])):
++        raise ValueError('grok_normalized_manifest_mismatch')
++    return b['raw_bytes']
++
++
+@@ -649,0 +680,3 @@
++    expected_capture_bytes = len(raw["stdout"])
++    if 'output_binding' in terminal:
++        expected_capture_bytes = qualify_grok_output(request, terminal, process, raw['stdout'])
+@@ -652 +685 @@
+-            or type(capture["stdout_bytes"]) is not int or capture["stdout_bytes"] != len(raw["stdout"])
++            or type(capture["stdout_bytes"]) is not int or capture["stdout_bytes"] != expected_capture_bytes
+@@ -667 +700 @@
+-            or process.get("stdout_bytes") != len(raw["stdout"])):
++            or process.get("stdout_bytes") != expected_capture_bytes):

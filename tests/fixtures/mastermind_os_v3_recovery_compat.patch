@@ -1,0 +1,22 @@
+--- a/app/mastermind_os/src/orchestration/executive-launch-command-port.ts
++++ b/app/mastermind_os/src/orchestration/executive-launch-command-port.ts
+@@ -31,7 +31,8 @@
+   "mastermind.ceo_intent_receipt.v1",
+   "mastermind.ceo_intent_receipt.v2",
+ ]);
+-// Closed web_ceo_v2 read/profile-error contract: server._is_e1_envelope.
++// Closed, source-qualified V2/V3 E1 contracts; other versions remain unknown.
++const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0", "1.5.0"]);
+ const E1_ENVELOPE_KEYS = [
+   "schema", "tool", "ok", "server_version", "mode", "generated_at",
+   "grounding", "data", "degraded", "bounded", "error",
+@@ -555,7 +556,8 @@
+ function validE1Envelope(value: Record<string, unknown>, tool: "submit_ceo_intent" | "ceo_intent_status"): boolean {
+   if (!hasExactKeys(value, E1_ENVELOPE_KEYS) ||
+       value.schema !== "mastermind.executive_mcp_result.v1" || value.tool !== tool ||
+-      value.server_version !== "1.2.0" || value.mode !== "readonly" ||
++      typeof value.server_version !== "string" ||
++      !E1_SERVER_VERSIONS.has(value.server_version) || value.mode !== "readonly" ||
+       typeof value.ok !== "boolean" || typeof value.generated_at !== "string" ||
+       !isPlainObject(value.grounding) || !Array.isArray(value.degraded) ||
+       !value.degraded.every((item) => typeof item === "string") ||

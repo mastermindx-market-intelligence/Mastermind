@@ -190,8 +190,12 @@ config and token metadata are both present and safe, the Relay principal
 matches, and the Relay is explicitly disabled and unloaded. The core release is
 derived independently from `control.json` plus the control/worker/backup
 plists; a mixed core never becomes stale-safe. The credential-free
-prepared-only Agent Relay state may coexist under its own stricter absence
-predicate. Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
+prepared-only Agent Relay state may coexist when its principal matches, it is
+unloaded, and its plist, config, token and socket are absent. Current A2 host
+preparation also establishes an explicit disabled override. The legacy absent
+override remains acceptable for this install-safety census; A2 enrollment still
+requires an explicitly disabled, unloaded Relay before it reads a token.
+Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
 metadata, foreign/malformed plist, or additional generation disagreement
 remains `EFFECT_UNKNOWN`.
 

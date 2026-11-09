@@ -25,12 +25,14 @@ function source(name) {
  return text;
 }
 const cap = {schema:'mastermind.web_sol_transport_capabilities.v1',protocol_major:1,
- package_version:'0.2.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT','TYPED_REENTRY'],
+ package_version:'0.3.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT','TYPED_REENTRY'],
+ browser_actions:['status','tabs','snapshot','screenshot','diagnostics','click','fill','select','press','scroll',
+ 'open','navigate','reload','back','forward','close','focus'].sort(),
  schemas:['mastermind.web_sol_surface_action.v1','mastermind.web_sol_transport_hello_ack.v1',
  'mastermind.web_sol_transport_hello.v1','mastermind.web_sol_instance_config.v1',
  'mastermind.web_sol_surface_probe.v1','mastermind.web_sol_surface_receipt.v1',
  'mastermind.web_sol_census_request.v1','mastermind.web_sol_census_receipt.v1',
- 'mastermind.web_sol_census_table.v1'].sort()};
+ 'mastermind.web_sol_census_table.v1','mastermind.web_sol_browser_request.v1','mastermind.web_sol_browser_receipt.v1'].sort()};
 const DIGEST = createHash('sha256').update(JSON.stringify(cap,Object.keys(cap).sort())).digest('hex');
 const tick = () => new Promise(r=>setImmediate(r));
 function delayedCrypto(delayMs) {
@@ -67,7 +69,7 @@ function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE,
  },onUpdated:emitter(),onRemoved:emitter()};
  const config={schema:'mastermind.web_sol_instance_config.v1',instanceId:instance,
  nativeHost:'com.mastermind.web_sol_surface.'+instance.slice(0,24),protocolMajor:1,
- clientPackageVersion:'0.2.0',nativePackageVersion:'0.2.0',extensionPackageVersion:'0.2.0',capabilityDigest:DIGEST,...configPatch};
+ clientPackageVersion:'0.3.0',nativePackageVersion:'0.3.0',extensionPackageVersion:'0.3.0',capabilityDigest:DIGEST,...configPatch};
  const runtime={id:ID,getURL:p=>'chrome-extension://'+ID+'/'+p,onMessage:events,
  connectNative(){const port={messages:[],onMessage:emitter(),onDisconnect:emitter(),
  postMessage:x=>{port.messages.push(plain(x));if(postNative)postNative(x);},disconnect:()=>port.onDisconnect.fire()};ports.push(port);return port;}};
@@ -238,7 +240,12 @@ if(process.argv.includes('--native-pipe')) {
  });
  test('outer expiry forbids Chrome acquisitions after a delayed initial query',async()=>{
   let now=0, release;const calls=[];
-  const h=harness({clock:{now:()=>now}});const p=await h.ready();
+  const h=harness({clock:{now:()=>now},cryptoApi:delayedCrypto(100)});const p=await h.ready();
+  // Observe the real collector's completion: event-loop ticks do not wait for
+  // WebCrypto, and can falsely pass the guard-removal mutation before it reads.
+  let collection;const collector=h.context.MMXWebSolCensus;
+  h.context.MMXWebSolCensus=Object.freeze({...collector,collect(...args){
+   collection=collector.collect(...args);return collection;}});
   const row={id:1,windowId:1,url:'https://chatgpt.com/c/deadline',status:'complete'};
   h.tabs.query=()=>{calls.push(['query',now]);return calls.length===1
    ?new Promise(r=>{release=r;}):Promise.resolve([row]);};
@@ -247,7 +254,7 @@ if(process.argv.includes('--native-pipe')) {
   const wall=Date.now();p.onMessage.fire(request({issued_at:new Date(wall).toISOString(),
    expires_at:new Date(wall+100).toISOString()}));
   await waitFor(()=>Boolean(release),'initial query actually acquired');
-  now=150;release([row]);for(let i=0;i<20;i++)await tick();
+  now=150;release([row]);await collection;await tick();
   assert.deepEqual(calls.filter(([,at])=>at>=100),[], 'no actual Chrome acquisition after outer expiry');
   assert.equal(p.messages.length,2,'expired attempt cannot post a browser receipt');
  });
