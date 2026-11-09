@@ -1,9 +1,9 @@
 # Paperclip donor reconciliation for Mastermind OS — Fable Revision 6
 
-**Recorded:** 8 November 2026, America/Vancouver (9 November UTC).  
-**Scope:** Research, architecture and additive implementation change order. No runtime installation, fleet migration, new Executive admission, deployment or message to Fable is represented by this document.  
-**Governing source:** Mastermind protected master at `28a9ab360f0573cbaac4695135131499ce7a9b90`; compatible Sol skillpack 1.0.1 / bootstrap major 1.  
-**Plan relationship:** Additive Revision 6 of the existing `FABLE_HERMES_MASTER_IMPLEMENTATION_PLAN.md` (Revision 5 was the input). Preserve active Wave 3, D0–D9, accepted work, existing native sessions and live source writers. The PC labels below are editorial plan nodes, not Executive Jobs, Agent OS Tasks, waves or new admissions.  
+**Recorded:** 8 November 2026, America/Vancouver (9 November UTC).\
+**Scope:** Research, architecture and additive implementation change order. No runtime installation, fleet migration, new Executive admission, deployment or message to Fable is represented by this document.\
+**Governing source:** Mastermind protected master at `28a9ab360f0573cbaac4695135131499ce7a9b90`; compatible Sol skillpack 1.0.1 / bootstrap major 1.\
+**Plan relationship:** Additive Revision 6 of the existing `FABLE_HERMES_MASTER_IMPLEMENTATION_PLAN.md` (Revision 5 was the input). Preserve active Wave 3, D0–D9, accepted work, existing native sessions and live source writers. The PC labels below are editorial plan nodes, not Executive Jobs, Agent OS Tasks, waves or new admissions.\
 **Mission completion:** Decide whether Paperclip contributes enough to adopt; reconcile exact owner boundaries with current implementation and Paper designs; provide a concrete, recoverable Fable change order with evidence and completion conditions. Implementation and production qualification remain the existing programme's work.
 
 ## 1. Decision
@@ -230,4 +230,3 @@ All GitHub source links below use inspected immutable revisions. Public document
 - **[T1]** [T3 ACP provider guide](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/docs/user/providers-acp.md), [outside-agent controls](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/docs/user/outside-agents.md).
 - **[T2]** [T3 event sink](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/apps/server/src/orchestration-v2/EventSink.ts), [effect worker](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/apps/server/src/orchestration-v2/EffectWorker.ts), [projection maintenance](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/apps/server/src/orchestration-v2/ProjectionMaintenance.ts).
 - **[T3]** [T3 license](https://github.com/pingdotgg/t3code/blob/eb97d82156f031d0533d4de80d4eeb9ad82788e7/LICENSE).
-
