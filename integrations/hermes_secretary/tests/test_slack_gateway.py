@@ -176,6 +176,29 @@ class InboundAdmissionSafetyTests(unittest.TestCase):
 
 
 
+class SecurePromptFileTests(unittest.TestCase):
+    def test_same_millisecond_multi_agent_prompts_never_collide_or_expose_content(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(gateway, "CONF_DIR", Path(root)):
+                seen = []
+                def invoke(cmd, **kwargs):
+                    qfile = Path(cmd[cmd.index("--query-file") + 1])
+                    seen.append(qfile)
+                    self.assertEqual(qfile.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(qfile.read_text(encoding="utf-8"),
+                                     ("secretary private prompt" if len(seen) == 1
+                                      else "engineering private prompt"))
+                    return subprocess.CompletedProcess(cmd, 0, "answer", "")
+                with patch.object(gateway.time, "time", return_value=1794200000.123), \
+                     patch.object(gateway.subprocess, "run", side_effect=invoke):
+                    self.assertEqual(
+                        gateway.dispatch("secretary", "secretary private prompt", None, 5)[0], True)
+                    self.assertEqual(
+                        gateway.dispatch("engineering", "engineering private prompt", None, 5)[0], True)
+                self.assertEqual(len(set(seen)), 2)
+                self.assertFalse(list(Path(root).glob(".prompt-*")))
+
+
 class ExactSlackEventDedupTests(unittest.TestCase):
     def test_dual_slack_delivery_is_one_dispatch_and_one_capacity_hit(self):
         import copy
