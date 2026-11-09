@@ -1,0 +1,25 @@
+.t3-attempt-fleet { min-width: 0; display: grid; gap: var(--sp-4); padding: var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); margin-block-start: var(--sp-5); }
+.t3-attempt-fleet-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); }
+.t3-attempt-fleet-heading h3 { margin-block: var(--sp-2); font-size: 18px; }
+.t3-attempt-fleet-heading .muted code { overflow-wrap: anywhere; }
+.t3-attempt-fleet-heading button { min-height: 44px; flex: 0 0 auto; }
+.t3-attempt-fleet-empty { display: grid; gap: var(--sp-2); }
+.t3-attempt-fleet-empty p, .t3-attempt-fleet-method p, .t3-attempt-fleet-facts dd small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.t3-attempt-fleet-chips { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.t3-attempt-fleet-chip { display: inline-flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-ctl); font-size: 12px; }
+.t3-attempt-fleet-chip b { font-size: 12px; }
+.t3-attempt-fleet-chip small { color: var(--muted); font-size: 11px; }
+.t3-verdict-proven { color: var(--text); border-color: var(--border); }
+.t3-verdict-violated { color: var(--red); border-color: var(--red); }
+.t3-verdict-unknown { color: var(--muted); }
+.t3-attempt-fleet-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); margin: 0; font-size: 12px; }
+.t3-attempt-fleet-facts dt { color: var(--muted); }
+.t3-attempt-fleet-facts dd { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }
+.t3-attempt-fleet-facts dd small { display: block; margin-top: var(--sp-1); }
+.t3-attempt-fleet code { overflow-wrap: anywhere; }
+.t3-unknown { color: var(--muted); }
+.t3-attempt-fleet-method summary { cursor: pointer; min-height: 44px; align-content: center; font-size: 12px; }
+.t3-attempt-fleet-method ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
+.t3-attempt-fleet :where(button, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.t3-attempt-fleet :where(button, summary) { touch-action: manipulation; }
+@media (max-width: 640px) { .t3-attempt-fleet-facts { grid-template-columns: minmax(0, 1fr); } }

@@ -593,6 +593,9 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     "/workspace/project-instructions/current",
     "/workspace/instruction-admission/current",
     "/workspace/instruction-admission/operation",
+    # Per-attempt T3 fleet projection: fixed literal path, strict v2 query
+    # param ``attempt_id`` (run ids contain ``/`` and cannot ride the path).
+    "/workspace/resources/t3/attempts/current",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",

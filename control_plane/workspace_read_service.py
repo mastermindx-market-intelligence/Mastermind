@@ -503,7 +503,7 @@ class WorkspaceReadService:
                  canonical_project_data=None, project_discovery=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
-                 byok_roles_reader=None, capacity_fabric_source=None):
+                 byok_roles_reader=None, capacity_fabric_source=None, t3_attempt_fleet_source=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
         if project_admission_permissions is not None:
             if type(project_admission_permissions) is not ProjectAdmissionPermissions:
@@ -542,6 +542,10 @@ class WorkspaceReadService:
         if capacity_fabric_source is not None and type(capacity_fabric_source) is not ExistingCapacityFabricSource:
             raise ValueError("exact existing Capacity Fabric source required")
         self._capacity_fabric_source = capacity_fabric_source
+        from control_plane.workspace_t3_attempt_fleet_read import ExistingT3AttemptFleetSource
+        if t3_attempt_fleet_source is not None and type(t3_attempt_fleet_source) is not ExistingT3AttemptFleetSource:
+            raise ValueError("exact existing T3 attempt fleet source required")
+        self._t3_attempt_fleet_source = t3_attempt_fleet_source
         self._acquire = acquire
         self._compose = compose
         self._bounded_runtime = bounded_runtime
@@ -2345,6 +2349,10 @@ class WorkspaceReadService:
         if type(frame) is dict and frame.get("schema") == capacity_fabric_wire.FRAME_SCHEMA:
             from control_plane.workspace_capacity_fabric_read import handle_capacity_fabric_frame
             return await handle_capacity_fabric_frame(self, frame)
+        from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
+        if type(frame) is dict and frame.get("schema") == t3_fleet_wire.FRAME_SCHEMA:
+            from control_plane.workspace_t3_attempt_fleet_read import handle_t3_attempt_fleet_frame
+            return await handle_t3_attempt_fleet_frame(self, frame)
         if type(frame) is dict and frame.get("schema") == model_configuration_wire.FRAME_SCHEMA:
             from control_plane.workspace_model_configuration_read import handle_model_configuration_frame
             return await handle_model_configuration_frame(self, frame)
@@ -2550,7 +2558,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None,
-                               capacity_fabric_source=None):
+                               capacity_fabric_source=None, t3_attempt_fleet_source=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -2623,6 +2631,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     control_room_presenter=presenter, control_room_actions=actions,
                                     byok_roles_reader=byok_roles_reader,
                                     capacity_fabric_source=capacity_fabric_source,
+                                    t3_attempt_fleet_source=t3_attempt_fleet_source,
                                     bounded_runtime=bounded_runtime,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,

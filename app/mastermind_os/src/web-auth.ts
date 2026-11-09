@@ -12,6 +12,7 @@ import { normalizeProjectAssociationSelection } from "./conversations/project-as
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import {projectConversationArguments,PROJECT_CONVERSATION_READ_PATHS} from './conversations/project-conversation-transport';
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
+import { validT3AttemptId } from "./resources/t3-attempt-fleet-contract";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
 import { validDirectionSelection } from "./direction/accepted-direction";
@@ -1459,6 +1460,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),
     readCapacityFabric: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/fabric/current`,
       signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_capacity_fabric.v1" }),
+    readT3AttemptFleet: ({ attemptId, signal }) => {
+      if (!validT3AttemptId(attemptId))
+        return Promise.reject(new Error("T3_ATTEMPT_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/resources/t3/attempts/current?${new URLSearchParams({ attempt_id: attemptId })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };
       if (!validResourceCapacitySelection(selected))
