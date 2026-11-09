@@ -164,9 +164,25 @@ All20 phase operations returned APPLIED_RESPONSE_OBSERVED:
 - `paper-bonds-publication-recovery-name-20261108-c4`
 - `paper-bonds-publication-recovery-finish-20261108-c4`
 
+## Government Revenue320px result returns — verified
+
+File [Government Revenue — R5 and Builder Contracts](https://app.paper.design/file/01M6Y3397SE03G626MJ72N90PF), page `p-1-0`, component atlas `2G-0`. Exact existing320px result panels lacked the local return controls already available in their390px equivalents.
+
+- Confirmed funding-watch panel `7A-0`: native duplicate of existing light320px return component `ED-0` appended as `3U8-0`, text `3U9-0` localized to “返回我的研究”. The48px control uses the existing light tokens and stays within the280px content width.
+- Unconfirmed save panel `7J-0`: native duplicate of existing return component `52-0` appended as `3UA-0`, text `3UB-0` “Back to my research”. The44px-or-larger control follows the existing dark pattern.
+- Both preserve confirmed/unknown result state, original request, selected contract, conditions and delivery preference. Return is local dismissal to the retained research origin. It does not retry, save, activate, reconcile or claim delivery. Existing contract `6A-0` already binds precise origin/focus and assigns activation/reconciliation to shared My Alerts; that contract remains unchanged.
+
+Root read exact current JSX and existing component patterns, then inspected full screenshots of both finished320px panels. All text/actions fit. The fit-content parent atlas remains clear of its only neighboring artboard; no fixed-height clipping was introduced. Existing financial/example figures and source/permission/runtime boundaries at `6B-0` are preserved. Root released only atlas `2G-0` with explicit finish.
+
+All3 phase operations returned APPLIED_RESPONSE_OBSERVED:
+
+- `paper-government-320-result-returns-20261108-c4`
+- `paper-government-320-confirmed-return-zh-20261108-c4`
+- `paper-government-320-returns-finish-20261108-c4`
+
 ## Active continuation
 
-Portfolio mobile and Bonds source-recovery phases are now verified. Continue Government Revenue320px return controls, Forex R26 tab/account state clarity, and read-only reconciliation of the live Breadth overlap. These remaining phases are not claimed complete.
+Portfolio mobile, Bonds source recovery, and Government Revenue320px return controls are now verified. Continue Forex R26 tab/account state clarity and reconciliation of the live Breadth overlap. These remaining phases are not claimed complete.
 
 ## Acceptance boundary
 
