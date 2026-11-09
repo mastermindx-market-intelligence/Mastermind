@@ -24,8 +24,8 @@ Inventory coverage is separate from retention coverage. A migrated copy is not p
 
 ## Phase ladder
 
-1. **Estate census — in progress.** Reuse exact IDs; inventory files/pages including archived material; resolve misleading names, empty scaffolds and active source overlaps. Initial evidence: 83 listed resources, 80 readable design files, 538 page entries; one Others resource has inconsistent type metadata.
-2. **Navigation and status — ready after census.** Extend existing directory `01M6XQ0KYY6ZDDV6F3G85SX6WW`. Normalize short page/file roles, correct legacy “current build” labels, preserve stable links and recovery snapshots. Do not create a second directory.
+1. **Estate census — baseline complete; classification in progress.** Reuse exact IDs; inventory files/pages including archived material; resolve misleading names, empty scaffolds and active source overlaps. Initial evidence: 83 listed resources, 80 readable design files, 538 page entries; one Others resource has inconsistent type metadata.
+2. **Navigation and status — applied centrally; estate-wide refinement in progress.** Extend existing directory `01M6XQ0KYY6ZDDV6F3G85SX6WW`. Normalize short page/file roles, correct legacy “current build” labels, preserve stable links and recovery snapshots. Do not create a second directory.
 3. **Product guides and retention — in progress as domains are inspected.** Link each product journey to exact frames, state/help pages and build contracts. Compare older/newer outcomes, controls, routes, variants, data semantics, failure/recovery states and implementation obligations. Record concrete missing or relocated requirements.
 4. **Cleanup — conditional.** Isolate confirmed tests/empty scaffolds and retired references from product entry points. Physical removal only through a currently admitted operation after the retention/link checks; preserve actual tool holds.
 5. **Acceptance and continuity — ongoing.** Test representative human/agent lookup journeys, backward links and recovered requirements. Persist exact applied operations/readbacks and unresolved gates at coherent milestones; continue the next safe phase.
@@ -50,10 +50,8 @@ Principal retains design decisions and same-carrier Paper edits: PRINCIPAL_JUDGM
 
 Fresh explicit file read before each bounded edit; stable operation ID; same-carrier result/readback; target-scoped collaboration. Preserve live writers and uncertain effects. Metadata guards are not leases. Keep existing product IDs and content unless a specific preserved disposition permits a change.
 
-## Recovery checkpoint — initial save
+## Recovery checkpoint
 
-MISSION_COMPLETE: false. No Paper mutations by this operation yet. Branch `sol/paper-estate-organization-20261108-c1` created from the governing pin after absent-ref read; authenticated GitHub actor MastermindX1 has observed admin permission. No deployment/merge action is part of this checkpoint.
+MISSION_COMPLETE: false. The initial plan and inventory were saved before Paper edits. See [CHECKPOINT.md](CHECKPOINT.md) for the latest verified changes, exact effects, protected boundaries and next actions. The mission continues after each milestone.
 
-DO_NOT_REDO: do not repeat accepted migration/canaries, clone whole files again, build another directory, prune either full recovery snapshot, treat R4 as approved solely by version, or bypass resource deletion/archive holds.
-
-Next action: reconcile the existing directory contents and later migration records, then correct misleading navigation metadata with exact readback. Source-linked inventory is [INVENTORY.json](INVENTORY.json). All design effects will be added to [CHECKPOINT.md](CHECKPOINT.md) at the next coherent milestone.
+The baseline inventory remains [INVENTORY.json](INVENTORY.json); it is not a claim that all historical requirements are preserved.

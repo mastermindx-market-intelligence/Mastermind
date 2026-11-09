@@ -1,0 +1,828 @@
+{
+  "schema": "paper.estate.organization.effects.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "effects": [
+    {
+      "operation_id": "peo-20261108-c1-directory-name-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "rename_resource",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "4ad56ebf1d61be87bbf38e952527653722e8984ed722444e61be2083dece7b2f",
+      "after_snapshot": "feac726f22ef23b7318a476cffb78d474fb2c4c1a2ba6522f0b9945ceaa0d30e",
+      "result": {
+        "resourceId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "name": "00 · Paper Estate · Start Here",
+        "type": "file"
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-pages-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "update_pages",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "feac726f22ef23b7318a476cffb78d474fb2c4c1a2ba6522f0b9945ceaa0d30e",
+      "after_snapshot": "9142d545328f85bfd1f7e02d9977a865b2422ee7eeb32fcf28e2e7e691c891ca",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "pageId": "p-1-0",
+            "name": "00 · Start here · Estate guide",
+            "icon": "arrow"
+          },
+          {
+            "pageId": "p-2-0",
+            "name": "01 · Product map",
+            "icon": "design"
+          },
+          {
+            "pageId": "p-6-0",
+            "name": "02 · Build sources & decisions",
+            "icon": "blueprint"
+          },
+          {
+            "pageId": "p-3-0",
+            "name": "10 · Retained designs · Foundations & markets",
+            "icon": "images"
+          },
+          {
+            "pageId": "p-4-0",
+            "name": "11 · Retained designs · Evidence & tools",
+            "icon": "images"
+          },
+          {
+            "pageId": "p-5-0",
+            "name": "12 · Retained designs · Products & history",
+            "icon": "images"
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-order-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "arrange_pages",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "9142d545328f85bfd1f7e02d9977a865b2422ee7eeb32fcf28e2e7e691c891ca",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "00 · Start here · Estate guide",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "01 · Product map",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-6-0",
+            "name": "02 · Build sources & decisions",
+            "icon": "blueprint",
+            "isActive": true
+          },
+          {
+            "type": "divider",
+            "id": "p-7-0"
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "10 · Retained designs · Foundations & markets",
+            "icon": "images",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "11 · Retained designs · Evidence & tools",
+            "icon": "images",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "12 · Retained designs · Products & history",
+            "icon": "images",
+            "isActive": false
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-directory-intro-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "nodeId": "3-0"
+          },
+          {
+            "nodeId": "4-0"
+          },
+          {
+            "nodeId": "5-0"
+          },
+          {
+            "nodeId": "C1-0"
+          },
+          {
+            "nodeId": "C3-0"
+          },
+          {
+            "nodeId": "D-0"
+          },
+          {
+            "nodeId": "E-0"
+          },
+          {
+            "nodeId": "1U-0"
+          },
+          {
+            "nodeId": "BX-0"
+          },
+          {
+            "nodeId": "L-0"
+          },
+          {
+            "nodeId": "N-0"
+          },
+          {
+            "nodeId": "U-0"
+          },
+          {
+            "nodeId": "3H-0"
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-product-deeplinks-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "nodeId": "S-0"
+          },
+          {
+            "nodeId": "V-0"
+          },
+          {
+            "nodeId": "10-0"
+          },
+          {
+            "nodeId": "13-0"
+          },
+          {
+            "nodeId": "18-0"
+          },
+          {
+            "nodeId": "1B-0"
+          },
+          {
+            "nodeId": "1G-0"
+          },
+          {
+            "nodeId": "1J-0"
+          },
+          {
+            "nodeId": "1O-0"
+          },
+          {
+            "nodeId": "1R-0"
+          },
+          {
+            "nodeId": "1Q-0"
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-estate-nav-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "CF-0",
+            "name": "Estate navigation",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CG-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CH-0",
+            "name": "Product map",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CI-0",
+            "name": "Working entry pages",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CJ-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CK-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CL-0",
+            "name": "Build sources",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CM-0",
+            "name": "Scope, behavior and …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CN-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CO-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CP-0",
+            "name": "Retained designs",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CQ-0",
+            "name": "Earlier versions and…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CR-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-estate-nav-position-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "move_nodes",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "moves": [
+          {
+            "nodeId": "CF-0",
+            "parentId": "1-0",
+            "index": 1
+          }
+        ],
+        "affectedParents": [
+          {
+            "parentId": "1-0",
+            "childIds": [
+              "2-0",
+              "CF-0",
+              "C0-0",
+              "C-0",
+              "1T-0",
+              "BV-0",
+              "C9-0"
+            ]
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-products-os-prophet-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "CT-0",
+            "name": "OS and Prophet entries",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CU-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CV-0",
+            "name": "Mastermind OS · Desi…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CW-0",
+            "name": "Projects, conversati…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CX-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CY-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "CZ-0",
+            "name": "Prophet · D03 workin…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D0-0",
+            "name": "Draft design; retain…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D1-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-products-ai-guide-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "D3-0",
+            "name": "ai-guide entries",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D4-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D5-0",
+            "name": "Mastermind AI · Chat…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D6-0",
+            "name": "R10 design, answer c…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D7-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D8-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "D9-0",
+            "name": "Market Guide · Start…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DA-0",
+            "name": "Scores, contextual h…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DB-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-products-ontology-risk-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "DD-0",
+            "name": "ontology-risk entries",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DE-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DF-0",
+            "name": "Market Ontology · Jo…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DG-0",
+            "name": "WTI investigation, e…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DH-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DI-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DJ-0",
+            "name": "Risk Radar & dashboa…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DK-0",
+            "name": "Risk, China, events …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DL-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      },
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "peo-20261108-c1-products-expectation-aerlor-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "before_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "after_snapshot": "819c7f1f447323cf1c564dcd9bd5875dd05c14fcb7f79c3e15d92a04caedf92e",
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "DN-0",
+            "name": "expectation-aerlor entries",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DO-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DP-0",
+            "name": "Expectation Surface …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DQ-0",
+            "name": "Estimate revisions, …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DR-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DS-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DT-0",
+            "name": "AERLOR · Design & bu…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DU-0",
+            "name": "R5 release lineage; …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "DV-0",
+            "name": "https://app.paper.de…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      },
+      "retry_allowed": false
+    }
+  ]
+}
