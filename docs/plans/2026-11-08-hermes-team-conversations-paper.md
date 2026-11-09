@@ -414,3 +414,23 @@ Target reconciliation: the first HC18 duplication used a page ID where Paper req
 The reasoning-only companion audit also identified the prototype's global DOM IDs and current-conversation binding as a split-view hazard. The continuation will parameterize the existing renderer and actions, reuse the existing per-conversation drafts/files/models/streams, and verify side-pane send, queue and Code-origin behavior. No duplicate state engine is planned.
 
 Next proof: recovery and narrow/light/ZH Paper frames, then the updated companion's actual click-through behavior and final source mapping. The design commission remains in progress.
+
+
+### Native daily-workspace pass — verified checkpoint
+
+Ten additional editable frames are now present in the original Paper file. Screenshots were inspected after creation; the split-pane unread divider and attention-rail spacing were corrected and rechecked.
+
+| Surface | Node | Verified design coverage |
+|---|---|---|
+| HC18 | 1NSP-0 | Needs-you inbox; exact request; unread and open requests remain distinct |
+| HC19 | 1OAV-0 | Two conversations; explicit recipients; independent drafts/queues; focused composer |
+| HC20 | 1OVH-0 | History search; exact message/context; return to results/latest and retained draft |
+| HC21 | 1PB7-0 | Parent waiting for delegated work; child dialogue; queued guidance; return destination |
+| HC22 | 1PPR-0 | 390px English attention inbox |
+| HC23 | 1PTB-0 | 390px English conversation tabs and retained second draft |
+| HC24 | 1PW0-0 | 390px Chinese light-theme search and exact-message return |
+| HS04 | 1PZ9-0 | Saved profile/start unknown; stale membership; activity-only task; archive active conversation |
+| HS05 | 1Q7B-0 | Finished routine/delivery failed or unknown; unavailable coordinator; restore archived conversation |
+| HB03 | 1QE6-0 | Conversation identity, search return, recovery and proof contracts |
+
+The Start-here directory gained an additive subsection at node `1QJJ-0`; the other session's HC17 and Code/settings work was preserved. Existing HC01–17, HS01–03, HB01–02 and pages 15/17/18 were not rewritten by this pass. This checkpoint proves native design creation and visual inspection only. The companion implementation and behavior verification remain the active next phase; it is not a live backend or revision-6 conformance claim.
