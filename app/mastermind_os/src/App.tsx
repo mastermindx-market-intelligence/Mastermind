@@ -1,3 +1,4 @@
+import {NativeWorkAuthorizationControl} from "./NativeWorkAuthorizationControl";
 import {NativePrimaryAccountControl} from "./NativePrimaryAccountControl";
 import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
@@ -6100,6 +6101,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               ) : null}
               {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
               {native && <NativeAuthorizationContinuationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale}/>}
+              {native && <NativeWorkAuthorizationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale} beforeSignIn={() => nativeGoalRef.current.onAuthChange(false)}/>}
             </div>
           ) : null}
         </div>
