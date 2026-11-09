@@ -587,16 +587,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-# Successor enrollment keeps these six reviewed literals and enclosing calls
-# unchanged; only intervening control flow moves five spans. The exact full
-# postimage was re-reviewed without adding an identity or numeric exception.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '1264fbc0a591aacf02fe2fe42b04b957752331154f2a11d22a33ec37330440d1',
+# Original-transaction recovery keeps these six literal tokens, their enclosing
+# owners and calls unchanged. Root re-reviewed the full recovery diff and these
+# exact moved spans; no identity/numeric exception or scanner rule is added.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'e8c812d6bc11a00a00db0fbb0bf4b60ff354c3b4ff9fcce18e3e11cebe45d0b0',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6995, 35, 37, 'int', '80'),
-           (6996, 50, 55, 'int', '0o755'),
-           (7876, 41, 46, 'int', '0o644'),
-           (8662, 64, 69, 'int', '0o644'),
-           (10074, 41, 46, 'int', '0o644'))}
+           (7008, 35, 37, 'int', '80'),
+           (7009, 50, 55, 'int', '0o755'),
+           (7889, 41, 46, 'int', '0o644'),
+           (8689, 64, 69, 'int', '0o644'),
+           (10104, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -756,8 +756,9 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-# Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture function.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6592b76edb1d58dab83ef905de596919b58995c13e099d8ca9437b35b9b1a040', 'sites': ((3739, 68, 71, 'int', '503'), (3744, 69, 72, 'int', '503'), (3748, 67, 70, 'int', '503'))}
+# Primary/work-entry composition preserves these three complete fixture calls.
+# Root re-reviewed the material auth diff; only exact existing tokens qualify.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6ce90063ed44ef222e081019ad43d94e373c485f5a7ff63cb795fc99f44d56e6', 'sites': ((3782, 68, 71, 'int', '503'), (3787, 69, 72, 'int', '503'), (3791, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -1102,11 +1103,12 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
 }
 
 # Content-continuation source union independently qualified at282140ec5,
-# exact final treee9b3984c (review6eb650a8). Only two synthetic600-second
+# original treee9b3984c (review6eb650a8), then primary-purpose and mode fixtures.
+# Root re-reviewed the final composition. Only two synthetic600-second
 # token lifetimes and six fixed HTTP400/403 response tokens are qualified.
 # No principal/UID/callee or arbitrary nearby literal is exempted; changed
 # bytes invalidate the whole pin, preserving the generic topology guard.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': 'cb629df9ba989ea38bc278acc938e4241ef03f6358e9c56de7b629f407fcdb11', 'sites': ((537, 58, 61, 'int', '600'), (538, 66, 69, 'int', '600'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': '71b76671de68819ac6ed92a4d705800aed84b9d51cf46f3858f6f974788cb2cb', 'sites': ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))}
 REVIEWED_FILES['integrations/mastermind_workspace_app/native_authorization_identity.py'] = {'sha256': 'db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', 'sites': ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))}
 # Fixed explicit Memory owner source: closed Control helper dependency paths;
 # same private mkdir, turn/CPU/reference/HTTP bounds, incumbent TTL and full
