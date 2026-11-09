@@ -359,6 +359,48 @@ async def execute_request(request, runtime):
                         code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_NOT_SENT" if not_sent else "NATIVE_UNAVAILABLE")
 
 
+# Gateway code identity and mechanism pins. The hard gate at every use is the
+# sha256 of the exact imported source file: a commit advance that leaves those
+# files byte-identical cannot change what this adapter executes, so it is not
+# by itself a refusal. GATEWAY_CODE_PINS records the gateway generations this
+# adapter was explicitly qualified against (the #2180 generation and the
+# 2026-11-08 advance whose pinned mechanism files are byte-identical); any
+# other well-formed identify answer is accepted only while the gateway still
+# reports the qualified version line. A pinned file hash that differs refuses
+# regardless of commit. Each literal lives here exactly once.
+GATEWAY_CODE_PINS = frozenset({
+    "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "ba4ddf9945a213ede9dda016602a86591ed634f9",
+})
+GATEWAY_CODE_VERSION = "0.23.0"
+RECOVERY_SOURCE_PINS = {
+    "hermes_state_keys.py": "46a44bcc9a82552c606fc0eaec275aac76bfe3c5523d7793218377d15cccc676",
+    "hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2",
+    "hermes_state_runtime.py": "6bbcc688799d3ea784545b5227d20e07f8b5ce8f26fcf545825bc8a60462ee3f",
+}
+HISTORY_SOURCE_PINS = {
+    "hermes_state_local.py": "359a03844bab07242c47748e9771fcc5d16a5144d4d099aeff483dc6f0efd1d2",
+    "hermes_state_local_lineage.py": "6e644e387f18a54ef1fd3e63dedbc5523ccddc00faab0c7de0f2432f1dce4bd3",
+    "hermes_state_local_migration.py": "0d4e2e1aa59e0cdafedcb38abe6ca2f82d24a9ad98b3a0629656e2816c3878bb",
+    "hermes_state_sessions.py": "85a4abc342fd0711cd750750d2cbc948f85804af1c433dccc8d2454b1e77c18d",
+    "hermes_state_messages.py": "b81c7d272f768a548daa91642bf8283dfad2f592528fbe95c029038a13e7f574",
+    "hermes_state_compression.py": "be9cc0bdca5fae8d5cbe8a15ca04cb72005228c290fa4e3d0a100e5e30796d7e",
+    "gateway/owner_identity.py": "4cb7810a49a5c3f2ddec645d00ecc90ac7b86edb862e16ea8cf4b039408546be",
+    "gateway/session.py": "ea2e48b1313fcb24054dccbbdc631321c7cad5526097588b65d20ab86346a870",
+}
+ROSTER_SOURCE_PINS = {
+    "tools/bot_mode_probe.py": "d82d160aaa6ef1de2d3479d97950afbb3f6837e235632cb775785c059343e6db",
+    "tools/bot_failure_reasons.py": "cc64ddc95bd958ff031c04208c926703862d16e337a95b1093b82a579f902466",
+}
+# Read-only capacity scope: home-relative pins (the fabric bridge lives under
+# the profile home, not the hermes-agent checkout).
+CAPACITY_SOURCE_PINS = {
+    "hermes-agent/tools/tool_search.py": "87e06c029304dae1ff1f592fa97f238165a04f1406cbdab68a2e3a0c3fd489a5",
+    "hermes-agent/agent/tool_executor.py": "c85e239d1d56ad415902db2371e9e28c2216f6fd72e29860cff7f97b2e05a0c2",
+    "bridges/fabric_capacity_mcp.py": "4d3f88a1b0ef0cbb501439acacebcbb5aa874cbd84c27755e87becda4b8a245c",
+}
+
+
 # Qualification of the already-installed read-only Mastermind OMH adapter and
 # its actual interpreter dependency. No installer, runtime, registration or grant.
 OMH_READONLY_PINS = {
@@ -431,36 +473,39 @@ class NativeRuntime:
         site.addsitedir(str(selected))
         sys.path.insert(0, str(selected))
 
+    def gateway_code_qualified(self):
+        """Accept the serving gateway's identify answer as a compatible generation.
+
+        Known pins pass without further identity questions. A well-formed but
+        unknown commit (an unrelated advance) is accepted only while the
+        gateway still reports the qualified version line; the pinned file
+        hashes checked by each caller remain the real mechanism gate.
+        """
+        code = getattr(self, "observed_code", None)
+        if code in GATEWAY_CODE_PINS:
+            return True
+        return (type(code) is str and re.fullmatch(r"[0-9a-f]{40}", code) is not None
+                and getattr(self, "observed_version", None) == GATEWAY_CODE_VERSION)
+
     def require_recovery_source(self):
+        # Mechanism truth first: the imported bytes refuse before the gateway's
+        # self-described generation is even considered.
         root = self.home / "hermes-agent"
-        hashes = {
-            "hermes_state_keys.py": "46a44bcc9a82552c606fc0eaec275aac76bfe3c5523d7793218377d15cccc676",
-            "hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2",
-            "hermes_state_runtime.py": "6bbcc688799d3ea784545b5227d20e07f8b5ce8f26fcf545825bc8a60462ee3f",
-        }
-        if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
-            raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
-        for name, expected in hashes.items():
+        for name, expected in RECOVERY_SOURCE_PINS.items():
             source = root / name
-            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+            if source.is_symlink() or not source.is_file() \
+                    or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                 raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
+        if not self.gateway_code_qualified():
+            raise BridgeRefusal("NATIVE_GATEWAY_CODE_UNQUALIFIED")
 
     def require_history_source(self):
         self.require_recovery_source()
         root = self.home / "hermes-agent"
-        hashes = {
-            "hermes_state_local.py": "359a03844bab07242c47748e9771fcc5d16a5144d4d099aeff483dc6f0efd1d2",
-            "hermes_state_local_lineage.py": "6e644e387f18a54ef1fd3e63dedbc5523ccddc00faab0c7de0f2432f1dce4bd3",
-            "hermes_state_local_migration.py": "0d4e2e1aa59e0cdafedcb38abe6ca2f82d24a9ad98b3a0629656e2816c3878bb",
-            "hermes_state_sessions.py": "85a4abc342fd0711cd750750d2cbc948f85804af1c433dccc8d2454b1e77c18d",
-            "hermes_state_messages.py": "b81c7d272f768a548daa91642bf8283dfad2f592528fbe95c029038a13e7f574",
-            "hermes_state_compression.py": "be9cc0bdca5fae8d5cbe8a15ca04cb72005228c290fa4e3d0a100e5e30796d7e",
-            "gateway/owner_identity.py": "4cb7810a49a5c3f2ddec645d00ecc90ac7b86edb862e16ea8cf4b039408546be",
-            "gateway/session.py": "ea2e48b1313fcb24054dccbbdc631321c7cad5526097588b65d20ab86346a870",
-        }
-        for name, expected in hashes.items():
+        for name, expected in HISTORY_SOURCE_PINS.items():
             source = root / name
-            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+            if source.is_symlink() or not source.is_file() \
+                    or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                 raise BridgeRefusal("NATIVE_HISTORY_SOURCE_CHANGED")
 
     @contextmanager
@@ -632,17 +677,14 @@ class NativeRuntime:
 
     def require_roster_source(self):
         """Pin the roster mechanism and failure vocabulary actually imported."""
-        if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
-            raise BridgeRefusal("NATIVE_ROSTER_SOURCE_CHANGED")
         root = self.home / "hermes-agent"
-        hashes = {
-            "tools/bot_mode_probe.py": "d82d160aaa6ef1de2d3479d97950afbb3f6837e235632cb775785c059343e6db",
-            "tools/bot_failure_reasons.py": "cc64ddc95bd958ff031c04208c926703862d16e337a95b1093b82a579f902466",
-        }
-        for name, expected in hashes.items():
+        for name, expected in ROSTER_SOURCE_PINS.items():
             source = root / name
-            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+            if source.is_symlink() or not source.is_file() \
+                    or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                 raise BridgeRefusal("NATIVE_ROSTER_SOURCE_CHANGED")
+        if not self.gateway_code_qualified():
+            raise BridgeRefusal("NATIVE_GATEWAY_CODE_UNQUALIFIED")
 
     def team_roster(self, public):
         """mastermind.team_roster/v1 from actual install sources (read-only).
@@ -765,7 +807,9 @@ class NativeRuntime:
         raw = await asyncio.to_thread(private_control_query, self.home,
             b'{"protocol":1,"id":1,"verb":"identify"}\n', 3)
         answer = json.loads(raw)
-        self.observed_code = answer.get("result", {}).get("code_sha")
+        result = answer.get("result", {})
+        self.observed_code = result.get("code_sha")
+        self.observed_version = result.get("code_version")
         return answer
 
     def readonly_capacity_qualified(self):
@@ -776,15 +820,10 @@ class NativeRuntime:
         """
         import hashlib
         try:
-            if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
+            if not self.gateway_code_qualified():
                 return False
-            root = self.home / "hermes-agent"
-            hashes = {
-                root / "tools/tool_search.py": "87e06c029304dae1ff1f592fa97f238165a04f1406cbdab68a2e3a0c3fd489a5",
-                root / "agent/tool_executor.py": "c85e239d1d56ad415902db2371e9e28c2216f6fd72e29860cff7f97b2e05a0c2",
-                self.home / "bridges/fabric_capacity_mcp.py": "4d3f88a1b0ef0cbb501439acacebcbb5aa874cbd84c27755e87becda4b8a245c",
-            }
-            for path, digest in hashes.items():
+            for name, digest in CAPACITY_SOURCE_PINS.items():
+                path = self.home / name
                 if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                     return False
             import hermes_yaml
@@ -802,7 +841,7 @@ class NativeRuntime:
     def readonly_omh_qualified(self):
         """Recognize one installed advisory bridge; never enable another toolset."""
         try:
-            if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
+            if not self.gateway_code_qualified():
                 return False
             pins = OMH_READONLY_PINS
             plugin = self.home / "plugins/mastermind-omh"
