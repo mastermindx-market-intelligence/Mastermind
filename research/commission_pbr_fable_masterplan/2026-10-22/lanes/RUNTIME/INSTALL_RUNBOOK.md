@@ -1,4 +1,4 @@
-# INSTALL_RUNBOOK: W1 release (Option A), Fri 2026-10-23 04:10–05:40Z
+# INSTALL_RUNBOOK: W1 release (Option A), Tue 2026-11-10 04:10–05:40Z (rev 3.8; first drafted for Fri 2026-10-23)
 
 PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host while writing this runbook.
 
@@ -271,7 +271,7 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 
 **Tool limits.** Each step finishes well inside the seat's 600 s tool timeout. The deploy is launched detached (`setsid` + `nohup`), so it survives the calling shell. It records its rc atomically in `logs/deploy.rc`.
 
-## 2. Timeline (UTC, Fri 2026-10-23)
+## 2. Timeline (UTC, Tue 2026-11-10)
 
 | When | Step | Host effect |
 |---|---|---|
@@ -292,8 +292,8 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 | 09:45 | `cycle hk_daily 09:00 hk`, then `s4a after-hk_daily` | read |
 | 15:45 | `cycle settle_pending 15:00 autonomous` (+G4 read) | read |
 | 23:55 | `cycle autonomous_daily 23:10 autonomous` | read |
-| Mon 10-26 02:20 | `cycle settle_brain_asia 01:35 china 2026-10-26` and `… hk 2026-10-26` | read |
-| Mon 10-26 15:45 | `cycle settle_pending 15:00 autonomous 2026-10-26` (closes the US chain) | read |
+| Wed 11-11 02:20 | `cycle settle_brain_asia 01:35 china 2026-11-11` and `… hk 2026-11-11` | read |
+| Wed 11-11 15:45 | `cycle settle_pending 15:00 autonomous 2026-11-11` (closes the US chain) | read |
 
 If s2 has not passed by 05:20Z, the window is lost. Do not run s3. Report to the seat. A new window needs a new s0, because each evidence dir is spent per deploy attempt.
 
