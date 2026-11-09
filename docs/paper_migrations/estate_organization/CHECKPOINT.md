@@ -38,7 +38,7 @@ Original native CLI actor remains mastermindxryan on m2studio, source author Mas
 
 ## Local Agent README rollout
 
-Verified 10 of 50 planned local guides at 2026-11-09T11:44:58.029Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
+Verified 15 of 50 planned local guides at 2026-11-09T11:52:30.837Z. Each completed guide has exact JSX readback, route identities, preserved original pages, and a finished indicator on the new guide node. Reused guidance pages preserve all original nodes. Sector and Crypto pilot screenshots are readable without clipping or overlap. No product board was rewritten.
 
 | File ID | Guide page | Exact guide node | Strategy |
 | --- | --- | --- | --- |
@@ -52,9 +52,14 @@ Verified 10 of 50 planned local guides at 2026-11-09T11:44:58.029Z. Each complet
 | `01M5EXPMQTSBFBAM8KKG83FTZH` | `p-6-0` | `43A-0` | dedicated_agent_page |
 | `01M6Y3BP50DDJVKT3Q7FMTSY3K` | `p-2-0` | `2R5-0` | dedicated_agent_page |
 | `01M312VSDSZFVT45674GDVJVZN` | `p-9-0` | `AOC-0` | reused_guidance_page |
+| `01M6Y2EJJ05SE2NCVBHKSE2BX8` | `p-4-0` | `1DI-0` | dedicated_agent_page |
+| `01M6Y2T8WVHR3AS82TSSCNN6YS` | `p-2-0` | `GT-0` | dedicated_agent_page |
+| `01M32XYWDYSFTNDZVJKQ5QHT33` | `p-9-0` | `4H7-0` | dedicated_agent_page |
+| `01M6Y2Z642VN20X8WDSWV07M0M` | `p-2-0` | `29O-0` | dedicated_agent_page |
+| `01M6Y31C449F02KGRNPGK94Q8D` | `p-3-0` | `1FO-0` | dedicated_agent_page |
 
 The existing FILE_INDEX.json holds each target's exact read_next routes and local_agent_guide_plan, including stable operation prefixes and the eight reusable guidance targets. Completed agent_entry locators include the small guide node_id; read that node rather than the entire canvas.
 
 ## Exact next action
 
-Continue with **Design Foundations and Archetypes · Migrated References**, file `01M6Y2EJJ05SE2NCVBHKSE2BX8`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.
+Continue with **Shared Market · Tools and Research Launcher**, file `01M6Y32A3E4XC51FQVJN98YRPH`. Do not replay any operation already in EFFECTS.json. For a partial file, reconcile its original operation and result before continuing the next unapplied step. Keep all archive/recovery/technical/staging structures preserved. Save/read back bounded receipt chunks and this index; continue while useful authorized work remains.

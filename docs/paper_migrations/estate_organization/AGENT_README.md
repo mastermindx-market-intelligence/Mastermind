@@ -41,7 +41,12 @@ https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-9-0
 
 ## MCP_READ · Use the requested result
 
-Pass explicit fileId and pageId to get_basic_info. Read requested content from result and confirm its returned file/page IDs. document.basic_info may describe the user-active page instead. Use verified board IDs for get_jsx; an empty page-root JSX is not proof of an empty page. document.snapshot_sha256 is a mutation drift guard, not content proof, permission or writer exclusivity.
+1. If the page is unknown, call `get_basic_info({fileId})` to read the explicit page list and find **AGENT README**. The active page may be an archive; it is not source-selection authority.
+2. Request the exact guide page and confirm its returned file/page IDs. Read the guide's scoped text with `find_nodes({fileId, nodeId: agent_entry.node_id, textValue: "*"})` when its node is known; otherwise use the exact `pageId`. Avoid a whole-file text scan.
+3. Follow the route matching the task. Inspect the destination page's returned artboards, then the relevant contract or product board. Use `get_jsx` on verified product board IDs for UI extraction. Empty page-root JSX does not establish an empty page.
+4. Consume requested content from `result`. `document.basic_info` may describe another user-active page. `document.snapshot_sha256` is only a mutation drift guard, not revision, permission or writer exclusivity.
+
+A guide's dated scope snapshot is evidence at that commit. For the current organization checkpoint, follow the source link on [AI START](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0).
 
 ## ROLE · Meaning, not rank
 
@@ -77,3 +82,5 @@ File-local Agent READMEs are being added or attached to existing guidance-only s
 ## Navigation proof · 9 November 2026
 
 A separate read-only consumer started from Crypto and Commodities file IDs, found each Agent README, and selected the exact relevant boards without inferring adoption from revision. Both paths had no dead destination and clearly excluded internal guides from UI extraction. Crypto's retained-contract label was tightened after the probe to preserve behavior without reviving rejected R1 visuals. See [the bounded read ledger and qualifications](effects/agent-navigation-consumer-probe-01.json). This verifies those two navigation paths; it is not a weaker-model benchmark, production proof or estate-wide acceptance.
+
+A second [bounded consumer probe](effects/agent-navigation-consumer-probe-02.json) selected the separate Memory workflows, broader News search/ranking contract and a named F02 product specimen. All followed destinations resolved, with adoption and export qualifications preserved. Dated scope links are now being labelled separately from the current organization checkpoint.
