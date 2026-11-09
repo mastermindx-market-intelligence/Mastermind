@@ -343,31 +343,35 @@
   color: var(--noir-champagne);
   font-size: 13px;
 }
-.mm-task-result {
+/* Admission binding facts (ExecutionBinding v1/v1.1 mirror). */
+.mm-task-binding {
   border: 1px solid var(--noir-selected);
   border-radius: 10px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.mm-task-result h4 {
-  margin: 0;
+  padding: 10px 14px;
   font-size: 13px;
+}
+.mm-task-binding summary {
   color: var(--noir-text-tertiary);
+  cursor: pointer;
   font-weight: 600;
 }
-.mm-task-result p {
+.mm-task-binding dl {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+}
+.mm-task-binding dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mm-task-binding dt {
+  color: var(--noir-text-tertiary);
+}
+.mm-task-binding dd {
   margin: 0;
   color: var(--noir-text-primary);
-  font-size: 14px;
-}
-.mm-task-result-title {
-  font-weight: 500;
-}
-.mm-task-not-accepted {
-  color: var(--noir-text-secondary) !important;
-  font-size: 13px !important;
+  overflow-wrap: anywhere;
 }
 .mm-task-actions {
   display: flex;
@@ -406,7 +410,7 @@
   font-size: 13px;
 }
 
-/* Result return (HC08). */
+/* Result return (HC08) — fed by execution_return/v1; no accepted state. */
 .mm-result-return {
   display: flex;
   flex-direction: column;
@@ -425,10 +429,13 @@
   font-size: 12px;
   color: var(--noir-text-tertiary);
 }
-.mm-result-title {
+.mm-result-return-empty .mm-result-empty-body {
   margin: 0;
-  font-size: 17px;
-  font-weight: 500;
+  font-size: 15px;
+  color: var(--noir-text-primary);
+}
+.mm-result-status-line {
+  margin: 0;
 }
 .mm-result-status {
   display: grid;
@@ -453,11 +460,17 @@
   color: var(--noir-text-secondary);
   font-size: 12px;
 }
-.mm-result-status [data-accepted="false"] {
+/* v1 closes acceptance to not_accepted — champagne marks the honest
+   not-accepted state; an accepted style deliberately does not exist. */
+.mm-result-status [data-acceptance="not_accepted"] {
   color: var(--noir-champagne);
 }
-.mm-result-status [data-accepted="true"] {
+.mm-result-status [data-delivery="delivered"] {
   color: var(--noir-sage);
+}
+.mm-result-status [data-delivery="unknown"],
+.mm-result-status [data-delivery="mismatch"] {
+  color: var(--noir-champagne);
 }
 .mm-result-evidence dl {
   display: grid;
@@ -477,6 +490,59 @@
   margin: 0;
   color: var(--noir-text-primary);
   font-size: 13px;
+}
+.mm-result-evidence dd[data-checks="green"] {
+  color: var(--noir-sage);
+}
+.mm-result-evidence dd[data-checks="failed"] {
+  color: var(--noir-champagne);
+}
+/* unknown checks stay neutral — never rendered green. */
+.mm-result-evidence dd[data-checks="unknown"] {
+  color: var(--noir-text-secondary);
+}
+.mm-result-checks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+}
+.mm-result-outcome .mm-result-text {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--noir-text-primary);
+}
+.mm-result-artifacts {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.mm-result-identity summary {
+  cursor: pointer;
+  color: var(--noir-text-tertiary);
+  font-size: 12px;
+}
+.mm-result-identity dl {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+.mm-result-identity dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mm-result-identity dt {
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+}
+.mm-result-identity dd {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .mm-result-open-origin {
   align-self: flex-start;

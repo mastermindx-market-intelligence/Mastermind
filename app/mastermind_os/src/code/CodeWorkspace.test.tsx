@@ -59,13 +59,26 @@ describe("CodeWorkspace (TD04)", () => {
     }
   });
 
-  it("shows the honest not-projected state with its source reason while no projection is connected", () => {
+  it("shows the honest not-projected state — naming the missing source and the Fleet read as per-attempt truth", () => {
     render(<CodeWorkspace projection={{ kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_NOT_CONNECTED" }} />);
     expect(screen.getByText("Code threads are not projected yet")).toBeTruthy();
-    expect(screen.getByText(/projection source is not connected, so no thread state is shown or inferred/i)).toBeTruthy();
+    // The copy names the exact missing source; it never implies a pending load.
+    expect(screen.getByText(/MastermindMissionHost\.t3ThreadProjection/i)).toBeTruthy();
+    expect(screen.getByText(/not connected on this host — no host implements it yet/i)).toBeTruthy();
+    expect(screen.getByText(/no thread state is shown or inferred/i)).toBeTruthy();
+    // Per-attempt T3 facts point at the Fleet per-attempt read, not this list.
+    expect(screen.getByText(/source of truth for per-attempt T3 facts is the Fleet per-attempt read/i)).toBeTruthy();
     expect(screen.getByText("T3_PROJECTION_SOURCE_NOT_CONNECTED")).toBeTruthy();
     expect(screen.getByText(/Open T3 Code directly/i)).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Open in T3 Code ↗" })).toBeNull();
+  });
+
+  it("renders the honest zh-CN not-projected copy naming the missing source", () => {
+    render(<CodeWorkspace projection={{ kind: "UNAVAILABLE", reason: "T3_PROJECTION_SOURCE_NOT_CONNECTED" }} locale="zh-CN" />);
+    expect(screen.getByText("编码线程尚未投影")).toBeTruthy();
+    expect(screen.getByText(/该投影来源未连接此主机——目前尚无主机实现它/i)).toBeTruthy();
+    expect(screen.getByText(/不显示也不推断任何线程状态/)).toBeTruthy();
+    expect(screen.getByText(/每次尝试的 T3 事实以 Fleet 的逐次尝试读取为准/i)).toBeTruthy();
   });
 
   it("reads from the provided host facade when no projection is supplied", () => {

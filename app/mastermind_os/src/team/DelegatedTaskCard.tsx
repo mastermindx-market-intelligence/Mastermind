@@ -24,10 +24,19 @@ const STRINGS = {
     chipsLabel: "Route",
     previewChip: "PREVIEW",
     effectNoneChip: "EFFECT·NONE",
-    resultHeading: "Result delivered",
-    deliveredTo: (value: string) => `Delivered to ${value}`,
-    deliveredNotAccepted:
-      "Delivered is not acceptance. The owner still reviews the result.",
+    bindingHeading: "Admission binding",
+    bindingSchema: "Contract",
+    rootRunRef: "Root run",
+    immediateParent: "Immediate parent",
+    logicalChildKey: "Logical child",
+    requestDigest: "Request digest",
+    effectiveComplexity: "Effective complexity",
+    taskKind: "Task kind",
+    runtimeKind: "Runtime",
+    operationKey: "Operation key",
+    callerNamespace: "Caller namespace",
+    leaseRef: "Lease",
+    unset: "Not set",
   },
   "zh-CN": {
     stateQueued: "排队中",
@@ -50,9 +59,19 @@ const STRINGS = {
     chipsLabel: "路径",
     previewChip: "预览",
     effectNoneChip: "无效果",
-    resultHeading: "结果已交付",
-    deliveredTo: (value: string) => `已交付给 ${value}`,
-    deliveredNotAccepted: "交付不等于接受。负责人仍需审阅该结果。",
+    bindingHeading: "受理绑定",
+    bindingSchema: "契约",
+    rootRunRef: "根运行",
+    immediateParent: "直接父级",
+    logicalChildKey: "逻辑子键",
+    requestDigest: "请求摘要",
+    effectiveComplexity: "生效复杂度",
+    taskKind: "任务类型",
+    runtimeKind: "运行时",
+    operationKey: "操作键",
+    callerNamespace: "调用方命名空间",
+    leaseRef: "租约",
+    unset: "未设置",
   },
 };
 
@@ -65,6 +84,46 @@ function stateLabel(
   if (state === "unknown") return t.stateUnknown;
   if (state === "declined") return t.stateDeclined;
   return t.stateTerminal;
+}
+
+/** The admission-contract identity, exactly as the shared binding spells it.
+ *  Unset v1.1 fields render as honestly unset — never invented. */
+function BindingFacts({
+  task,
+  t,
+}: {
+  task: DelegatedTask;
+  t: typeof STRINGS.en;
+}) {
+  const b = task.binding;
+  const rows: [string, string][] = [
+    [t.bindingSchema, b.schema],
+    [t.rootRunRef, b.root_run_ref],
+    [t.immediateParent, b.immediate_parent_run_ref],
+    [t.logicalChildKey, b.logical_child_key],
+    [t.requestDigest, b.request_digest],
+    [t.effectiveComplexity, b.effective_complexity],
+    [t.taskKind, b.task_kind || t.unset],
+    [t.runtimeKind, b.runtime_kind || t.unset],
+    [t.operationKey, b.operation_key || t.unset],
+    [t.callerNamespace, b.caller_namespace || t.unset],
+    [t.leaseRef, b.lease_ref || t.unset],
+  ];
+  return (
+    <details className="mm-task-binding">
+      <summary>{t.bindingHeading}</summary>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>
+              <code>{value}</code>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
 }
 
 export function DelegatedTaskCard({
@@ -105,6 +164,11 @@ export function DelegatedTaskCard({
             </span>
           </>
         ) : null}
+        {task.binding.runtime_kind ? (
+          <span className="mm-chip mm-chip-route">
+            {task.binding.runtime_kind}
+          </span>
+        ) : null}
       </header>
       {task.summary ? <p className="mm-task-summary">{task.summary}</p> : null}
       {task.route.length > 0 ? (
@@ -133,14 +197,7 @@ export function DelegatedTaskCard({
           {task.stateReason.length > 0 ? task.stateReason : t.noReason}
         </p>
       ) : null}
-      {task.result ? (
-        <div className="mm-task-result">
-          <h4>{t.resultHeading}</h4>
-          <p className="mm-task-result-title">{task.result.title}</p>
-          <p>{t.deliveredTo(task.result.deliveredTo)}</p>
-          <p className="mm-task-not-accepted">{t.deliveredNotAccepted}</p>
-        </div>
-      ) : null}
+      <BindingFacts task={task} t={t} />
       <div className="mm-task-actions">
         {dispatchDisabledReason !== null ? (
           <button

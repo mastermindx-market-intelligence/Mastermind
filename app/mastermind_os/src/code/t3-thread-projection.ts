@@ -126,8 +126,16 @@ export function t3ThreadUrl(environment: string, threadId: string): string {
 }
 
 /** Read the projection through the existing mission host facade, fail-closed.
- *  Until the T3 lane's projection is installed, every host reports no source
- *  and the Code surface renders the honest not-projected state. */
+ *  NO host implements `MastermindMissionHost.t3ThreadProjection` today — the
+ *  read therefore reports UNAVAILABLE on every host and the Code surface
+ *  names that missing source honestly instead of implying a pending load.
+ *  This module never invents a host or a second transport. The source of
+ *  truth for per-attempt T3 facts is the Fleet per-attempt read
+ *  (`mastermind.t3_attempt_fleet/v1`,
+ *  integrations/mmos/FLEET_ATTEMPT_CONTRACT_PROPOSAL.md §3 — the Workspace
+ *  read route `/workspace/resources/t3/attempts/<attempt_id>` pending
+ *  Director G2); this thread-list projection is a separate, still-unfed
+ *  surface and does not duplicate it. */
 export function readT3ThreadProjection(host: unknown): T3ProjectionRead {
   const source = (
     host as { t3ThreadProjection?: { read?: unknown } } | undefined
