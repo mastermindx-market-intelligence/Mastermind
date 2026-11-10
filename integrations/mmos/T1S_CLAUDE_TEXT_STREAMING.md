@@ -22,11 +22,11 @@ place before same-snapshot tool items (the incumbent emitted tool items first).
 Sub-agent (parented) frames and synthetic notices are excluded; replayed history
 never streams.
 
-Adversarial review note (kimi-k3.1-pro via Fabric; hypothesis confirmed here): on the
-unpatched pin, those cumulative per-block snapshots re-emit text once per snapshot —
-a `[text, tool_use]` message produces 2 text items and `[text, tool_use, text]`
-produces 3, all duplicated (pre-existing upstream behavior, not introduced by this
-patch). The patch collapses both to 1 item; two "attack" tests in the suite pin it.
+Adversarial review (kimi-k3.1-pro via Fabric; hypothesis confirmed here): on the
+unpatched pin those cumulative per-block snapshots re-emit text once per snapshot —
+`[text, tool_use]` produces 2 duplicated text items, `[text, tool_use, text]`
+produces 3 (pre-existing upstream behavior, not introduced by this patch). The patch
+collapses both to 1 item; two "attack" tests in the suite pin it.
 
 ## What the Chairman sees differently
 
